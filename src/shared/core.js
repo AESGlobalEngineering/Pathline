@@ -339,6 +339,8 @@
   //   uni: true scans every line left to right only (one way), false both ways
   // (older jobs kept the direction as adv.Direction 'Top down' / 'Bottom up')
   const ENGRAVE_DIRS = ['down', 'up', 'fastest'];
+  // engrave resolutions offered (DPI)
+  const DPI_STEPS = [100, 300, 500, 1000];
   function engraveScan(proc) {
     const legacy = proc && proc.adv && ({ 'Top down': 'down', 'Bottom up': 'up' })[proc.adv.Direction];
     const dir = proc && ENGRAVE_DIRS.includes(proc.dir) ? proc.dir : legacy || 'down';
@@ -1142,6 +1144,14 @@
     ].map((p) => ({ ...p, adv: {} }));
   }
 
+  // What a new material starts with: one cut and one engrave on a laser
+  // (ACI 1 and 7), one knife cut on a plotter (ACI 1). The operator adds the rest.
+  function starterPresets(type, t) {
+    const all = defaultPresets(type, t);
+    if (type === 'plotter') return [{ ...all.find((p) => p.name === 'Knife through'), aci: [1] }];
+    return [{ ...all.find((p) => p.name === 'Cut contour'), aci: [1] }, { ...all.find((p) => p.name === 'Engrave fill'), aci: [7] }];
+  }
+
   // Starting presets for metal sheet. On a CO2 laser bare metal is marked
   // through a marking spray/coating (anodised aluminium marks directly);
   // cutting needs a fibre source or very thin sheet, hence the slow cut.
@@ -1381,6 +1391,6 @@
     processOrder, processOfAci, toolSlot, toolRank, polyTime, travelTime, rasterSpans, orderPaths,
     estimate, headAt, fmtDuration, fmtLen, fmtArea, checkJob, regMarks, regMarkAci, regProcess, isRegProc, REG_PROC, REG_NEEDED,
     cutOrderOf, CUT_ORDER_DEFAULT, bedOf, bedCount, defaultPresets, DEFAULTS,
-    rasterIslands, engraveScan, ENGRAVE_DIRS, nestRects, THERMAL, thermalKey, thermalOf, thermalSim, metalPresets, presetsFor
+    rasterIslands, engraveScan, ENGRAVE_DIRS, DPI_STEPS, starterPresets, nestRects, THERMAL, thermalKey, thermalOf, thermalSim, metalPresets, presetsFor
   };
 });

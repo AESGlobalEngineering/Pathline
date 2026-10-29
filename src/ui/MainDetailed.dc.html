@@ -436,7 +436,10 @@
                     <sc-for list="{{sel.nums}}" as="n" hint-placeholder-count="4">
                       <label class="fcol">
                         <span class="lbl">{{n.l}}</span>
-                        <span class="fld"><input type="text" value="{{n.v}}" onChange="{{n.set}}"><span class="lbl">{{n.u}}</span></span>
+                        <sc-if value="{{n.isNum}}" hint-placeholder-val="{{true}}">
+                          <span class="fld"><input type="text" value="{{n.v}}" onChange="{{n.set}}"><span class="lbl">{{n.u}}</span></span>
+                        </sc-if>
+                        <sc-if value="{{n.isSel}}" hint-placeholder-val="{{false}}">{{n.el}}</sc-if>
                       </label>
                     </sc-for>
                   </div>
@@ -1562,6 +1565,7 @@ class Component extends DCLogic {
     const dirty = hasSel && has(S.edit[selIdx]);
     const isCut = sc && sc.proc === 'Cut';
     const selIsReg = sc && CC.isRegProc(sc);
+    const dpiSelect = (v, set) => LRC.dpiSelect(v, set);
     const num = (k) => (e) => {
       const raw = e.target.value;
       const v = parseFloat(raw);
@@ -1587,9 +1591,9 @@ class Component extends DCLogic {
           ? [{ l: 'Power', v: sc.power, u: '%', min: 0, max: 100, step: 1, set: num('power') }, { l: 'Speed', v: sc.speed, u: 'mm/s', min: 1, max: Math.max(1000, Number(sc.speed) || 0), step: 1, set: num('speed') }]
           : [{ l: 'Speed', v: sc.speed, u: 'mm/s', min: 10, max: Math.max(1000, Number(sc.speed) || 0), step: 10, set: num('speed') }],
         nums: isLaser
-          ? [{ l: isCut ? 'Frequency' : 'DPI', v: String(sc.f), u: isCut ? 'Hz' : 'DPI', set: num('f') }, { l: 'Passes', v: String(sc.passes), u: '×', set: num('passes') }]
-            .concat(Number(sc.passes) > 1 ? [{ l: 'Dwell between passes', v: String(sc.dwell || 0), u: 's', set: num('dwell') }] : [])
-          : [{ l: 'Passes', v: String(sc.passes), u: '×', set: num('passes') }],
+          ? [isCut ? { isNum: true, l: 'Frequency', v: String(sc.f), u: 'Hz', set: num('f') } : { isSel: true, l: 'DPI', el: dpiSelect(sc.f, (v) => this.setEdit('f', v)) }, { isNum: true, l: 'Passes', v: String(sc.passes), u: '×', set: num('passes') }]
+            .concat(Number(sc.passes) > 1 ? [{ isNum: true, l: 'Dwell between passes', v: String(sc.dwell || 0), u: 's', set: num('dwell') }] : [])
+          : [{ isNum: true, l: 'Passes', v: String(sc.passes), u: '×', set: num('passes') }],
         showLinks: !isLaser || isCut,
         dashTitle: isLaser ? 'Generate links' : 'Dashed line',
         dashLenLabel: isLaser ? 'Link length' : 'Dash length',

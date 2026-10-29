@@ -31,6 +31,10 @@
 .ms-heads{display:grid;grid-template-columns:52px minmax(160px,1fr) 110px 110px 90px;gap:10px;align-items:center}
 .ms-slot{width:36px;height:var(--ctl-h);border-radius:var(--ctl-r);background:var(--sunken);display:inline-flex;align-items:center;justify-content:center;font-weight:500;color:var(--text-2)}
 .ms-dot{width:7px;height:7px;border-radius:50%;flex:none}
+.ms-name{margin:0;font-size:16px;font-weight:600;line-height:var(--ctl-h);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ms-conn{display:flex;flex-direction:column;gap:2px;font-size:12px;line-height:1.3;white-space:nowrap}
+.ms-ib{border:1px solid var(--line-strong)}
+.ms-actions{display:flex;flex-wrap:wrap;justify-content:flex-end;align-items:center;gap:10px 12px;margin-left:auto}
 </style>
 </helmet>
 <div class="ms-page">
@@ -90,7 +94,7 @@
           <div class="empty">
             <span class="em-icon"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.machine}}"></path></svg></span>
             <h2 class="em-title" style="margin: 0">No machines yet</h2>
-            <span class="em-text">Add the lasers and plotters this computer prepares jobs for. Set the connection here, then use Refresh from machine to read the bed size, speeds and features.</span>
+            <span class="em-text">Add the lasers and plotters this computer prepares jobs for. Set the connection here, then use the refresh icon to read the bed size, speeds and features.</span>
             <div class="em-actions">
               <button class="btn-primary" onClick="{{addMachine}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.plus}}"></path></svg>Add machine</button>
             </div>
@@ -100,30 +104,34 @@
       <sc-if value="{{hasMachine}}" hint-placeholder-val="{{true}}">
       <section aria-label="Machine" class="card" style="padding: 16px; display: flex; flex-wrap: wrap; align-items: center; gap: 14px">
         <span class="badge" style="height: 28px; padding: 0 9px; background: {{m.tbg}}">{{m.type}}</span>
-        <div style="flex: 1 1 280px; min-width: 0; display: flex; flex-direction: column; gap: 4px">
-          <label class="fld sans" style="max-width: 420px">
-            <input value="{{m.name}}" onChange="{{setName}}" disabled="{{m.nameRo}}" title="{{m.nameTip}}" aria-label="Machine name" style="font-size: 15px; font-weight: 600">
-          </label>
+        <div style="flex: 1 1 200px; min-width: 0; display: flex; flex-direction: column; gap: 4px">
+          <!-- a simulated machine is named here; a real one takes its name from its HMI -->
+          <sc-if value="{{m.nameEdit}}" hint-placeholder-val="{{false}}">
+            <label class="fld sans" style="max-width: 420px">
+              <input value="{{m.name}}" onChange="{{setName}}" aria-label="Machine name" style="font-size: 15px; font-weight: 600">
+            </label>
+          </sc-if>
+          <sc-if value="{{m.nameText}}" hint-placeholder-val="{{true}}">
+            <h2 class="ms-name" title="{{m.nameTip}}">{{m.name}}</h2>
+          </sc-if>
           <span class="lbl">{{m.sub}}</span>
         </div>
+        <div class="ms-actions">
         <span class="pill nodot" style="background: {{m.statusBg}}; color: {{m.statusFg}}"><span class="ms-dot" aria-hidden="true" style="background: {{m.dot}}"></span>{{m.status}}</span>
-        <sc-if value="{{testShown}}" hint-placeholder-val="{{false}}"><span style="font-size: 12px; color: {{testFg}}">{{testText}}</span></sc-if>
-        <button class="tb" onClick="{{runTest}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.plug}}"></path></svg>{{testLabel}}</button>
+        <sc-if value="{{conn.show}}" hint-placeholder-val="{{true}}">
+          <div class="ms-conn">
+            <span style="color: {{conn.fg}}">{{conn.line}}</span>
+            <span class="lbl">{{conn.sync}}</span>
+          </div>
+          <button class="ib ms-ib" onClick="{{runTest}}" aria-label="Test connection" title="Test connection"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.plug}}"></path></svg></button>
+          <button class="ib ms-ib" onClick="{{refresh}}" disabled="{{noSync}}" aria-label="{{refreshLabel}}" title="{{refreshLabel}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.sync}}"></path></svg></button>
+        </sc-if>
         <div style="display: flex; gap: 2px">
           <button class="ib" onClick="{{duplicate}}" aria-label="Duplicate machine" title="Duplicate"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.copy}}"></path></svg></button>
           <button class="ib" onClick="{{remove}}" aria-label="Delete machine" title="Delete"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.trash}}"></path></svg></button>
         </div>
+        </div>
       </section>
-
-      <div class="card" style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; padding: 10px 14px">
-        <svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="color: var(--text-3)"><path d="{{icons.sync}}"></path></svg>
-        <span style="font-weight: 500">{{syncTitle}}</span>
-        <span class="{{syncCls}}">{{syncText}}</span>
-        <span style="flex: 1"></span>
-        <span class="lbl">{{syncHint}}</span>
-        <button class="tb" onClick="{{openHmi}}" disabled="{{noSync}}">Open HMI</button>
-        <button class="tb" onClick="{{refresh}}" disabled="{{noSync}}" title="{{syncTip}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.sync}}"></path></svg>{{refreshLabel}}</button>
-      </div>
 
       <div role="tablist" aria-label="Settings" class="tabs">
         <sc-for list="{{tabs}}" as="t" hint-placeholder-count="5">
@@ -272,8 +280,9 @@ class Component extends DCLogic {
     if (document.hidden) return;
     for (const m of this.state.saved) {
       if (m.conn !== 'Ethernet' || !m.ip) { this.setState((s) => ({ online: { ...s.online, [m.id]: null } })); continue; }
+      const t0 = performance.now();
       window.api.device.status(m.id)
-        .then((st) => this.setState((s) => ({ online: { ...s.online, [m.id]: { ok: true, state: st.state } } })))
+        .then((st) => this.setState((s) => ({ online: { ...s.online, [m.id]: { ok: true, state: st.state, ms: Math.round(performance.now() - t0) } } })))
         .catch((err) => this.setState((s) => ({ online: { ...s.online, [m.id]: { ok: false, msg: err.message } } })));
     }
   }
@@ -331,7 +340,7 @@ class Component extends DCLogic {
       title: 'Add machine',
       message: 'For a real machine only the connection is set here — bed size, speeds and features are read from the machine once it is connected. A simulated machine has no machine behind it: use it to try Pathline out, and set its bed, speeds and features yourself.',
       fields: [
-        { key: 'kind', label: 'Machine', type: 'seg', value: 'real', options: [{ value: 'real', label: 'Real machine' }, { value: 'sim', label: 'Simulated, for testing' }], onChange: (v, _vals, box) => realOnly(box, v === 'real') },
+        { key: 'kind', label: 'Machine', type: 'seg', value: 'real', options: [{ value: 'real', label: 'Real machine' }, { value: 'sim', label: 'Simulated' }], onChange: (v, _vals, box) => realOnly(box, v === 'real') },
         { key: 'type', label: 'Type', type: 'seg', value: 'laser', options: [{ value: 'laser', label: 'Laser' }, { value: 'plotter', label: 'Plotter / router' }] },
         { key: 'name', label: 'Name', value: '', full: true },
         { key: 'ip', label: 'IP address', value: '', full: false, real: true },
@@ -405,7 +414,7 @@ class Component extends DCLogic {
       return { isSeg: true, l, op: 1, opts: opts.map(([v, lbl]) => ({ l: lbl, on: cur === v, ro: false, ...(cur === v ? segOn : segOff), pick: () => this.patch((m) => ({ ...m, [k]: v })) })) };
     };
     const text = (l, k, u, ph) => ({ isText: true, l, v: String(raw[k] ?? ''), fc: k === 'ip' ? 'mono' : fc(raw[k] ?? ''), u: u || '', ph: ph || '', set: set(k), ro: false, fbg: 'var(--surface)', ffg: 'var(--text)' });
-    // A simulated machine (for testing) has no real machine behind it: no
+    // A simulated machine has no real machine behind it: no
     // connection, and the settings that are normally read from the machine are
     // set here instead (every "ro" control below takes a setter for that case).
     const sim = !!raw.sim;
@@ -437,13 +446,13 @@ class Component extends DCLogic {
     if (sim) {
       // nothing to connect to: Ethernet is greyed out and jobs are saved as files
       connFields[0].opts.forEach((o) => { if (o.l === 'Ethernet') { o.ro = true; o.pick = () => {}; } });
-      connFields.push({ isNote: true, l: 'Simulated machine, for testing: there is no real machine to connect to. Send to machine saves the job file where you choose, and the settings on these tabs are set here.' });
     } else if (raw.conn === 'Ethernet') connFields.push(text('IP address', 'ip', '', '192.168.1.60'), text('Port', 'port', '', '8470'), text('Timeout', 'timeout', 'ms', '3000'));
     else connFields.push({ isNote: true, l: 'Send to machine opens a save window so you can put the job (settings, DXF, preview and time estimate) wherever you like, then load it on the controller.' });
     if (sim) {
       // a simulated machine still has a controller type: the operator picks it
       const key = raw.id + '|ctrl', open = S.openPick === key;
-      connFields.push({ isPick: true, l: 'Controller', v: raw.ctrl || 'Choose…', open, toggle: () => this.setState({ openPick: open ? null : key }), ...ED,
+      // older builds stored 'Simulated' here; only a real controller type counts
+      connFields.push({ isPick: true, l: 'Controller', v: CONTROLLERS.includes(raw.ctrl) ? raw.ctrl : 'Choose…', open, toggle: () => this.setState({ openPick: open ? null : key }), ...ED,
         opts: open ? CONTROLLERS.map((c) => ({ l: c, on: c === raw.ctrl, bg: c === raw.ctrl ? accentSoft : '', pick: () => { this.patch((m) => ({ ...m, ctrl: c })); this.setState({ openPick: null }); } })) : [] });
     } else connFields.push(roPick('Driver', raw.ctrl));
     const connCard = card('Connection', connFields);
@@ -529,7 +538,7 @@ class Component extends DCLogic {
       const st = statusOf(x);
       return {
         ...TYPE[x.type], name: x.name,
-        sub: x.sim ? 'Simulated' + (x.ctrl ? ' · ' + x.ctrl : '') : (x.ctrl ? x.ctrl + ' · ' : '') + (x.conn === 'Ethernet' ? (x.ip || 'no IP') : 'save locally'),
+        sub: x.sim ? 'Simulated' + (CONTROLLERS.includes(x.ctrl) ? ' · ' + x.ctrl : '') : (x.ctrl ? x.ctrl + ' · ' : '') + (x.conn === 'Ethernet' ? (x.ip || 'no IP') : 'save locally'),
         status: st.status, short: st.short, dot: st.dot, pbg: st.bg, pfg: st.fg, cur: on ? 'page' : 'false',
         bg: on ? accentSoft : '', bd: on ? accent : 'transparent',
         pick: () => this.setState({ mid: x.id, tab: null })
@@ -542,21 +551,33 @@ class Component extends DCLogic {
     return {
       ...common, hasMachine: true, noMachine: false,
       machineList, duplicate: R(() => this.duplicate()), remove: R(() => this.remove()),
-      // the name comes from the HMI once the machine has reported one (an edit here would be replaced)
-      m: { ...TYPE[raw.type], name: raw.name, nameRo: !!(raw.hmiName && raw.conn === 'Ethernet' && !sim), nameTip: raw.hmiName && raw.conn === 'Ethernet' && !sim ? 'Set on the machine\'s HMI' : 'Machine name', kind: raw.kind || (isLaser ? 'Laser' : 'Plotter'), ctrl: raw.ctrl, sub: [raw.kind || (isLaser ? 'Laser' : 'Plotter'), raw.ctrl].filter(Boolean).join(' · '), status: st.status, dot: st.dot, statusBg: st.bg, statusFg: st.fg },
+      // only a simulated machine is named here; a real one shows the name from its HMI
+      m: {
+        ...TYPE[raw.type], name: raw.name, nameEdit: sim, nameText: !sim, nameTip: 'Set on the machine\'s HMI',
+        kind: raw.kind || (isLaser ? 'Laser' : 'Plotter'), ctrl: raw.ctrl,
+        sub: [raw.kind || (isLaser ? 'Laser' : 'Plotter'), raw.ctrl].filter(Boolean).join(' · ') + (sim ? ' · bed, speeds and features are set on these tabs' : raw.conn === 'Ethernet' ? ' · greyed settings are set on the machine\'s HMI' : ''),
+        status: st.status, dot: st.dot, statusBg: st.bg, statusFg: st.fg
+      },
       setName: set('name'),
-      testShown: !!test, testText: test ? (test.busy ? 'Testing…' : test.text) : '', testFg: test && test.ok ? 'var(--ok)' : test && test.busy ? 'var(--text-3)' : 'var(--err)',
-      testLabel: raw.conn === 'Ethernet' ? 'Test connection' : 'Check',
+      // connection (Ethernet): latency (from the last test, else the background check) over the last sync time
+      conn: (() => {
+        const o = S.online[raw.id];
+        // (the status pill already says Connected)
+        const line = test ? (test.busy ? 'Testing…' : String(test.text).replace(/^Connected · /, ''))
+          : o && o.ok ? o.ms + ' ms' : o ? 'Not answering' + (o.msg ? ' · ' + o.msg : '') : o === null ? 'Not checked yet' : 'Checking…';
+        const ok = test ? test.ok : o && o.ok;
+        return {
+          show: raw.conn === 'Ethernet' && !sim, line,
+          fg: test && test.busy ? 'var(--text-3)' : ok ? 'var(--ok)' : o === undefined && !test ? 'var(--text-3)' : 'var(--err)',
+          sync: raw.syncedAt ? 'Synced ' + new Date(raw.syncedAt).toLocaleString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Not synced yet'
+        };
+      })(),
       runTest: R(() => this.test()),
       noSync: raw.conn !== 'Ethernet' || !raw.ip || S.syncing,
       syncTip: raw.conn !== 'Ethernet' ? 'Settings can only be read over Ethernet' : connChanged ? 'Saves the connection, then reads settings from the machine' : 'Read bed size, speeds and features from the machine',
       refreshLabel: S.syncing ? 'Reading…' : 'Refresh from machine',
       refresh: R(() => this.refresh()),
-      openHmi: R(() => window.api.app.openExternal('http://' + raw.ip + ':' + (raw.port || 8470) + '/')),
-      tabs, cards: cardsByTab[tab] || [], heads,
-      syncCls: raw.syncedAt ? 'mono lbl' : 'lbl',
-      syncTitle: sim ? 'Simulated machine' : 'Synced from machine', syncHint: sim ? 'Nothing to read from: set the bed, speeds and features on these tabs' : 'Greyed settings are set on the machine\'s HMI',
-      syncText: sim ? 'for testing' : raw.syncedAt ? new Date(raw.syncedAt).toLocaleString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Not read yet — showing defaults'
+      tabs, cards: cardsByTab[tab] || [], heads
     };
   }
 }

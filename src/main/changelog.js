@@ -5,6 +5,19 @@
 
 module.exports = [
   {
+    version: '1.2.7', date: '29 Oct 2026',
+    added: [
+      'A simulated machine\'s controller is picked from the real types (Trotec, Ruida, Other).',
+      'Engrave resolution is picked from 100, 300, 500 or 1000 DPI, in Materials and in the job\'s process settings.',
+      'A new material starts with one cut (Cut contour) and one engrave (Engrave fill); a plotter material starts with one knife cut.',
+      'Tidier machine header: test connection and refresh are icons (hover for their names) beside the latency and the last sync time.',
+      'Only a simulated machine can be renamed; a real machine takes its name from its HMI.',
+      '"Simulated, for testing" is now just "Simulated".',
+      'Removed the Open HMI button.'
+    ],
+    fixed: []
+  },
+  {
     version: '1.2.6', date: '29 Oct 2026',
     added: [
       'Machine settings refresh by themselves: on first contact with a machine, every time Pathline opens, and every 5 minutes. Refresh from machine still works any time.',

@@ -86,6 +86,18 @@
     stroke: (n) => (n === 7 ? 'var(--aci7-stroke)' : CC.aciStroke(n))
   };
 
+  // Engrave resolution: a choice of CC.DPI_STEPS (a value from an older job that
+  // isn't one of them stays listed, so it isn't changed by opening the menu).
+  function dpiSelect(value, onPick, opts) {
+    const h = window.React.createElement;
+    const cur = Number(value) || 500;
+    const list = CC.DPI_STEPS.includes(cur) ? CC.DPI_STEPS : CC.DPI_STEPS.concat(cur).sort((a, b) => a - b);
+    return h('select', {
+      className: 'dd' + (opts && opts.cls ? ' ' + opts.cls : ''), value: String(cur), disabled: !!(opts && opts.disabled), 'aria-label': 'Engrave resolution (DPI)',
+      style: { width: '100%' }, onChange: (e) => onPick(Number(e.target.value))
+    }, list.map((d) => h('option', { key: d, value: String(d) }, d + ' DPI')));
+  }
+
   // ------------------------------------------------------------ dialogs
   // fields: [{ key, label, type: text|textarea|number|select|seg|check|info|note, value, options, unit, full, warn, rows, placeholder }]
   // buttons: [{ label, value, primary, danger }] — resolves { button, values } or null on cancel.
@@ -1589,5 +1601,5 @@
     window.api.update.status().then((s) => { if (s.state === 'downloading') updateWindow(s); }).catch(() => {});
   }
 
-  window.LRC = { toast, fail, dialog, sendDialog, confirm, keys, guardNav, clip, ops, textEntity, JobCanvas, entityD, PX_PER_MM, contextMenu, closeMenu, theme, aci, support };
+  window.LRC = { toast, fail, dialog, sendDialog, confirm, keys, guardNav, clip, ops, textEntity, JobCanvas, entityD, PX_PER_MM, contextMenu, closeMenu, theme, aci, support, dpiSelect };
 })();

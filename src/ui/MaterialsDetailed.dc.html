@@ -209,8 +209,11 @@ select.dd:disabled{background-color:var(--sunken);background-repeat:no-repeat;ba
                       </select>
                     </span>
                     <span role="cell" style="display: flex; align-items: center; gap: 6px">
-                      <input class="cell" value="{{r.f}}" onChange="{{r.setF}}" disabled="{{locked}}" aria-label="{{r.name}} {{r.fu}}">
-                      <span class="lbl" style="width: 28px">{{r.fu}}</span>
+                      <sc-if value="{{r.isCut}}" hint-placeholder-val="{{true}}">
+                        <input class="cell" value="{{r.f}}" onChange="{{r.setF}}" disabled="{{locked}}" aria-label="{{r.name}} {{r.fu}}">
+                        <span class="lbl" style="width: 28px">{{r.fu}}</span>
+                      </sc-if>
+                      <sc-if value="{{r.isEng}}" hint-placeholder-val="{{false}}">{{r.dpiEl}}</sc-if>
                     </span>
                     <span role="cell">
                       <button class="btn-link" onClick="{{r.toggleAdv}}" aria-expanded="{{r.advOpen}}" style="height: var(--ctl-h); padding: 0 6px">
@@ -532,7 +535,7 @@ class Component extends DCLogic {
     const m = r.values.m === 'both' ? ['laser', 'plotter'] : [r.values.m];
     const mat = {
       id: CC.uid('mat'), g: r.values.g, name: r.values.name, t, sw: '#E1E4E8', m, notes: '', locked: false, edited: null, jobs: 0, last: null,
-      presets: { laser: m.includes('laser') ? CC.defaultPresets('laser', t) : [], plotter: m.includes('plotter') ? CC.defaultPresets('plotter', t) : [] }
+      presets: { laser: m.includes('laser') ? CC.starterPresets('laser', t) : [], plotter: m.includes('plotter') ? CC.starterPresets('plotter', t) : [] }
     };
     this.setState((s) => ({ lib: s.lib.concat(mat), matId: mat.id, filter: 'all', q: '' }));
   }
@@ -767,7 +770,9 @@ class Component extends DCLogic {
         if (f.l === 'Dwell between passes') { f.v = String(b.dwell || 0); f.set = setF(i, 'dwell', true); }
       });
       return {
-        ...common(b, i), proc: b.proc, isCut, power: String(b.power), f: String(b.f), source: b.source || adv.Source || 'CO2 DC', fu: isCut ? 'Hz' : 'DPI',
+        ...common(b, i), proc: b.proc, isCut, isEng: !isCut, power: String(b.power), f: String(b.f), source: b.source || adv.Source || 'CO2 DC', fu: isCut ? 'Hz' : 'DPI',
+        // engrave resolution: one of the standard DPI steps
+        dpiEl: isCut ? null : LRC.dpiSelect(b.f, (v) => setRow('f', v), { cls: 'cell', disabled: locked }),
         advOpen, advRot: advOpen ? '180deg' : '0deg', adv: advList,
         toggleAdv: () => this.setState((s) => ({ adv: { ...s.adv, [advKey]: !advOpen } })),
         setProc: setF(i, 'proc'), setPower: setF(i, 'power', true), setF: setF(i, 'f', true), setSource: setF(i, 'source')
@@ -845,7 +850,7 @@ class Component extends DCLogic {
       toggleLock: () => this.patchMat((m) => ({ ...m, locked: !m.locked })),
       duplicate: () => this.duplicate(), remove: R(() => this.remove()),
       machTabs, canAddType: !!otherType, addTypeLabel: otherType ? MACH[otherType].name : '',
-      addType: () => { this.patchMat((m) => ({ ...m, m: m.m.concat(otherType), presets: { ...m.presets, [otherType]: CC.defaultPresets(otherType, m.t) } })); const first = S.machines.find((x) => x.type === otherType); this.setState({ tab: first ? first.id : null }); },
+      addType: () => { this.patchMat((m) => ({ ...m, m: m.m.concat(otherType), presets: { ...m.presets, [otherType]: CC.starterPresets(otherType, m.t) } })); const first = S.machines.find((x) => x.type === otherType); this.setState({ tab: first ? first.id : null }); },
       isLaser, isPlotter: !isLaser,
       rowCount: rows.length + ' processes' + (machine && !Array.isArray(mat.presets[machine.id]) ? ' · starting values, saved for ' + machine.name + ' once changed' : ''),
       laserRows, plotRows, tg, heads,

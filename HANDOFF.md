@@ -15,6 +15,12 @@ Latest round (28 Oct, final):
 - **Dark mode bed is grey** (`--bed`, `--sheet`, `--bed-grid*` in theme.css). **ACI 7 shows as white in dark mode** (black in light), as in CAD, and so do the marks drawn on the bed (registration marks, engrave hatching, arrows, start points): see the `--aci7*` and `--ink` tokens, and `LRC.aci.hex/fg/stroke` in app.js. Exports (DXF/SVG/PDF) still use real black.
 - **Sample machines and materials from earlier builds are removed on first start** (main.js, tracked by `settings.samplesRemoved`). This is by exact id (trotec, flatbed, laser2, acr-print-3 … brass-1); anything the operator created stays.
 
+Version 1.2.7 (29 Oct):
+- **Engrave DPI is a choice of `CC.DPI_STEPS` (100, 300, 500, 1000)**, built by `LRC.dpiSelect` (app.js) and used in the Materials process table and the Job page process editor. A stored value outside the list still shows, as an extra option.
+- **New materials start with `CC.starterPresets(type)`**: laser gets Cut contour (ACI 1) and Engrave fill (ACI 7); plotter gets one Knife through (ACI 1). This applies to New material, Add type, and `materials:create`.
+- **Machines header:** the name box is shown only for simulated machines; real machines show the name as a heading, taken from the HMI. Beside the status: latency over the last sync time, then icon-only Test connection and Refresh from machine (each shows its name on hover). The Open HMI button and the sync bar card are gone.
+- **Simulated machines** are labelled "Simulated", with no note under Connection. Their Controller is one of `CONTROLLERS` (Trotec, Ruida, Other); a value left over from older builds (e.g. "Simulated") shows "Choose…".
+
 Version 1.2.6 (29 Oct):
 - **Machine settings refresh automatically** (`syncMachine` / `autoSync` in main.js). GET /machine is read:
   - on first contact (a successful Test connection of a saved machine, or the first status answer after starting or being offline);

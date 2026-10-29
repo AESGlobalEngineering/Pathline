@@ -390,7 +390,7 @@ function registerIpc() {
   handle('materials:remove', (id) => { store.remove('materials', id); return store.get('materials'); });
   handle('materials:create', (type) => {
     const t = 3;
-    const mat = { id: CC.uid('mat'), g: 'Other', name: 'New material', t, sw: '#E1E4E8', m: [type || 'laser'], notes: '', locked: false, edited: null, jobs: 0, last: null, presets: { laser: type === 'plotter' ? [] : seed.laserPresets(t), plotter: type === 'plotter' ? seed.plotterPresets(t) : [] } };
+    const mat = { id: CC.uid('mat'), g: 'Other', name: 'New material', t, sw: '#E1E4E8', m: [type || 'laser'], notes: '', locked: false, edited: null, jobs: 0, last: null, presets: { laser: type === 'plotter' ? [] : CC.starterPresets('laser', t), plotter: type === 'plotter' ? CC.starterPresets('plotter', t) : [] } };
     return store.upsert('materials', mat);
   });
   handle('materials:duplicate', (id) => {
