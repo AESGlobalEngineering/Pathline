@@ -1,0 +1,24 @@
+{
+  "name": "pathline-run",
+  "productName": "Pathline Run",
+  "version": "0.1.0",
+  "description": "Pathline Run: the machine-side HMI. Receives Pathline jobs over Ethernet, converts them for a Trotec or Ruida controller and runs them.",
+  "main": "src/server.js",
+  "private": true,
+  "bin": {
+    "pathline-convert": "tools/convert.js"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "sim": "node src/server.js --sim --open",
+    "convert": "node tools/convert.js",
+    "decode": "node tools/decode.js",
+    "test": "node tools/selftest.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "optionalDependencies": {
+    "serialport": "12.0.0"
+  }
+}
