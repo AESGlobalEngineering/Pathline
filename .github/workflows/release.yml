@@ -1,8 +1,8 @@
 # Builds Pathline on GitHub and publishes the installer as a GitHub release
-# named after the version in package.json (tag v<version>, created by the
+# named after the version in package.json (tag v<version>, created with the
 # release). The release includes latest.yml, which installed copies read to
 # find updates. Start it from the Actions tab (Release → Run workflow), or by
-# pushing a v* tag.
+# pushing a v* tag. Running it again for the same version replaces the files.
 name: Release
 
 on:
@@ -17,13 +17,26 @@ jobs:
   windows:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
       - run: npm ci
       - run: npm test
-      - run: npx electron-builder --win --publish always
+      # build only; the release is published by the next step
+      - run: npx electron-builder --win --publish never
+      - name: Publish release
+        shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          V=$(node -p "require('./package.json').version")
+          FILES="dist/Pathline-Setup-$V.exe dist/Pathline-Setup-$V.exe.blockmap dist/latest.yml dist/Pathline-$V-portable.exe"
+          ls -l $FILES
+          if gh release view "v$V" > /dev/null 2>&1; then
+            gh release upload "v$V" $FILES --clobber
+          else
+            gh release create "v$V" $FILES --target "$GITHUB_SHA" --title "Pathline $V" \
+              --notes "Install with Pathline-Setup-$V.exe (updates itself), or run the portable exe. Installed copies of Pathline 1.1.0 and later update to this version automatically."
+          fi
