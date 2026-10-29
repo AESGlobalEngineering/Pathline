@@ -15,6 +15,12 @@ Latest round (28 Oct, final):
 - **Dark mode bed is grey** (`--bed`, `--sheet`, `--bed-grid*` in theme.css). **ACI 7 shows as white in dark mode** (black in light), as in CAD, and so do the marks drawn on the bed (registration marks, engrave hatching, arrows, start points): see the `--aci7*` and `--ink` tokens, and `LRC.aci.hex/fg/stroke` in app.js. Exports (DXF/SVG/PDF) still use real black.
 - **Sample machines and materials from earlier builds are removed on first start** (main.js, tracked by `settings.samplesRemoved`). This is by exact id (trotec, flatbed, laser2, acr-print-3 … brass-1); anything the operator created stays.
 
+Version 1.3.0 (29 Oct):
+- **Common lines** (`commonLines(paths, eps = 0.05)` in core.js). Where a path runs along part of an earlier path in the same process, and on the same bed, that stretch is dropped, so the line is cut once. A closed path that loses a stretch becomes open pieces; a full duplicate disappears. This happens in `estimateIn` (`commonOf(pi, bed)`, worked out once per run), so the Simulation, the cut length and the job package all use the merged paths. The DXF export still holds the drawing as it is.
+  - Merged pieces carry `orig`. `arrangePaths` nests by the original shape, so an outline opened by a shared edge is still that part's outline for inside-first.
+- **Fastest honours "Cut inside shapes first."** In the part-by-part plan, steps can carry `only` (a Set of paths). Within a part the order is engraving, then holes, then outlines. With All insides the outlines are deferred to one final run per process; with Off the cuts are unconstrained. Process orders are also checked (`allowed`): with inside-first on, a cut inside another process's shape runs first; with All insides, no process with outlines runs before one with holes.
+- An entity is only "inside" a cut shape that is bigger than it (a centred hole no longer counts as enclosing its own part).
+
 Version 1.2.9 (29 Oct):
 - **Fastest never engraves inside a cut-out part** (`estimate()` in core.js). An entity is "inside" a through-cut (laser `Cut`, plotter knife) when its centre lies within one of that cut's closed paths.
   - Process orders where such an engraving would come after its cut are not used.

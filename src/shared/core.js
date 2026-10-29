@@ -655,6 +655,82 @@
   }
 
   /**
+   * Common lines: where a path runs along part of a path earlier in the list
+   * (within eps mm, either direction), that stretch is left out so the line is
+   * cut once. Returns Map(path → pieces) for the paths that changed (pieces
+   * are open paths; a path that is covered completely has none).
+   */
+  function commonLines(paths, eps) {
+    eps = eps || 0.05;
+    const CELL = 5, grid = new Map(), out = new Map();
+    // grid cells along a segment (a little either side, for the tolerance)
+    const cellsOf = (a, b) => {
+      const n = Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / (CELL / 2)) + 1, ks = new Set();
+      for (let i = 0; i <= n; i++) {
+        const x = a[0] + ((b[0] - a[0]) * i) / n, y = a[1] + ((b[1] - a[1]) * i) / n;
+        for (const dx of [-eps, eps]) for (const dy of [-eps, eps]) ks.add(Math.floor((x + dx) / CELL) + ',' + Math.floor((y + dy) / CELL));
+      }
+      return ks;
+    };
+    const segsOf = (path) => {
+      const p = path.p, s = [];
+      for (let i = 1; i < p.length; i++) s.push([p[i - 1], p[i]]);
+      if (path.c && p.length > 2) s.push([p[p.length - 1], p[0]]);
+      return s;
+    };
+    for (const path of paths) {
+      const segs = segsOf(path);
+      let changed = false;
+      // the stretches (t from 0 to 1) of each segment that no earlier path covers
+      const keep = segs.map(([a, b]) => {
+        const L = Math.hypot(b[0] - a[0], b[1] - a[1]);
+        if (L < 1e-9) return [[0, 1]];
+        const ux = (b[0] - a[0]) / L, uy = (b[1] - a[1]) / L, cov = [], seen = new Set();
+        const off = (q) => Math.abs((q[0] - a[0]) * uy - (q[1] - a[1]) * ux);
+        const along = (q) => ((q[0] - a[0]) * ux + (q[1] - a[1]) * uy) / L;
+        for (const k of cellsOf(a, b)) {
+          for (const c of grid.get(k) || []) {
+            if (seen.has(c)) continue;
+            seen.add(c);
+            if (off(c[0]) > eps || off(c[1]) > eps) continue;
+            const lo = Math.max(0, Math.min(along(c[0]), along(c[1]))), hi = Math.min(1, Math.max(along(c[0]), along(c[1])));
+            if (hi - lo > eps / L) cov.push([lo, hi]);
+          }
+        }
+        if (!cov.length) return [[0, 1]];
+        cov.sort((x, y) => x[0] - y[0]);
+        const free = [];
+        let t = 0;
+        for (const [lo, hi] of cov) { if (lo - t > eps / L) free.push([t, lo]); t = Math.max(t, hi); }
+        if (1 - t > eps / L) free.push([t, 1]);
+        changed = true;
+        return free;
+      });
+      for (const s of segs) for (const k of cellsOf(s[0], s[1])) { if (!grid.has(k)) grid.set(k, []); grid.get(k).push(s); }
+      if (!changed) continue;
+      // join the uncovered stretches back into polylines
+      const at = (s, t) => [s[0][0] + (s[1][0] - s[0][0]) * t, s[0][1] + (s[1][1] - s[0][1]) * t];
+      const pieces = [];
+      let cur = null;
+      segs.forEach((s, i) => {
+        if (!keep[i].length) cur = null;
+        keep[i].forEach(([t0, t1]) => {
+          if (cur && t0 === 0) cur.push(at(s, t1));
+          else { cur = [at(s, t0), at(s, t1)]; pieces.push(cur); }
+          if (t1 !== 1) cur = null;
+        });
+      });
+      // a closed path: the last stretch runs on into the first
+      if (path.c && pieces.length > 1 && keep[0].length && keep[0][0][0] === 0 && cur) {
+        const first = pieces.shift();
+        cur.push(...first.slice(1));
+      }
+      out.set(path, pieces.map((p) => ({ ...path, p, c: false })));
+    }
+    return out;
+  }
+
+  /**
    * Order a process's paths. opts: { inside, order, start, nest } where nest
    * says whether holes matter for this process (cuts) — when false, `inside`
    * is ignored. Closed paths then start wherever is most convenient on the
@@ -698,14 +774,23 @@
     const inside = opts.nest ? opts.inside || 'off' : 'off';
     let at = opts.start || [0, 0];
     // annotated copies so the job's own path objects stay untouched
-    items = items.map((it, n) => {
+    const note = (path) => {
       const b = EMPTY_BOX();
-      it.path.p.forEach(([x, y]) => growBox(b, x, y));
-      return { ...it, n, path: { ...it.path, area: it.path.c ? Math.abs(polyArea(it.path.p)) : 0, box: b } };
+      path.p.forEach(([x, y]) => growBox(b, x, y));
+      return { ...path, area: path.c ? Math.abs(polyArea(path.p)) : 0, box: b };
+    };
+    // shape: the drawn path an item comes from (a piece left by commonLines
+    // still nests, and belongs to its part, as the whole outline)
+    const shapes = new Map();
+    items = items.map((it, n) => {
+      const path = note(it.path);
+      const from = it.orig || it.path;
+      if (!shapes.has(from)) shapes.set(from, from === it.path ? path : note(from));
+      return { ...it, n, path, shape: shapes.get(from) };
     });
     if (inside !== 'off') {
-      const all = items.map((it) => it.path);
-      items.forEach((it) => { it.depth = nestDepth(it.path, all); });
+      const all = [...shapes.values()];
+      items.forEach((it) => { it.depth = nestDepth(it.shape, all); });
     }
     const pathUnit = (it) => {
       const b = it.path.box;
@@ -737,17 +822,17 @@
     }
     if (inside === 'part') {
       // a part = an outermost closed contour and everything inside it
-      const roots = items.filter((it) => it.path.c && it.depth === 0);
-      const parts = new Map(roots.map((r) => [r, [r]]));
+      const roots = [...new Set(items.filter((it) => it.shape.c && it.depth === 0).map((it) => it.shape))];
+      const parts = new Map(roots.map((r) => [r, []]));
       const loose = [];
       for (const it of items) {
-        if (it.path.c && it.depth === 0) continue;
-        const [x, y] = it.path.p[0];
+        if (parts.has(it.shape)) { parts.get(it.shape).push(it); continue; }
+        const [x, y] = it.shape.p[0];
         let home = null;
         for (const r of roots) {
-          const b = r.path.box;
+          const b = r.box;
           if (x < b.x0 || x > b.x1 || y < b.y0 || y > b.y1) continue;
-          if (pointInPoly(x, y, r.path.p) && (!home || r.path.area < home.path.area)) home = r;
+          if (pointInPoly(x, y, r.p) && (!home || r.area < home.area)) home = r;
         }
         if (home) parts.get(home).push(it);
         else loose.push([it]);
@@ -815,16 +900,34 @@
     const cuts = ents.filter((e) => through(procOf(e)))
       .map((e) => ({ e, b: entityBox(e), rings: (e.paths || []).filter((p) => p.c && p.p.length > 2).map((p) => p.p) }))
       .filter((c) => c.rings.length);
-    // the cut shapes around an entity: its centre is inside one of their closed paths
+    // the cut shapes around an entity: bigger than it, with its centre inside
+    // one of their closed paths
+    const boxArea = (b) => boxW(b) * boxH(b);
     const encl = new Map(ents.map((e) => {
-      const b = entityBox(e), x = (b.x0 + b.x1) / 2, y = (b.y0 + b.y1) / 2;
-      return [e, cuts.filter((c) => c.e !== e && x >= c.b.x0 && x <= c.b.x1 && y >= c.b.y0 && y <= c.b.y1 && c.rings.some((r) => pointInPoly(x, y, r)))];
+      const b = entityBox(e), x = (b.x0 + b.x1) / 2, y = (b.y0 + b.y1) / 2, a = boxArea(b);
+      return [e, cuts.filter((c) => c.e !== e && boxArea(c.b) > a && x >= c.b.x0 && x <= c.b.x1 && y >= c.b.y0 && y <= c.b.y1 && c.rings.some((r) => pointInPoly(x, y, r)))];
     }));
+    // "Cut inside shapes first": a closed cut path inside another closed cut
+    // path is a hole (open cuts go with the holes: nothing drops out)
+    const inside = cutOrderOf(job).inside;
+    const rings = cuts.flatMap((c) => c.e.paths.filter((p) => p.c && p.p.length > 2).map((p) => ({ p, a: Math.abs(polyArea(p.p)), b: entityBox({ paths: [p] }) })));
+    const isHole = (path) => {
+      if (!path.c) return true;
+      const a = Math.abs(polyArea(path.p)), [x, y] = path.p[0];
+      return rings.some((r) => r.p !== path && r.a > a && x >= r.b.x0 && x <= r.b.x1 && y >= r.b.y0 && y <= r.b.y1 && pointInPoly(x, y, r.p.p));
+    };
+    const hasHole = new Set(), hasOuter = new Set();
+    for (const c of cuts) for (const p of c.e.paths) (isHole(p) ? hasHole : hasOuter).add(procOf(c.e));
     const allowed = (p) => {
       const pos = new Map(p.map((pi, k) => [pi, k]));
+      // all insides: no cut process with outlines before one with holes
+      if (inside === 'all' && p.some((a, i) => hasOuter.has(a) && p.slice(i + 1).some((b) => b !== a && hasHole.has(b)))) return false;
       return ents.every((e) => {
         const pe = procOf(e);
-        return pe === undefined || through(pe) || encl.get(e).every((c) => pos.get(procOf(c.e)) > pos.get(pe));
+        // engraving never inside a part already cut out; with inside-first on,
+        // a cut inside another process's shape goes first as well
+        if (pe === undefined || (through(pe) && inside === 'off')) return true;
+        return encl.get(e).every((c) => procOf(c.e) === pe || pos.get(procOf(c.e)) > pos.get(pe));
       });
     };
     const cands = [];
@@ -851,17 +954,34 @@
       const bedSize = bedOf(machine), o = ((machine && machine.info) || {}).origin || 'tl';
       let at = [o.includes('r') ? bedSize[0] : 0, o.includes('b') ? bedSize[1] : 0];
       const left = [...groups.values()].map((list) => { const b = boxOf(list); return { list, c: [(b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2] }; });
-      const plan = [];
+      // within a part: engraving (and marking), then its holes, then its
+      // outlines (Per part); with All insides every outline waits until every
+      // hole in the job is cut; with Off the cuts go in any order
+      const plan = [], later = [];
       while (left.length) {
         let bi = 0, bd = Infinity;
         left.forEach((g, i) => { const d = Math.hypot(g.c[0] - at[0], g.c[1] - at[1]); if (d < bd) { bd = d; bi = i; } });
         const g = left.splice(bi, 1)[0];
         at = g.c;
-        // engraving (and marking) before the cuts, as processOrder ranks them
+        const eng = [], holes = [], outs = [];
         for (const pi of base) {
-          const ids = new Set(g.list.filter((e) => procOf(e) === pi));
-          if (ids.size) plan.push({ pi, ids });
+          const list = g.list.filter((e) => procOf(e) === pi);
+          if (!list.length) continue;
+          const ids = new Set(list);
+          if (!through(pi)) { eng.push({ pi, ids }); continue; }
+          if (inside === 'off') { holes.push({ pi, ids }); continue; }
+          const paths = list.flatMap((e) => e.paths);
+          const h = new Set(paths.filter(isHole)), o2 = new Set(paths.filter((p) => !h.has(p)));
+          if (h.size) holes.push({ pi, ids, only: h });
+          if (o2.size) outs.push({ pi, ids, only: o2 });
         }
+        plan.push(...eng, ...holes);
+        if (inside === 'all') later.push(...outs); else plan.push(...outs);
+      }
+      // all insides: the outlines last, one run per process (nearest next across the job)
+      for (const pi of base) {
+        const mine = later.filter((s) => s.pi === pi);
+        if (mine.length) plan.push({ pi, ids: new Set(mine.flatMap((s) => [...s.ids])), only: new Set(mine.flatMap((s) => [...s.only])) });
       }
       if (plan.length > base.length) cands.push({ order: [...new Set(plan.map((s) => s.pi))], plan });
     }
@@ -874,8 +994,8 @@
     }
     return estimateIn(job, machine, opts, best.order, best.plan);
   }
-  // plan (Fastest, part by part): [{ pi, ids: Set of entities }] run in that
-  // order instead of whole processes
+  // plan (Fastest, part by part): [{ pi, ids: Set of entities, only?: Set of
+  // their paths to cut }] run in that order instead of whole processes
   function estimateIn(job, machine, opts, order, plan) {
     const isLaser = (machine && machine.type ? machine.type : job.machineType) !== 'plotter';
     const info = (machine && machine.info) || {};
@@ -924,6 +1044,13 @@
     // then all of them again, then the outlines once, then again. On a plotter
     // this all happens per bed, before the conveyor moves on.
     const passesOf = (proc) => Math.max(1, Math.round(Number(proc.passes) || 1));
+    // overlapping lines within a process (on one bed) are merged, worked out once
+    const common = new Map();
+    const commonOf = (pi, bed) => {
+      const k = pi + '|' + bed;
+      if (!common.has(k)) common.set(k, commonLines(ents.filter((e) => (job.processes[pi].aci || []).includes(e.aci) && (isLaser || (e.bed || 0) === bed)).flatMap((e) => e.paths)));
+      return common.get(k);
+    };
     // Run order: registration marks are read first (the camera visits each
     // mark), then engraving, then cutting (processOrder).
     let inspectTime = 0, dwellTime = 0;
@@ -975,10 +1102,10 @@
     for (let bed = 0; bed < nBeds; bed++) {
       const bedEnts = isLaser ? ents : ents.filter((e) => (e.bed || 0) === bed);
       const work = (plan && isLaser
-        ? plan.map((s, k) => ({ pi: s.pi, key: 's' + k, mine: bedEnts.filter((e) => s.ids.has(e)) }))
+        ? plan.map((s, k) => ({ pi: s.pi, key: 's' + k, only: s.only, mine: bedEnts.filter((e) => s.ids.has(e)) }))
         : order.map((pi) => ({ pi, key: pi, mine: bedEnts.filter((e) => (job.processes[pi].aci || []).includes(e.aci)) }))).filter((w) => w.mine.length);
       const cache = new Map();
-      for (const { pi, key, mine } of work) runPass(bed, pi, job.processes[pi], mine, passesOf(job.processes[pi]), cache, key);
+      for (const { pi, key, only, mine } of work) runPass(bed, pi, job.processes[pi], mine, passesOf(job.processes[pi]), cache, key, only);
       if (!isLaser && bed < nBeds - 1) {
         const dur = travelTime(feedLen, plot.feedSpeed, 500) + plot.feedSettle;
         feeds++;
@@ -1006,7 +1133,7 @@
     }
 
     // One process on one bed, with all its passes.
-    function runPass(bed, pi, proc, mine, passes, cache, key) {
+    function runPass(bed, pi, proc, mine, passes, cache, key, only) {
       const passNo = (k) => (passes > 1 ? k : null);
       // laser processes can wait between passes (the head stays put, the beam off)
       const dwell = isLaser ? Math.max(0, Number(proc.dwell) || 0) : 0;
@@ -1080,7 +1207,12 @@
       let ordered = cache.get(key);
       if (!ordered) {
         const items = [];
-        mine.forEach((e) => e.paths.forEach((path, k) => items.push({ ent: e.id, k, path })));
+        // lines shared with another path of this process are cut once (commonLines)
+        const shared = commonOf(pi, bed);
+        mine.forEach((e) => e.paths.forEach((path, k) => {
+          if (only && !only.has(path)) return;
+          for (const q of shared.get(path) || [path]) items.push({ ent: e.id, k, path: q, orig: path });
+        }));
         ordered = orderPaths(items, {
           nest: isLaser ? proc.proc === 'Cut' : /Knife/.test(proc.tool || ''),
           inside: cut.inside, order: 'speed', start: at
@@ -1477,7 +1609,7 @@
     mapEntity, translate, scaleAbout, rotateAbout, polyLen, polyArea, pointInPoly, distToEntity, isClosedPts, cleanPath, shapes,
     processOrder, processOfAci, toolSlot, toolRank, polyTime, travelTime, rasterSpans, orderPaths,
     estimate, headAt, fmtDuration, fmtLen, fmtArea, checkJob, regMarks, regMarkAci, regProcess, isRegProc, REG_PROC, REG_NEEDED,
-    cutOrderOf, CUT_ORDER_DEFAULT, bedOf, bedCount, defaultPresets, DEFAULTS,
+    cutOrderOf, CUT_ORDER_DEFAULT, commonLines, bedOf, bedCount, defaultPresets, DEFAULTS,
     rasterIslands, engraveScan, ENGRAVE_DIRS, DPI_STEPS, starterPresets, nestRects, THERMAL, thermalKey, thermalOf, thermalSim, metalPresets, presetsFor
   };
 });

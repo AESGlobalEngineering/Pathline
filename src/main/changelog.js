@@ -5,6 +5,14 @@
 
 module.exports = [
   {
+    version: '1.3.0', date: '29 Oct 2026',
+    added: [
+      'Overlapping lines are merged automatically: where parts share an edge, or a line is drawn twice, it is cut once (within one process).',
+      'Fastest follows "Cut inside shapes first": Per part finishes each part before the next, All insides cuts every hole before any outline, Off cuts in whatever order is quickest.'
+    ],
+    fixed: ['Fastest could treat a part as sitting inside its own centred hole.']
+  },
+  {
     version: '1.2.9', date: '29 Oct 2026',
     added: ['Fastest cut order can engrave before or after cutting, part by part, but never inside a part that has already been cut out.'],
     fixed: []

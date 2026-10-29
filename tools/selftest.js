@@ -116,6 +116,36 @@ async function main() {
       ok(Math.min(at('c0'), at('c1')) < Math.max(at('g0'), at('g1'), at('gx')), 'fastest can engrave after cutting (' + runs.join(' ') + ')');
       const t = (order) => CC.estimate({ ...far, cutOrder: { inside: 'part', order } }, laser).total;
       ok(t('speed') <= t('ordered') + 1e-6, 'part by part is no slower than ordered (' + t('speed').toFixed(1) + ' s vs ' + t('ordered').toFixed(1) + ' s)');
+      // fastest keeps to "Cut inside shapes first": parts with a hole and a logo, far apart
+      const holed = (x, k) => [{ id: 'o' + k, aci: 1, paths: [{ p: CC.shapes.rect(x, 20, 120, 120, 0), c: true }] }, { id: 'h' + k, aci: 1, paths: [{ p: CC.shapes.ellipse(x + 90, 80, 10, 10), c: true }] }, { id: 'g' + k, aci: 7, paths: [{ p: CC.shapes.rect(x + 15, 40, 40, 40, 0), c: true }] }];
+      const hj = { ...mix, entities: [...holed(10, 0), ...holed(700, 1)] };
+      const runOf = (inside) => CC.estimate({ ...hj, cutOrder: { inside, order: 'speed' } }, laser, { timeline: true }).timeline.filter((o) => o.kind === 'op').map((o) => (o.mode === 'raster' ? (o.ents || []).join('+') : o.ent));
+      const idx = (r, id) => r.findIndex((x) => String(x).split('+').includes(id));
+      const rAll = runOf('all'), rPart = runOf('part'), rOff = runOf('off');
+      ok(Math.max(idx(rAll, 'h0'), idx(rAll, 'h1')) < Math.min(idx(rAll, 'o0'), idx(rAll, 'o1')), 'fastest, all insides: every hole before any outline (' + rAll.join(' ') + ')');
+      ok(idx(rPart, 'h0') < idx(rPart, 'o0') && idx(rPart, 'h1') < idx(rPart, 'o1') && (idx(rPart, 'o0') < idx(rPart, 'h1') || idx(rPart, 'o1') < idx(rPart, 'h0')), 'fastest, per part: each part finished before the next (' + rPart.join(' ') + ')');
+      ok(rOff.length === 6 && idx(rOff, 'g0') < idx(rOff, 'o0') && idx(rOff, 'g1') < idx(rOff, 'o1'), 'fastest, inside-first off: still engraves before cutting out (' + rOff.join(' ') + ')');
+    }
+    // overlapping lines are cut once
+    {
+      const sq = (x) => ({ p: CC.shapes.rect(x, 0, 50, 50, 0), c: true });
+      const a = sq(0), b = sq(50), dup = sq(0);
+      const m = CC.commonLines([a, b, dup]);
+      const len = (ps) => ps.reduce((s, q) => s + CC.polyLen(q.p, q.c), 0);
+      ok(!m.has(a) && Math.abs(len(m.get(b)) - 150) < 0.01, 'shared edge of two squares cut once (' + len(m.get(b)).toFixed(1) + ' mm left of the second)');
+      ok(m.get(dup).length === 0, 'an exact duplicate is not cut at all');
+      const shared = { ...pj, entities: [{ id: 'a', aci: 1, paths: [a] }, { id: 'b', aci: 1, paths: [b] }, { id: 'd', aci: 1, paths: [dup] }], regMode: 'off' };
+      const est = CC.estimate({ ...shared, cutOrder: { inside: 'off', order: 'speed' } }, laser);
+      ok(Math.abs(est.cutLen - 350) < 0.5, 'cut length counts shared lines once (' + est.cutLen.toFixed(1) + ' mm)');
+      // touching parts with holes: an outline left open by a shared edge is still an outline
+      const row = [];
+      for (let i = 0; i < 4; i++) row.push({ id: 'p' + i, aci: 1, paths: [{ p: CC.shapes.rect(i * 100, 0, 100, 100, 0), c: true }] }, { id: 'h' + i, aci: 1, paths: [{ p: CC.shapes.ellipse(i * 100 + 50, 50, 18, 18), c: true }] });
+      for (const order of ['speed', 'ordered']) {
+        const seqOf = (inside) => CC.estimate({ ...shared, entities: row, cutOrder: { inside, order } }, laser, { timeline: true }).timeline.filter((o) => o.kind === 'op').map((o) => o.ent);
+        const all = seqOf('all'), part = seqOf('part');
+        ok(all.lastIndexOf(all.filter((x) => x[0] === 'h').pop()) < all.findIndex((x) => x[0] === 'p'), order + ', all insides with shared edges: holes first (' + all.join(' ') + ')');
+        ok([0, 1, 2, 3].every((i) => part.indexOf('h' + i) < part.indexOf('p' + i)), order + ', per part with shared edges: each hole before its outline (' + part.join(' ') + ')');
+      }
     }
     // 2 passes, any order: item 1, 2, 3, 4 once, then 1, 2, 3, 4 again
     const twoPass = { ...pj, entities: grid.slice(0, 4), processes: pj.processes.map((p, i) => (i === 0 ? { ...p, passes: 2 } : p)) };
