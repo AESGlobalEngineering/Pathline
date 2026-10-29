@@ -38,12 +38,15 @@ class Machine {
       if (this.link !== link) return;
       this.st.link = 'online';
       this.st.message = 'Ready';
+      this.lastConnectError = null;
       if (this.st.state === 'alarm') this.st.state = 'idle';
     } catch (e) {
       if (this.link !== link) return;
       this.st.link = 'offline';
       this.st.message = e.message;
-      this.log('connect failed: ' + e.message);
+      // retried every 10 s: log it once, not every time (it would bury the rest of the log)
+      if (e.message !== this.lastConnectError) this.log('connect failed: ' + e.message + ' (retrying every 10 s)');
+      this.lastConnectError = e.message;
       clearTimeout(this.retry);
       this.retry = setTimeout(() => { if (this.link === link) this.connect(); }, 10000);
     }

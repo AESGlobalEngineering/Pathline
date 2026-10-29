@@ -7,7 +7,7 @@ module.exports = [
   {
     version: '0.3.3', date: '29 Oct 2026',
     added: ['Anchor to toolhead is a switch, like "Remove completed job from queue". On: the job starts at the head\'s position when you switched it on. Off: back where Pathline placed it.'],
-    fixed: []
+    fixed: ['With the laser unplugged, the Diagnostics log filled with the same connection error every 10 seconds. It\'s now logged once.']
   },
   {
     version: '0.3.2', date: '29 Oct 2026',
