@@ -49,6 +49,8 @@ class Machine {
       this.lastConnectError = null;
       if (this.st.state === 'alarm') this.st.state = 'idle';
     } catch (e) {
+      // let go of the port, or the next attempt finds it "in use" by this failed one
+      await link.close().catch(() => {});
       if (this.link !== link) return;
       this.st.link = 'offline';
       this.st.message = e.message;

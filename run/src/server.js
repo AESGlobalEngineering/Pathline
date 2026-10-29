@@ -300,7 +300,11 @@ function start(opts = {}) {
         machine,
         log,
         // stops the machine safely, then closes the server
-        close: async () => { try { await machine.stop(); } catch (e) { /* closing anyway */ } server.close(); }
+        close: async () => {
+          try { await machine.stop(); } catch (e) { /* closing anyway */ }
+          try { if (machine.link) await machine.link.close(); } catch (e) { /* closing anyway */ }
+          server.close();
+        }
       });
     });
   });

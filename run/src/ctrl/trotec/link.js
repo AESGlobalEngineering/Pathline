@@ -10,6 +10,7 @@ const { packet, takePacket, parseReply, IM, TT, KEY } = require('./sf');
 const { settings, units } = require('./compile');
 
 const POLL = Buffer.from([IM.GETSTATUS, IM.GETXYPOSITION, IM.GET_PROGRESS_MARKER]);
+const NOP = Buffer.from([0x00]); // TTCMD_NOP: the data section of a packet that only asks
 const MAX_DATA = 1024;
 const REPLY_MS = 1500;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -131,15 +132,15 @@ class TrotecLink {
 
   async connect() {
     await this.open();
-    // after an interrupted session the first query may go unanswered: wake it up and retry once
-    this.write(Buffer.from('\r\n\r\n'));
-    await sleep(500);
-    let model;
-    try { model = await this.textQuery('pg0\r', /Parameter #0:\s*(\d+)/); } catch (e) {
-      this.write(Buffer.from('\r\n\r\n'));
-      await sleep(500);
-      model = await this.textQuery('pg0\r', /Parameter #0:\s*(\d+)/).catch(() => { throw new Error('The laser didn\'t answer. Is it on, and is Ruby/JobDispatcher closed?'); });
+    // Wake-up line and query in one write (on the Q500 a separate wake-up was sometimes
+    // ignored). After a session that ended without handing the laser back (close() does),
+    // it ignores text until the port is opened again: the caller retries with a fresh open.
+    let model = null;
+    for (let attempt = 0; attempt < 3 && !model; attempt++) {
+      if (attempt) await sleep(1000);
+      model = await this.textQuery('\r\n\r\npg0\r', /Parameter #0:\s*(\d+)/, 2500).catch(() => null);
     }
+    if (!model) throw new Error('The laser didn\'t answer. Is it switched on, and are Ruby and JobDispatcher closed?');
     const cpu = await this.textQuery('pg250\r', /Parameter #250:\s*([\d.]+)/).catch(() => null);
     const conn = await this.textQuery('\n\n\nTX;', /(\d\d\.\d\d-\d\d\.\d\d-\d\d\.\d\d)/, 3000);
     if (this.cfg.connection.mode !== 'tcp' && this.io.update) await new Promise((r) => this.io.update({ baudRate: 460800 }, () => r()));
@@ -151,7 +152,20 @@ class TrotecLink {
     return this.info;
   }
 
+  // The laser re-accepts the connect request (TX;) at any time; afterwards packet ids start at 0 again.
+  async resync() {
+    await this.textQuery('\n\n\nTX;', /(\d\d\.\d\d-\d\d\.\d\d-\d\d\.\d\d)/, 3000);
+    this.rx = Buffer.alloc(0);
+    this.id = 0;
+  }
+
   async close() {
+    // Hand the laser back in text mode (TTCMD_SWITCHTOHPGL, no motion). Otherwise it stays
+    // in packet mode and ignores the next connection's handshake (seen on the Q500).
+    if (this.binary && !this.closed && this.io) {
+      await Promise.race([this.sendCmds([Buffer.from([0x88])]), sleep(1500)]).catch(() => {});
+    }
+    this.binary = false;
     this.closed = true;
     if (!this.io) return;
     await new Promise((r) => { try { if (this.io.close) this.io.close(() => r()); else { this.io.end(); r(); } } catch (e) { r(); } });
@@ -159,15 +173,23 @@ class TrotecLink {
 
   // ------------------------------------------------------------ packets
   // One packet out, its reply back. Serialised: callers queue behind each other.
-  exchange(imm, data) {
-    const run = this.chain.then(() => this.exchangeNow(imm, data));
+  exchange(imm, data, opts) {
+    const run = this.chain.then(() => this.exchangeNow(imm, data, opts));
     this.chain = run.catch(() => {});
     return run;
   }
 
-  async exchangeNow(imm, data) {
+  // opts.poll: a status check (never waits for buffer room: answers with the last status)
+  // opts.urgent: abort/pause/resume (still sent while a job is being stopped)
+  async exchangeNow(imm, data, opts = {}) {
     if (this.closed) throw new Error('Laser disconnected');
+    // As Ruby does: every packet carries a data section (a NOP when there's nothing to
+    // queue), and the packet ids count up through all of them. The laser checks the ids
+    // of packets with data, so status-only packets without data put the ids out of step
+    // and the next command is refused as "invalid id".
+    if (!data || !data.length) data = NOP;
     const id = this.id;
+    let resynced = false;
     let timeouts = 0;
     let crcErrors = 0;
     for (;;) {
@@ -190,29 +212,38 @@ class TrotecLink {
         this.id = (id + 1) & 0xff;
         const r = parseReply(got);
         if (r.text) this.log('trotec: ' + r.text.trim().replace(/\s*\r?\n\s*/g, ' | '));
+        if (r.status) this.lastReply = r;
         return r;
       }
       // buffer full is normal while a long job runs: the job stream is far ahead of the
       // machine. Keep offering the packet until there is room, unless we're stopping.
       if (got.kind === 'bufferFull') {
-        if (this.aborting && data && data.length) throw new Error('aborted');
+        if (opts.poll && this.lastReply) return this.lastReply;
+        if (this.aborting && !opts.urgent) throw new Error('aborted');
         await sleep(200);
         // pause/resume can't wait for buffer room: send them in between, with this id
-        if (this.urgent.length) {
+        if (this.urgent.length && !opts.urgent) {
           const u = this.urgent.shift();
-          try { u.resolve(await this.exchangeNow(u.imm)); } catch (e) { u.reject(e); }
-          return this.exchangeNow(imm, data);
+          try { u.resolve(await this.exchangeNow(u.imm, null, { urgent: true })); } catch (e) { u.reject(e); }
+          return this.exchangeNow(imm, data, opts);
         }
         // while waiting, keep the head position on screen up to date
-        if (this.onPoll && Date.now() - (this.lastPollAt || 0) > 700) {
+        if (this.onPoll && !opts.poll && !opts.urgent && Date.now() - (this.lastPollAt || 0) > 700) {
           this.lastPollAt = Date.now();
-          this.onPoll(this.view(await this.exchangeNow(POLL)));
-          return this.exchangeNow(imm, data);
+          this.onPoll(this.view(await this.exchangeNow(POLL, null, { poll: true })));
+          return this.exchangeNow(imm, data, opts);
         }
         continue;
       }
       if (got.kind === 'invalidCrc' && ++crcErrors <= 5) continue;
-      throw new Error('Laser refused the packet (' + got.kind + ')');
+      // the laser expected another packet id: start the numbering again (TX; resets it) and resend once
+      if (got.kind === 'invalidId' && !resynced) {
+        resynced = true;
+        this.log('trotec: packet id ' + id + ' refused, starting the numbering again');
+        await this.resync();
+        return this.exchangeNow(imm, data, opts);
+      }
+      throw new Error(got.kind === 'invalidId' ? 'The laser refused the packet numbering. Tap Reconnect.' : 'Laser refused the packet (' + got.kind + ')');
     }
   }
 
@@ -223,7 +254,7 @@ class TrotecLink {
     return { state, pos: { x: +pos[0].toFixed(3), y: +pos[1].toFixed(3), z: 0 }, interlock: !!s.interlock, marker: r.marker, raw: s.raw };
   }
 
-  async poll() { return this.view(await this.exchange(POLL)); }
+  async poll() { return this.view(await this.exchange(POLL, null, { poll: true })); }
 
   // data-lane commands, packed into packets on command boundaries
   async sendCmds(cmds, ctl = {}) {
@@ -272,7 +303,7 @@ class TrotecLink {
         const i = this.urgent.indexOf(u);
         if (i < 0) return;
         this.urgent.splice(i, 1);
-        try { resolve(await this.exchangeNow(imm)); } catch (e) { reject(e); }
+        try { resolve(await this.exchangeNow(imm, null, { urgent: true })); } catch (e) { reject(e); }
       }).catch(() => {});
     });
     return p;
@@ -282,7 +313,7 @@ class TrotecLink {
   async resume() { await this.immediate(Buffer.from([IM.CONTINUE])); }
   async abort() {
     this.aborting = true; // lets a data packet waiting for buffer room give up first
-    try { await this.exchange(Buffer.from([IM.ABORT])); } finally { this.aborting = false; }
+    try { await this.exchange(Buffer.from([IM.ABORT]), null, { urgent: true }); } finally { this.aborting = false; }
   }
 }
 

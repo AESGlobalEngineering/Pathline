@@ -5,6 +5,15 @@
 
 module.exports = [
   {
+    version: '0.4.2', date: '29 Oct 2026',
+    added: [],
+    fixed: [
+      'Trotec: jogs and jobs were refused with "invalid id". Every packet now carries a data section, as Ruby\'s do, so the packet numbering stays in step with the laser. If the laser still refuses a number, the numbering is started again and the packet is resent.',
+      'Trotec: Pathline Run hands the laser back properly when it disconnects or closes, so reconnecting takes about a second.',
+      'A failed connection attempt kept the port open, so the next attempt said "Access denied".'
+    ]
+  },
+  {
     version: '0.4.1', date: '29 Oct 2026',
     added: ['The Trotec\'s USB port is found automatically: Setup → Serial port → Automatic (the default) looks for the Trotec controller (USB id 1CBE:0002) each time it connects. The ports it finds are listed too, with the Trotec marked.'],
     fixed: ['When the port is in use, the message says by what (for example Trotec JobDispatcher, part of Ruby) instead of "Access denied".']

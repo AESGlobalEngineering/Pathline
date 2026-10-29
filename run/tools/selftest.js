@@ -236,7 +236,8 @@ async function linkTests() {
   const RuidaLink = require('../src/ctrl/ruida/link');
 
   console.log('Trotec link (fake controller over TCP)');
-  const dev = { pos: [0, 0], packets: 0, data: 0, ids: [], full: 3, abort: false };
+  // like the Q500: packets with a data section must count up from 0 after TX; (otherwise "invalid id")
+  const dev = { pos: [0, 0], packets: 0, data: 0, ids: [], full: 3, abort: false, expect: 0, refused: 0, noData: 0 };
   const fake = net.createServer((s) => {
     let buf = Buffer.alloc(0);
     let binary = false;
@@ -250,11 +251,16 @@ async function linkTests() {
         buf = Buffer.alloc(0);
         return;
       }
+      // the connect request is accepted again at any time, and restarts the packet numbering
+      if (buf.includes('TX;')) { s.write('04.02-53.00-11.04\r\n'); dev.expect = 0; buf = buf.subarray(buf.indexOf('TX;') + 3); }
       for (let t; (t = sf.takePacket(buf));) {
         buf = Buffer.from(t.rest);
         const p = t.packet;
-        // refuse the first few data packets once with "buffer full", like a busy machine
-        if (p.data.length && dev.full > 0) { dev.full--; s.write(sf.packet(p.id, null, null, 0x90)); continue; }
+        if (!p.data.length) dev.noData++;
+        if (p.data.length && p.id !== dev.expect) { dev.refused++; s.write(sf.packet(p.id, null, null, 0xa0)); continue; }
+        // refuse the first few real data packets once with "buffer full", like a busy machine
+        if (p.data.length > 1 && dev.full > 0) { dev.full--; s.write(sf.packet(p.id, null, null, 0x90)); continue; }
+        if (p.data.length) dev.expect = (dev.expect + 1) & 0xff;
         dev.packets++; dev.ids.push(p.id); dev.data += p.data.length;
         for (const c of sf.decodeData(p.data)) if (c.name === 'MOVEXY') dev.pos = c.v;
         const ans = [];
@@ -276,15 +282,23 @@ async function linkTests() {
     ok(/53/.test(info.model) && /04\.02-53/.test(info.firmware), 'handshake: model 53, ' + info.firmware);
     const p0 = await tl.poll();
     ok(p0.state === 'idle' && !p0.interlock, 'poll: idle, lid closed');
+    for (let i = 0; i < 40; i++) await tl.poll(); // status checks between commands, as the app does
+    const before0 = dev.data;
     await tl.moveTo(100, 50);
     const p1 = await tl.poll();
     ok(Math.abs(p1.pos.x - 100) < 0.011 && Math.abs(p1.pos.y - 50) < 0.011, 'move to 100, 50 mm reads back', JSON.stringify(p1.pos));
+    ok(dev.data > before0 && dev.refused === 0 && dev.noData === 0, 'a move after 40 status checks is accepted: every packet has data (NOP), ids in step', 'refused ' + dev.refused + ', without data ' + dev.noData);
+    // the laser expecting another id (e.g. after a hiccup): TX; restarts the numbering and the packet goes again
+    dev.expect = 200;
+    await tl.moveTo(10, 10);
+    const p2 = await tl.poll();
+    ok(Math.abs(p2.pos.x - 10) < 0.011, 'an "invalid id" refusal recovers by starting the numbering again', JSON.stringify(p2.pos));
     const prog = trotec.compile(plan.build(example), { ...cfgT, regMarks: 'ignore' });
     const before = dev.data;
     for (const s of prog.segments.filter((x) => x.kind === 'stream')) await tl.send(s, {});
     const total = prog.segments.filter((x) => x.kind === 'stream').reduce((a, s) => a + s.data.length, 0);
     ok(dev.data - before === total, 'whole example streamed (' + total + ' bytes), after 3 "buffer full" retries', (dev.data - before) + ' bytes');
-    ok(dev.ids.every((id, i) => i === 0 || id === ((dev.ids[i - 1] + 1) & 0xff)), 'packet ids count up without gaps (' + dev.packets + ' packets)');
+    ok(dev.ids.every((id, i) => i === 0 || id === ((dev.ids[i - 1] + 1) & 0xff) || id === 0), 'packet ids count up without gaps, apart from the restart at 0 (' + dev.packets + ' packets)');
     await tl.abort();
     ok(dev.abort, 'abort reaches the controller');
   } catch (e) { ok(false, 'Trotec link', e.stack); }
