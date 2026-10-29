@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Installs Pathline Run on a Raspberry Pi (Raspberry Pi OS Bookworm 64-bit with desktop):
-#   curl -fsSL https://github.com/AESGlobalEngineering/Pathline/releases/download/run-latest/install-pi.sh | bash
+#   curl -fsSL https://github.com/AESGlobalEngineering/Pathline/releases/download/pathlinerun/install-pi.sh | bash
 # - downloads the Pathline Run AppImage to ~/Applications (it updates itself there, like Pathline)
 # - adds it to the menu, and opens it full screen (--kiosk) at login
 # - libfuse2 for AppImages, and serial port access (dialout) for a Trotec on USB
@@ -11,7 +11,7 @@ case "$(uname -m)" in
   x86_64|amd64) ARCH=x86_64 ;;
   *) echo "Pathline Run needs a 64-bit Raspberry Pi OS (this is $(uname -m))." >&2; exit 1 ;;
 esac
-URL="https://github.com/AESGlobalEngineering/Pathline/releases/download/run-latest/Pathline-Run-$ARCH.AppImage"
+URL="https://github.com/AESGlobalEngineering/Pathline/releases/download/pathlinerun/Pathline-Run-$ARCH.AppImage"
 DEST="$HOME/Applications"
 APP="$DEST/Pathline-Run.AppImage"
 

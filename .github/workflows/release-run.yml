@@ -1,14 +1,14 @@
 # Builds Pathline Run (run/) like Pathline: an installer and a portable exe for
-# Windows, and AppImages for the Raspberry Pi (arm64) and Linux PCs (x64). Publishes:
-#   run-v<version>   this version's files
-#   run-latest       the files installed copies update from (latest.yml,
-#                    latest-linux-arm64.yml, latest-linux.yml, set in run/package.json
-#                    build.publish), plus fixed names for the README download links
-# Neither release is ever marked as the repository's "latest": that one belongs
-# to Pathline, whose updater reads it.
+# Windows, and AppImages for the Raspberry Pi (arm64) and Linux PCs (x64). Everything
+# goes into one release, tag "pathlinerun", titled "Pathline Run <version>":
+#   - this version's files and the update files installed copies read (latest.yml,
+#     latest-linux-arm64.yml, latest-linux.yml; the address is build.publish in run/package.json)
+#   - the same downloads under fixed names, for the README links
+# Each new version replaces the previous one's files. The release is never
+# marked as the repository's "latest": that one belongs to Pathline, whose updater reads it.
 #
 # - Pushing to main releases automatically when run/package.json has a version
-#   that has no run-v<version> release yet (bump the version, push, done).
+#   that isn't in the pathlinerun release yet (bump the version, push, done).
 # - Actions → Release Pathline Run → Run workflow rebuilds the current version.
 name: Release Pathline Run
 
@@ -35,7 +35,8 @@ jobs:
         run: |
           V=$(node -p "require('./run/package.json').version")
           echo "version=$V" >> "$GITHUB_OUTPUT"
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ] || ! gh release view "run-v$V" > /dev/null 2>&1; then echo "build=true" >> "$GITHUB_OUTPUT"; else echo "build=false" >> "$GITHUB_OUTPUT"; fi
+          HAVE=$(gh release view pathlinerun --json assets --jq '.assets[].name' 2>/dev/null || true)
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] || ! echo "$HAVE" | grep -qxF "Pathline-Run-Setup-$V.exe"; then echo "build=true" >> "$GITHUB_OUTPUT"; else echo "build=false" >> "$GITHUB_OUTPUT"; fi
 
   windows:
     needs: check
@@ -98,30 +99,27 @@ jobs:
           cd files
           cp ../run/deploy/pi/install-pi.sh .
           ls -l
-          NOTES="Windows: Pathline-Run-Setup-$V.exe (installs, updates itself), or the portable exe.
-          Raspberry Pi: curl -fsSL https://github.com/${{ github.repository }}/releases/download/run-latest/install-pi.sh | bash
-          Installed copies of Pathline Run 0.2.0 and later offer this version themselves."
-          VERSIONED=$(ls Pathline-Run-Setup-$V.exe Pathline-Run-Setup-$V.exe.blockmap Pathline-Run-$V-portable.exe Pathline-Run-$V-*.AppImage)
-          if gh release view "run-v$V" > /dev/null 2>&1; then
-            gh release upload "run-v$V" $VERSIONED install-pi.sh --clobber
-          else
-            gh release create "run-v$V" $VERSIONED install-pi.sh --target "$GITHUB_SHA" --title "Pathline Run $V" --latest=false --notes "$NOTES"
-          fi
-          # run-latest: what installed copies read, and fixed names for the download links
+          NOTES="Windows: Pathline-Run-Setup.exe installs Pathline Run and keeps it up to date (or Pathline-Run-portable.exe, no install).
+          Raspberry Pi: curl -fsSL https://github.com/${{ github.repository }}/releases/download/pathlinerun/install-pi.sh | bash
+          Installed copies offer each new version themselves. This release always holds the newest version ($V)."
+          # this version's files, the update files, and fixed names for the download links
           mkdir latest
-          cp $VERSIONED latest.yml latest-linux*.yml install-pi.sh latest/
+          cp Pathline-Run-Setup-$V.exe Pathline-Run-Setup-$V.exe.blockmap Pathline-Run-$V-portable.exe Pathline-Run-$V-*.AppImage latest.yml latest-linux*.yml install-pi.sh latest/
           cp "Pathline-Run-Setup-$V.exe" latest/Pathline-Run-Setup.exe
           cp "Pathline-Run-$V-portable.exe" latest/Pathline-Run-portable.exe
           cp "Pathline-Run-$V-arm64.AppImage" latest/Pathline-Run-arm64.AppImage
           cp "Pathline-Run-$V-x86_64.AppImage" latest/Pathline-Run-x86_64.AppImage
-          if ! gh release view run-latest > /dev/null 2>&1; then
-            gh release create run-latest --target "$GITHUB_SHA" --title "Pathline Run (latest download)" --latest=false --notes "Always the newest Pathline Run."
+          if ! gh release view pathlinerun > /dev/null 2>&1; then
+            gh release create pathlinerun --target "$GITHUB_SHA" --title "Pathline Run $V" --latest=false --notes "$NOTES"
           fi
-          gh release upload run-latest latest/* --clobber
-          # drop files of older versions (and of the old zip downloads)
+          gh release upload pathlinerun latest/* --clobber
+          # drop the previous version's files
           KEEP=$(ls latest)
-          for a in $(gh release view run-latest --json assets --jq '.assets[].name'); do
-            echo "$KEEP" | grep -qxF "$a" || gh release delete-asset run-latest "$a" -y
+          for a in $(gh release view pathlinerun --json assets --jq '.assets[].name'); do
+            echo "$KEEP" | grep -qxF "$a" || gh release delete-asset pathlinerun "$a" -y
           done
-          gh release edit run-latest --title "Pathline Run $V (latest download)" --latest=false \
-            --notes "Always the newest Pathline Run ($V). Windows: Pathline-Run-Setup.exe. Raspberry Pi: install-pi.sh. Every version also has its own run-v… release."
+          gh release edit pathlinerun --title "Pathline Run $V" --latest=false --notes "$NOTES"
+          # the earlier layout (run-latest plus one run-v… release per version) is gone
+          for t in $(gh release list --limit 200 --json tagName --jq '.[].tagName' | grep -E '^run-(latest|v[0-9])' || true); do
+            gh release delete "$t" --cleanup-tag -y
+          done

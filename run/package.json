@@ -36,7 +36,7 @@
     "publish": [
       {
         "provider": "generic",
-        "url": "https://github.com/AESGlobalEngineering/Pathline/releases/download/run-latest"
+        "url": "https://github.com/AESGlobalEngineering/Pathline/releases/download/pathlinerun"
       }
     ],
     "directories": {

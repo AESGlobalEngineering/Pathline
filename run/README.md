@@ -13,15 +13,15 @@ Pathline Run installs and updates like Pathline.
 
 | For | Download | Then |
 |---|---|---|
-| **Windows PC** | **[⬇ Pathline-Run-Setup.exe](https://github.com/AESGlobalEngineering/Pathline/releases/download/run-latest/Pathline-Run-Setup.exe)** | Run the installer. It adds a Start menu entry and a desktop shortcut, and **Pathline Run updates itself**. |
-| Windows, no install | [Pathline-Run-portable.exe](https://github.com/AESGlobalEngineering/Pathline/releases/download/run-latest/Pathline-Run-portable.exe) | A single file. It can't update itself. |
+| **Windows PC** | **[⬇ Pathline-Run-Setup.exe](https://github.com/AESGlobalEngineering/Pathline/releases/download/pathlinerun/Pathline-Run-Setup.exe)** | Run the installer. It adds a Start menu entry and a desktop shortcut, and **Pathline Run updates itself**. |
+| Windows, no install | [Pathline-Run-portable.exe](https://github.com/AESGlobalEngineering/Pathline/releases/download/pathlinerun/Pathline-Run-portable.exe) | A single file. It can't update itself. |
 | **Raspberry Pi** | The line below, in a terminal on the Pi | Installs the AppImage, which opens full screen at login and updates itself |
 
 ```bash
-curl -fsSL https://github.com/AESGlobalEngineering/Pathline/releases/download/run-latest/install-pi.sh | bash
+curl -fsSL https://github.com/AESGlobalEngineering/Pathline/releases/download/pathlinerun/install-pi.sh | bash
 ```
 
-These links always give the newest version. Every version also has its own `run-v…` release under [Releases](https://github.com/AESGlobalEngineering/Pathline/releases). The builds aren't code-signed, so Windows SmartScreen warns the first time ("More info" → "Run anyway"). The first time Pathline Run starts, Windows Firewall asks about it: allow private networks, so Pathline can connect.
+These links always give the newest version. They all live in one release, [**pathlinerun**](https://github.com/AESGlobalEngineering/Pathline/releases/tag/pathlinerun), titled with the current version. The builds aren't code-signed, so Windows SmartScreen warns the first time ("More info" → "Run anyway"). The first time Pathline Run starts, Windows Firewall asks about it: allow private networks, so Pathline can connect.
 
 **Raspberry Pi:** Raspberry Pi OS Bookworm 64-bit with desktop, on a Pi 4 or 5 with a touchscreen. The script puts `Pathline-Run.AppImage` in `~/Applications`, adds it to the menu, and starts it full screen (`--kiosk`) at login. It also installs `libfuse2` (AppImages need it) and allows the USB port (`/dev/ttyACM0` for a Trotec). Restart the Pi afterwards. There's also an x64 AppImage for Linux PCs (`Pathline-Run-x86_64.AppImage`).
 
@@ -35,12 +35,12 @@ The same as Pathline. Pathline Run checks for a newer release when it opens and 
 
 Only the machine's own screen offers updates. Browsers on other PCs viewing the same page (Pathline's **Open HMI**) don't. The portable exe and copies run from source don't update themselves.
 
-Updates come from the `run-latest` release (a generic feed, set in `build.publish` in `package.json`), so Pathline's own releases never mix in.
+Updates come from the `pathlinerun` release (a generic feed, set in `build.publish` in `package.json`), so Pathline's own releases never mix in.
 
 ## Releasing a new version
 
 1. Set the new `version` in `run/package.json` and add an entry to `src/changelog.js`. Commit and push to `main`.
-2. That's it. The workflow ([../.github/workflows/release-run.yml](../.github/workflows/release-run.yml)) runs the self-test. It builds the Windows installer and portable exe on Windows, and the AppImages on Linux. It publishes `run-v<version>` and refreshes `run-latest`, which installed copies read. They offer the update within 5 minutes.
+2. That's it. The workflow ([../.github/workflows/release-run.yml](../.github/workflows/release-run.yml)) runs the self-test. It builds the Windows installer and portable exe on Windows, and the AppImages on Linux. It replaces the files in the `pathlinerun` release with the new version's, and installed copies read them there. They offer the update within 5 minutes.
 3. To redo a release, use **Actions → Release Pathline Run → Run workflow**.
 
 ## Develop

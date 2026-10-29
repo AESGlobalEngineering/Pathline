@@ -19,16 +19,15 @@ Problems: **Help → Report a bug…** saves a report (with a screenshot and, if
 
 | For | Download | Then |
 |---|---|---|
-| **Windows PC** | **[⬇ Pathline-Run-Setup.exe](https://github.com/AESGlobalEngineering/Pathline/releases/download/run-latest/Pathline-Run-Setup.exe)** | Installer, like Pathline's: Start menu and desktop shortcut, and it updates itself |
-| Windows, no install | [Pathline-Run-portable.exe](https://github.com/AESGlobalEngineering/Pathline/releases/download/run-latest/Pathline-Run-portable.exe) | A single file. It can't update itself. |
+| **Windows PC** | **[⬇ Pathline-Run-Setup.exe](https://github.com/AESGlobalEngineering/Pathline/releases/download/pathlinerun/Pathline-Run-Setup.exe)** | Installer, like Pathline's: Start menu and desktop shortcut, and it updates itself |
+| Windows, no install | [Pathline-Run-portable.exe](https://github.com/AESGlobalEngineering/Pathline/releases/download/pathlinerun/Pathline-Run-portable.exe) | A single file. It can't update itself. |
 | **Raspberry Pi** | The line below, in a terminal on the Pi | Opens full screen at login and updates itself |
 
 ```bash
-curl -fsSL https://github.com/AESGlobalEngineering/Pathline/releases/download/run-latest/install-pi.sh | bash
+curl -fsSL https://github.com/AESGlobalEngineering/Pathline/releases/download/pathlinerun/install-pi.sh | bash
 ```
 
-Updates work as in Pathline: it checks when it opens and every 5 minutes, then asks before downloading. Older versions are under [Releases](https://github.com/AESGlobalEngineering/Pathline/releases), tagged `run-v…`.
-
+Updates work as in Pathline: it checks when it opens and every 5 minutes, then asks before downloading. All Pathline Run downloads are in the [**pathlinerun**](https://github.com/AESGlobalEngineering/Pathline/releases/tag/pathlinerun) release.
 
 ## Releasing a new version
 
@@ -36,7 +35,7 @@ Updates work as in Pathline: it checks when it opens and every 5 minutes, then a
 2. That's it: the workflow ([.github/workflows/release.yml](.github/workflows/release.yml)) sees a version with no release yet, runs the self-test, builds the installer and publishes release `v1.3.0` with `latest.yml` (about 10 minutes). Installed copies pick it up the next time they open.
 3. To redo a release, use **Actions → Release → Run workflow**. It builds the latest commit. (**Re-run** on an old run rebuilds that run's old commit instead.)
 
-Pathline Run is released the same way from `run/package.json`, by [.github/workflows/release-run.yml](.github/workflows/release-run.yml). It publishes `run-v<version>` and refreshes the fixed `run-latest` downloads. Neither ever becomes the repository's "latest" release, which Pathline's own updater reads.
+Pathline Run is released the same way from `run/package.json`, by [.github/workflows/release-run.yml](.github/workflows/release-run.yml). It replaces the files in the one `pathlinerun` release. That release never becomes the repository's "latest" release, which Pathline's own updater reads.
 
 Pathline comes with no machines or materials. Add your machines under **Setup → Machines** (connection, then **Refresh from machine**), and your materials under **Setup → Materials** (or import a library). Until a machine is added, the Job page lays jobs out on a stand-in bed and can't send.
 

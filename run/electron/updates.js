@@ -1,5 +1,5 @@
 // Update checks, the same way Pathline does them (src/main/updates.js there).
-// Releases come from the run-latest release on GitHub (build.publish in
+// Releases come from the pathlinerun release on GitHub (build.publish in
 // package.json, a "generic" feed so Pathline's own releases never mix in).
 // electron-builder writes that address into the installed app as
 // resources\app-update.yml; without it (development) updates are off.
