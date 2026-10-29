@@ -337,7 +337,7 @@ async function linkTests() {
       rdev.cmds.push(c[0]);
       if (c[0] === 0xda && c[1] === 0x00) {
         const addr = (c[2] << 8) | c[3];
-        const v = addr === 0x057e ? 0x6445 : addr === 0x0400 ? 0 : addr === 0x0421 ? 850000 : addr === 0x0431 ? 20000 : 0;
+        const v = { 0x057e: 0x6445, 0x0400: 0, 0x0421: 850000, 0x0431: 20000, 0x0026: 900000, 0x0036: 600000, 0x0023: 400000, 0x0033: 300000, 0x0025: 3000000, 0x0035: 2500000 }[addr] || 0;
         sock.send(rd.swizzle(Buffer.from([0xda, 0x01, c[2], c[3], ...rd.enc(v, 5), ...rd.enc(0, 5)]), magic), from.port, from.address);
       }
     }
@@ -355,6 +355,8 @@ async function linkTests() {
     for (const s of prog.segments.filter((x) => x.kind === 'stream')) await rl.send(s, {});
     const total = prog.segments.filter((x) => x.kind === 'stream').reduce((a, s) => a + s.data.length, 0);
     ok(rdev.bytes - before === total && rdev.sumOk, 'whole example sent in checked packets (' + total + ' bytes)');
+    const rb = require('../src/ctrl/ruida/readback').interpret(await rl.readSettings());
+    ok(JSON.stringify(rb.suggest.bed) === '[900,600]' && rb.suggest.speed === 300 && rb.suggest.acc === 2500, 'settings read from the controller: work area 900 × 600 mm, 300 mm/s, 2500 mm/s²', JSON.stringify(rb.suggest));
     await rl.abort();
     ok(rdev.cmds[rdev.cmds.length - 1] === 0xd8, 'stop (D8 01) reaches the controller');
   } catch (e) { ok(false, 'Ruida link', e.stack); }

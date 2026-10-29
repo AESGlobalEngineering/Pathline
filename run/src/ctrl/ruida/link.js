@@ -173,6 +173,25 @@ class RuidaLink {
 
   // plotter conveyor on the U axis: where it is (mm), and advance it by hand
   async readU() { return (await this.query(MEM.u)) / 1000; }
+
+  // The controller's own settings (read only), for Setup → Read from controller.
+  // Addresses from the EduTech wiki (two 7-bit bytes); lengths in µm, speeds in µm/s.
+  async readSettings() {
+    const ADDR = {
+      rangeX: 0x0026, rangeY: 0x0036, rangeU: 0x0056,
+      maxVelX: 0x0023, maxVelY: 0x0033, maxVelU: 0x0053,
+      maxAccX: 0x0025, maxAccY: 0x0035,
+      g0Vel: 0x0005, uWorkVel: 0x022d,
+      out1Min: 0x0012, out1Max: 0x0013, out2Min: 0x0018, out2Max: 0x0019,
+      out3Min: 0x0063, out3Max: 0x0064, out4Min: 0x0068, out4Max: 0x0069,
+      machineType: 0x0060, mainboard: 0x057f, cardId: MEM.cardId
+    };
+    const raw = {};
+    for (const [k, a] of Object.entries(ADDR)) {
+      try { raw[k] = await this.query(a); } catch (e) { raw[k] = null; }
+    }
+    return raw;
+  }
   async feed(mm) {
     const u = await this.readU();
     await this.sendRaw(Buffer.from(RD.rapidU(Math.round((u + mm) * 1000))));

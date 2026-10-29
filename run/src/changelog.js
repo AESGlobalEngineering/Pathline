@@ -5,6 +5,14 @@
 
 module.exports = [
   {
+    version: '0.5.1', date: '29 Oct 2026',
+    added: [
+      'Setup → Read from controller (Ruida): reads the controller\'s own settings (work area, speeds, acceleration, conveyor axis, outputs, card ID) and fills them in for you to check. Works while adding a machine too.',
+      'Setup → Tools: as many tools as the plotter has (1 to 4). Remove one with ×, or Add tool.'
+    ],
+    fixed: ['Switches on the Setup page (for example Conveyor and Vacuum) didn\'t change when tapped.']
+  },
+  {
     version: '0.5.0', date: '29 Oct 2026',
     added: [
       'Ruida: choosing Ruida shows a Controller model list: laser controllers (RDC6442G/S, 6445, 6332, 634x, 654x, RDLC320/220, RDL9635) and plotters and cutters. The model sets laser or plotter and the swizzle magic.',

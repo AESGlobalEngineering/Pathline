@@ -508,9 +508,12 @@ function setupView() {
     group('laser', 'Laser controllers') + group('plotter', 'Plotters and cutters') +
     '<option value="OTHER"' + (model.id === 'OTHER' ? ' selected' : '') + '>Other / not sure</option></select></label>';
   // plotter tools: which controller output (1–4) lowers each tool
-  const toolRows = (d.heads || []).map((h, i) => '<div class="row" style="grid-template-columns:52px minmax(0,1fr) 150px"><span class="mono" style="font-weight:600;color:var(--text)">' + esc(h.slot) + '</span>' +
+  const heads = d.heads || [];
+  const toolRows = heads.map((h, i) => '<div class="row" style="grid-template-columns:52px minmax(0,1fr) 150px 44px"><span class="mono" style="font-weight:600;color:var(--text)">' + esc(h.slot) + '</span>' +
     '<span class="fld"><input class="sans" data-f="heads.' + i + '.tool" value="' + esc(h.tool) + '" aria-label="' + esc(h.slot) + ' tool"></span>' +
-    '<select class="cell" data-num="1" data-f="heads.' + i + '.output" aria-label="' + esc(h.slot) + ' output">' + [1, 2, 3, 4].map((o) => '<option value="' + o + '"' + (Number(h.output) === o ? ' selected' : '') + '>Output ' + o + '</option>').join('') + '</select></div>').join('');
+    '<select class="cell" data-num="1" data-f="heads.' + i + '.output" aria-label="' + esc(h.slot) + ' output">' + [1, 2, 3, 4].map((o) => '<option value="' + o + '"' + (Number(h.output) === o ? ' selected' : '') + '>Output ' + o + '</option>').join('') + '</select>' +
+    '<button class="ib" data-a="toolRemove" data-v="' + i + '" aria-label="Remove ' + esc(h.slot) + '" title="Remove ' + esc(h.slot) + '"' + (heads.length <= 1 ? ' disabled' : '') + '>' + ic('M6 6l12 12 M18 6L6 18', 18) + '</button></div>').join('') +
+    '<div style="display:flex;align-items:center;gap:12px"><button class="tb sm" data-a="toolAdd"' + (heads.length >= 4 ? ' disabled' : '') + '>+ Add tool</button><span class="lbl">' + heads.length + ' of up to 4 tools (one per output)</span></div>';
 
   tabs.Machine.push(card('Machine', text('Name', 'name') +
     seg('Controller', 'controller', [['trotec', 'Trotec'], ['ruida', 'Ruida']]) +
@@ -522,7 +525,7 @@ function setupView() {
     (d.connection.mode === 'sim' ? num('Simulation speed', 'sim.speedup', '×', 'Jobs run this many times faster') : ''),
   trotec ? 'Trotec classic controllers (Electronics 2000/2015) over USB. Close Ruby/JobDispatcher first: only one program can hold the port.' : 'Ruida controllers over Ethernet (UDP). Close LightBurn or RDWorks while Pathline Run is connected.'));
   if (isPlotter) {
-    tabs.Machine.push(card('Tools', '<div class="row" style="grid-template-columns:52px minmax(0,1fr) 150px"><span class="lbl">Slot</span><span class="lbl">Tool</span><span class="lbl">Lowered by</span></div>' + toolRows +
+    tabs.Machine.push(card('Tools', '<div class="row" style="grid-template-columns:52px minmax(0,1fr) 150px 44px"><span class="lbl">Slot</span><span class="lbl">Tool</span><span class="lbl">Lowered by</span><span></span></div>' + toolRows +
       num('Tool down time', 'timing.toolDown', 's') + num('Tool up time', 'timing.toolUp', 's'),
     'Each tool is lowered by one output of the controller (the outputs a Ruida uses for laser tubes 1–4). Pathline\'s processes name the slot, for example "T2 · V-cut 45°".'));
   } else {
@@ -552,14 +555,16 @@ function setupView() {
   const tab = tabs[ui.setTab] ? ui.setTab : 'Machine';
   // no machine yet: this page adds one (name, controller and connection on the Machine tab)
   const adding = !cfg().configured;
+  // Ruida: fill in the work area, speeds and conveyor from what the controller reports
+  const readBtn = trotec ? '' : '<button class="tb" data-a="readCtrl"' + (ui.reading ? ' disabled' : '') + '>' + (ui.reading ? 'Reading…' : 'Read from controller') + '</button>';
   return '<div class="view" style="padding:12px;display:flex;flex-direction:column;gap:12px">' +
     '<section class="card" style="padding:16px 18px;display:flex;flex-wrap:wrap;align-items:center;gap:14px"><span class="badge" style="height:28px;padding:0 9px;border-radius:6px' + (isPlotter ? ';background:var(--badge-plotter)' : '') + '">' + (isPlotter ? 'PLOTTER' : 'LASER') + '</span>' +
     (adding
       ? '<div style="flex:1 1 280px;min-width:0;display:flex;flex-direction:column;gap:4px"><span style="font-size:17px;font-weight:600">Add a machine</span><span class="lbl">Name it, choose Trotec or Ruida and how it\'s connected (Machine tab), check the bed size (Work area), then Add machine.</span></div>' +
-        '<button class="btn-primary" data-a="save">Add machine</button></section>'
+        readBtn + '<button class="btn-primary" data-a="save">Add machine</button></section>'
       : '<div style="flex:1 1 280px;min-width:0;display:flex;flex-direction:column;gap:4px"><span style="font-size:17px;font-weight:600">' + esc(d.name) + '</span><span class="lbl">' + (d.controller === 'ruida' ? 'Ruida' : 'Trotec') + ' · ' + esc(S.info.model || 'not connected') + (S.info.firmware ? ' · ' + esc(S.info.firmware) : '') + '</span></div>' +
         (dirty ? '<span class="tag warn">Unsaved changes</span><button class="tb" data-a="discard">Discard</button>' : '') +
-        '<button class="btn-primary" data-a="save"' + (dirty ? '' : ' disabled') + '>Save to machine</button></section>') +
+        readBtn + '<button class="btn-primary" data-a="save"' + (dirty ? '' : ' disabled') + '>Save to machine</button></section>') +
     '<div role="tablist" aria-label="Setup sections" class="tabs">' + Object.keys(tabs).map((t) => '<button role="tab" aria-selected="' + (t === tab) + '" data-a="setTab" data-v="' + t + '">' + t + '</button>').join('') + '</div>' +
     '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));gap:12px;align-items:start">' + tabs[tab].join('') + '</div></div>';
 }
@@ -596,6 +601,15 @@ function dialog() {
       '<div style="display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap"><button class="tb" data-a="close">' + (first ? 'Cancel' : 'Keep ' + name) + '</button>' +
       '<button class="btn-primary" data-a="' + (first ? 'removeAsk2' : 'removeGo') + '"' + (busy ? ' disabled' : '') + '>' + (first ? 'Remove machine' : 'Yes, remove it') + '</button></div></div></div>';
   }
+  if (ui.dlg.kind === 'readback') {
+    const r = ui.dlg.r;
+    const s = r.suggest || {};
+    const uses = [s.bed && 'work area', s.speed && 'max speed', s.acc && 'acceleration', s.feedSpeed && 'conveyor speed'].filter(Boolean);
+    return '<div class="scrim"><div role="dialog" aria-label="Read from controller" class="dlg" style="max-width:600px"><span class="h-sec" style="font-size:18px">Read from the controller</span>' +
+      '<div>' + r.rows.map((x) => '<div style="display:grid;grid-template-columns:200px minmax(0,1fr);gap:10px;padding:7px 0;border-bottom:1px solid var(--line-soft)"><span class="lbl">' + esc(x.label) + '</span><span><span class="mono">' + esc(x.value) + '</span> <span class="lbl">' + esc(x.unit) + (x.note ? ' · ' + esc(x.note) : '') + '</span></span></div>').join('') + '</div>' +
+      '<span class="lbl">' + (uses.length ? 'Use these values fills in the ' + uses.join(', ') + '. Nothing is saved until you save the setup.' : 'Nothing here can be filled in automatically.') + '</span>' +
+      '<div style="display:flex;justify-content:flex-end;gap:8px"><button class="tb" data-a="close">Close</button>' + (uses.length ? '<button class="btn-primary" data-a="useRead">Use these values</button>' : '') + '</div></div></div>';
+  }
   if (ui.dlg.kind === 'update') return updateWindow();
   if (ui.dlg.kind === 'changelog') return changelogWindow(ui.dlg.entries, ui.dlg.title);
   if (ui.dlg.kind === 'message') return messageWindow(ui.dlg.title, ui.dlg.msg);
@@ -607,7 +621,9 @@ function render() {
   $app.dataset.theme = ui.dark ? 'dark' : 'light';
   if (!S) { $app.innerHTML = header() + '<div class="view" style="display:flex;align-items:center;justify-content:center;color:var(--text-3)">Connecting to Pathline Run…</div>'; return; }
   // don't redraw the setup form under the operator's fingers while a field has focus
-  const focused = document.activeElement && document.activeElement.dataset && (document.activeElement.dataset.f || document.activeElement.dataset.n);
+  // (only fields you type in or pick from: a switch or a choice button that keeps focus must still redraw)
+  const ae = document.activeElement;
+  const focused = ae && /^(INPUT|SELECT|TEXTAREA)$/.test(ae.tagName) && ae.dataset && (ae.dataset.f || ae.dataset.n);
   if (ui.view === 'setup' && focused) { const h = $app.querySelector('header'); if (h) h.outerHTML = header(); return; }
   const scroll = $app.querySelector('.view') && ui.drawn === ui.view ? $app.querySelector('.view').scrollTop : 0;
   ui.drawn = ui.view;
@@ -697,6 +713,40 @@ const H = {
     ui.draft = null;
     toast(adding ? 'Machine added. Connecting to the controller…' : 'Saved. Reconnecting to the controller…');
   }),
+  // Setup → Tools: as many tools as the plotter has (1–4). A new tool takes the next free
+  // slot (T1…T4) and output; removing one leaves the other slots' names as they are.
+  toolAdd: () => {
+    const heads = (ui.draft.heads || []).slice();
+    if (heads.length >= 4) return;
+    const slot = ['T1', 'T2', 'T3', 'T4'].find((s) => !heads.some((h) => h.slot === s));
+    const output = [1, 2, 3, 4].find((o) => !heads.some((h) => Number(h.output) === o)) || 1;
+    heads.push({ slot, tool: 'Tool ' + slot.slice(1), output });
+    heads.sort((a, b) => a.slot.localeCompare(b.slot));
+    ui.draft.heads = heads;
+    render();
+  },
+  toolRemove: (v) => {
+    const heads = (ui.draft.heads || []).slice();
+    if (heads.length <= 1) return;
+    heads.splice(Number(v), 1);
+    ui.draft.heads = heads;
+    render();
+  },
+  // Setup → Read from controller: show what it reports, then copy it into the form
+  readCtrl: async () => {
+    ui.reading = true; render();
+    try { ui.dlg = { kind: 'readback', r: await call('POST', LOCAL('/machine/read'), ui.draft) }; } catch (e) { toast('Couldn\'t read the controller: ' + e.message, { ms: 8000 }); }
+    ui.reading = false; render();
+  },
+  useRead: () => {
+    const s = (ui.dlg && ui.dlg.r && ui.dlg.r.suggest) || {};
+    if (s.bed) set(ui.draft, 'bed', s.bed);
+    if (s.speed) set(ui.draft, 'speed', s.speed);
+    if (s.acc) set(ui.draft, 'acc', s.acc);
+    if (s.feedSpeed) set(ui.draft, 'timing.feedSpeed', s.feedSpeed);
+    ui.dlg = null;
+    toast('Filled in from the controller. Check them, then ' + (cfg().configured ? 'Save to machine.' : 'Add machine.'), { ms: 6000 });
+  },
   // ☰ → Remove machine: two confirmations, then the setup is forgotten
   removeMachine: () => { ui.navOpen = false; ui.dlg = { kind: 'remove1' }; render(); },
   removeAsk2: () => { ui.dlg = { kind: 'remove2' }; render(); },

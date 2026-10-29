@@ -190,6 +190,29 @@ function start(opts = {}) {
       return { config: cfg };
     },
     'GET /presets': () => ({ trotec: config.defaults('trotec'), ruida: config.defaults('ruida'), ruidaModels: ruidaModels.MODELS }),
+    // Setup → Read from controller: the controller's own settings (read only). Takes the setup
+    // being edited, so it also works while adding a machine, before it's saved.
+    'POST /machine/read': async (b) => {
+      const draft = config.merge(cfg, b || {});
+      if (draft.controller !== 'ruida') throw err(409, 'Reading settings works with Ruida controllers');
+      let raw;
+      if (draft.connection.mode === 'sim') {
+        // simulated: what a controller of this setup would report
+        raw = { rangeX: draft.bed[0] * 1000, rangeY: draft.bed[1] * 1000, rangeU: 99999000, maxVelX: draft.speed * 1000, maxVelY: draft.speed * 1000, maxVelU: 200000,
+          maxAccX: draft.acc * 1000, maxAccY: draft.acc * 1000, g0Vel: draft.speed * 1000, uWorkVel: 200000, out1Min: 0, out1Max: 16383, out2Min: 0, out2Max: 16383,
+          out3Min: null, out3Max: null, out4Min: null, out4Max: null, machineType: 0x1155, mainboard: 0, cardId: 0x6445 };
+      } else {
+        const same = machine.link && machine.st.link === 'online' && cfg.controller === 'ruida' && cfg.connection.ip === draft.connection.ip;
+        const RuidaLink = require('./ctrl/ruida/link');
+        const link = same ? machine.link : new RuidaLink(draft, log);
+        try {
+          if (!same) await link.connect();
+          raw = await link.readSettings();
+        } finally { if (!same) await link.close(); }
+      }
+      log('read settings from the controller');
+      return { raw, ...require('./ctrl/ruida/readback').interpret(raw) };
+    },
     // ☰ → Remove machine (the screen asks twice first): forgets the machine's setup.
     // Queued jobs and history stay.
     'POST /machine/remove': async (b, req) => {
