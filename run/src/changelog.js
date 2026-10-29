@@ -5,6 +5,11 @@
 
 module.exports = [
   {
+    version: '0.3.3', date: '29 Oct 2026',
+    added: ['Anchor to toolhead is a switch, like "Remove completed job from queue". On: the job starts at the head\'s position when you switched it on. Off: back where Pathline placed it.'],
+    fixed: []
+  },
+  {
     version: '0.3.2', date: '29 Oct 2026',
     added: ['Update checks (when Pathline Run opens and every 5 minutes) are written to ☰ → Diagnostics log.'],
     fixed: ['When no update information is found, Check for updates says where it looked, instead of "no releases published yet".']

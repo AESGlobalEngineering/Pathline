@@ -310,9 +310,14 @@ function queueView() {
     '<div style="display:flex;margin-top:4px"><span class="pill lg ' + status[1] + '">' + status[0] + '</span></div>' +
     '<div style="display:flex;align-items:center;gap:12px;min-height:44px"><button role="switch" class="sw" aria-checked="' + !!cfg().removeDone + '" data-a="removeDone" aria-label="Remove completed job from queue"></button><span style="font-size:16px">Remove completed job from queue</span></div>' +
     // pin the job's top-left corner to where the head is now
-    '<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">' + (job && job.anchor
-      ? '<button class="tb" data-a="anchor" data-v="clear" style="border-color:#30A46C;color:var(--ok)"' + (isRun ? ' disabled' : '') + '>' + ic(ICON.anchor) + 'Clear anchor</button><span class="lbl">Starts at the toolhead: X ' + job.anchor.x.toFixed(1) + ', Y ' + job.anchor.y.toFixed(1) + ' mm</span>'
-      : '<button class="tb" data-a="anchor"' + (!job || isRun || st.link !== 'online' ? ' disabled' : '') + '>' + ic(ICON.anchor) + 'Anchor to toolhead</button><span class="lbl">Moves the job so its top-left corner starts at the head</span>') + '</div>' +
+    // (switching it on uses the head position at that moment; off puts the job back where Pathline placed it)
+    (() => {
+      const on = !!(job && job.anchor);
+      const off = !job || isRun || (!on && st.link !== 'online');
+      return '<div style="display:flex;align-items:center;gap:12px;min-height:44px"><button role="switch" class="sw" aria-checked="' + on + '" data-a="anchor"' + (on ? ' data-v="clear"' : '') + ' aria-label="Anchor to toolhead"' + (off ? ' disabled' : '') + '></button>' +
+        '<span style="display:flex;flex-direction:column;gap:2px;line-height:1.3"><span style="font-size:16px">Anchor to toolhead</span>' +
+        '<span class="lbl">' + (on ? 'The job\'s top-left corner starts at X ' + job.anchor.x.toFixed(1) + ', Y ' + job.anchor.y.toFixed(1) + ' mm' : 'Moves the job so its top-left corner starts at the head') + '</span></span></div>';
+    })() +
     (shown ? '<div style="display:flex;gap:8px;flex-wrap:wrap"><a class="tb sm" href="' + LOCAL('/jobs/' + shown.id + '/export') + '">' + ic(ICON.download, 16) + 'Save ' + (cfg().controller === 'ruida' ? '.rd file' : 'Trotec stream') + '</a>' +
       '<a class="tb sm" href="' + LOCAL('/jobs/' + shown.id + '/export?format=txt') + '">' + ic(ICON.file, 16) + 'Code listing</a></div>' : '') +
     '</div>' +
