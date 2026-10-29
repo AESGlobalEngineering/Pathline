@@ -15,6 +15,9 @@ Latest round (28 Oct, final):
 - **Dark mode bed is grey** (`--bed`, `--sheet`, `--bed-grid*` in theme.css). **ACI 7 shows as white in dark mode** (black in light), as in CAD, and so do the marks drawn on the bed (registration marks, engrave hatching, arrows, start points): see the `--aci7*` and `--ink` tokens, and `LRC.aci.hex/fg/stroke` in app.js. Exports (DXF/SVG/PDF) still use real black.
 - **Sample machines and materials from earlier builds are removed on first start** (main.js, tracked by `settings.samplesRemoved`). This is by exact id (trotec, flatbed, laser2, acr-print-3 … brass-1); anything the operator created stays.
 
+Version 1.2.2 (29 Oct):
+- **Fixed: importing several drawings stacked some on top of each other.** Each drawing was placed below the last; when the next one didn't fit, it went back to the top, over what was there. Now each drawing goes in the first free spot (`LRC.ops.freeSpot`: topmost, then leftmost, 10 mm apart) on the sheet or bed, never over existing objects or other imported drawings. A drawing that doesn't fit goes on the next plotter bed (adding beds as needed), or beside the laser bed with a note suggesting Nest parts.
+
 Version 1.2.1 (29 Oct):
 - **Updates ask first.** When Pathline opens (and from Help → Check for updates), a found update opens the update window: "Update available — Later / Download and install". Nothing downloads until the operator clicks. The download shows a progress bar (percent, MB, speed) and can be hidden. When it's done: "Restart and install" or Later. `autoDownload` and `autoInstallOnAppQuit` are off (`src/main/updates.js`; the window is `updateWindow()` in app.js). Tested end to end against the real v1.2.0 release with a copy built as version 0.9.0. `LRC_UPDATES=1` lets the screenshot harness run update checks.
 - **New jobs start with no processes** when they have no material (before, they got five built-in starting processes).

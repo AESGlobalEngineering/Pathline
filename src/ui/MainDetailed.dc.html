@@ -845,30 +845,48 @@ class Component extends DCLogic {
     if (res && res.length) this.placeImports(res);
   }
   // Put imported drawings on the sheet (or bed), keeping their size.
+  // Each drawing goes in the first free space (topmost, then leftmost) on the
+  // sheet or bed, never over what's already there or another imported
+  // drawing. A drawing that doesn't fit goes on the next bed (plotter) or
+  // beside the bed (laser).
   placeImports(results) {
     if (!results.length) return;
     let job = this.state.job;
     const m = this.machine();
+    const isPlot = m.type === 'plotter';
     const bed = CC.bedOf(m);
-    const sh = job.sheet && job.sheet.on && m.type === 'laser' ? job.sheet : null;
-    const base = sh ? [sh.x + 10, sh.y + 10] : [10, 10];
-    const existing = CC.boxOf(job.entities);
-    let x = base[0], y = base[1];
-    if (CC.boxValid(existing)) { x = base[0]; y = Math.min(existing.y1 + 10, bed[1] - 10); }
+    const GAP = 10;
+    const sh = job.sheet && job.sheet.on && !isPlot ? job.sheet : null;
+    const area = sh ? { x: sh.x + GAP, y: sh.y + GAP, w: sh.w - 2 * GAP, h: sh.h - 2 * GAP } : { x: GAP, y: GAP, w: bed[0] - 2 * GAP, h: bed[1] - 2 * GAP };
+    // what's on each bed already (plotter beds share one coordinate space)
+    const occ = [];
+    const onBed = (k) => occ[k] || (occ[k] = job.entities.filter((e) => !e.hidden && (e.bed || 0) === k).map((e) => CC.entityBox(e)));
+    let beds = isPlot ? Math.max(1, job.beds || 1) : 1;
     const newIds = [];
     const notes = [];
+    let outside = 0;
     for (const r of results) {
       if (!r.entities.length) { notes.push(r.name + ': no vector shapes found' + (Object.keys(r.skipped).length ? ' (skipped ' + Object.entries(r.skipped).map(([k, v]) => v + ' ' + k).join(', ') + ')' : '')); continue; }
-      if (y + r.height > bed[1]) y = base[1];
+      let spot = null, bedNo = 0;
+      for (let k = 0; k < beds && !spot; k++) { spot = LRC.ops.freeSpot(onBed(k), r.width, r.height, area, GAP); bedNo = k; }
+      if (!spot && isPlot) { bedNo = beds++; spot = LRC.ops.freeSpot(onBed(bedNo), r.width, r.height, area, GAP) || [area.x, area.y]; }
+      if (!spot) {
+        // laser: doesn't fit on the sheet or bed, so it goes beside the bed
+        outside++;
+        spot = LRC.ops.freeSpot(onBed(0), r.width, r.height, { x: bed[0] + 2 * GAP, y: area.y, w: Infinity, h: Math.max(area.h, r.height) }, GAP) || [bed[0] + 2 * GAP, area.y];
+      }
+      const [x, y] = spot;
       const g = r.entities.length > 1 ? CC.uid('g') : null;
-      const ents = r.entities.map((e) => ({ ...CC.translate(e, x, y), group: g, bed: 0 }));
+      const ents = r.entities.map((e) => ({ ...CC.translate(e, x, y), group: g, bed: bedNo }));
+      onBed(bedNo).push({ x0: x, y0: y, x1: x + r.width, y1: y + r.height });
       newIds.push(...ents.map((e) => e.id));
       job = { ...job, entities: job.entities.concat(ents) };
       if (job.name === 'Untitled job') job = { ...job, name: r.name.replace(/\.[^.]+$/, '') };
       const skipped = Object.entries(r.skipped || {});
-      notes.push(r.name + ': ' + r.entities.length + ' shape' + (r.entities.length === 1 ? '' : 's') + ' · ' + r.width.toFixed(1) + ' × ' + r.height.toFixed(1) + ' mm' + (skipped.length ? ' · skipped ' + skipped.map(([k, v]) => v + ' ' + k).join(', ') : ''));
-      y += r.height + 10;
+      notes.push(r.name + ': ' + r.entities.length + ' shape' + (r.entities.length === 1 ? '' : 's') + ' · ' + r.width.toFixed(1) + ' × ' + r.height.toFixed(1) + ' mm' + (isPlot && bedNo ? ' · bed ' + (bedNo + 1) : '') + (skipped.length ? ' · skipped ' + skipped.map(([k, v]) => v + ' ' + k).join(', ') : ''));
     }
+    if (isPlot && beds > (job.beds || 1)) job = { ...job, beds };
+    if (outside) notes.push(outside + ' drawing' + (outside === 1 ? " didn't" : " didn't") + ' fit on the ' + (sh ? 'sheet' : 'bed') + ' and ' + (outside === 1 ? 'was' : 'were') + ' placed beside it. Use Arrange → Nest parts to fit what you can.');
     this.commit(job, { record: true }, newIds);
     notes.forEach((n) => LRC.toast(n, { ms: 6000 }));
     if (this.canvas && newIds.length) setTimeout(() => this.canvas.fit(), 50);

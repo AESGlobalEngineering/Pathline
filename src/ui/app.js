@@ -696,6 +696,24 @@
     void gmapFirst;
     return { job: { ...out, entities: out.entities.concat(add) }, placed: placed.length, sel: ids.concat(add.map((e) => e.id)) };
   };
+  // Where a w × h drawing fits in an area without overlapping the occupied
+  // boxes (kept `gap` apart): the topmost, then leftmost, free spot. The
+  // candidates are the area's corner and the spots right of and below each
+  // occupied box. Returns [x, y], or null when it doesn't fit.
+  ops.freeSpot = (occupied, w, h, area, gap) => {
+    const xs = [area.x].concat(occupied.map((b) => b.x1 + gap));
+    const ys = [area.y].concat(occupied.map((b) => b.y1 + gap));
+    const cands = [];
+    for (const y of ys) for (const x of xs) if (x >= area.x - 1e-6 && y >= area.y - 1e-6) cands.push([x, y]);
+    cands.sort((a, b) => a[1] - b[1] || a[0] - b[0]);
+    for (const [x, y] of cands) {
+      if (x + w > area.x + area.w + 1e-6 || y + h > area.y + area.h + 1e-6) continue;
+      if (occupied.some((b) => x < b.x1 + gap && b.x0 < x + w + gap && y < b.y1 + gap && b.y0 < y + h + gap)) continue;
+      return [x, y];
+    }
+    return null;
+  };
+
   // Nesting: pack whole parts (a group counts as one part) into an area with
   // CC.nestRects, turning parts 90° where that packs better (opts.rotate).
   //   opts: { area: { x, y, w, h }, spacing, margin, rotate, beds }
