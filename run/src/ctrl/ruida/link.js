@@ -9,6 +9,13 @@
 const dgram = require('dgram');
 const { swizzle, unswizzle, swizzleByte, commands, dec, RD, MEM } = require('./rd');
 const { settings, mapper } = require('./compile');
+const MODELS = require('./models');
+
+// which swizzle magic turns 0xCC (ACK) into this byte?
+function magicFromAck(b) {
+  for (let m = 0; m < 256; m++) if (swizzleByte(0xcc, m) === b) return m;
+  return null;
+}
 
 const PORT_OUT = 50200;
 const PORT_IN = 40200;
@@ -42,8 +49,13 @@ class RuidaLink {
       this.sock.bind(PORT_IN, resolve);
     });
     const id = await this.query(MEM.cardId).catch(() => { throw new Error('No answer from the Ruida controller at ' + this.host); });
-    this.info = { model: 'Ruida card ' + id.toString(16).toUpperCase(), firmware: 'magic 0x' + this.magic.toString(16) };
-    this.log('ruida connected: ' + this.info.model);
+    const model = MODELS.byId((this.cfg.ruida || {}).model);
+    this.info = {
+      model: 'Ruida card ' + id.toString(16).toUpperCase() + (model.id !== 'OTHER' ? ' · set up as ' + model.label : ''),
+      firmware: 'swizzle magic 0x' + this.magic.toString(16) + (this.magicFixed ? ' (detected)' : ''),
+      cardId: id, magic: this.magic
+    };
+    this.log('ruida connected: card ' + id.toString(16) + ', magic 0x' + this.magic.toString(16));
     return this.info;
   }
 
@@ -84,8 +96,25 @@ class RuidaLink {
       const b = await ack;
       if (b === this.ACK) return;
       if (b === null && attempt === 2) throw new Error('No answer from the Ruida controller');
+      // The ACK (0xCC) comes back scrambled with the controller's own magic. Anything other
+      // than our ACK/NAK means a different magic: work it out and send again with it.
+      if (b !== null && b !== this.NAK && !this.magicFixed) {
+        const m = magicFromAck(b);
+        if (m !== null && m !== this.magic) {
+          this.log('ruida: the controller uses swizzle magic 0x' + m.toString(16) + ' (set 0x' + this.magic.toString(16) + '): switching');
+          this.setMagic(m);
+          this.magicFixed = true;
+          return this.packetNow(raw);
+        }
+      }
     }
     throw new Error('The Ruida controller rejected the data (checksum)');
+  }
+
+  setMagic(m) {
+    this.magic = m;
+    this.ACK = swizzleByte(0xcc, m);
+    this.NAK = swizzleByte(0xcf, m);
   }
 
   // splits raw commands into packets on command boundaries
@@ -141,6 +170,13 @@ class RuidaLink {
   send(seg, ctl) { return this.sendRaw(seg.data, ctl); }
   moveTo(x, y, o = {}) { return this.sendRaw(Buffer.from(RD.rapidXY(this.M.x(x), this.M.y(y), o.light))); }
   home() { return this.sendRaw(Buffer.from(RD.homeXY())); }
+
+  // plotter conveyor on the U axis: where it is (mm), and advance it by hand
+  async readU() { return (await this.query(MEM.u)) / 1000; }
+  async feed(mm) {
+    const u = await this.readU();
+    await this.sendRaw(Buffer.from(RD.rapidU(Math.round((u + mm) * 1000))));
+  }
   async setIo(name) { throw Object.assign(new Error('Ruida switches ' + name + ' from the job, not by hand'), { code: 409 }); }
   pause() { return this.sendRaw(Buffer.from(RD.pause())); }
   resume() { return this.sendRaw(Buffer.from(RD.resume())); }

@@ -5,6 +5,15 @@
 
 module.exports = [
   {
+    version: '0.5.0', date: '29 Oct 2026',
+    added: [
+      'Ruida: choosing Ruida shows a Controller model list: laser controllers (RDC6442G/S, 6445, 6332, 634x, 654x, RDLC320/220, RDL9635) and plotters and cutters. The model sets laser or plotter and the swizzle magic.',
+      'Ruida: the swizzle magic is worked out from the controller\'s first reply, so a wrong model choice still connects. Setup shows the controller\'s card ID and magic.',
+      'Ruida plotters: Pathline\'s plotter jobs run with each tool on a controller output (Setup → Tools: T1–T4 → outputs 1–4), tool down/up times, perforation, and the conveyor fed between beds on the U axis. The Jog page has Feed one bed. Pathline sees the machine as a plotter.'
+    ],
+    fixed: []
+  },
+  {
     version: '0.4.3', date: '29 Oct 2026',
     added: [
       'Jog page: hold an arrow to keep moving. 0.1, 1, 10 and 100 are the step in mm for a tap, and the speed in mm/s while held. The head stops when you let go, at the edge of the bed, or by itself if the screen stops answering.',

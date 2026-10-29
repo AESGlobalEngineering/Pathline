@@ -41,6 +41,20 @@ function compile(plan, cfg, opts = {}) {
   const partOf = (p) => parts.get(p.index) % 128;
   const minPowerOf = (p) => (p.powerCorrection !== null ? Math.min(p.power, p.powerCorrection) : S.minPower !== undefined ? Math.min(p.power, S.minPower) : p.power);
 
+  // Plotter on a Ruida: each tool is wired to one of the controller's four outputs (Setup → Tools).
+  // A tool's layer sets its output to 100 % and the others to 0 %, so "beam on" lowers that
+  // tool only. Tool down/up times go in the laser on/off delays. Conveyor feeds move the U axis.
+  const heads = cfg.heads || [];
+  const outputOf = (p) => { const h = heads.find((x) => x.slot === p.slot); return h ? Math.min(4, Math.max(1, Number(h.output) || 1)) : 1; };
+  const outputPowers = (out) => [1, 2, 3, 4].map((k) => (k === out ? 100 : 0));
+  const timing = cfg.timing || {};
+  let u = opts.uStart || 0; // conveyor (U axis) position, mm: read from the controller before a job
+  for (const s of plan.steps) {
+    if (s.proc && s.proc.kind === 'tool' && !heads.some((h) => h.slot === s.proc.slot)) {
+      warnings.push(s.proc.slot + ' isn\'t set up (Setup → Tools): "' + s.proc.name + '" uses output 1');
+    }
+  }
+
   // group steps into streams separated by dwells / marks
   const groups = [];
   let g = null;
@@ -73,6 +87,14 @@ function compile(plan, cfg, opts = {}) {
       if (!first) body.push(...RD.layerEnd());
       first = false;
       curProc = p;
+      if (p.kind === 'tool') {
+        const pw = outputPowers(outputOf(p));
+        body.push(...RD.layerNumber(partOf(p)), ...RD.laserDevice0(), ...RD.airOff());
+        body.push(...RD.speed(p.speed), ...RD.laserOnDelay(timing.toolDown || 0), ...RD.laserOffDelay(timing.toolUp || 0));
+        body.push(...RD.minPower1(pw[0]), ...RD.maxPower1(pw[0]), ...RD.minPower2(pw[1]), ...RD.maxPower2(pw[1]));
+        body.push(...RD.minPower3(pw[2]), ...RD.maxPower3(pw[2]), ...RD.minPower4(pw[3]), ...RD.maxPower4(pw[3]), ...RD.enLaserTubeStart());
+        return;
+      }
       if (raster) body.push(0xca, 0x01, 0x03); // work mode 3: horizontal scanning
       body.push(...RD.layerNumber(partOf(p)), ...RD.laserDevice0());
       body.push(...(p.air && cfg.f.air !== false ? RD.airOn() : RD.airOff()));
@@ -92,6 +114,13 @@ function compile(plan, cfg, opts = {}) {
     const seconds = grp.steps.reduce((a, s) => a + s.seconds, 0);
     for (const step of grp.steps) {
       const p = step.proc;
+      // conveyor: advance the material one bed (U axis), then the next bed's steps follow
+      if (step.op === 'feed') {
+        u += cfg.feedLen || 1000;
+        body.push(...RD.moveU(Math.round(u * 1000)));
+        continue;
+      }
+      if (step.op === 'toolchange') continue; // the next layer selects the tool's output
       const part = partOf(p);
       if (step.op === 'cut') {
         layer(p, false);
@@ -145,9 +174,15 @@ function compile(plan, cfg, opts = {}) {
     for (const p of used) {
       const part = partOf(p);
       const b = partBox.get(part) || box;
-      const lo = minPowerOf(p);
-      h.push(...RD.partSpeed(part, p.speed), ...RD.partMinPower1(part, lo), ...RD.partMaxPower1(part, p.power));
-      h.push(...RD.partMinPower2(part, lo), ...RD.partMaxPower2(part, p.power));
+      if (p.kind === 'tool') {
+        const pw = outputPowers(outputOf(p));
+        h.push(...RD.partSpeed(part, p.speed), ...RD.partMinPower1(part, pw[0]), ...RD.partMaxPower1(part, pw[0]), ...RD.partMinPower2(part, pw[1]), ...RD.partMaxPower2(part, pw[1]));
+        h.push(...RD.partMinPower3(part, pw[2]), ...RD.partMaxPower3(part, pw[2]), ...RD.partMinPower4(part, pw[3]), ...RD.partMaxPower4(part, pw[3]));
+      } else {
+        const lo = minPowerOf(p);
+        h.push(...RD.partSpeed(part, p.speed), ...RD.partMinPower1(part, lo), ...RD.partMaxPower1(part, p.power));
+        h.push(...RD.partMinPower2(part, lo), ...RD.partMaxPower2(part, p.power));
+      }
       h.push(...RD.partColor(part, bgr(ACI_RGB[p.aci[0]] !== undefined ? ACI_RGB[p.aci[0]] : 0xff0000)), ...RD.partWorkMode(part, 0));
       h.push(0xe7, 0x52, part, ...abs(b[0]), ...abs(b[1]), 0xe7, 0x53, part, ...abs(b[2]), ...abs(b[3]));
       h.push(0xe7, 0x61, part, ...abs(b[0]), ...abs(b[1]), 0xe7, 0x62, part, ...abs(b[2]), ...abs(b[3]));

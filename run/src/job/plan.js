@@ -3,6 +3,8 @@
 // The controller compilers (src/ctrl/*) turn the plan into machine code.
 //
 // plan = { name, procs: { [index]: proc }, steps: [...], seconds, warnings }
+// (plotters: procs have kind 'tool' with a slot, and steps include
+//   { op: 'toolchange', i, slot, tool } and { op: 'feed', i, bed })
 // steps, in run order, one per toolpath step:
 //   { op: 'cut',     i, proc, runs: [[[x, y]…]…], seconds }   beam on along each run, travel between runs (links already applied)
 //   { op: 'engrave', i, proc, paths, box, dpi, down, bidi, seconds }
@@ -16,6 +18,16 @@ const num = (v, d) => (typeof v === 'number' && Number.isFinite(v) ? v : d);
 function normProc(p) {
   const adv = p.adv || {};
   const engrave = p.proc === 'Engrave';
+  // plotter process: a tool ("T2 · V-cut 45°") instead of power, frequency and DPI
+  if (p.tool !== undefined && p.proc === undefined) {
+    return {
+      index: p.index, name: p.name || p.tool, kind: 'tool',
+      tool: p.tool, slot: String(p.tool).split(' · ')[0].trim(),
+      power: 100, speed: num(p.speed, 100), freq: null, dpi: null, air: false,
+      dash: !!p.dash && num(p.dl, 0) > 0 && num(p.gl, 0) > 0, dl: num(p.dl, 0), gl: num(p.gl, 0),
+      aci: Array.isArray(p.aci) ? p.aci : [], powerCorrection: null, planning: 'Standard', overshoot: 0
+    };
+  }
   return {
     index: p.index,
     name: p.name || (engrave ? 'Engrave' : 'Cut'),
@@ -95,6 +107,10 @@ function build(pkg) {
         op: 'engrave', i, proc, paths, box: s.box, dpi: num(s.dpi, proc.dpi || 500),
         down: s.direction !== 'up', bidi: s.bidirectional !== false, seconds, name: s.name
       });
+    } else if (s.type === 'toolchange') {
+      steps.push({ op: 'toolchange', i, tool: s.tool, slot: String(s.tool || '').split(' · ')[0].trim(), proc: procs[s.process], seconds });
+    } else if (s.type === 'feed') {
+      steps.push({ op: 'feed', i, bed: s.bed, seconds });
     } else if (s.type === 'dwell') {
       steps.push({ op: 'dwell', i, seconds });
     } else if (s.type === 'inspect') {

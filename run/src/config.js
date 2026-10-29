@@ -25,9 +25,17 @@ const PRESETS = {
   ruida: {
     name: '', bed: [900, 600], speed: 500, acc: 3000, power: 100, source: 'CO2', lens: '2.0"', minPower: 10,
     connection: { mode: 'udp', port: '', host: '', tcpPort: 4713, ip: '' },
-    f: { air: false, pointer: false, camera: false, autofocus: false, rotary: false, interlock: false }
+    f: { air: false, pointer: false, camera: false, autofocus: false, rotary: false, interlock: false, conveyor: false, vacuum: false }
   }
 };
+
+// a plotter's tools: slot → the Ruida output (1–4) that lowers it
+const PLOTTER_HEADS = [
+  { slot: 'T1', tool: 'Knife', output: 1 },
+  { slot: 'T2', tool: 'V-cut 45°', output: 2 },
+  { slot: 'T3', tool: 'Crease wheel', output: 3 },
+  { slot: 'T4', tool: 'Pen', output: 4 }
+];
 
 const BASE = {
   configured: false,             // true once a machine has been added in Setup
@@ -37,7 +45,12 @@ const BASE = {
   regMarks: 'refuse',            // 'refuse' or 'ignore' (run without print-and-cut correction)
   removeDone: true,              // completed jobs leave the queue for History
   trotec: { unit: 0.010125, offset: [14.833125, 9.527625], laserSource: 5, travelSpeed: 700, maxSpeed: 2000, airOutput: 4, overscan: 10, cutPowerCorrection: 15, engravePowerCorrection: 20 },
-  ruida: { magic: 0x88, origin: 'tr' },
+  type: 'laser',                 // 'laser' or 'plotter' (Trotec: always laser; Ruida: from the model)
+  ruida: { model: 'RDC6442G', magic: 0x88, origin: 'tr' },
+  // plotters only
+  heads: PLOTTER_HEADS,
+  feedLen: 1000,                 // conveyor: material advanced per bed, mm
+  timing: { toolDown: 0.15, toolUp: 0.12, toolChange: 8, feedSpeed: 200, feedSettle: 3 },
   sim: { speedup: 20 }
 };
 
@@ -82,13 +95,24 @@ function save(dir, cfg) {
   fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify(cfg, null, 2));
 }
 
+// laser or plotter (a Trotec is always a laser)
+const machineType = (cfg) => (cfg.controller === 'ruida' && cfg.type === 'plotter' ? 'plotter' : 'laser');
+
 // What Pathline sees in GET /machine
 function machineView(cfg) {
+  const base = { bed: cfg.bed, speed: cfg.speed, acc: cfg.acc, origin: cfg.origin, units: cfg.units, home: cfg.home, prefix: cfg.prefix };
+  if (machineType(cfg) === 'plotter') {
+    return {
+      ...base,
+      heads: (cfg.heads || []).map((h) => ({ slot: h.slot, tool: h.tool, x: '0.00', y: '0.00', loaded: true })),
+      feedLen: cfg.feedLen, timing: cfg.timing,
+      f: { conveyor: !!cfg.f.conveyor, vacuum: !!cfg.f.vacuum, pointer: !!cfg.f.pointer, camera: false, detect: false }
+    };
+  }
   return {
-    bed: cfg.bed, speed: cfg.speed, acc: cfg.acc, origin: cfg.origin, units: cfg.units, home: cfg.home, prefix: cfg.prefix,
-    source: cfg.source, power: cfg.power, lens: cfg.lens, minPower: cfg.minPower,
+    ...base, source: cfg.source, power: cfg.power, lens: cfg.lens, minPower: cfg.minPower,
     f: { camera: false, autofocus: false, rotary: false, air: !!cfg.f.air, pointer: !!cfg.f.pointer, pass: false, interlock: !!cfg.f.interlock, conveyor: false, vacuum: false }
   };
 }
 
-module.exports = { dataDir, defaults, load, save, merge, machineView, withoutMachine, PRESETS };
+module.exports = { dataDir, defaults, load, save, merge, machineView, machineType, withoutMachine, PRESETS, PLOTTER_HEADS };

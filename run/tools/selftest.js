@@ -157,6 +157,23 @@ console.log('Network address commands (not run)');
   ok(e4 && e4.code === 400, 'a bad IP address is refused');
 }
 
+console.log('Ruida plotter');
+{
+  const plotterPkg = JSON.parse(fs.readFileSync(path.join(FIX, 'plotter-two-beds.json'), 'utf8'));
+  const cfgP = { ...config.defaults('ruida'), configured: true, name: 'Plotter', type: 'plotter', bed: [1600, 1000], feedLen: 1000,
+    f: { ...config.defaults('ruida').f, conveyor: true }, ruida: { model: 'RD-PLOTTER', magic: 0x88, origin: 'tl' } };
+  ok(validate.check(plotterPkg, cfgP).length === 0, 'plotter job accepted by a Ruida plotter');
+  let eL = null; try { validate.check(example, cfgP); } catch (e) { eL = e; }
+  ok(eL && /laser job/.test(eL.message), 'laser job refused by a plotter', eL && eL.message);
+  const prog = ruida.compile(plan.build(plotterPkg), cfgP, { uStart: 250 });
+  const cmds = rd.commands(prog.segments[0].data).map(rd.describe);
+  ok(cmds.filter((c) => /^MOVE_U/.test(c)).join() === 'MOVE_U 1250.000 mm', 'conveyor feed between beds: U axis from 250 to 1250 mm', cmds.filter((c) => /^MOVE_U/.test(c)).join());
+  // first process is the V-cut on T2: output 2 at 100 %, the others at 0 %
+  const maxes = cmds.filter((c) => /^MAX_POWER_[1-4] /.test(c)).slice(0, 4).map((c) => c.split(' ')[1]);
+  ok(maxes.join(',') === '0.0,100.0,0.0,0.0', 'tool T2 lowers output 2 only', maxes.join(','));
+  ok(cmds.some((c) => /^LASER_ON_DELAY/.test(c)), 'tool down/up times in the on/off delays');
+}
+
 console.log('Refusals');
 {
   const cfg = config.defaults('trotec');
@@ -306,7 +323,7 @@ async function linkTests() {
   fake.close();
 
   console.log('Ruida link (fake controller over UDP)');
-  const magic = 0x88;
+  let magic = 0x88; // the fake controller's own swizzle magic
   const rdev = { sumOk: true, bytes: 0, cmds: [] };
   const sock = dgram.createSocket('udp4');
   sock.on('message', (m, from) => {
@@ -342,6 +359,15 @@ async function linkTests() {
     ok(rdev.cmds[rdev.cmds.length - 1] === 0xd8, 'stop (D8 01) reaches the controller');
   } catch (e) { ok(false, 'Ruida link', e.stack); }
   await rl.close();
+
+  // a 634x-family controller (magic 0x11) set up as a 6442 (0x88): the link works out the magic
+  magic = 0x11;
+  const rl2 = new RuidaLink({ ...cfgR, ruida: { ...cfgR.ruida, magic: 0x88 } }, () => {});
+  try {
+    const info2 = await rl2.connect();
+    ok(rl2.magic === 0x11 && /detected/.test(info2.firmware), 'wrong swizzle magic in Setup: detected 0x11 from the first reply and connected', info2.firmware);
+  } catch (e) { ok(false, 'magic detection', e.message); }
+  await rl2.close();
   sock.close();
 }
 

@@ -86,6 +86,7 @@ node tools/decode.js job.rd
 | Engraving | `MOVEX±` + b/w switch table per line, 10 mm overscan, pitch rounded to 6 µm | Work mode 3 + `CUT_REL_X` / `MOVE_REL_X` runs per line, overscan from speed and acceleration |
 | Settings used | power, speed, frequency, air, power correction, path planning, links, extended overshoot | power, speed, air, power correction (as min power), links, extended overshoot |
 | Dwell | Host waits between streams | Host waits between streams (left out of a saved `.rd`) |
+| Plotters | — | Ruida only. Each tool (T1–T4) on a controller output (1–4, Setup → Tools): its layer sets that output to 100 % and the others to 0 %. Tool down/up times as the laser on/off delays, perforation as cut/move, conveyor feeds as U-axis moves from where the conveyor stopped |
 | Progress | Progress markers (`D2`) after each step | Time against Pathline's estimate |
 
 `adv` settings not listed are ignored: Source, Engrave mode, High quality, Relief, Dithering, Process gas, Z-offset. Dithering has no effect anyway: Pathline only sends vector fills so far.
@@ -99,8 +100,9 @@ Sources: the Trotec protocol comes from our own decompile and captures (`TROTEC_
 **Not yet tried on hardware.** Before cutting material:
 
 - **Trotec:** jog, home and frame first. Then cut a 20 mm square at low power and compare with Ruby. Engraving (`ACTIVATEPPIMODE` 5 at every DPI, which power level the switch table fires) is copied from one capture at 500 DPI.
-- **Ruida:** the header, the layer blocks and the work-mode-3 raster are from public notes and haven't been tried on a controller. Check the swizzle magic for your card (Setup → Controller), and the checksum, status bits and rapid-move option bytes. The origin corner is a setting. Run a small square at low power first, or save the `.rd` file and open it in RDWorks/LightBurn to check it.
-- **Not supported:** registration marks (no camera: jobs wait, or run uncorrected if Setup → Jobs → Registration marks is "Skip"), test fire, auto-focus, Z, rotary, plotters. Pathline is told through `GET /machine` features, so it hides those controls.
+- **Ruida:** the header, the layer blocks and the work-mode-3 raster are from public notes and haven't been tried on a controller. Choose the controller model in Setup → Machine. The swizzle magic is also detected from the controller's first reply. Check the checksum, status bits and rapid-move option bytes. The origin corner is a setting. Run a small square at low power first, or save the `.rd` file and open it in RDWorks/LightBurn to check it.
+- **Ruida plotters:** tools on outputs 1–4 and the conveyor on the U axis are the laser-family command set used for tools. That's the likely wiring for a plotter on a Ruida laser-family board, but it's unconfirmed. Ruida's own knife-cutter controllers (RDD6584 series) aren't documented publicly: a capture from RDCutting or the controller's own software is the way to confirm them. Try a pen first, with the knife out.
+- **Not supported:** registration marks (no camera: jobs wait, or run uncorrected if Setup → Jobs → Registration marks is "Skip"), test fire, auto-focus, Z, rotary, Trotec plotters. Pathline is told through `GET /machine` features, so it hides those controls.
 
 ## Layout
 

@@ -14,25 +14,37 @@ function check(pkg, cfg) {
   if (!pkg || typeof pkg !== 'object') throw bad('Not a job package');
   if (pkg.format !== 'lrc-job-package') throw bad('Not a Pathline job package (format is ' + JSON.stringify(pkg.format) + ')');
   if (pkg.version !== 1) throw bad('Job package version ' + pkg.version + ' is not supported (expected 1)');
-  if (pkg.machine && pkg.machine.type && pkg.machine.type !== 'laser') {
-    throw bad('This is a ' + pkg.machine.type + ' job, but ' + cfg.name + ' is a laser');
+  const type = cfg.controller === 'ruida' && cfg.type === 'plotter' ? 'plotter' : 'laser';
+  const plotter = type === 'plotter';
+  if (pkg.machine && pkg.machine.type && pkg.machine.type !== type) {
+    throw bad('This is a ' + pkg.machine.type + ' job, but ' + cfg.name + ' is a ' + type);
   }
   if (!Array.isArray(pkg.toolpath)) throw bad('The job has no toolpath');
   const procs = new Map((pkg.processes || []).map((p) => [p.index, p]));
+  const slots = new Set((cfg.heads || []).map((h) => h.slot));
+  const warnings = [];
   for (const p of procs.values()) {
+    if (!ok(p.speed) || p.speed <= 0) throw bad('Process "' + p.name + '": speed must be above 0');
+    if (plotter) {
+      // plotter processes name a tool: "T2 · V-cut 45°" → slot T2
+      const slot = String(p.tool || '').split(' · ')[0].trim();
+      if (!slot) throw bad('Process "' + p.name + '" has no tool');
+      if (!slots.has(slot)) warnings.push('Process "' + p.name + '" uses ' + slot + ', which isn\'t set up on this plotter (Setup → Tools)');
+      continue;
+    }
     if (p.proc !== 'Cut' && p.proc !== 'Engrave') throw bad('Process "' + p.name + '" is not a laser process');
     if (!ok(p.power) || p.power < 0 || p.power > 100) throw bad('Process "' + p.name + '": power must be 0–100 %');
-    if (!ok(p.speed) || p.speed <= 0) throw bad('Process "' + p.name + '": speed must be above 0');
     if (p.proc === 'Engrave' && (!ok(p.f) || p.f < 10 || p.f > 2000)) throw bad('Process "' + p.name + '": resolution must be 10–2000 DPI');
   }
   const [W, H] = cfg.bed;
   const tol = 0.5;
   const inBed = (x, y) => ok(x) && ok(y) && x >= -tol && y >= -tol && x <= W + tol && y <= H + tol;
-  const warnings = [];
   pkg.toolpath.forEach((s, i) => {
     const where = 'Step ' + (i + 1) + ' (' + (s.name || s.type) + ')';
     if (!STEP_TYPES.has(s.type)) throw bad(where + ': unknown step type ' + JSON.stringify(s.type));
-    if (s.type === 'toolchange' || s.type === 'feed') throw bad(where + ': plotter steps can\'t run on a laser');
+    if (!plotter && (s.type === 'toolchange' || s.type === 'feed')) throw bad(where + ': plotter steps can\'t run on a laser');
+    if (plotter && (s.type === 'engrave' || s.type === 'inspect')) throw bad(where + ': laser steps can\'t run on a plotter');
+    if (plotter && s.type === 'feed' && !cfg.f.conveyor) throw bad(where + ': the job feeds the conveyor, but this plotter has no conveyor (Setup → Work area)');
     if ((s.type === 'cut' || s.type === 'engrave') && !procs.has(s.process)) throw bad(where + ': unknown process ' + s.process);
     if (s.type === 'cut') {
       if (!Array.isArray(s.p) || s.p.length < 2) throw bad(where + ': the path has no points');

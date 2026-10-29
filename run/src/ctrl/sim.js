@@ -74,6 +74,8 @@ class SimLink {
   }
 
   async home() { return this.moveTo(0, 0); }
+  async feed() { this.u = (this.u || 0) + (this.cfg.feedLen || 1000); }
+  async readU() { return this.u || 0; }
   async setIo() {}
   async send(seg) { this.run = { seg, t: 0, last: Date.now(), paused: false, marker: 0 }; }
   async pause() { if (this.run) this.run.paused = true; }

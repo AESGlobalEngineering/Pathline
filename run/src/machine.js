@@ -194,6 +194,17 @@ class Machine {
     } finally { h.busy = false; }
   }
 
+  // plotter conveyor: advance the material by one bed (or `length` mm)
+  async feed(length) {
+    if (!(this.cfg.controller === 'ruida' && this.cfg.type === 'plotter' && this.cfg.f.conveyor)) throw busyErr('This machine has no conveyor');
+    this.guard({ lidOpenOk: true });
+    const mm = Number(length) > 0 ? Number(length) : this.cfg.feedLen || 1000;
+    if (!this.link.feed) throw busyErr('This controller can\'t feed by hand');
+    await this.link.feed(mm);
+    this.log('conveyor fed ' + mm + ' mm');
+    return { fed: mm };
+  }
+
   async home() {
     this.guard({ lidOpenOk: true });
     await this.link.home();
@@ -244,9 +255,9 @@ class Machine {
   }
 
   // ------------------------------------------------------------ jobs
-  compile(pkg) {
+  compile(pkg, opts) {
     const p = plan.build(pkg);
-    return controller(this.cfg.controller).compile(p, this.cfg);
+    return controller(this.cfg.controller).compile(p, this.cfg, opts);
   }
 
   async start() {
@@ -260,7 +271,10 @@ class Machine {
       try { validate.check(pkg, this.cfg); } catch (e) { throw busyErr('"' + job.name + '" anchored at the head: ' + e.message); }
     }
     let program;
-    try { program = this.compile(pkg); } catch (e) { throw Object.assign(new Error('Couldn\'t convert "' + job.name + '": ' + e.message), { code: 409 }); }
+    // a plotter's conveyor moves on from where it stopped last time
+    const opts = {};
+    if (pkg.toolpath.some((s) => s.type === 'feed') && this.link && this.link.readU) opts.uStart = await this.link.readU().catch(() => 0);
+    try { program = this.compile(pkg, opts); } catch (e) { throw Object.assign(new Error('Couldn\'t convert "' + job.name + '": ' + e.message), { code: 409 }); }
     if (program.segments.some((s) => s.kind === 'inspect') && this.cfg.regMarks !== 'ignore') {
       throw busyErr('"' + job.name + '" uses registration marks, and Pathline Run has no camera yet. Set Registration marks to "Skip" in Setup to run it uncorrected.');
     }

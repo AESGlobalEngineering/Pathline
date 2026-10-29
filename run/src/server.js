@@ -19,6 +19,7 @@ const validate = require('./job/validate');
 const plan = require('./job/plan');
 const changelog = require('./changelog');
 const network = require('./network');
+const ruidaModels = require('./ctrl/ruida/models');
 const anchor = require('./job/anchor');
 const { controller, CONTROLLERS } = require('./ctrl');
 const pkgJson = require('../package.json');
@@ -120,7 +121,7 @@ function start(opts = {}) {
   // ---------------------------------------------------------------- Pathline protocol
   const api = {
     'GET /info': () => (needMachine(), {
-      name: cfg.name, type: 'laser', ctrl: CONTROLLERS[cfg.controller].label, model: machine.info.model || cfg.name,
+      name: cfg.name, type: config.machineType(cfg), ctrl: CONTROLLERS[cfg.controller].label, model: machine.info.model || cfg.name,
       firmware: machine.info.firmware || '', protocol: 1, bed: cfg.bed, app: 'Pathline Run ' + pkgJson.version
     }),
     'GET /machine': () => (needMachine(), config.machineView(cfg)),
@@ -138,8 +139,9 @@ function start(opts = {}) {
     'POST /io': (b) => machine.io(b),
     'POST /autofocus': () => { throw err(409, 'This machine has no auto-focus'); },
     'POST /testfire': () => { throw err(409, 'Test fire isn\'t supported by Pathline Run yet'); },
-    'POST /feed': () => { throw err(409, 'This machine has no conveyor'); },
-    'POST /toolchange': () => { throw err(409, 'This machine has no tool changer'); }
+    'POST /feed': (b) => machine.feed(b.length),
+    // tools are chosen by each job's processes (each tool has its own output)
+    'POST /toolchange': () => { throw err(409, 'Tools are chosen by the job: each tool has its own output on the controller'); }
   };
 
   // ---------------------------------------------------------------- HMI screen
@@ -157,7 +159,7 @@ function start(opts = {}) {
 
   const local = {
     'GET /state': (b, req) => ({
-      app: pkgJson.version, update: updates.status(), here: isLocalReq(req), config: cfg, status: machine.status(), info: machine.info,
+      app: pkgJson.version, update: updates.status(), here: isLocalReq(req), config: cfg, status: machine.status(), info: machine.info, ruidaModels: ruidaModels.MODELS,
       jobs: store.jobs.filter((j) => !j.hidden), history: store.history.slice(0, 100), controllers: Object.keys(CONTROLLERS)
     }),
     'GET /log': () => logLines,
@@ -170,6 +172,8 @@ function start(opts = {}) {
     'PUT /config': async (b) => {
       const next = config.merge(cfg, b);
       if (!CONTROLLERS[next.controller]) throw err(400, 'Unknown controller');
+      // the model decides laser or plotter (a Trotec is always a laser)
+      next.type = next.controller === 'ruida' ? ruidaModels.byId(next.ruida.model).kind : 'laser';
       if (!Array.isArray(next.bed) || next.bed.length !== 2 || !next.bed.every((v) => Number.isFinite(v) && v > 0)) throw err(400, 'Bed size must be two numbers above 0');
       if (next.configured) {
         // adding or changing a machine: it needs a name and somewhere to connect
@@ -185,7 +189,7 @@ function start(opts = {}) {
       log('setup saved (' + cfg.controller + ', ' + cfg.connection.mode + ')');
       return { config: cfg };
     },
-    'GET /presets': () => ({ trotec: config.defaults('trotec'), ruida: config.defaults('ruida') }),
+    'GET /presets': () => ({ trotec: config.defaults('trotec'), ruida: config.defaults('ruida'), ruidaModels: ruidaModels.MODELS }),
     // ☰ → Remove machine (the screen asks twice first): forgets the machine's setup.
     // Queued jobs and history stay.
     'POST /machine/remove': async (b, req) => {

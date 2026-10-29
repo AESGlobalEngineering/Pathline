@@ -206,7 +206,7 @@ function header() {
       '<button data-a="go" data-v="' + k + '" aria-current="' + (ui.view === k ? 'page' : 'false') + '">' + ic(d) + '<span class="lab">' + l + '</span>' + (k === 'queue' ? '<span class="count">' + nq + '</span>' : '') + '</button>').join('') + '</nav>' +
     '<div style="display:flex;align-items:center;gap:8px">' + updateChip() +
     (c ? '<div style="position:relative"><button data-a="machMenu" aria-haspopup="dialog" aria-expanded="' + !!ui.machOpen + '" aria-label="' + esc((c.configured ? c.name : 'No machine') + ': ' + ms.label) + '" title="' + esc(ms.label) + '" style="display:flex;align-items:center;gap:10px;height:48px;padding:0 12px 0 8px;border:1px solid ' + (ms.flag ? STATUS_COLOR.warn : 'var(--line-strong)') + ';border-radius:var(--ctl-r);background:var(--surface);color:var(--text);cursor:pointer;text-align:left">' +
-      '<span class="badge">LASER</span><span style="display:flex;flex-direction:column;line-height:1.2"><span style="font-weight:600">' + esc(c.configured ? c.name : 'No machine') + '</span><span class="lbl">' + esc(ms.label) + '</span></span>' +
+      (c.controller === 'ruida' && c.type === 'plotter' ? '<span class="badge" style="background:var(--badge-plotter)">PLOTTER</span>' : '<span class="badge">LASER</span>') + '<span style="display:flex;flex-direction:column;line-height:1.2"><span style="font-weight:600">' + esc(c.configured ? c.name : 'No machine') + '</span><span class="lbl">' + esc(ms.label) + '</span></span>' +
       (ms.flag ? '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" style="flex:none"><path d="M12 3L2 21h20z" fill="' + STATUS_COLOR.warn + '"/><path d="M12 10v5 M12 17.5v.5" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round"/></svg>' : '') +
       '<span aria-hidden="true" style="width:11px;height:11px;border-radius:50%;background:' + dot + (ms.key === 'busy' ? ';animation:plr-pulse-blue 1.4s ease-in-out infinite' : '') + '"></span></button>' +
       (ui.machOpen ? machinePanel() : '') + '</div>' : '') +
@@ -284,7 +284,9 @@ function messageWindow(title, msg) {
 // ---------------------------------------------------------------- queue view
 function procRows(pkg) {
   return (pkg.processes || []).map((p) => {
-    const pv = p.proc === 'Engrave' ? 'P ' + p.power + ' %  V ' + p.speed + ' mm/s  ' + p.f + ' DPI' : 'P ' + p.power + ' %  V ' + p.speed + ' mm/s' + (p.passes > 1 ? '  ×' + p.passes : '');
+    const pv = p.tool !== undefined && p.proc === undefined
+      ? String(p.tool).split(' · ')[0] + ' · ' + p.speed + ' mm/s' + (p.passes > 1 ? '  ×' + p.passes : '') // plotter: tool and speed
+      : p.proc === 'Engrave' ? 'P ' + p.power + ' %  V ' + p.speed + ' mm/s  ' + p.f + ' DPI' : 'P ' + p.power + ' %  V ' + p.speed + ' mm/s' + (p.passes > 1 ? '  ×' + p.passes : '');
     return '<div style="display:flex;align-items:center;gap:10px;min-height:34px;padding:0 2px;border-bottom:1px solid var(--line-soft)">' +
       '<span style="display:flex;gap:3px">' + (p.aci || []).slice(0, 4).map((n) => '<span class="chip" title="ACI ' + n + '" style="background:' + (aciHex(n) || 'var(--text)') + ';color:' + (n === 7 ? 'var(--surface)' : aciFg(n)) + '">' + n + '</span>').join('') + '</span>' +
       '<span style="flex:1;min-width:0">' + esc(p.name) + '</span><span class="mono" style="font-size:13px;color:var(--text-2)">' + pv + '</span></div>';
@@ -400,7 +402,8 @@ function jogView() {
     '<section aria-label="Machine" class="card" style="flex:1 1 360px;min-width:0;padding:22px;display:flex;flex-direction:column;gap:14px"><h2 class="h-sec">Machine</h2>' +
     '<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px">' +
     '<button class="tb" style="height:52px" data-a="home">Home</button><button class="tb" style="height:52px" data-a="frame">Frame job</button>' +
-    '<button class="tb" style="height:52px" data-a="goto0">Go to 0, 0</button><button class="tb" style="height:52px" data-a="stop">Stop</button></div>' +
+    '<button class="tb" style="height:52px" data-a="goto0">Go to 0, 0</button><button class="tb" style="height:52px" data-a="stop">Stop</button>' +
+    (c.controller === 'ruida' && c.type === 'plotter' && c.f.conveyor ? '<button class="tb" style="height:52px" data-a="feed">Feed one bed (' + esc(c.feedLen) + ' mm)</button>' : '') + '</div>' +
     '<div class="hr" style="margin:4px 0"></div><h2 class="h-sec">Status</h2><div style="display:flex;flex-direction:column;gap:4px">' +
     pill('Controller', st.link === 'online' ? (S.info.model || 'Connected') : st.link === 'connecting' ? 'Connecting…' : 'Not connected', st.link === 'online') +
     (sim ? '<div style="display:flex;align-items:center;justify-content:space-between;min-height:48px;border-bottom:1px solid var(--line-soft)"><span>Lid closed (simulated)</span><button role="switch" class="sw" aria-checked="' + !st.interlock + '" data-a="simLid" aria-label="Lid closed"></button></div>'
@@ -496,17 +499,41 @@ function setupView() {
   tabs.Network.push(networkCard(card), card('Pathline connection', num('HTTP port', 'httpPort', '', 'Takes effect after a restart') +
     '<div class="row"><span>This screen is showing</span><span class="mono">' + esc(location.host) + '</span></div>',
   'Pathline talks to Pathline Run on this port. Use the same port in Pathline\'s machine setup.'));
+  // Ruida: which controller model (sets laser or plotter, and the swizzle magic)
+  const models = S.ruidaModels || [];
+  const model = models.find((m) => m.id === d.ruida.model) || models.find((m) => m.id === 'OTHER') || { kind: 'laser', note: '' };
+  const isPlotter = !trotec && model.kind === 'plotter';
+  const group = (kind, title) => '<optgroup label="' + title + '">' + models.filter((m) => m.kind === kind && m.id !== 'OTHER').map((m) => '<option value="' + m.id + '"' + (m.id === model.id ? ' selected' : '') + '>' + esc(m.label) + '</option>').join('') + '</optgroup>';
+  const modelSelect = trotec ? '' : '<label class="row"><span>Controller model<span class="hint">' + esc(model.note || '') + '</span></span><select class="cell" data-f="ruida.model">' +
+    group('laser', 'Laser controllers') + group('plotter', 'Plotters and cutters') +
+    '<option value="OTHER"' + (model.id === 'OTHER' ? ' selected' : '') + '>Other / not sure</option></select></label>';
+  // plotter tools: which controller output (1–4) lowers each tool
+  const toolRows = (d.heads || []).map((h, i) => '<div class="row" style="grid-template-columns:52px minmax(0,1fr) 150px"><span class="mono" style="font-weight:600;color:var(--text)">' + esc(h.slot) + '</span>' +
+    '<span class="fld"><input class="sans" data-f="heads.' + i + '.tool" value="' + esc(h.tool) + '" aria-label="' + esc(h.slot) + ' tool"></span>' +
+    '<select class="cell" data-num="1" data-f="heads.' + i + '.output" aria-label="' + esc(h.slot) + ' output">' + [1, 2, 3, 4].map((o) => '<option value="' + o + '"' + (Number(h.output) === o ? ' selected' : '') + '>Output ' + o + '</option>').join('') + '</select></div>').join('');
+
   tabs.Machine.push(card('Machine', text('Name', 'name') +
     seg('Controller', 'controller', [['trotec', 'Trotec'], ['ruida', 'Ruida']]) +
+    modelSelect +
     seg('Connection', 'connection.mode', modes) +
     (d.connection.mode === 'serial' ? portSelect : '') +
     (d.connection.mode === 'tcp' ? text('Host', 'connection.host') + num('TCP port', 'connection.tcpPort') : '') +
     (d.connection.mode === 'udp' ? text('Controller IP address', 'connection.ip', '', 'UDP 50200') : '') +
     (d.connection.mode === 'sim' ? num('Simulation speed', 'sim.speedup', '×', 'Jobs run this many times faster') : ''),
   trotec ? 'Trotec classic controllers (Electronics 2000/2015) over USB. Close Ruby/JobDispatcher first: only one program can hold the port.' : 'Ruida controllers over Ethernet (UDP). Close LightBurn or RDWorks while Pathline Run is connected.'));
-  tabs.Machine.push(card('Laser source', text('Type', 'source') + num('Rated power', 'power', 'W') + text('Lens', 'lens') + num('Minimum power', 'minPower', '%') +
-    tog('Air assist', 'f.air') + tog('Lid interlock', 'f.interlock')));
+  if (isPlotter) {
+    tabs.Machine.push(card('Tools', '<div class="row" style="grid-template-columns:52px minmax(0,1fr) 150px"><span class="lbl">Slot</span><span class="lbl">Tool</span><span class="lbl">Lowered by</span></div>' + toolRows +
+      num('Tool down time', 'timing.toolDown', 's') + num('Tool up time', 'timing.toolUp', 's'),
+    'Each tool is lowered by one output of the controller (the outputs a Ruida uses for laser tubes 1–4). Pathline\'s processes name the slot, for example "T2 · V-cut 45°".'));
+  } else {
+    tabs.Machine.push(card('Laser source', text('Type', 'source') + num('Rated power', 'power', 'W') + text('Lens', 'lens') + num('Minimum power', 'minPower', '%') +
+      tog('Air assist', 'f.air') + tog('Lid interlock', 'f.interlock')));
+  }
   tabs['Work area'].push(card('Bed', num('Width', 'bed.0', 'mm') + num('Height', 'bed.1', 'mm') + num('Max speed', 'speed', 'mm/s', 'Used by Pathline\'s time estimate') + num('Acceleration', 'acc', 'mm/s²')));
+  if (isPlotter) {
+    tabs['Work area'].push(card('Conveyor and vacuum', tog('Conveyor', 'f.conveyor') + (d.f.conveyor ? num('Feed length', 'feedLen', 'mm', 'Material advanced per bed (U axis)') + num('Feed time', 'timing.feedSettle', 's', 'For Pathline\'s estimate') : '') + tog('Vacuum', 'f.vacuum'),
+      'Jobs over several beds feed the conveyor between beds. The Jog page has Feed one bed.'));
+  }
   if (trotec) {
     tabs.Controller.push(card('Trotec', num('Position unit', 'trotec.unit', 'mm') + num('Mechanical offset X', 'trotec.offset.0', 'mm') + num('Mechanical offset Y', 'trotec.offset.1', 'mm') +
       num('Travel speed', 'trotec.travelSpeed', 'mm/s') + num('Speed limit', 'trotec.maxSpeed', 'mm/s') + num('Engrave overscan', 'trotec.overscan', 'mm') +
@@ -515,17 +542,18 @@ function setupView() {
     'From the factory calibration in the controller (TROTEC_PROTOCOL.md §0). Change only if your machine differs.'));
   } else {
     tabs.Controller.push(card('Ruida', seg('Machine origin', 'ruida.origin', [['tl', 'Top left'], ['tr', 'Top right'], ['bl', 'Bottom left'], ['br', 'Bottom right']]) +
-      num('Swizzle magic', 'ruida.magic', '', '136 (0x88) for most cards; 17 (0x11) for 634XG'),
+      num('Swizzle magic', 'ruida.magic', '', 'Set by the model (136 = 0x88 for most). Pathline Run also detects it from the controller\'s first reply.') +
+      (S.info && S.info.cardId ? '<div class="row"><span>Connected controller</span><span class="mono">card 0x' + S.info.cardId.toString(16).toUpperCase() + ' · magic 0x' + S.info.magic.toString(16) + '</span></div>' : ''),
     'Origin is the corner the head homes to. Pathline\'s top-left coordinates are mirrored to match.'));
   }
-  tabs.Jobs.push(card('Job defaults', seg('Registration marks', 'regMarks', [['refuse', 'Don\'t run'], ['ignore', 'Skip']]) + tog('Remove completed job from queue', 'removeDone') + text('File name prefix', 'prefix'),
-    'Pathline Run has no camera yet: jobs with registration marks either wait, or run without print-and-cut correction.'));
+  tabs.Jobs.push(card('Job defaults', (isPlotter ? '' : seg('Registration marks', 'regMarks', [['refuse', 'Don\'t run'], ['ignore', 'Skip']])) + tog('Remove completed job from queue', 'removeDone') + text('File name prefix', 'prefix'),
+    isPlotter ? '' : 'Pathline Run has no camera yet: jobs with registration marks either wait, or run without print-and-cut correction.'));
 
   const tab = tabs[ui.setTab] ? ui.setTab : 'Machine';
   // no machine yet: this page adds one (name, controller and connection on the Machine tab)
   const adding = !cfg().configured;
   return '<div class="view" style="padding:12px;display:flex;flex-direction:column;gap:12px">' +
-    '<section class="card" style="padding:16px 18px;display:flex;flex-wrap:wrap;align-items:center;gap:14px"><span class="badge" style="height:28px;padding:0 9px;border-radius:6px">LASER</span>' +
+    '<section class="card" style="padding:16px 18px;display:flex;flex-wrap:wrap;align-items:center;gap:14px"><span class="badge" style="height:28px;padding:0 9px;border-radius:6px' + (isPlotter ? ';background:var(--badge-plotter)' : '') + '">' + (isPlotter ? 'PLOTTER' : 'LASER') + '</span>' +
     (adding
       ? '<div style="flex:1 1 280px;min-width:0;display:flex;flex-direction:column;gap:4px"><span style="font-size:17px;font-weight:600">Add a machine</span><span class="lbl">Name it, choose Trotec or Ruida and how it\'s connected (Machine tab), check the bed size (Work area), then Add machine.</span></div>' +
         '<button class="btn-primary" data-a="save">Add machine</button></section>'
@@ -630,6 +658,7 @@ const H = {
   step: (v) => { ui.step = v; render(); },
   home: act(async () => call('POST', API('/home'), {})),
   goto0: act(async () => call('POST', API('/jog'), { x: 0, y: 0 })),
+  feed: act(async () => { const r = await call('POST', API('/feed'), {}); toast('Conveyor fed ' + r.fed + ' mm'); }),
   io: act(async (k) => call('POST', API('/io'), { [k]: !S.status.io[k] })),
   simLid: act(async () => call('POST', LOCAL('/sim/lid'), { open: !S.status.interlock })),
   hist: (v) => { ui.histFilter = v; render(); },
@@ -789,6 +818,11 @@ $app.addEventListener('change', (e) => {
     let v = el.value.trim();
     if (el.dataset.num) { v = Number(v.replace(',', '.')); if (!Number.isFinite(v)) { toast('Enter a number'); render(); return; } }
     set(ui.draft, el.dataset.f, v);
+    // a Ruida model brings its machine type (laser or plotter) and swizzle magic
+    if (el.dataset.f === 'ruida.model') {
+      const m = (S.ruidaModels || []).find((x) => x.id === v);
+      if (m) { ui.draft.type = m.kind; set(ui.draft, 'ruida.magic', m.magic); }
+    }
     el.blur();
     render();
   }
