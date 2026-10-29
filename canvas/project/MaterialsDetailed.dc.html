@@ -1,0 +1,768 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Material library</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#2457D6}a:hover{color:#1A43AB}
+button,select,input{font:inherit;color:inherit}
+.ib{display:inline-flex;align-items:center;justify-content:center;width:36px;height:36px;border:0;border-radius:8px;background:transparent;cursor:pointer;color:#3A414C;padding:0}
+.ib:hover{background:#EEF0F3}
+.tb{display:inline-flex;align-items:center;gap:8px;height:36px;padding:0 12px;border:1px solid #D5D9DF;border-radius:8px;background:#FFFFFF;cursor:pointer;font-size:13px;color:#15181E;white-space:nowrap;text-decoration:none;box-sizing:border-box}
+.tb:hover{border-color:#AEB5C0;color:#15181E}
+.mono{font-family:'IBM Plex Mono',ui-monospace,monospace}
+.lbl{font-size:12px;color:#5B6370}
+.fld{display:flex;align-items:center;height:36px;border:1px solid #D5D9DF;border-radius:8px;background:#FFFFFF;padding:0 10px;gap:6px;box-sizing:border-box}
+.fld input{border:0;outline:0;width:100%;min-width:0;font-size:13px;background:transparent;color:#15181E;padding:0}
+.fld:focus-within{border-color:#2457D6;box-shadow:0 0 0 3px #DCE6FB}
+.cell{width:100%;min-width:0;height:32px;border:1px solid #D5D9DF;border-radius:6px;padding:0 8px;box-sizing:border-box;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:13px;background:#FFFFFF;color:#15181E}
+select.cell{font-family:'IBM Plex Sans',system-ui,sans-serif;padding:0 4px 0 8px}
+.cell:focus{outline:none;border-color:#2457D6;box-shadow:0 0 0 3px #DCE6FB}
+.cell:disabled{background:#F3F4F6;color:#8A919C}
+.th{font-size:12px;font-weight:500;color:#5B6370;white-space:nowrap}
+svg.i{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round;flex:none}
+</style>
+</helmet>
+<div style="min-height: 100vh; display: flex; flex-direction: column; background: #F3F4F6; color: #15181E; font-family: 'IBM Plex Sans', system-ui, sans-serif; font-size: 13px">
+
+  <!-- ===== Header ===== -->
+  <header style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; padding: 10px 16px; background: #FFFFFF; border-bottom: 1px solid #E1E4E8">
+    <nav aria-label="Sections" style="display: flex; padding: 3px; gap: 2px; background: #F0F1F4; border-radius: 8px">
+      <a href="MainDetailed.dc.html" style="display: inline-flex; align-items: center; height: 30px; padding: 0 12px; border-radius: 6px; text-decoration: none; font-weight: 500; color: #5B6370">Job</a>
+      <a href="MaterialsDetailed.dc.html" aria-current="page" style="display: inline-flex; align-items: center; height: 30px; padding: 0 12px; border-radius: 6px; text-decoration: none; font-weight: 500; background: #FFFFFF; box-shadow: 0 1px 2px rgba(21, 24, 30, 0.14); color: #15181E">Materials</a>
+      <a href="MachineSetupDetailed.dc.html" style="display: inline-flex; align-items: center; height: 30px; padding: 0 12px; border-radius: 6px; text-decoration: none; font-weight: 500; color: #5B6370">Machines</a>
+      <a href="SimulationDetailed.dc.html" style="display: inline-flex; align-items: center; height: 30px; padding: 0 12px; border-radius: 6px; text-decoration: none; font-weight: 500; color: #5B6370">Simulation</a>
+    </nav>
+    <div style="display: flex; flex-direction: column; line-height: 1.25">
+      <h1 style="margin: 0; font-size: 15px; font-weight: 600">Material library</h1>
+      <span class="lbl">{{libCount}}</span>
+    </div>
+    <span style="flex: 1"></span>
+    <sc-if value="{{dirty}}" hint-placeholder-val="{{false}}">
+      <span style="height: 24px; padding: 0 8px; border-radius: 5px; font-size: 12px; font-weight: 600; display: inline-flex; align-items: center; background: #FFF1DB; color: #8A4B00">Unsaved changes</span>
+      <button class="tb" onClick="{{discard}}">Discard</button>
+    </sc-if>
+    <button class="tb"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.import}}"></path></svg>Import</button>
+    <button class="tb"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.export}}"></path></svg>Export</button>
+    <button onClick="{{save}}" disabled="{{clean}}" style="height: 36px; padding: 0 20px; border: 0; border-radius: 8px; background: {{accent}}; color: #FFFFFF; font-weight: 600; opacity: {{saveOpacity}}; cursor: {{saveCursor}}">Save</button>
+  </header>
+
+  <div style="flex: 1; display: flex; flex-wrap: wrap; min-height: 0">
+
+    <!-- ===== Material list ===== -->
+    <nav aria-label="Materials" style="flex: 1 1 300px; min-width: 0; background: #FFFFFF; border-right: 1px solid #E1E4E8; display: flex; flex-direction: column; gap: 12px; padding: 14px">
+      <label class="fld">
+        <svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width: 16px; height: 16px; color: #5B6370"><path d="{{icons.search}}"></path></svg>
+        <input type="search" aria-label="Search materials" placeholder="Search" value="{{q}}" onChange="{{setQ}}">
+      </label>
+      <div role="radiogroup" aria-label="Machine filter" style="display: flex; padding: 3px; gap: 2px; background: #F0F1F4; border-radius: 8px">
+        <sc-for list="{{filters}}" as="f" hint-placeholder-count="3">
+          <button role="radio" aria-checked="{{f.on}}" onClick="{{f.pick}}" style="flex: 1; height: 30px; border: 0; border-radius: 6px; background: {{f.bg}}; box-shadow: {{f.sh}}; color: {{f.fg}}; cursor: pointer; font-weight: 500">{{f.l}}</button>
+        </sc-for>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 14px">
+        <sc-for list="{{groups}}" as="g" hint-placeholder-count="4">
+          <div style="display: flex; flex-direction: column; gap: 2px">
+            <div style="display: flex; justify-content: space-between; padding: 2px 8px 4px">
+              <span style="font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: #3A414C">{{g.name}}</span>
+              <span class="lbl">{{g.count}}</span>
+            </div>
+            <sc-for list="{{g.items}}" as="it" hint-placeholder-count="3">
+              <button onClick="{{it.pick}}" aria-current="{{it.cur}}" style="display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px; border: 0; border-radius: 8px; background: {{it.bg}}; box-shadow: inset 0 0 0 1px {{it.bd}}; cursor: pointer; text-align: left">
+                <span aria-hidden="true" style="width: 26px; height: 26px; flex: none; border-radius: 6px; background: {{it.sw}}; box-shadow: inset 0 0 0 1px rgba(21, 24, 30, 0.12)"></span>
+                <span style="flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.3">
+                  <span style="font-weight: 500">{{it.name}}</span>
+                  <span class="lbl">{{it.sub}}</span>
+                </span>
+                <sc-if value="{{it.locked}}" hint-placeholder-val="{{false}}">
+                  <svg class="i" viewBox="0 0 24 24" role="img" aria-label="Locked" style="width: 15px; height: 15px; color: #5B6370"><path d="{{icons.lock}}"></path></svg>
+                </sc-if>
+              </button>
+            </sc-for>
+          </div>
+        </sc-for>
+      </div>
+      <span style="flex: 1"></span>
+      <button class="tb" style="justify-content: center"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.plus}}"></path></svg>New material</button>
+    </nav>
+
+    <!-- ===== Material detail ===== -->
+    <main style="flex: 999 1 760px; min-width: 0; padding: 20px; display: flex; flex-direction: column; gap: 16px">
+
+      <section aria-label="Material details" style="background: #FFFFFF; border: 1px solid #E1E4E8; border-radius: 12px; padding: 16px; display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start">
+        <span aria-hidden="true" style="width: 64px; height: 64px; flex: none; border-radius: 10px; background: {{mat.sw}}; box-shadow: inset 0 0 0 1px rgba(21, 24, 30, 0.12)"></span>
+        <div style="flex: 1 1 520px; min-width: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px">
+          <label style="display: flex; flex-direction: column; gap: 6px; min-width: 0; grid-column: span 2">
+            <span class="lbl">Name</span>
+            <span class="fld"><input type="text" value="{{mat.name}}" onChange="{{noop}}" disabled="{{locked}}"></span>
+          </label>
+          <label style="display: flex; flex-direction: column; gap: 6px; min-width: 0">
+            <span class="lbl">Thickness</span>
+            <span class="fld"><input type="text" class="mono" value="{{mat.t}}" onChange="{{noop}}" disabled="{{locked}}"><span class="lbl">mm</span></span>
+          </label>
+          <label style="display: flex; flex-direction: column; gap: 6px; min-width: 0">
+            <span class="lbl">Group</span>
+            <select class="cell" style="height: 36px; border-radius: 8px" value="{{mat.g}}" onChange="{{noop}}" disabled="{{locked}}">
+              <option value="Acrylic">Acrylic</option>
+              <option value="Wood">Wood</option>
+              <option value="Board &amp; card">Board &amp; card</option>
+              <option value="Film &amp; sheet">Film &amp; sheet</option>
+            </select>
+          </label>
+          <label style="display: flex; flex-direction: column; gap: 6px; min-width: 0; grid-column: 1 / -1">
+            <span class="lbl">Notes</span>
+            <span class="fld"><input type="text" value="{{mat.notes}}" onChange="{{noop}}" disabled="{{locked}}"></span>
+          </label>
+        </div>
+        <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 8px">
+          <div style="display: flex; gap: 2px">
+            <button class="ib" aria-label="Duplicate material" title="Duplicate"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.copy}}"></path></svg></button>
+            <button class="ib" aria-label="Delete material" title="Delete"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.trash}}"></path></svg></button>
+          </div>
+          <span class="lbl">{{mat.edited}}</span>
+        </div>
+      </section>
+
+      <section aria-label="Colour presets" style="background: #FFFFFF; border: 1px solid #E1E4E8; border-radius: 12px; display: flex; flex-direction: column; min-width: 0">
+        <div role="tablist" aria-label="Machines" style="display: flex; flex-wrap: wrap; align-items: center; gap: 2px; padding: 4px 12px 0; border-bottom: 1px solid #E1E4E8">
+          <sc-for list="{{machTabs}}" as="t" hint-placeholder-count="2">
+            <button role="tab" aria-selected="{{t.on}}" onClick="{{t.pick}}" style="display: inline-flex; align-items: center; gap: 8px; height: 46px; padding: 0 12px; border: 0; background: transparent; border-bottom: 2px solid {{t.bd}}; color: {{t.fg}}; font-weight: {{t.w}}; cursor: pointer">
+              <span style="height: 20px; padding: 0 6px; border-radius: 4px; display: inline-flex; align-items: center; font-size: 10px; font-weight: 600; letter-spacing: 0.04em; background: {{t.tbg}}; color: #FFFFFF">{{t.type}}</span>{{t.name}}
+            </button>
+          </sc-for>
+          <button class="tb" style="height: 30px; margin-left: 6px; border-style: dashed; color: #3A414C"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width: 15px; height: 15px"><path d="{{icons.plus}}"></path></svg>Machine</button>
+          <span style="flex: 1"></span>
+          <span class="lbl" style="padding-right: 4px">{{rowCount}}</span>
+        </div>
+
+        <!-- laser presets -->
+        <sc-if value="{{isLaser}}" hint-placeholder-val="{{true}}">
+          <div style="overflow-x: auto">
+            <div role="table" aria-label="Laser processes" style="min-width: 1100px">
+              <div role="row" style="display: grid; grid-template-columns: 20px 24px minmax(150px, 1.2fr) 104px 112px 80px 92px 104px 118px 108px 36px; gap: 10px; align-items: center; padding: 10px 16px; border-bottom: 1px solid #E1E4E8">
+                <span></span>
+                <span></span>
+                <span role="columnheader" class="th">Name</span>
+                <span role="columnheader" class="th">Process</span>
+                <span role="columnheader" class="th">Colours (ACI)</span>
+                <span role="columnheader" class="th">Power %</span>
+                <span role="columnheader" class="th">Speed mm/s</span>
+                <span role="columnheader" class="th">Source</span>
+                <span role="columnheader" class="th">Freq / DPI</span>
+                <span></span>
+                <span></span>
+              </div>
+              <sc-for list="{{laserRows}}" as="r" hint-placeholder-count="6">
+                <div style="border-bottom: 1px solid #EEF0F3; background: {{r.bg}}">
+                  <div role="row" style="display: grid; grid-template-columns: 20px 24px minmax(150px, 1.2fr) 104px 112px 80px 92px 104px 118px 108px 36px; gap: 10px; align-items: center; padding: 8px 16px">
+                    <span aria-hidden="true" style="display: flex; color: #8A919C; cursor: grab"><svg class="i" viewBox="0 0 24 24"><path d="{{icons.grip}}"></path></svg></span>
+                    <span role="cell"><input type="checkbox" checked="{{r.out}}" onChange="{{r.toggleOut}}" disabled="{{locked}}" aria-label="{{r.name}} enabled" style="width: 18px; height: 18px; margin: 0; accent-color: {{accent}}"></span>
+                    <span role="cell" style="display: flex; align-items: center; gap: 6px; min-width: 0">
+                      <input class="cell" value="{{r.name}}" onChange="{{r.setName}}" disabled="{{locked}}" aria-label="Process name" style="font-family: 'IBM Plex Sans', system-ui, sans-serif; font-weight: 500">
+                      <sc-if value="{{r.edited}}" hint-placeholder-val="{{false}}"><span role="img" aria-label="Edited" style="width: 7px; height: 7px; flex: none; border-radius: 50%; background: {{accent}}"></span></sc-if>
+                    </span>
+                    <span role="cell">
+                      <select class="cell" value="{{r.proc}}" onChange="{{r.setProc}}" disabled="{{locked}}" aria-label="{{r.name}} process">
+                        <option value="Cut">Cut</option>
+                        <option value="Engrave">Engrave</option>
+                        <option value="Mark">Mark</option>
+                      </select>
+                    </span>
+                    <span role="cell">
+                      <button onClick="{{r.pick}}" aria-expanded="{{r.picking}}" aria-label="Colours for {{r.name}}" style="display: inline-flex; align-items: center; gap: 3px; min-width: 48px; height: 32px; padding: 0 6px; box-sizing: border-box; border: 1px solid {{r.pickBd}}; border-radius: 6px; background: #FFFFFF; cursor: pointer">
+                        <sc-for list="{{r.chips}}" as="k" hint-placeholder-count="1"><span class="mono" title="{{k.title}}" style="width: 20px; height: 20px; border-radius: 4px; background: {{k.hex}}; color: {{k.fg}}; font-size: 10px; font-weight: 500; display: inline-flex; align-items: center; justify-content: center; box-shadow: inset 0 0 0 1px rgba(21, 24, 30, 0.18)">{{k.n}}</span></sc-for>
+                        <sc-if value="{{r.none}}" hint-placeholder-val="{{false}}"><span class="lbl">None</span></sc-if>
+                        <svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width: 14px; height: 14px; color: #5B6370"><path d="{{icons.plus}}"></path></svg>
+                      </button>
+                    </span>
+                    <span role="cell"><input class="cell" value="{{r.power}}" onChange="{{r.setPower}}" disabled="{{locked}}" aria-label="{{r.name}} power"></span>
+                    <span role="cell"><input class="cell" value="{{r.speed}}" onChange="{{r.setSpeed}}" disabled="{{locked}}" aria-label="{{r.name}} speed"></span>
+                    <span role="cell">
+                      <select class="cell" value="{{r.source}}" onChange="{{r.setSource}}" disabled="{{locked}}" aria-label="{{r.name}} source">
+                        <option value="CO2 DC">CO2 DC</option>
+                        <option value="CO2 RF">CO2 RF</option>
+                        <option value="Fiber">Fiber</option>
+                      </select>
+                    </span>
+                    <span role="cell" style="display: flex; align-items: center; gap: 6px">
+                      <input class="cell" value="{{r.f}}" onChange="{{r.setF}}" disabled="{{locked}}" aria-label="{{r.name}} {{r.fu}}">
+                      <span class="lbl" style="width: 28px">{{r.fu}}</span>
+                    </span>
+                    <span role="cell">
+                      <button onClick="{{r.toggleAdv}}" aria-expanded="{{r.advOpen}}" style="display: inline-flex; align-items: center; gap: 4px; height: 32px; padding: 0 6px; border: 0; background: transparent; color: {{accent}}; font-weight: 500; cursor: pointer">
+                        <svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="transform: rotate({{r.advRot}})"><path d="{{icons.chev}}"></path></svg>Advanced
+                      </button>
+                    </span>
+                    <span role="cell"><button class="ib" aria-label="{{r.name}} more actions" title="More"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="stroke-width: 2.6"><path d="{{icons.more}}"></path></svg></button></span>
+                  </div>
+                  <sc-if value="{{r.picking}}" hint-placeholder-val="{{false}}">
+                    <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 16px 10px 70px; background: #FAFAFB; border-top: 1px solid #EEF0F3">
+                      <span class="lbl" style="margin-right: 4px">Colours for {{r.name}}</span>
+                      <sc-for list="{{r.aci}}" as="a" hint-placeholder-count="9">
+                        <button aria-pressed="{{a.on}}" onClick="{{a.toggle}}" title="{{a.title}}" aria-label="{{a.title}}" disabled="{{locked}}" style="display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 10px 0 6px; border: 0; border-radius: 8px; background: {{a.bg}}; box-shadow: {{a.ring}}; cursor: pointer">
+                          <span aria-hidden="true" style="width: 20px; height: 20px; border-radius: 4px; background: {{a.hex}}; box-shadow: inset 0 0 0 1px rgba(21, 24, 30, 0.18)"></span>
+                          <span class="mono" style="font-size: 12px">{{a.n}}</span>
+                          <sc-if value="{{a.taken}}" hint-placeholder-val="{{false}}"><span class="lbl">{{a.ownerShort}}</span></sc-if>
+                        </button>
+                      </sc-for>
+                      <button class="tb" style="height: 32px; font-size: 12px">ACI #</button>
+                      <span style="flex: 1"></span>
+                      <button class="tb" onClick="{{r.pick}}" style="height: 32px">Done</button>
+                    </div>
+                  </sc-if>
+                  <sc-if value="{{r.advOpen}}" hint-placeholder-val="{{false}}">
+                    <div style="padding: 6px 16px 18px 70px; display: flex; flex-direction: column; gap: 16px">
+                      <div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px 24px">
+                        <sc-for list="{{r.adv}}" as="f" hint-placeholder-count="5">
+                          <sc-if value="{{f.isText}}" hint-placeholder-val="{{true}}">
+                            <label style="display: flex; flex-direction: column; gap: 6px; min-width: 0">
+                              <span class="lbl">{{f.l}}</span>
+                              <span class="fld" style="height: 32px"><input class="mono" value="{{f.v}}" onChange="{{f.set}}" disabled="{{locked}}"><span class="lbl">{{f.u}}</span></span>
+                            </label>
+                          </sc-if>
+                          <sc-if value="{{f.isPick}}" hint-placeholder-val="{{false}}">
+                            <div style="display: flex; flex-direction: column; gap: 6px; min-width: 0">
+                              <span class="lbl">{{f.l}}</span>
+                              <button class="tb" onClick="{{f.toggle}}" aria-haspopup="listbox" aria-expanded="{{f.open}}" aria-label="{{f.l}}: {{f.v}}" disabled="{{locked}}" style="height: 32px; width: 100%; justify-content: space-between">{{f.v}}<svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="color: #5B6370"><path d="{{icons.chev}}"></path></svg></button>
+                              <sc-if value="{{f.open}}" hint-placeholder-val="{{false}}">
+                                <div role="listbox" aria-label="{{f.l}}" style="display: flex; flex-direction: column; padding: 4px; border: 1px solid #E1E4E8; border-radius: 8px; background: #FFFFFF; box-shadow: 0 8px 20px rgba(21, 24, 30, 0.10)">
+                                  <sc-for list="{{f.opts}}" as="o" hint-placeholder-count="3">
+                                    <button role="option" aria-selected="{{o.on}}" onClick="{{o.pick}}" style="display: flex; align-items: center; justify-content: space-between; min-height: 30px; padding: 0 8px; border: 0; border-radius: 6px; background: {{o.bg}}; cursor: pointer; text-align: left">{{o.l}}<sc-if value="{{o.on}}" hint-placeholder-val="{{false}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width: 15px; height: 15px; color: {{accent}}"><path d="{{icons.check}}"></path></svg></sc-if></button>
+                                  </sc-for>
+                                </div>
+                              </sc-if>
+                            </div>
+                          </sc-if>
+                          <sc-if value="{{f.isCheck}}" hint-placeholder-val="{{false}}">
+                            <label style="display: flex; align-items: center; gap: 8px; align-self: end; height: 32px">
+                              <input type="checkbox" checked="{{f.on}}" onChange="{{f.toggle}}" disabled="{{locked}}" style="width: 18px; height: 18px; margin: 0; accent-color: {{accent}}">
+                              <span>{{f.l}}</span>
+                            </label>
+                          </sc-if>
+                        </sc-for>
+                      </div>
+                      <sc-if value="{{r.isCut}}" hint-placeholder-val="{{false}}">
+                        <div style="display: flex; flex-direction: column; gap: 10px; padding-top: 14px; border-top: 1px solid #EEF0F3">
+                          <span style="font-weight: 600">Links</span>
+                          <div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px 24px">
+                            <label style="display: flex; align-items: center; gap: 8px; align-self: end; height: 32px">
+                              <input type="checkbox" checked="{{r.dash}}" onChange="{{r.toggleDash}}" disabled="{{locked}}" style="width: 18px; height: 18px; margin: 0; accent-color: {{accent}}">
+                              <span>Generate links</span>
+                            </label>
+                            <label style="display: flex; flex-direction: column; gap: 6px; min-width: 0">
+                              <span class="lbl">Link length</span>
+                              <span class="fld" style="height: 32px"><input class="mono" value="{{r.dl}}" onChange="{{r.setDl}}" disabled="{{r.dashOff}}"><span class="lbl">mm</span></span>
+                            </label>
+                            <label style="display: flex; flex-direction: column; gap: 6px; min-width: 0">
+                              <span class="lbl">Gap length</span>
+                              <span class="fld" style="height: 32px"><input class="mono" value="{{r.gl}}" onChange="{{r.setGl}}" disabled="{{r.dashOff}}"><span class="lbl">mm</span></span>
+                            </label>
+                            <label style="display: flex; flex-direction: column; gap: 6px; min-width: 0">
+                              <span class="lbl">Power ratio</span>
+                              <span class="fld" style="height: 32px"><input class="mono" value="{{r.ratio}}" onChange="{{r.setRatio}}" disabled="{{r.dashOff}}"><span class="lbl">%</span></span>
+                            </label>
+                          </div>
+                        </div>
+                      </sc-if>
+                    </div>
+                  </sc-if>
+                </div>
+              </sc-for>
+              <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 16px">
+                <button class="tb" style="height: 32px" disabled="{{locked}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width: 15px; height: 15px"><path d="{{icons.plus}}"></path></svg>Add process</button>
+                <span style="flex: 1"></span>
+                <sc-if value="{{hasUnassigned}}" hint-placeholder-val="{{false}}">
+                  <span class="lbl">Unassigned</span>
+                  <sc-for list="{{unassigned}}" as="k" hint-placeholder-count="2"><span class="mono" title="{{k.title}}" style="width: 20px; height: 20px; border-radius: 4px; background: {{k.hex}}; color: {{k.fg}}; font-size: 10px; font-weight: 500; display: inline-flex; align-items: center; justify-content: center; box-shadow: inset 0 0 0 1px rgba(21, 24, 30, 0.18)">{{k.n}}</span></sc-for>
+                </sc-if>
+              </div>
+            </div>
+          </div>
+        </sc-if>
+
+        <!-- plotter presets -->
+        <sc-if value="{{isPlotter}}" hint-placeholder-val="{{false}}">
+          <div style="overflow-x: auto">
+            <div role="table" aria-label="Plotter process presets" style="min-width: 910px">
+              <div role="row" style="display: grid; grid-template-columns: minmax(260px, 1.6fr) 190px 100px 76px 64px 84px 84px 60px; gap: 8px; align-items: center; padding: 10px 16px; border-bottom: 1px solid #E1E4E8">
+                <span role="columnheader" class="th">Colours (ACI) · Process</span>
+                <span role="columnheader" class="th">Tool head</span>
+                <span role="columnheader" class="th">Speed mm/s</span>
+                <span role="columnheader" class="th">Passes</span>
+                <span role="columnheader" class="th">Dashed</span>
+                <span role="columnheader" class="th">Dash mm</span>
+                <span role="columnheader" class="th">Gap mm</span>
+                <span role="columnheader" class="th">Output</span>
+              </div>
+              <sc-for list="{{plotRows}}" as="r" hint-placeholder-count="5">
+                <div role="row" style="display: grid; grid-template-columns: minmax(260px, 1.6fr) 190px 100px 76px 64px 84px 84px 60px; gap: 8px; align-items: center; padding: 6px 16px; border-bottom: 1px solid #EEF0F3; background: {{r.bg}}">
+                  <span role="cell" style="display: flex; align-items: center; gap: 8px; min-width: 0">
+                    <button onClick="{{r.pick}}" aria-expanded="{{r.picking}}" aria-label="Colours for {{r.name}}" style="display: inline-flex; align-items: center; gap: 3px; flex: none; min-width: 48px; height: 32px; padding: 0 6px; box-sizing: border-box; border: 1px solid {{r.pickBd}}; border-radius: 6px; background: #FFFFFF; cursor: pointer">
+                      <sc-for list="{{r.chips}}" as="k" hint-placeholder-count="1"><span class="mono" title="{{k.title}}" style="width: 20px; height: 20px; border-radius: 4px; background: {{k.hex}}; color: {{k.fg}}; font-size: 10px; font-weight: 500; display: inline-flex; align-items: center; justify-content: center; box-shadow: inset 0 0 0 1px rgba(21, 24, 30, 0.18)">{{k.n}}</span></sc-for>
+                      <sc-if value="{{r.none}}" hint-placeholder-val="{{false}}"><span class="lbl">None</span></sc-if>
+                    </button>
+                    <input class="cell" value="{{r.name}}" onChange="{{r.setName}}" disabled="{{locked}}" aria-label="Process name" style="font-family: 'IBM Plex Sans', system-ui, sans-serif; font-weight: 500">
+                    <sc-if value="{{r.edited}}" hint-placeholder-val="{{false}}"><span role="img" aria-label="Edited" style="width: 7px; height: 7px; flex: none; border-radius: 50%; background: {{accent}}"></span></sc-if>
+                  </span>
+                  <span role="cell">
+                    <select class="cell" value="{{r.tool}}" onChange="{{r.setTool}}" disabled="{{locked}}" aria-label="{{r.name}} tool head">
+                      <option value="T1 · Knife">T1 · Knife</option>
+                      <option value="T2 · V-cut 45°">T2 · V-cut 45°</option>
+                      <option value="T3 · Crease wheel">T3 · Crease wheel</option>
+                      <option value="T4 · Pen">T4 · Pen</option>
+                    </select>
+                  </span>
+                  <span role="cell"><input class="cell" value="{{r.speed}}" onChange="{{r.setSpeed}}" disabled="{{locked}}" aria-label="{{r.name}} speed"></span>
+                  <span role="cell"><input class="cell" value="{{r.passes}}" onChange="{{r.setPasses}}" disabled="{{locked}}" aria-label="{{r.name}} passes"></span>
+                  <span role="cell"><input type="checkbox" checked="{{r.dash}}" onChange="{{r.toggleDash}}" disabled="{{locked}}" aria-label="{{r.name}} dashed" style="width: 18px; height: 18px; margin: 0; accent-color: {{accent}}"></span>
+                  <span role="cell"><input class="cell" value="{{r.dl}}" onChange="{{r.setDl}}" disabled="{{r.dashOff}}" aria-label="{{r.name}} dash length"></span>
+                  <span role="cell"><input class="cell" value="{{r.gl}}" onChange="{{r.setGl}}" disabled="{{r.dashOff}}" aria-label="{{r.name}} gap length"></span>
+                  <span role="cell">
+                    <button role="switch" aria-checked="{{r.out}}" aria-label="{{r.name}} output" onClick="{{r.toggleOut}}" disabled="{{locked}}" style="width: 36px; height: 22px; border: 0; border-radius: 11px; padding: 3px; box-sizing: border-box; background: {{r.swBg}}; display: flex; justify-content: {{r.swJ}}; cursor: pointer">
+                      <span style="width: 16px; height: 16px; border-radius: 50%; background: #FFFFFF; box-shadow: 0 1px 2px rgba(21, 24, 30, 0.3)"></span>
+                    </button>
+                  </span>
+                </div>
+                <sc-if value="{{r.picking}}" hint-placeholder-val="{{false}}">
+                  <div role="row" style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 16px; background: #FAFAFB; border-bottom: 1px solid #EEF0F3">
+                    <span class="lbl" style="margin-right: 4px">Colours for {{r.name}}</span>
+                    <sc-for list="{{r.aci}}" as="a" hint-placeholder-count="9">
+                      <button aria-pressed="{{a.on}}" onClick="{{a.toggle}}" title="{{a.title}}" aria-label="{{a.title}}" disabled="{{locked}}" style="display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 10px 0 6px; border: 0; border-radius: 8px; background: {{a.bg}}; box-shadow: {{a.ring}}; cursor: pointer">
+                        <span aria-hidden="true" style="width: 20px; height: 20px; border-radius: 4px; background: {{a.hex}}; box-shadow: inset 0 0 0 1px rgba(21, 24, 30, 0.18)"></span>
+                        <span class="mono" style="font-size: 12px">{{a.n}}</span>
+                        <sc-if value="{{a.taken}}" hint-placeholder-val="{{false}}"><span class="lbl">{{a.ownerShort}}</span></sc-if>
+                      </button>
+                    </sc-for>
+                    <button class="tb" style="height: 32px; font-size: 12px">ACI #</button>
+                    <span style="flex: 1"></span>
+                    <button class="tb" onClick="{{r.pick}}" style="height: 32px">Done</button>
+                  </div>
+                </sc-if>
+              </sc-for>
+              <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 16px">
+                <button class="tb" style="height: 32px" disabled="{{locked}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width: 15px; height: 15px"><path d="{{icons.plus}}"></path></svg>Add process</button>
+                <span style="flex: 1"></span>
+                <sc-if value="{{hasUnassigned}}" hint-placeholder-val="{{false}}">
+                  <span class="lbl">Unassigned</span>
+                  <sc-for list="{{unassigned}}" as="k" hint-placeholder-count="2"><span class="mono" title="{{k.title}}" style="width: 20px; height: 20px; border-radius: 4px; background: {{k.hex}}; color: {{k.fg}}; font-size: 10px; font-weight: 500; display: inline-flex; align-items: center; justify-content: center; box-shadow: inset 0 0 0 1px rgba(21, 24, 30, 0.18)">{{k.n}}</span></sc-for>
+                </sc-if>
+              </div>
+            </div>
+          </div>
+        </sc-if>
+      </section>
+
+      <div style="display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start">
+        <!-- laser: test grid -->
+        <sc-if value="{{isLaser}}" hint-placeholder-val="{{true}}">
+          <section aria-label="Test grid" style="flex: 2 1 480px; min-width: 0; background: #FFFFFF; border: 1px solid #E1E4E8; border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 12px">
+            <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px">
+              <h2 style="margin: 0; font-size: 14px; font-weight: 600">Test grid</h2>
+              <span style="flex: 1"></span>
+              <label style="display: flex; align-items: center; gap: 8px">
+                <span class="lbl">Colour</span>
+                <select class="cell" style="width: 170px" value="{{tg.target}}" onChange="{{tg.setTarget}}">
+                  <option value="0">Cut contour</option>
+                  <option value="1">Tear-off line</option>
+                  <option value="2">Engrave outline</option>
+                  <option value="3">Engrave fill</option>
+                  <option value="4">Kiss cut</option>
+                  <option value="5">Mark</option>
+                </select>
+              </label>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 6px">
+              <div style="display: flex; gap: 6px; align-items: center">
+                <span class="lbl" style="width: 64px; flex: none">Power ↓</span>
+                <sc-for list="{{tg.speeds}}" as="s" hint-placeholder-count="5"><span class="mono lbl" style="flex: 1; text-align: center">{{s}}</span></sc-for>
+              </div>
+              <sc-for list="{{tg.rows}}" as="row" hint-placeholder-count="5">
+                <div style="display: flex; gap: 6px; align-items: center">
+                  <span class="mono lbl" style="width: 64px; flex: none">{{row.p}} %</span>
+                  <sc-for list="{{row.cells}}" as="c" hint-placeholder-count="5">
+                    <button onClick="{{c.pick}}" aria-pressed="{{c.on}}" aria-label="{{c.label}}" style="flex: 1; height: 34px; border: 0; border-radius: 6px; background: {{c.bg}}; box-shadow: {{c.ring}}; cursor: pointer"></button>
+                  </sc-for>
+                </div>
+              </sc-for>
+              <div style="display: flex; gap: 6px">
+                <span style="width: 64px; flex: none"></span>
+                <span class="lbl" style="flex: 1; text-align: right">Speed mm/s →</span>
+              </div>
+            </div>
+            <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding-top: 4px; border-top: 1px solid #EEF0F3">
+              <span class="mono" style="font-weight: 500; padding-top: 8px">{{tg.pickLabel}}</span>
+              <span style="flex: 1"></span>
+              <button class="tb" style="margin-top: 8px">Engrave grid</button>
+              <button onClick="{{tg.apply}}" disabled="{{locked}}" style="margin-top: 8px; height: 36px; padding: 0 16px; border: 0; border-radius: 8px; background: {{accent}}; color: #FFFFFF; font-weight: 600; cursor: pointer">Apply to {{tg.targetName}}</button>
+            </div>
+          </section>
+        </sc-if>
+
+        <!-- plotter: tool heads -->
+        <sc-if value="{{isPlotter}}" hint-placeholder-val="{{false}}">
+          <section aria-label="Tool heads" style="flex: 2 1 480px; min-width: 0; background: #FFFFFF; border: 1px solid #E1E4E8; border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 10px">
+            <h2 style="margin: 0; font-size: 14px; font-weight: 600">Tool heads</h2>
+            <sc-for list="{{heads}}" as="h" hint-placeholder-count="4">
+              <div style="display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid #E1E4E8; border-radius: 8px">
+                <span class="mono" style="width: 30px; height: 30px; flex: none; border-radius: 6px; background: #F0F1F4; display: inline-flex; align-items: center; justify-content: center; font-weight: 500">{{h.slot}}</span>
+                <span style="flex: 1; min-width: 0; font-weight: 500">{{h.name}}</span>
+                <span style="display: flex; gap: 6px; flex-wrap: wrap">
+                  <sc-for list="{{h.colours}}" as="c" hint-placeholder-count="1">
+                    <span style="display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 8px; border-radius: 12px; background: #F3F4F6; font-size: 12px"><span aria-hidden="true" style="width: 10px; height: 10px; border-radius: 3px; background: {{c.c}}"></span>{{c.name}}</span>
+                  </sc-for>
+                </span>
+              </div>
+            </sc-for>
+          </section>
+        </sc-if>
+
+        <!-- info -->
+        <section aria-label="Material info" style="flex: 1 1 280px; min-width: 0; background: #FFFFFF; border: 1px solid #E1E4E8; border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 10px">
+          <h2 style="margin: 0; font-size: 14px; font-weight: 600">Usage</h2>
+          <sc-for list="{{usage}}" as="u" hint-placeholder-count="3">
+            <div style="display: flex; justify-content: space-between; gap: 8px"><span style="color: #3A414C">{{u.k}}</span><span class="mono">{{u.v}}</span></div>
+          </sc-for>
+          <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px">
+            <span style="color: #3A414C">Machines</span>
+            <span style="display: flex; gap: 4px">
+              <sc-for list="{{mat.machineTags}}" as="t" hint-placeholder-count="1"><span style="height: 20px; padding: 0 6px; border-radius: 4px; display: inline-flex; align-items: center; font-size: 10px; font-weight: 600; letter-spacing: 0.04em; background: {{t.tbg}}; color: #FFFFFF">{{t.type}}</span></sc-for>
+            </span>
+          </div>
+          <div style="height: 1px; background: #E1E4E8; margin: 4px 0"></div>
+          <div style="display: flex; justify-content: space-between; align-items: center">
+            <span id="lock-label" style="font-weight: 500">Lock presets</span>
+            <button role="switch" aria-checked="{{locked}}" aria-labelledby="lock-label" onClick="{{toggleLock}}" style="width: 44px; height: 26px; border: 0; border-radius: 13px; padding: 3px; box-sizing: border-box; background: {{lockBg}}; display: flex; justify-content: {{lockJ}}; cursor: pointer">
+              <span style="width: 20px; height: 20px; border-radius: 50%; background: #FFFFFF; box-shadow: 0 1px 2px rgba(21, 24, 30, 0.3)"></span>
+            </button>
+          </div>
+          <button class="tb" style="justify-content: center"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.export}}"></path></svg>Export material</button>
+        </section>
+      </div>
+    </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#2457D6","options":["#2457D6","#0B7F75","#C2410C","#15181E"]},"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  state = {
+    matId: 'acr-print-3',
+    filter: 'all',
+    q: '',
+    tab: null,
+    edits: {},
+    saved: {},
+    assign: {},
+    savedAssign: {},
+    picking: null,
+    adv: {},
+    openPick: null,
+    dirty: false,
+    locks: {},
+    tgTarget: 0,
+    tgCell: null
+  };
+
+  renderVals() {
+    const accent = this.props.accent ?? '#2457D6';
+    const soft = (h, t) => {
+      const n = parseInt(String(h).slice(1, 7), 16);
+      if (Number.isNaN(n)) return '#EEF2FC';
+      const mix = (c) => Math.round(c + (255 - c) * t);
+      return 'rgb(' + mix(n >> 16) + ', ' + mix((n >> 8) & 255) + ', ' + mix(n & 255) + ')';
+    };
+    const accentSoft = soft(accent, 0.9);
+    const noop = () => {};
+
+    const icons = {
+      back: 'M15 6l-6 6 6 6',
+      import: 'M12 3v12 M7 10l5 5 5-5 M4 20h16',
+      export: 'M12 15V3 M7 8l5-5 5 5 M4 20h16',
+      search: 'M11 4a7 7 0 1 0 0 14a7 7 0 1 0 0-14z M20 20l-4-4',
+      plus: 'M12 5v14 M5 12h14',
+      copy: 'M8 8h12v12H8z M4 16V4h12',
+      trash: 'M4 7h16 M9 7V4h6v3 M6 7l1 13h10l1-13',
+      lock: 'M6 11h12v9H6z M8 11V8a4 4 0 0 1 8 0v3',
+      chev: 'M6 9l6 6 6-6',
+      check: 'M5 12.5l4.5 4.5L19 7',
+      grip: 'M5 9h14 M5 15h14',
+      more: 'M12 5h.01 M12 12h.01 M12 19h.01'
+    };
+
+    const MACH = {
+      laser: { name: 'Trotec Speedy 360', type: 'LASER', tbg: '#15181E' },
+      plotter: { name: 'Flatbed 1', type: 'PLOTTER', tbg: '#0B7F75' }
+    };
+
+    const MATS = [
+      { id: 'acr-print-3', g: 'Acrylic', name: 'Printed acrylic', t: 3, sw: '#DCE3EC', m: ['laser'], notes: 'Print side up', edited: 'Edited 24 Oct 2026', jobs: 12, tpl: 2, last: '24 Oct 2026' },
+      { id: 'acr-clear-3', g: 'Acrylic', name: 'Cast acrylic, clear', t: 3, sw: '#E3EEF3', m: ['laser'], notes: 'Remove film both sides', edited: 'Edited 2 Oct 2026', jobs: 31, tpl: 4, last: '26 Oct 2026' },
+      { id: 'acr-clear-5', g: 'Acrylic', name: 'Cast acrylic, clear', t: 5, sw: '#D6E6EE', m: ['laser'], notes: '', edited: 'Edited 18 Sep 2026', jobs: 9, tpl: 1, last: '20 Oct 2026' },
+      { id: 'acr-white-3', g: 'Acrylic', name: 'Extruded acrylic, white', t: 3, sw: '#F7F7F5', m: ['laser'], notes: '', edited: 'Edited 3 Aug 2026', jobs: 6, tpl: 0, last: '11 Oct 2026' },
+      { id: 'birch-3', g: 'Wood', name: 'Birch ply', t: 3, sw: '#E9D9BC', m: ['laser'], locked: true, notes: 'B/BB grade', edited: 'Edited 12 Jul 2026', jobs: 48, tpl: 6, last: '27 Oct 2026' },
+      { id: 'birch-6', g: 'Wood', name: 'Birch ply', t: 6, sw: '#E2CFAB', m: ['laser'], notes: '', edited: 'Edited 12 Jul 2026', jobs: 17, tpl: 2, last: '22 Oct 2026' },
+      { id: 'mdf-6', g: 'Wood', name: 'MDF', t: 6, sw: '#C9A97E', m: ['laser'], notes: '', edited: 'Edited 1 Jun 2026', jobs: 22, tpl: 3, last: '19 Oct 2026' },
+      { id: 'foam-5', g: 'Board & card', name: 'Foam board', t: 5, sw: '#F1EDE4', m: ['plotter'], notes: '', edited: 'Edited 21 Oct 2026', jobs: 27, tpl: 3, last: '27 Oct 2026' },
+      { id: 'corr-3', g: 'Board & card', name: 'Corrugated board', t: 3, sw: '#D8B98C', m: ['laser', 'plotter'], notes: 'Flute direction along X', edited: 'Edited 9 Oct 2026', jobs: 14, tpl: 2, last: '23 Oct 2026' },
+      { id: 'grey-2', g: 'Board & card', name: 'Greyboard', t: 2, sw: '#B4B3AD', m: ['laser', 'plotter'], notes: '', edited: 'Edited 9 Oct 2026', jobs: 8, tpl: 1, last: '15 Oct 2026' },
+      { id: 'pet-025', g: 'Film & sheet', name: 'Polyester film', t: 0.25, sw: '#EEF1F4', m: ['plotter'], notes: '', edited: 'Edited 14 Sep 2026', jobs: 5, tpl: 0, last: '2 Oct 2026' },
+      { id: 'mag-08', g: 'Film & sheet', name: 'Magnetic sheet', t: 0.8, sw: '#55554F', m: ['plotter'], notes: '', edited: 'Edited 14 Sep 2026', jobs: 3, tpl: 0, last: '28 Sep 2026' }
+    ];
+
+    const filter = this.state.filter;
+    const q = this.state.q.trim().toLowerCase();
+    const visible = MATS.filter((x) => (filter === 'all' || x.m.includes(filter)) && (!q || x.name.toLowerCase().includes(q) || x.g.toLowerCase().includes(q)));
+    const mat = MATS.find((x) => x.id === this.state.matId) || MATS[0];
+    const isLocked = (x) => this.state.locks[x.id] ?? !!x.locked;
+    const locked = isLocked(mat);
+
+    const groupNames = ['Acrylic', 'Wood', 'Board & card', 'Film & sheet'];
+    const groups = groupNames.map((g) => {
+      const items = visible.filter((x) => x.g === g).map((x) => {
+        const on = x.id === mat.id;
+        return {
+          name: x.name,
+          sub: x.t + ' mm · ' + x.m.map((k) => (k === 'laser' ? 'Laser' : 'Plotter')).join(', '),
+          sw: x.sw,
+          locked: isLocked(x),
+          cur: on ? 'page' : 'false',
+          bg: on ? accentSoft : 'transparent',
+          bd: on ? accent : 'transparent',
+          pick: () => this.setState({ matId: x.id, tab: null, tgCell: null, picking: null })
+        };
+      });
+      return { name: g, count: items.length, items };
+    }).filter((g) => g.items.length > 0);
+
+    const filt = (id, l) => ({
+      l, on: filter === id,
+      bg: filter === id ? '#FFFFFF' : 'transparent',
+      sh: filter === id ? '0 1px 2px rgba(21, 24, 30, 0.14)' : 'none',
+      fg: filter === id ? '#15181E' : '#5B6370',
+      pick: () => this.setState({ filter: id })
+    });
+
+    const tab = mat.m.includes(this.state.tab) ? this.state.tab : mat.m[0];
+    const isLaser = tab === 'laser';
+    const machTabs = mat.m.map((k) => ({
+      ...MACH[k], on: k === tab,
+      bd: k === tab ? accent : 'transparent',
+      fg: k === tab ? '#15181E' : '#5B6370',
+      w: k === tab ? 600 : 400,
+      pick: () => this.setState({ tab: k, picking: null })
+    }));
+
+    // presets
+    const t = mat.t;
+    const cs = Math.max(4, Math.round(60 / t));
+    const ks = Math.max(150, Math.round(450 - t * 30));
+    const LASER = [
+      { c: '#E5484D', name: 'Cut contour', proc: 'Cut', power: 90, speed: cs, f: 5000, passes: 1, air: 'On', dash: false, dl: 5, gl: 2, out: true },
+      { c: '#30A46C', name: 'Tear-off line', proc: 'Cut', power: 90, speed: cs, f: 5000, passes: 1, air: 'On', dash: true, dl: 4, gl: 1, out: true },
+      { c: '#3E63DD', name: 'Engrave outline', proc: 'Engrave', power: 45, speed: 300, f: 500, passes: 1, air: 'Off', dash: false, dl: 5, gl: 2, out: true },
+      { c: '#15181E', name: 'Engrave fill', proc: 'Engrave', power: 60, speed: 400, f: 500, passes: 1, air: 'Off', dash: false, dl: 5, gl: 2, out: true },
+      { c: '#EAB308', name: 'Kiss cut', proc: 'Cut', power: 40, speed: cs * 3, f: 5000, passes: 1, air: 'On', dash: false, dl: 5, gl: 2, out: false },
+      { c: '#8E8C99', name: 'Mark', proc: 'Mark', power: 15, speed: 800, f: 1000, passes: 1, air: 'Off', dash: false, dl: 5, gl: 2, out: false }
+    ];
+    const PLOT = [
+      { c: '#E5484D', name: 'Knife through', tool: 'T1 · Knife', speed: ks, passes: t > 4 ? 2 : 1, dash: false, dl: 5, gl: 2, out: true },
+      { c: '#F76B15', name: 'Perforate', tool: 'T1 · Knife', speed: ks, passes: 1, dash: true, dl: 8, gl: 2, out: true },
+      { c: '#3E63DD', name: 'V-cut 45°', tool: 'T2 · V-cut 45°', speed: 250, passes: 1, dash: false, dl: 5, gl: 2, out: true },
+      { c: '#30A46C', name: 'Crease', tool: 'T3 · Crease wheel', speed: 300, passes: 1, dash: false, dl: 5, gl: 2, out: true },
+      { c: '#15181E', name: 'Pen', tool: 'T4 · Pen', speed: 500, passes: 1, dash: false, dl: 5, gl: 2, out: false }
+    ];
+
+    const edits = this.state.edits, saved = this.state.saved;
+    const key = (i, f) => mat.id + '|' + tab + '|' + i + '|' + f;
+    const val = (i, f, b) => (edits[key(i, f)] !== undefined ? edits[key(i, f)] : b);
+    const rowEdited = (i) => Object.keys(edits).some((k) => k.startsWith(mat.id + '|' + tab + '|' + i + '|') && edits[k] !== saved[k]);
+    const set = (i, f) => (e) => {
+      const v = e.target.value;
+      this.setState((s) => ({ edits: { ...s.edits, [key(i, f)]: v }, dirty: true }));
+    };
+    const flip = (i, f, cur) => () => this.setState((s) => ({ edits: { ...s.edits, [key(i, f)]: !cur }, dirty: true }));
+
+    // DXF / AutoCAD Color Index assignment
+    const ACI = [
+      { n: 1, name: 'Red', hex: '#FF0000', fg: '#FFFFFF' }, { n: 2, name: 'Yellow', hex: '#FFFF00', fg: '#15181E' },
+      { n: 3, name: 'Green', hex: '#00FF00', fg: '#15181E' }, { n: 4, name: 'Cyan', hex: '#00FFFF', fg: '#15181E' },
+      { n: 5, name: 'Blue', hex: '#0000FF', fg: '#FFFFFF' }, { n: 6, name: 'Magenta', hex: '#FF00FF', fg: '#FFFFFF' },
+      { n: 7, name: 'White / black', hex: '#000000', fg: '#FFFFFF' }, { n: 8, name: 'Grey', hex: '#808080', fg: '#FFFFFF' },
+      { n: 9, name: 'Light grey', hex: '#C0C0C0', fg: '#15181E' }
+    ].map((a) => ({ ...a, title: 'ACI ' + a.n + ' · ' + a.name }));
+    const akey = mat.id + '|' + tab;
+    const defAssign = tab === 'laser' ? [[1, 6], [3], [5], [7], [], [8]] : [[1], [6], [5], [3], [7, 8]];
+    const assign = this.state.assign[akey] || defAssign;
+    const baseRows = tab === 'laser' ? LASER : PLOT;
+    const nameOf = (i) => val(i, 'name', baseRows[i].name);
+    const chipsFor = (i) => (assign[i] || []).map((n) => ACI[n - 1]);
+    const picking = this.state.picking;
+    const aciFor = (i) => ACI.map((a) => {
+      const on = (assign[i] || []).includes(a.n);
+      const owner = assign.findIndex((l) => l.includes(a.n));
+      const taken = owner >= 0 && owner !== i;
+      return {
+        ...a, on, taken,
+        ownerShort: taken ? nameOf(owner) : '',
+        title: a.title + (taken ? ' · used by ' + nameOf(owner) : ''),
+        bg: on ? accentSoft : '#FFFFFF',
+        ring: on ? '0 0 0 2px ' + accent : '0 0 0 1px #E1E4E8',
+        toggle: () => this.setState((s) => {
+          const cur = s.assign[akey] || defAssign;
+          const had = (cur[i] || []).includes(a.n);
+          const next = cur.map((l) => l.filter((x) => x !== a.n));
+          if (!had) next[i] = (next[i] || []).concat(a.n).sort((x, y) => x - y);
+          return { assign: { ...s.assign, [akey]: next }, dirty: true };
+        })
+      };
+    });
+    const unassigned = ACI.filter((a) => !assign.some((l) => l.includes(a.n)));
+
+    const common = (b, i) => {
+      const dash = val(i, 'dash', b.dash);
+      const out = val(i, 'out', b.out);
+      const chips = chipsFor(i);
+      return {
+        chips, none: chips.length === 0,
+        name: nameOf(i), setName: set(i, 'name'),
+        picking: picking === i, pickBd: picking === i ? accent : '#D5D9DF',
+        pick: () => this.setState((s) => ({ picking: s.picking === i ? null : i })),
+        aci: picking === i ? aciFor(i) : [],
+        edited: rowEdited(i),
+        speed: val(i, 'speed', b.speed), passes: val(i, 'passes', b.passes),
+        dash, dashOff: !dash || locked, dl: val(i, 'dl', b.dl), gl: val(i, 'gl', b.gl),
+        out, swBg: out ? accent : '#C9CED6', swJ: out ? 'flex-end' : 'flex-start',
+        bg: out ? '#FFFFFF' : '#FAFAFB',
+        setSpeed: set(i, 'speed'), setPasses: set(i, 'passes'), setDl: set(i, 'dl'), setGl: set(i, 'gl'),
+        toggleDash: flip(i, 'dash', dash), toggleOut: flip(i, 'out', out)
+      };
+    };
+    const OPTS = {
+      'Path planning': ['Standard', 'Inner geometries first', 'Optimised'],
+      'Process gas': ['Air assist', 'Off', 'Nitrogen'],
+      'Direction': ['Top down', 'Bottom up'],
+      'Engrave mode': ['Standard', 'Stamp', 'Relief'],
+      'High quality': ['Off', 'On'],
+      'Dithering': ['Floyd–Steinberg', 'Ordered', 'Jarvis', 'Stucki', 'None'],
+      'Process splitting': ['None', 'By colour', 'By object']
+    };
+    const laserRows = LASER.map((b, i) => {
+      const proc = val(i, 'proc', b.proc);
+      const isCut = proc === 'Cut';
+      const advKey = mat.id + '|' + i;
+      const advOpen = this.state.adv[advKey] ?? (i === 0);
+      const T = (l, k, d, u) => ({ isText: true, l, v: val(i, k, d), u: u || '', set: set(i, k) });
+      const P = (l, d) => {
+        const pk = 'p_' + l;
+        const v = val(i, pk, d);
+        const ok = mat.id + '|' + i + '|' + l;
+        const open = this.state.openPick === ok;
+        return {
+          isPick: true, l, v, open,
+          toggle: () => this.setState({ openPick: open ? null : ok }),
+          opts: open ? (OPTS[l] || [d]).map((o) => ({
+            l: o, on: o === v, bg: o === v ? accentSoft : 'transparent',
+            pick: () => this.setState((s) => ({ edits: { ...s.edits, [key(i, pk)]: o }, dirty: true, openPick: null }))
+          })) : []
+        };
+      };
+      const C = (l, k, d) => {
+        const on = !!val(i, k, d);
+        return { isCheck: true, l, on, toggle: flip(i, k, on) };
+      };
+      const adv = isCut
+        ? [T('Passes', 'passes', b.passes, '×'), T('Power correction', 'pc', '7'), P('Path planning', 'Standard'), T('Z-offset', 'z', '0', 'mm'), P('Process gas', 'Air assist')]
+        : [
+          T('Frequency', 'freq2', '0', 'Hz'), T('Passes', 'passes', b.passes, '×'), T('Power correction', 'pc', '20'), P('Direction', 'Bottom up'),
+          P('Engrave mode', 'Standard'), P('High quality', 'Off'), C('Relief', 'relief', false), T('Extended overshoot', 'over', '0', 'mm'),
+          T('Z-offset', 'z', '0', 'mm'), P('Process gas', 'Air assist'), P('Dithering', 'Floyd–Steinberg'), C('Engrave covered layers', 'covered', false),
+          P('Process splitting', 'None')
+        ];
+      return {
+        ...common(b, i), proc, isCut, power: val(i, 'power', b.power), f: val(i, 'f', b.f),
+        source: val(i, 'source', 'CO2 DC'),
+        fu: isCut ? 'Hz' : 'DPI',
+        ratio: val(i, 'ratio', '50'),
+        advOpen, advRot: advOpen ? '180deg' : '0deg', adv,
+        toggleAdv: () => this.setState((s) => ({ adv: { ...s.adv, [advKey]: !advOpen } })),
+        setProc: set(i, 'proc'), setPower: set(i, 'power'), setF: set(i, 'f'), setSource: set(i, 'source'), setRatio: set(i, 'ratio')
+      };
+    });
+    const plotRows = PLOT.map((b, i) => ({ ...common(b, i), tool: val(i, 'tool', b.tool), setTool: set(i, 'tool') }));
+
+    // test grid (laser)
+    const ti = Math.min(this.state.tgTarget, laserRows.length - 1);
+    const tr = laserRows[ti];
+    const p0 = Number(tr.power) || 50, s0 = Number(tr.speed) || 20;
+    const powers = [-10, -5, 0, 5, 10].map((d) => Math.min(100, Math.max(5, p0 + d)));
+    const speeds = [0.6, 0.8, 1, 1.2, 1.4].map((f) => Math.max(1, Math.round(s0 * f)));
+    const cellKey = this.state.tgCell || '2-2';
+    const lerp = (a, b, k) => Math.round(a + (b - a) * k);
+    const burn = (k) => 'rgb(' + lerp(240, 74, k) + ', ' + lerp(230, 52, k) + ', ' + lerp(212, 34, k) + ')';
+    const tgRows = powers.map((p, ri) => ({
+      p,
+      cells: speeds.map((sp, ci) => {
+        const id = ri + '-' + ci;
+        const on = id === cellKey;
+        return {
+          on, label: p + '% power, ' + sp + ' mm/s',
+          bg: burn((ri / 4) * 0.55 + (1 - ci / 4) * 0.45),
+          ring: on ? '0 0 0 2px #FFFFFF, 0 0 0 4px ' + accent : 'none',
+          pick: () => this.setState({ tgCell: id })
+        };
+      })
+    }));
+    const [cr, cc] = cellKey.split('-').map(Number);
+    const pickP = powers[cr], pickS = speeds[cc];
+    const tg = {
+      target: String(ti),
+      targetName: tr.name,
+      setTarget: (e) => this.setState({ tgTarget: Number(e.target.value), tgCell: null }),
+      speeds, rows: tgRows,
+      pickLabel: pickP + ' % · ' + pickS + ' mm/s',
+      apply: () => this.setState((s) => ({
+        edits: { ...s.edits, [mat.id + '|laser|' + ti + '|power']: String(pickP), [mat.id + '|laser|' + ti + '|speed']: String(pickS) },
+        dirty: true, tgCell: null
+      }))
+    };
+
+    // tool heads (plotter)
+    const HEADS = [['T1', 'Knife', 'T1 · Knife'], ['T2', 'V-cut 45°', 'T2 · V-cut 45°'], ['T3', 'Crease wheel', 'T3 · Crease wheel'], ['T4', 'Pen', 'T4 · Pen']];
+    const heads = HEADS.map(([slot, name, id]) => ({ slot, name, colours: plotRows.filter((r) => r.tool === id).map((r) => ({ c: r.chips.length ? r.chips[0].hex : '#C9CED6', name: r.name })) }));
+
+    return {
+      accent, icons, noop,
+      libCount: MATS.length + ' materials',
+      dirty: this.state.dirty,
+      clean: !this.state.dirty,
+      saveOpacity: this.state.dirty ? 1 : 0.45,
+      saveCursor: this.state.dirty ? 'pointer' : 'default',
+      save: () => this.setState((s) => ({ saved: { ...s.edits }, savedAssign: { ...s.assign }, dirty: false })),
+      discard: () => this.setState((s) => ({ edits: { ...s.saved }, assign: { ...s.savedAssign }, dirty: false, picking: null })),
+      unassigned, hasUnassigned: unassigned.length > 0,
+      q: this.state.q,
+      setQ: (e) => this.setState({ q: e.target.value }),
+      filters: [filt('all', 'All'), filt('laser', 'Laser'), filt('plotter', 'Plotter')],
+      groups,
+      mat: { ...mat, machineTags: mat.m.map((k) => MACH[k]) },
+      locked,
+      lockBg: locked ? accent : '#C9CED6',
+      lockJ: locked ? 'flex-end' : 'flex-start',
+      toggleLock: () => this.setState((s) => ({ locks: { ...s.locks, [mat.id]: !locked } })),
+      machTabs,
+      isLaser, isPlotter: !isLaser,
+      rowCount: (isLaser ? laserRows.length : plotRows.length) + ' processes',
+      laserRows, plotRows, tg, heads,
+      usage: [{ k: 'Jobs', v: String(mat.jobs) }, { k: 'Templates', v: String(mat.tpl) }, { k: 'Last used', v: mat.last }]
+    };
+  }
+}
+</script>
+</body>
+</html>

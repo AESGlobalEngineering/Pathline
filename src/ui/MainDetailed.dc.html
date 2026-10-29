@@ -1,0 +1,2116 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Pathline</title>
+<link rel="stylesheet" href="fonts.css">
+<link rel="stylesheet" href="theme.css">
+<script src="../shared/core.js"></script>
+<script src="../../node_modules/clipper-lib/clipper.js"></script>
+<script src="../../node_modules/opentype.js/dist/opentype.min.js"></script>
+<script src="./support.js"></script>
+<script src="./app.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+/* Job page only. Shared components and tokens are in theme.css. */
+.dock{scrollbar-width:thin}
+/* values set from renderVals() as custom properties, so hover still works */
+.v-bg.v-bg{background:var(--v-bg,transparent)}
+.v-bg.v-bg:hover{background:var(--hover)}
+.v-bg.v-bg:is([aria-selected="true"],[aria-checked="true"],[aria-pressed="true"],[aria-expanded="true"]):hover,.v-bg.v-bg:disabled:hover{background:var(--v-bg,transparent)}
+.v-bd.v-bd{border-color:var(--v-bd,var(--line-strong))}
+.v-bd.v-bd:hover{border-color:var(--line-hover)}
+.v-bd.v-bd[aria-expanded="true"]{border-color:var(--accent)}
+/* app bar context: job name + menu bar */
+.job-name{display:flex;flex-direction:column;min-width:0;max-width:260px;line-height:1.25;border:0;background:transparent;padding:3px 8px;border-radius:6px;cursor:text;text-align:left;color:var(--text)}
+.job-name:hover{background:var(--hover)}
+.job-name > span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mbar{display:flex;gap:2px;flex:none}
+.mbar .mb{height:32px;padding:0 10px;border:0;border-radius:6px;cursor:pointer;color:var(--text-2)}
+.mbar .mb:hover,.mbar .mb[aria-expanded="true"]{color:var(--text)}
+/* machine box in the app bar */
+.mach-box{display:flex;align-items:center;gap:10px;height:44px;padding:0 10px 0 8px;border:1px solid var(--line-strong);border-radius:10px;background:var(--surface);cursor:pointer;text-align:left;color:var(--text);box-sizing:border-box}
+.mach-box:hover{border-color:var(--line-hover)}
+.mach-box[aria-expanded="true"]{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-ring)}
+.mach-box .dot{width:7px;height:7px;border-radius:50%;flex:none}
+/* label above a field */
+.fcol{display:flex;flex-direction:column;gap:6px;min-width:0}
+.grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+/* inline notes */
+.note{padding:8px 10px;border-radius:8px;background:var(--sunken);color:var(--text-2);font-size:12px;line-height:1.4}
+.note.warn{background:var(--warn-soft);color:var(--warn)}
+/* material picker button */
+.mat-btn{display:flex;align-items:center;gap:12px;width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid var(--line-strong);border-radius:10px;background:var(--surface);text-align:left;color:var(--text);cursor:pointer}
+.mat-btn[aria-expanded="true"]{box-shadow:0 0 0 3px var(--accent-ring)}
+.mat-sw{flex:none;border-radius:8px;box-shadow:var(--chip-ring)}
+/* process rows */
+.proc{display:flex;flex-direction:column;border-radius:8px}
+.proc-head{flex:1;min-width:0;display:flex;align-items:center;gap:10px;padding:9px 4px 9px 10px;border:0;background:transparent;cursor:pointer;text-align:left;color:var(--text)}
+.proc-title{display:flex;align-items:center;gap:6px;min-width:0}
+.proc-title > .nm{font-weight:500;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.proc-set{margin:0 6px 6px;padding:12px;border-radius:6px;background:var(--surface);box-shadow:inset 0 0 0 1px var(--line);display:flex;flex-direction:column;gap:14px}
+.proc-name{flex:1;min-width:0;font:600 14px var(--font);border:0;border-bottom:1px dashed transparent;outline:0;padding:2px 0;color:var(--text);background:transparent;text-overflow:ellipsis}
+.proc-name:hover,.proc-name:focus{border-bottom-color:var(--line-hover)}
+.chip.lg{width:26px;height:26px;border-radius:6px;font-size:11px}
+.chip.sm{width:16px;height:16px;font-size:9px}
+.chip-none{box-sizing:border-box;border-radius:4px;border:1.5px dashed var(--line-hover);display:inline-flex;align-items:center;color:var(--text-3);font-size:12px}
+/* fill / sheet popovers */
+.popover{position:absolute;top:44px;z-index:40;padding:14px;display:flex;flex-direction:column;gap:12px;border-radius:12px}
+/* snap toggles */
+.snap[aria-pressed="true"]{border-color:var(--accent)}
+</style>
+</helmet>
+<div style="height: 100vh; display: flex; flex-direction: column; background: var(--bg); color: var(--text); font-family: var(--font); font-size: 13px; overflow: hidden">
+
+  <!-- ===== App bar ===== -->
+  <header class="appbar">
+    <div class="brand">
+      <svg viewBox="0 0 64 64" width="28" height="28" role="img" aria-label="Pathline" style="flex: none; display: block"><rect width="64" height="64" rx="15" fill="#D62828"></rect><g transform="translate(14 14) scale(0.5625)" stroke-width="6" stroke-linejoin="round"><polygon points="6,6 50,6 6,50" fill="#FFFFFF" stroke="#FFFFFF"></polygon><polygon points="58,14 58,58 14,58" fill="#111214" stroke="#111214"></polygon></g></svg>
+      <span class="word">Pathline</span>
+    </div>
+    <nav aria-label="Sections" class="seg">
+      <a href="MainDetailed.dc.html" aria-current="page">Job</a>
+      <a href="SimulationDetailed.dc.html">Simulation</a>
+    </nav>
+    <span class="divider"></span>
+    <div class="ctx">
+      <button class="job-name" onClick="{{renameJob}}" title="Rename job">
+        <span style="font-weight: 600">{{saveName}}</span>
+        <span class="lbl">{{savedLabel}}</span>
+      </button>
+      <nav aria-label="Menu" class="mbar">
+        <sc-for list="{{menuBar}}" as="mb" hint-placeholder-count="6">
+          <div style="position: relative">
+            <button class="mb v-bg" onClick="{{mb.toggle}}" aria-haspopup="menu" aria-expanded="{{mb.open}}" style="--v-bg: {{mb.bg}}">{{mb.l}}</button>
+            <sc-if value="{{mb.open}}" hint-placeholder-val="{{false}}">
+              <div role="menu" aria-label="{{mb.l}}" class="pop" style="position: absolute; left: 0; top: 38px; min-width: 250px; z-index: 50">
+                <sc-for list="{{mb.items}}" as="it" hint-placeholder-count="6">
+                  <sc-if value="{{it.isSep}}" hint-placeholder-val="{{false}}"><div role="separator" class="sep"></div></sc-if>
+                  <sc-if value="{{it.isLink}}" hint-placeholder-val="{{false}}"><a role="menuitem" class="opt" href="{{it.href}}">{{it.l}}<span class="mono lbl">{{it.k}}</span></a></sc-if>
+                  <sc-if value="{{it.isPlain}}" hint-placeholder-val="{{true}}"><button role="menuitem" class="opt" onClick="{{it.run}}" disabled="{{it.off}}" style="opacity: {{it.op}}">{{it.l}}<span class="mono lbl">{{it.k}}</span></button></sc-if>
+                  <sc-if value="{{it.isSub}}" hint-placeholder-val="{{false}}">
+                    <div style="position: relative">
+                      <button role="menuitem" class="opt v-bg" aria-haspopup="menu" aria-expanded="{{it.open}}" onClick="{{it.toggle}}" style="padding-right: 6px; --v-bg: {{it.bg}}">{{it.l}}<svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width: 15px; height: 15px; color: var(--text-3)"><path d="{{icons.chevR}}"></path></svg></button>
+                      <sc-if value="{{it.open}}" hint-placeholder-val="{{false}}">
+                        <div role="menu" aria-label="{{it.l}}" class="pop" style="position: absolute; left: 100%; top: -4px; margin-left: 6px; min-width: 220px; max-height: 70vh; overflow-y: auto">
+                          <sc-for list="{{it.sub}}" as="s" hint-placeholder-count="4">
+                            <button role="menuitem" class="opt" onClick="{{s.run}}">{{s.l}}</button>
+                          </sc-for>
+                        </div>
+                      </sc-if>
+                    </div>
+                  </sc-if>
+                </sc-for>
+              </div>
+            </sc-if>
+          </div>
+        </sc-for>
+      </nav>
+    </div>
+    <span class="spacer"></span>
+    <div style="position: relative">
+      <button class="mach-box" onClick="{{toggleMenu}}" aria-haspopup="menu" aria-expanded="{{menuOpen}}">
+        <span class="badge" style="background: {{mach.tbg}}">{{mach.type}}</span>
+        <span style="display: flex; flex-direction: column; line-height: 1.2; min-width: 0">
+          <span style="font-weight: 600">{{mach.name}}</span>
+          <span class="lbl">{{mach.sub}}</span>
+        </span>
+        <span class="pill nodot {{dev.cls}}" style="color: {{dev.fg}}"><span class="dot" aria-hidden="true" style="background: {{dev.dot}}"></span>{{dev.label}}</span>
+        <svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="color: var(--text-3)"><path d="{{icons.chev}}"></path></svg>
+      </button>
+      <sc-if value="{{menuOpen}}" hint-placeholder-val="{{false}}">
+        <div role="menu" aria-label="Machines" class="pop" style="position: absolute; right: 0; top: 52px; width: 320px; padding: 6px; border-radius: 12px; z-index: 50">
+          <sc-for list="{{machines}}" as="mc" hint-placeholder-count="2">
+            <button role="menuitemradio" aria-checked="{{mc.on}}" onClick="{{mc.pick}}" class="list-item v-bg" style="--v-bg: {{mc.bg}}; padding: 10px">
+              <span class="badge" style="min-width: 62px; background: {{mc.tbg}}">{{mc.type}}</span>
+              <span style="flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.25"><span style="font-weight: 600">{{mc.name}}</span><span class="lbl">{{mc.sub}}</span></span>
+              <sc-if value="{{mc.on}}" hint-placeholder-val="{{false}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="color: var(--accent-fg)"><path d="{{icons.check}}"></path></svg></sc-if>
+            </button>
+          </sc-for>
+          <div class="sep"></div>
+          <a href="MachineSetupDetailed.dc.html" class="opt" style="min-height: 38px">Machine setup…</a>
+        </div>
+      </sc-if>
+    </div>
+  </header>
+
+  <!-- ===== Toolbar ===== -->
+  <div role="toolbar" aria-label="Tools" class="subbar">
+    <div class="grp" style="gap: 6px; position: relative">
+      <button class="tb" onClick="{{importFiles}}" title="Import DXF, PDF, SVG or PLT (Ctrl+I)"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.import}}"></path></svg>Import</button>
+      <button class="tb v-bd" onClick="{{toggleFill}}" aria-haspopup="dialog" aria-expanded="{{fillOpen}}" style="--v-bd: {{fillBd}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.array}}"></path></svg>{{fill.button}}</button>
+      <sc-if value="{{fillOpen}}" hint-placeholder-val="{{false}}">
+        <div role="dialog" aria-label="Fill" class="pop popover" style="left: 0; width: 340px">
+          <span class="h-sec">{{fill.title}}</span>
+          <div class="fcol">
+            <span class="lbl">Fill area</span>
+            <div role="radiogroup" aria-label="Fill area" class="seg fill">
+              <sc-for list="{{fill.areas}}" as="a" hint-placeholder-count="3">
+                <button role="radio" aria-checked="{{a.on}}" aria-disabled="{{a.off}}" onClick="{{a.pick}}" style="background: {{a.bg}}; box-shadow: {{a.sh}}; color: {{a.fg}}; opacity: {{a.op}}; cursor: {{a.cur}}">{{a.l}}</button>
+              </sc-for>
+            </div>
+            <sc-if value="{{fill.isCustom}}" hint-placeholder-val="{{false}}">
+              <div class="grid2">
+                <label class="fcol">
+                  <span class="lbl">Width</span>
+                  <span class="fld"><input type="text" value="{{fill.cw}}" onChange="{{fill.setCw}}"><span class="lbl">mm</span></span>
+                </label>
+                <label class="fcol">
+                  <span class="lbl">Height</span>
+                  <span class="fld"><input type="text" value="{{fill.ch}}" onChange="{{fill.setCh}}"><span class="lbl">mm</span></span>
+                </label>
+              </div>
+            </sc-if>
+          </div>
+          <div role="radiogroup" aria-label="Copies" class="seg fill">
+            <sc-for list="{{fill.modes}}" as="f" hint-placeholder-count="2">
+              <button role="radio" aria-checked="{{f.on}}" onClick="{{f.pick}}" style="background: {{f.bg}}; box-shadow: {{f.sh}}; color: {{f.fg}}">{{f.l}}</button>
+            </sc-for>
+          </div>
+          <div class="grid2">
+            <sc-if value="{{fill.isCount}}" hint-placeholder-val="{{false}}">
+              <label class="fcol" style="grid-column: 1 / -1">
+                <span class="lbl">Copies</span>
+                <span class="fld"><input type="text" value="{{fill.count}}" onChange="{{fill.setCount}}"><span class="lbl">×</span></span>
+              </label>
+            </sc-if>
+            <label class="fcol">
+              <span class="lbl">Spacing</span>
+              <span class="fld"><input type="text" value="{{fill.spacing}}" onChange="{{fill.setSpacing}}"><span class="lbl">mm</span></span>
+            </label>
+            <label class="fcol">
+              <span class="lbl">Edge margin</span>
+              <span class="fld"><input type="text" value="{{fill.margin}}" onChange="{{fill.setMargin}}"><span class="lbl">mm</span></span>
+            </label>
+          </div>
+          <div class="note" style="display: flex; align-items: center; gap: 8px; font-size: 13px; background: {{fill.resBg}}; color: {{fill.resFg}}">
+            <svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width: 16px; height: 16px"><path d="{{fill.resIcon}}"></path></svg>
+            <span>{{fill.result}}</span>
+          </div>
+          <div style="display: flex; justify-content: flex-end; gap: 8px">
+            <button class="tb" onClick="{{toggleFill}}">Cancel</button>
+            <button class="btn-primary" onClick="{{fill.apply}}" disabled="{{fill.cant}}" style="opacity: {{fill.op}}">Fill</button>
+          </div>
+        </div>
+      </sc-if>
+      <button class="tb v-bd" onClick="{{toggleSheet}}" aria-haspopup="dialog" aria-expanded="{{sheetOpen}}" style="--v-bd: {{sheetBd}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.sheet}}"></path></svg>Sheet<span class="tag" style="background: {{sheetPillBg}}; color: {{sheetPillFg}}">{{sheetPill}}</span></button>
+      <sc-if value="{{sheetOpen}}" hint-placeholder-val="{{false}}">
+        <div role="dialog" aria-label="Sheet" class="pop popover" style="left: 120px; width: 330px">
+          <div style="display: flex; align-items: center; justify-content: space-between">
+            <span id="sheet-label" class="h-sec">Sheet</span>
+            <button role="switch" class="sw" aria-checked="{{sheetOn}}" aria-labelledby="sheet-label" onClick="{{toggleSheetOn}}" style="background: {{sheetSwBg}}; justify-content: {{sheetSwJ}}"></button>
+          </div>
+          <div class="grid2" style="opacity: {{sheetFieldsOp}}">
+            <sc-for list="{{sheetFields}}" as="f" hint-placeholder-count="4">
+              <label class="fcol">
+                <span class="lbl">{{f.l}}</span>
+                <span class="fld"><input type="text" class="mono" value="{{f.v}}" onChange="{{f.set}}" onBlur="{{f.commit}}" onKeyDown="{{f.key}}" disabled="{{sheetOff}}"><span class="lbl">mm</span></span>
+              </label>
+            </sc-for>
+          </div>
+          <div style="display: flex; flex-wrap: wrap; gap: 6px">
+            <sc-for list="{{sheetPresets}}" as="p" hint-placeholder-count="3">
+              <button class="tb sm" onClick="{{p.pick}}" disabled="{{sheetOff}}">{{p.l}}</button>
+            </sc-for>
+          </div>
+          <div style="display: flex; justify-content: space-between; gap: 8px">
+            <button class="tb" onClick="{{centreSheet}}" disabled="{{sheetOff}}" style="opacity: {{sheetFieldsOp}}">Centre on bed</button>
+            <button class="btn-primary" onClick="{{toggleSheet}}">Done</button>
+          </div>
+        </div>
+      </sc-if>
+    </div>
+    <sc-for list="{{toolGroups}}" as="g" hint-placeholder-count="3">
+      <div class="grp">
+        <sc-for list="{{g.items}}" as="t" hint-placeholder-count="3">
+          <button class="ib" onClick="{{t.run}}" disabled="{{t.off}}" aria-label="{{t.l}}" title="{{t.l}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{t.d}}"></path></svg></button>
+        </sc-for>
+      </div>
+    </sc-for>
+    <span style="flex: 1"></span>
+    <span class="lbl" style="margin-right: 2px">{{mach.toolsLabel}}</span>
+    <sc-if value="{{regAvail}}" hint-placeholder-val="{{true}}">
+      <div style="position: relative">
+        <button class="tb v-bd" onClick="{{toggleReg}}" aria-haspopup="menu" aria-expanded="{{regOpen}}" style="--v-bd: {{regBd}}; box-shadow: {{regSh}}">
+          <svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="color: {{regIc}}"><path d="{{icons.reg}}"></path></svg>
+          <span>Registration marks:</span><span style="font-weight: 600">{{regLabel}}</span>
+          <svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="color: var(--text-3)"><path d="{{icons.chev}}"></path></svg>
+        </button>
+        <sc-if value="{{regOpen}}" hint-placeholder-val="{{false}}">
+          <div role="menu" aria-label="Registration marks" class="pop" style="position: absolute; right: 0; top: 44px; width: 340px; padding: 6px; border-radius: 12px; z-index: 40">
+            <div class="h-sec" style="padding: 8px 10px 4px">Registration marks</div>
+            <sc-for list="{{regModes}}" as="r" hint-placeholder-count="4">
+              <button role="menuitemradio" aria-checked="{{r.on}}" onClick="{{r.pick}}" class="list-item v-bg" style="--v-bg: {{r.bg}}; gap: 12px; padding: 10px">
+                <span aria-hidden="true" style="position: relative; width: 44px; height: 30px; flex: none; border-radius: 3px; background: var(--bed); box-shadow: 0 0 0 1px var(--line-hover)">
+                  <sc-for list="{{r.dots}}" as="d" hint-placeholder-count="3"><span style="position: absolute; left: {{d.x}}px; top: {{d.y}}px; width: 6px; height: 6px; border-radius: 50%; background: var(--brand-black)"></span></sc-for>
+                </span>
+                <span style="flex: 1; display: flex; flex-direction: column; line-height: 1.3">
+                  <span style="font-weight: 600">{{r.l}}</span>
+                  <span class="lbl">{{r.n}}</span>
+                </span>
+                <sc-if value="{{r.on}}" hint-placeholder-val="{{false}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="color: var(--accent-fg)"><path d="{{icons.check}}"></path></svg></sc-if>
+              </button>
+            </sc-for>
+          </div>
+        </sc-if>
+      </div>
+    </sc-if>
+    <sc-for list="{{machTools}}" as="t" hint-placeholder-count="2">
+      <button class="tb v-bd" onClick="{{t.run}}" disabled="{{t.off}}" title="{{t.tip}}" style="--v-bd: {{t.bd}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{t.d}}"></path></svg>{{t.l}}</button>
+    </sc-for>
+  </div>
+
+  <!-- ===== Body ===== -->
+  <div style="flex: 1; display: flex; min-height: 0">
+    <main style="flex: 1; min-width: 0; display: flex; min-height: 0">
+      <nav aria-label="Drawing tools" style="width: 52px; flex: none; background: var(--surface); border-right: 1px solid var(--line); display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px 0">
+        <sc-for list="{{tools}}" as="t" hint-placeholder-count="9">
+          <button class="ib v-bg" onClick="{{t.pick}}" aria-label="{{t.l}}" title="{{t.tip}}" aria-pressed="{{t.on}}" style="width: 40px; height: 40px; --v-bg: {{t.bg}}; color: {{t.fg}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{t.d}}"></path></svg></button>
+        </sc-for>
+      </nav>
+
+      <div style="flex: 1; min-width: 0; display: flex; flex-direction: column">
+        <!-- viewport -->
+        <div class="viewport" style="flex: 1; min-width: 0; min-height: 0; position: relative; overflow: hidden">
+          {{canvasEl}}
+          <sc-if value="{{empty}}" hint-placeholder-val="{{false}}">
+            <div class="card empty" style="position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); padding: 24px 28px; border-style: dashed; border-color: var(--line-hover); box-shadow: var(--shadow-pop); pointer-events: none">
+              <span class="em-icon"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.import}}"></path></svg></span>
+              <span class="em-title">Drop a DXF, PDF, SVG or PLT file here</span>
+              <span class="em-text">or use Import (Ctrl+I) · draw with the tools on the left</span>
+            </div>
+          </sc-if>
+        </div>
+
+        <!-- canvas footer -->
+        <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 6px 10px; background: var(--surface); border-top: 1px solid var(--line)">
+          <div class="ctl-group">
+            <button class="ib" onClick="{{zoomOut}}" aria-label="Zoom out"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.minus}}"></path></svg></button>
+            <button class="val" onClick="{{zoomActual}}" title="Actual size">{{zoom}}</button>
+            <button class="ib" onClick="{{zoomIn}}" aria-label="Zoom in"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.plus}}"></path></svg></button>
+          </div>
+          <button class="tb" onClick="{{zoomFit}}">Fit</button>
+          <sc-if value="{{isPlotter}}" hint-placeholder-val="{{false}}">
+            <button class="tb" onClick="{{addBed}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.plus}}"></path></svg>Bed</button>
+            <button class="tb" onClick="{{removeBed}}" disabled="{{noRemoveBed}}" style="opacity: {{removeBedOp}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.minus}}"></path></svg>Bed</button>
+          </sc-if>
+          <span class="mono lbl" id="lrc-cursor"></span>
+          <span style="flex: 1"></span>
+          <span class="lbl">{{selInfo}}</span>
+          <span class="lbl">Snap</span>
+          <sc-for list="{{snaps}}" as="s" hint-placeholder-count="3">
+            <button class="tb snap v-bd" aria-pressed="{{s.on}}" onClick="{{s.toggle}}" style="--v-bd: {{s.bd}}; background: {{s.bg}}; color: {{s.fg}}">{{s.l}}</button>
+          </sc-for>
+        </div>
+      </div>
+    </main>
+
+    <!-- ===== Right dock ===== -->
+    <aside aria-label="Job settings" style="width: 360px; flex: none; min-width: 0; background: var(--surface); border-left: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0">
+      <div role="tablist" aria-label="Panels" class="tabs" style="padding: 4px 10px 0; flex-wrap: nowrap">
+        <sc-for list="{{tabs}}" as="t" hint-placeholder-count="4">
+          <button role="tab" aria-selected="{{t.on}}" onClick="{{t.pick}}" style="border-bottom-color: {{t.bd}}; color: {{t.fg}}; font-weight: {{t.w}}">
+            {{t.l}}
+            <sc-if value="{{t.badge}}" hint-placeholder-val="{{false}}"><span class="count">{{t.badge}}</span></sc-if>
+          </button>
+        </sc-for>
+      </div>
+      <div class="dock" style="flex: 1; min-height: 0; overflow-y: auto">
+
+      <sc-if value="{{tabProcesses}}" hint-placeholder-val="{{true}}">
+      <div style="padding: 14px; display: flex; flex-direction: column; gap: 14px">
+        <!-- material -->
+        <div style="position: relative">
+          <button class="mat-btn v-bd" onClick="{{toggleMat}}" aria-haspopup="listbox" aria-expanded="{{matOpen}}" style="--v-bd: {{matBd}}">
+            <span class="mat-sw" aria-hidden="true" style="width: 38px; height: 38px; background: {{mat.sw}}"></span>
+            <span style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px">
+              <span class="lbl">Material</span>
+              <span style="font-weight: 600; font-size: 14px">{{mat.name}}</span>
+              <span class="lbl">{{mat.sub}}</span>
+            </span>
+            <svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="color: var(--text-3)"><path d="{{icons.chev}}"></path></svg>
+          </button>
+          <sc-if value="{{matOpen}}" hint-placeholder-val="{{false}}">
+            <div role="listbox" aria-label="Materials" class="pop" style="position: absolute; left: 0; right: 0; top: 70px; max-height: 360px; overflow-y: auto; z-index: 40">
+              <sc-for list="{{matList}}" as="m" hint-placeholder-count="5">
+                <button role="option" aria-selected="{{m.on}}" onClick="{{m.pick}}" class="list-item v-bg" style="--v-bg: {{m.bg}}; padding: 8px">
+                  <span class="mat-sw" aria-hidden="true" style="width: 22px; height: 22px; border-radius: 5px; background: {{m.sw}}"></span>
+                  <span style="flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.25"><span style="font-weight: 500">{{m.name}}</span><span class="lbl">{{m.sub}}</span></span>
+                  <sc-if value="{{m.on}}" hint-placeholder-val="{{false}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width: 16px; height: 16px; color: var(--accent-fg)"><path d="{{icons.check}}"></path></svg></sc-if>
+                </button>
+              </sc-for>
+              <div class="sep"></div>
+              <a href="MaterialsDetailed.dc.html" class="opt">Material library…</a>
+            </div>
+          </sc-if>
+        </div>
+
+        <!-- colour list -->
+        <div style="display: flex; flex-direction: column; gap: 8px">
+          <div style="display: flex; justify-content: space-between; align-items: baseline">
+            <span class="h-sec">Processes</span>
+            <span class="lbl">{{coloursUsed}}</span>
+          </div>
+          <sc-if value="{{orphanNote}}" hint-placeholder-val="{{false}}">
+            <div class="note warn">{{orphanNote}}</div>
+          </sc-if>
+          <div style="display: flex; flex-direction: column; gap: 4px">
+            <sc-for list="{{colours}}" as="c" hint-placeholder-count="4">
+              <div class="proc" style="background: {{c.bg}}; box-shadow: inset 0 0 0 1px {{c.bd}}">
+                <div style="display: flex; align-items: center; opacity: {{c.op}}">
+                <button class="proc-head" onClick="{{c.pick}}" aria-expanded="{{c.open}}">
+                  <span style="display: flex; gap: 3px; flex: none; min-width: 18px">
+                    <sc-for list="{{c.chips}}" as="k" hint-placeholder-count="1"><span class="chip" title="{{k.title}}" style="background: {{k.hex}}; color: {{k.fg}}">{{k.n}}</span></sc-for>
+                    <sc-if value="{{c.none}}" hint-placeholder-val="{{false}}"><span role="img" aria-label="No colour" class="chip-none" style="width: 18px; height: 18px"></span></sc-if>
+                  </span>
+                  <span style="flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.3">
+                    <span class="proc-title"><span class="nm">{{c.name}}</span><sc-if value="{{c.badge}}" hint-placeholder-val="{{false}}"><span class="tag" style="background: {{c.badgeBg}}; color: {{c.badgeFg}}">{{c.badge}}</span></sc-if></span>
+                    <span style="display: flex; align-items: center; gap: 6px; min-width: 0">
+                      <span class="lbl" style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{c.proc}}</span>
+                      <sc-if value="{{c.dashOn}}" hint-placeholder-val="{{false}}">
+                        <svg width="22" height="8" role="img" aria-label="Dashed" style="flex: none"><line x1="0" y1="4" x2="22" y2="4" stroke-width="2" stroke-dasharray="5 3" style="stroke: var(--text-2)"></line></svg>
+                      </sc-if>
+                    </span>
+                  </span>
+                  <span class="mono" style="font-size: 12px; color: var(--text-2); white-space: nowrap">{{c.summary}}</span>
+                  <svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width: 16px; height: 16px; color: var(--text-3); transform: rotate({{c.chevRot}}); transition: transform 0.15s"><path d="{{icons.chev}}"></path></svg>
+                </button>
+                <button class="ib" onClick="{{c.toggleOut}}" aria-label="{{c.outLabel}}" title="{{c.outLabel}}" style="color: var(--text-3)"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{c.outIcon}}"></path></svg></button>
+                </div>
+                <sc-if value="{{c.open}}" hint-placeholder-val="{{false}}">
+                <section aria-label="{{c.name}} settings" class="proc-set">
+                  <div style="display: flex; align-items: center; gap: 10px">
+                    <input type="text" class="proc-name" value="{{sel.name}}" onChange="{{sel.setName}}" aria-label="Process name">
+                    <span class="tag" style="background: {{sel.statusBg}}; color: {{sel.statusFg}}">{{sel.status}}</span>
+                    <button class="ib sm" onClick="{{deleteProcess}}" aria-label="Delete process" title="Delete process" style="color: var(--text-3)"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width: 16px; height: 16px"><path d="{{icons.trash}}"></path></svg></button>
+                  </div>
+
+                  <div class="fcol">
+                    <span class="lbl">Colours (ACI)</span>
+                    <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 6px">
+                      <sc-for list="{{sel.chips}}" as="k" hint-placeholder-count="1">
+                        <span class="chip lg" title="{{k.title}}" style="background: {{k.hex}}; color: {{k.fg}}">{{k.n}}</span>
+                      </sc-for>
+                      <sc-if value="{{sel.none}}" hint-placeholder-val="{{false}}"><span class="chip-none" style="height: 26px; padding: 0 8px; border-radius: 6px">None</span></sc-if>
+                      <button class="tb sm v-bd" onClick="{{togglePicker}}" aria-expanded="{{pickerOpen}}" style="--v-bd: {{pickerBd}}">Edit</button>
+                      <sc-if value="{{canRecolour}}" hint-placeholder-val="{{false}}">
+                        <button class="tb sm" onClick="{{recolourSel}}" title="Give the selected objects this process's colour">Apply to selection</button>
+                      </sc-if>
+                    </div>
+                    <sc-if value="{{pickerOpen}}" hint-placeholder-val="{{false}}">
+                      <div role="group" aria-label="Assign colours" style="display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; padding: 8px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2)">
+                        <sc-for list="{{aci}}" as="a" hint-placeholder-count="9">
+                          <button aria-pressed="{{a.on}}" onClick="{{a.toggle}}" disabled="{{a.taken}}" title="{{a.title}}" aria-label="{{a.title}}" style="display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 6px 2px; border: 0; border-radius: 8px; background: {{a.bg}}; box-shadow: {{a.ring}}; cursor: pointer; opacity: {{a.op}}">
+                            <span class="chip" aria-hidden="true" style="width: 24px; height: 24px; border-radius: 5px; background: {{a.hex}}"></span>
+                            <span class="mono" style="display: inline-flex; align-items: center; gap: 3px; font-size: 11px; color: var(--text-2)">{{a.n}}<sc-if value="{{a.taken}}" hint-placeholder-val="{{false}}"><span aria-hidden="true" style="width: 5px; height: 5px; border-radius: 50%; background: var(--text-4)"></span></sc-if></span>
+                          </button>
+                        </sc-for>
+                        <button class="tb" onClick="{{aciOther}}" style="height: auto; font-size: 12px; padding: 6px 2px">ACI #</button>
+                      </div>
+                    </sc-if>
+                  </div>
+
+                  <div class="fcol">
+                    <span class="lbl">{{sel.selectLabel}}</span>
+                    <button class="dd" onClick="{{sel.toggleSelect}}" aria-haspopup="listbox" aria-expanded="{{sel.selectOpen}}">{{sel.selectValue}}<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.chev}}"></path></svg></button>
+                    <sc-if value="{{sel.selectOpen}}" hint-placeholder-val="{{false}}">
+                      <div role="listbox" aria-label="{{sel.selectLabel}}" class="pop">
+                        <sc-for list="{{sel.selectOpts}}" as="o" hint-placeholder-count="3">
+                          <button role="option" class="opt v-bg" aria-selected="{{o.on}}" onClick="{{o.pick}}" style="--v-bg: {{o.bg}}">{{o.l}}<sc-if value="{{o.on}}" hint-placeholder-val="{{false}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.check}}"></path></svg></sc-if></button>
+                        </sc-for>
+                      </div>
+                    </sc-if>
+                  </div>
+
+                  <sc-for list="{{sel.sliders}}" as="s" hint-placeholder-count="2">
+                    <label style="display: flex; flex-direction: column; gap: 8px">
+                      <span style="display: flex; justify-content: space-between; align-items: baseline"><span>{{s.l}}</span><span class="mono" style="font-weight: 500">{{s.v}} {{s.u}}</span></span>
+                      <input type="range" min="{{s.min}}" max="{{s.max}}" step="{{s.step}}" value="{{s.v}}" onChange="{{s.set}}" style="accent-color: {{accent}}">
+                    </label>
+                  </sc-for>
+
+                  <div class="grid2">
+                    <sc-for list="{{sel.nums}}" as="n" hint-placeholder-count="4">
+                      <label class="fcol">
+                        <span class="lbl">{{n.l}}</span>
+                        <span class="fld"><input type="text" value="{{n.v}}" onChange="{{n.set}}"><span class="lbl">{{n.u}}</span></span>
+                      </label>
+                    </sc-for>
+                  </div>
+
+                  <sc-if value="{{isLaser}}" hint-placeholder-val="{{true}}">
+                    <button class="btn-link" onClick="{{toggleAdv}}" aria-expanded="{{advOpen}}" style="align-self: flex-start">
+                      <svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="transform: rotate({{advRot}})"><path d="{{icons.chev}}"></path></svg>Advanced
+                    </button>
+                    <sc-if value="{{advOpen}}" hint-placeholder-val="{{false}}">
+                      <div class="grid2">
+                        <sc-for list="{{sel.adv}}" as="f" hint-placeholder-count="4">
+                          <sc-if value="{{f.isText}}" hint-placeholder-val="{{true}}">
+                            <label class="fcol">
+                              <span class="lbl">{{f.l}}</span>
+                              <span class="fld"><input type="text" value="{{f.v}}" onChange="{{f.set}}"><span class="lbl">{{f.u}}</span></span>
+                            </label>
+                          </sc-if>
+                          <sc-if value="{{f.isPick}}" hint-placeholder-val="{{false}}">
+                            <div class="fcol">
+                              <span class="lbl">{{f.l}}</span>
+                              <button class="dd" onClick="{{f.toggle}}" aria-haspopup="listbox" aria-expanded="{{f.open}}" aria-label="{{f.l}}: {{f.v}}"><span style="overflow: hidden; text-overflow: ellipsis">{{f.v}}</span><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.chev}}"></path></svg></button>
+                              <sc-if value="{{f.open}}" hint-placeholder-val="{{false}}">
+                                <div role="listbox" aria-label="{{f.l}}" class="pop">
+                                  <sc-for list="{{f.opts}}" as="o" hint-placeholder-count="3">
+                                    <button role="option" class="opt v-bg" aria-selected="{{o.on}}" onClick="{{o.pick}}" style="--v-bg: {{o.bg}}; gap: 8px; padding: 0 8px">{{o.l}}<sc-if value="{{o.on}}" hint-placeholder-val="{{false}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.check}}"></path></svg></sc-if></button>
+                                  </sc-for>
+                                </div>
+                              </sc-if>
+                            </div>
+                          </sc-if>
+                          <sc-if value="{{f.isCheck}}" hint-placeholder-val="{{false}}">
+                            <label style="display: flex; align-items: center; gap: 8px; align-self: end; height: 36px">
+                              <input type="checkbox" checked="{{f.on}}" onChange="{{f.toggle}}" style="width: 18px; height: 18px; margin: 0; accent-color: {{accent}}">
+                              <span>{{f.l}}</span>
+                            </label>
+                          </sc-if>
+                        </sc-for>
+                      </div>
+                    </sc-if>
+                  </sc-if>
+
+                  <sc-if value="{{sel.showLinks}}" hint-placeholder-val="{{true}}">
+                  <div class="hr"></div>
+
+                  <div style="display: flex; flex-direction: column; gap: 10px">
+                    <div style="display: flex; align-items: center; justify-content: space-between">
+                      <span id="dash-label" style="font-weight: 500">{{sel.dashTitle}}</span>
+                      <button role="switch" class="sw" aria-checked="{{sel.dashOn}}" aria-labelledby="dash-label" onClick="{{toggleDash}}" style="background: {{sel.swBg}}; justify-content: {{sel.swJ}}"></button>
+                    </div>
+                    <div class="grid2" style="opacity: {{sel.dashOpacity}}">
+                      <label class="fcol">
+                        <span class="lbl">{{sel.dashLenLabel}}</span>
+                        <span class="fld"><input type="text" value="{{sel.dashLen}}" onChange="{{sel.setDl}}"><span class="lbl">mm</span></span>
+                      </label>
+                      <label class="fcol">
+                        <span class="lbl">{{sel.gapLabel}}</span>
+                        <span class="fld"><input type="text" value="{{sel.gapLen}}" onChange="{{sel.setGl}}"><span class="lbl">mm</span></span>
+                      </label>
+                    </div>
+                    <svg width="100%" height="12" viewBox="0 0 300 12" preserveAspectRatio="none" role="img" aria-label="{{sel.previewLabel}}"><line x1="1" y1="6" x2="299" y2="6" stroke-width="3" stroke-dasharray="{{sel.dashArray}}" style="stroke: {{sel.c}}"></line></svg>
+                  </div>
+                  </sc-if>
+
+                  <div class="hr"></div>
+
+                  <div style="display: flex; flex-direction: column; gap: 8px">
+                    <button class="btn-primary" onClick="{{saveGlobal}}" disabled="{{sel.cantGlobal}}" title="{{sel.globalTip}}" style="opacity: {{sel.globalOpacity}}; cursor: {{sel.saveCursor}}">Save to material</button>
+                    <sc-if value="{{sel.showRevert}}" hint-placeholder-val="{{false}}">
+                      <button class="tb" onClick="{{revertJob}}">Revert to material preset</button>
+                    </sc-if>
+                  </div>
+                </section>
+                </sc-if>
+              </div>
+            </sc-for>
+          </div>
+          <button class="tb dashed" onClick="{{newProcess}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.plus}}"></path></svg>New process</button>
+        </div>
+      </div>
+      </sc-if>
+
+      <!-- objects -->
+      <sc-if value="{{tabObjects}}" hint-placeholder-val="{{false}}">
+        <div style="padding: 14px; display: flex; flex-direction: column; gap: 12px">
+          <div style="display: flex; justify-content: space-between; align-items: baseline">
+            <span class="h-sec">Objects</span>
+            <span class="lbl">{{objCount}}</span>
+          </div>
+          <sc-if value="{{hasObjSel}}" hint-placeholder-val="{{false}}">
+          <section aria-label="Object properties" class="card" style="padding: 14px; display: flex; flex-direction: column; gap: 12px">
+            <span class="h-sec" style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{objName}}</span>
+            <div class="grid2">
+              <sc-for list="{{objProps}}" as="p" hint-placeholder-count="6">
+                <label class="fcol">
+                  <span class="lbl">{{p.l}}</span>
+                  <span class="fld"><input type="text" value="{{p.v}}" onChange="{{p.set}}" onBlur="{{p.commit}}" onKeyDown="{{p.key}}" disabled="{{p.ro}}"><span class="lbl">{{p.u}}</span></span>
+                </label>
+              </sc-for>
+            </div>
+            <label style="display: flex; align-items: center; gap: 8px">
+              <input type="checkbox" checked="{{lockRatio}}" onChange="{{toggleLockRatio}}" style="width: 16px; height: 16px; margin: 0; accent-color: {{accent}}">
+              <span class="lbl">Keep proportions</span>
+            </label>
+            <div class="fcol">
+              <span class="lbl">Colour · {{objColourLabel}}</span>
+              <div role="group" aria-label="Colour of selected objects" style="display: flex; flex-wrap: wrap; gap: 5px">
+                <sc-for list="{{objColours}}" as="c" hint-placeholder-count="9">
+                  <button onClick="{{c.pick}}" aria-pressed="{{c.on}}" title="{{c.title}}" aria-label="{{c.title}}" class="mono" style="width: 26px; height: 26px; border: 0; border-radius: 6px; background: {{c.hex}}; color: {{c.fg}}; font-size: 11px; font-weight: 500; cursor: pointer; box-shadow: {{c.ring}}">{{c.n}}</button>
+                </sc-for>
+                <button class="tb sm" onClick="{{objColourOther}}" style="height: 26px; padding: 0 8px">ACI #</button>
+              </div>
+            </div>
+            <div style="display: flex; gap: 8px">
+              <button class="tb" onClick="{{lockSel}}" style="flex: 1">{{lockLabel}}</button>
+              <button class="tb" onClick="{{hideSel}}" style="flex: 1">Hide</button>
+              <button class="tb" onClick="{{deleteSel}}" style="flex: 1">Delete</button>
+            </div>
+          </section>
+          </sc-if>
+          <sc-if value="{{hasHidden}}" hint-placeholder-val="{{false}}">
+            <button class="tb" onClick="{{showAll}}">Show {{hiddenCount}} hidden</button>
+          </sc-if>
+          <div style="display: flex; flex-direction: column; gap: 2px">
+            <sc-for list="{{objects}}" as="o" hint-placeholder-count="6">
+              <div role="button" tabindex="0" onClick="{{o.pick}}" onDoubleClick="{{o.rename}}" onContextMenu="{{o.menu}}" aria-disabled="{{o.off}}" aria-pressed="{{o.on}}" class="list-item v-bg" style="--v-bg: {{o.bg}}; box-shadow: inset 0 0 0 1px {{o.bd}}; opacity: {{o.op}}">
+                <span style="display: flex; gap: 3px; min-width: 32px">
+                  <sc-for list="{{o.chips}}" as="k" hint-placeholder-count="1"><span class="chip sm" title="{{k.title}}" style="background: {{k.hex}}; color: {{k.fg}}">{{k.n}}</span></sc-for>
+                </span>
+                <span style="flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.3">
+                  <sc-if value="{{o.editing}}" hint-placeholder-val="{{false}}">{{o.nameEl}}</sc-if>
+                  <sc-if value="{{o.notEditing}}" hint-placeholder-val="{{true}}"><span style="font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{o.name}}</span></sc-if>
+                  <span class="mono lbl">{{o.meta}}</span>
+                </span>
+                <sc-if value="{{o.notEditing}}" hint-placeholder-val="{{true}}">
+                  <button class="ib sm" onClick="{{o.edit}}" aria-label="Rename {{o.plainName}}" title="Rename" style="color: var(--text-3)"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width: 15px; height: 15px"><path d="{{icons.pencil}}"></path></svg></button>
+                </sc-if>
+              </div>
+            </sc-for>
+            <sc-if value="{{objMore}}" hint-placeholder-val="{{false}}"><span class="lbl" style="padding: 6px 10px">{{objMore}}</span></sc-if>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- move -->
+      <sc-if value="{{tabMove}}" hint-placeholder-val="{{false}}">
+        <div style="padding: 14px; display: flex; flex-direction: column; gap: 14px">
+          <sc-if value="{{moveNote}}" hint-placeholder-val="{{false}}">
+            <div class="note" style="background: {{moveNoteBg}}; color: {{moveNoteFg}}">{{moveNote}}</div>
+          </sc-if>
+          <section aria-label="Machine position" class="card" style="padding: 14px; display: flex; flex-direction: column; gap: 10px">
+            <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 8px">
+              <span class="h-sec">Machine position</span>
+              <span class="lbl" style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{devState}}</span>
+            </div>
+            <div style="display: flex; gap: 20px">
+              <sc-for list="{{pos}}" as="p" hint-placeholder-count="2">
+                <div style="display: flex; flex-direction: column; gap: 2px"><span class="lbl">{{p.l}}</span><span class="mono" style="font-size: 18px; font-weight: 500">{{p.v}}</span></div>
+              </sc-for>
+            </div>
+          </section>
+          <section aria-label="Jog" class="card" style="padding: 14px; display: flex; flex-direction: column; align-items: center; gap: 12px">
+            <span class="h-sec" style="align-self: flex-start">Jog</span>
+            <div style="display: grid; grid-template-columns: repeat(3, 56px); grid-template-rows: repeat(3, 56px); gap: 6px">
+              <span></span>
+              <button class="tb" onClick="{{jog.yMinus}}" disabled="{{jogOff}}" aria-label="Jog Y back" title="Jog Y back (towards the top of the bed)" style="height: 56px; padding: 0"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.up}}"></path></svg></button>
+              <span></span>
+              <button class="tb" onClick="{{jog.xMinus}}" disabled="{{jogOff}}" aria-label="Jog X minus" style="height: 56px; padding: 0"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.left}}"></path></svg></button>
+              <button class="tb" onClick="{{jog.home}}" disabled="{{jogOff}}" aria-label="Home" style="height: 56px; padding: 0"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.home}}"></path></svg></button>
+              <button class="tb" onClick="{{jog.xPlus}}" disabled="{{jogOff}}" aria-label="Jog X plus" style="height: 56px; padding: 0"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.right}}"></path></svg></button>
+              <span></span>
+              <button class="tb" onClick="{{jog.yPlus}}" disabled="{{jogOff}}" aria-label="Jog Y forward" title="Jog Y forward (towards the front of the bed)" style="height: 56px; padding: 0"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.down}}"></path></svg></button>
+              <span></span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 8px">
+              <div role="radiogroup" aria-label="Step size" class="seg">
+                <sc-for list="{{steps}}" as="s" hint-placeholder-count="4">
+                  <button role="radio" aria-checked="{{s.on}}" onClick="{{s.pick}}" class="mono" style="padding: 0 10px; background: {{s.bg}}; box-shadow: {{s.sh}}; color: {{s.fg}}; font-size: 12px">{{s.l}}</button>
+                </sc-for>
+              </div>
+              <span class="lbl">mm</span>
+            </div>
+            <sc-if value="{{isLaser}}" hint-placeholder-val="{{true}}">
+              <div style="display: flex; gap: 6px; align-items: center">
+                <span class="lbl">Z</span>
+                <button class="tb" onClick="{{jog.zMinus}}" disabled="{{jogOff}}">Z −</button>
+                <button class="tb" onClick="{{jog.zPlus}}" disabled="{{jogOff}}">Z +</button>
+              </div>
+            </sc-if>
+          </section>
+          <div class="grid2" style="gap: 8px">
+            <sc-for list="{{moveActions}}" as="a" hint-placeholder-count="4">
+              <button class="tb" onClick="{{a.run}}" disabled="{{a.off}}" style="opacity: {{a.op}}">{{a.l}}</button>
+            </sc-for>
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 6px">
+            <sc-for list="{{moveToggles}}" as="t" hint-placeholder-count="2">
+              <div style="display: flex; align-items: center; justify-content: space-between; min-height: 36px">
+                <span>{{t.l}}</span>
+                <button role="switch" class="sw" aria-checked="{{t.on}}" aria-label="{{t.l}}" onClick="{{t.toggle}}" disabled="{{jogOff}}" style="background: {{t.swBg}}; justify-content: {{t.swJ}}"></button>
+              </div>
+            </sc-for>
+          </div>
+          <button class="btn-danger" onClick="{{stopMachine}}" disabled="{{jogOff}}" style="height: 40px; opacity: {{jogOp}}">Stop machine</button>
+        </div>
+      </sc-if>
+
+      <!-- queue: the machine controller's own job list -->
+      <sc-if value="{{tabQueue}}" hint-placeholder-val="{{false}}">
+        <div style="padding: 14px; display: flex; flex-direction: column; gap: 10px">
+          <div style="display: flex; justify-content: space-between; align-items: baseline; gap: 8px">
+            <span class="h-sec" style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis">Queue on {{qMachine}}</span>
+            <span class="lbl" style="flex: none">{{queueCount}}</span>
+          </div>
+          <sc-if value="{{queueNote}}" hint-placeholder-val="{{false}}">
+            <div class="note" style="background: {{queueNoteBg}}; color: {{queueNoteFg}}">{{queueNote}}</div>
+          </sc-if>
+          <sc-for list="{{queue}}" as="q" hint-placeholder-count="3">
+            <div style="display: flex; flex-direction: column; gap: 6px; padding: 10px; border: 1px solid var(--line); border-radius: 10px; background: {{q.bg}}">
+              <div style="display: flex; align-items: center; gap: 10px">
+                <span class="mono" style="width: 26px; height: 26px; flex: none; border-radius: 6px; background: var(--sunken); color: var(--text-2); display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 500">{{q.n}}</span>
+                <span style="flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.3">
+                  <span style="font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{q.name}}</span>
+                  <span class="lbl">{{q.meta}}</span>
+                </span>
+                <span class="pill {{q.cls}}" style="background: {{q.sbg}}; color: {{q.sfg}}">{{q.status}}</span>
+                <sc-if value="{{q.waiting}}" hint-placeholder-val="{{false}}">
+                  <div style="display: flex; flex-direction: column">
+                    <button class="ib" onClick="{{q.up}}" aria-label="Move {{q.name}} up" style="width: 28px; height: 22px"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width: 14px; height: 14px"><path d="{{icons.chevU}}"></path></svg></button>
+                    <button class="ib" onClick="{{q.down}}" aria-label="Move {{q.name}} down" style="width: 28px; height: 22px"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width: 14px; height: 14px"><path d="{{icons.chev}}"></path></svg></button>
+                  </div>
+                </sc-if>
+                <sc-if value="{{q.removable}}" hint-placeholder-val="{{false}}">
+                  <button class="ib sm" onClick="{{q.remove}}" aria-label="Remove {{q.name}}" title="Remove from the machine's queue" style="color: var(--text-3)"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width: 15px; height: 15px"><path d="{{icons.x}}"></path></svg></button>
+                </sc-if>
+              </div>
+              <sc-if value="{{q.running}}" hint-placeholder-val="{{false}}">
+                <div style="height: 6px; border-radius: 3px; background: var(--sunken); overflow: hidden"><div style="height: 100%; width: {{q.pct}}; background: {{accent}}"></div></div>
+              </sc-if>
+            </div>
+          </sc-for>
+          <sc-if value="{{queueOnline}}" hint-placeholder-val="{{false}}">
+            <div style="display: flex; gap: 8px; padding-top: 4px">
+              <button class="btn-primary" onClick="{{queueStart}}" disabled="{{queueBusy}}" style="flex: 1; opacity: {{queueOp}}">Start queue</button>
+              <sc-if value="{{hasDone}}" hint-placeholder-val="{{false}}">
+                <button class="tb" onClick="{{queueClear}}" style="flex: 1">Clear finished</button>
+              </sc-if>
+            </div>
+          </sc-if>
+        </div>
+      </sc-if>
+      </div>
+    </aside>
+  </div>
+  <footer style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; padding: 10px 14px; background: var(--surface); border-top: 1px solid var(--line)">
+    <div style="display: flex; flex-direction: column; gap: 1px">
+      <span style="font-weight: 600; font-size: 14px">{{est}}</span>
+      <span class="lbl">{{jobSummary}}</span>
+    </div>
+    <div style="display: flex; flex-wrap: wrap; gap: 6px">
+      <sc-for list="{{checks}}" as="k" hint-placeholder-count="3">
+        <span class="pill check {{k.cls}}" style="background: {{k.bg}}; color: {{k.fg}}">
+          <svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width: 14px; height: 14px"><path d="{{k.icon}}"></path></svg>{{k.l}}
+        </span>
+      </sc-for>
+    </div>
+    <span style="flex: 1"></span>
+    <button class="btn-primary lg" onClick="{{sendJob}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.send}}"></path></svg>Send to machine</button>
+  </footer>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  state = {
+    ready: false, job: null, machines: [], materials: [], recent: [], hist: { undo: 0, redo: 0 },
+    dev: null, devErr: null, devJobs: null, devJobsErr: null,
+    sel: [], tool: 'select', zoom: '—', snap: { grid: true, objects: true, centre: false },
+    menu: false, reg: false, fill: false, fillMode: 'max', fillArea: 'sheet', fillCustom: { w: '300', h: '200' },
+    fillCount: '12', fillSpacing: '5.0', fillMargin: '10.0',
+    sheetOpen: false,
+    procSel: 0, procPanel: true, edit: {}, picker: false, adv: false, procOpen: false, openPick: null, matOpen: false,
+    bar: null, sub: null, tab: 'Processes', draft: {}, lockRatio: true,
+    step: '10', queueBusy: false
+  };
+
+  // ---------------------------------------------------------------- data
+  componentDidMount() {
+    const api = window.api;
+    window.__page = this; // lets the test harness drive the page
+    Promise.all([api.job.current(), api.machines.list(), api.materials.list(), api.job.recent(), api.job.history(), api.settings.get(), api.machines.placeholder()])
+      .then(([job, machines, materials, recent, hist, settings, none]) => {
+        // no machines set up yet: lay the job out on the stand-in bed
+        this.setState({ ready: true, job, machines: machines.length ? machines : [none], materials, recent, hist, settings });
+        if (!machines.length) LRC.toast('No machines yet. Add one under Setup → Machines.', { ms: 6000 });
+        // "Send to machine" from the Simulation page lands here
+        if (location.hash === '#send') {
+          history.replaceState(null, '', location.pathname);
+          setTimeout(() => this.run(() => this.sendDialog(false))(), 300);
+        }
+      })
+      .catch(LRC.fail);
+    this.offKeys = LRC.keys(this.shortcuts());
+    this.poll = setInterval(() => this.pollDevice(), 1500);
+    this.onDragOver = (e) => { e.preventDefault(); };
+    this.onDrop = (e) => {
+      e.preventDefault();
+      const files = [...(e.dataTransfer && e.dataTransfer.files || [])];
+      if (!files.length) return;
+      Promise.all(files.map((f) => {
+        const p = window.api.pathOf(f);
+        return /\.cjob$/i.test(p) ? window.api.job.open(p).then((job) => { this.setState({ job, sel: [], edit: {} }); return null; }) : window.api.job.importPath(p);
+      })).then((res) => this.placeImports(res.filter(Boolean))).catch(LRC.fail);
+    };
+    window.addEventListener('dragover', this.onDragOver);
+    window.addEventListener('drop', this.onDrop);
+    this.onDocDown = (e) => {
+      // close open menus when clicking elsewhere
+      if (!(this.state.bar || this.state.menu || this.state.reg || this.state.matOpen)) return;
+      if (e.target.closest && e.target.closest('[role=menu],[role=listbox],[aria-haspopup]')) return;
+      this.setState({ bar: null, sub: null, menu: false, reg: false, matOpen: false });
+    };
+    document.addEventListener('pointerdown', this.onDocDown, true);
+  }
+  componentWillUnmount() {
+    this.offKeys && this.offKeys();
+    clearInterval(this.poll);
+    window.removeEventListener('dragover', this.onDragOver);
+    window.removeEventListener('drop', this.onDrop);
+    document.removeEventListener('pointerdown', this.onDocDown, true);
+  }
+  machine() {
+    const s = this.state;
+    if (!s.job) return null;
+    return s.machines.find((m) => m.id === s.job.machineId) || s.machines[0] || null;
+  }
+  material() {
+    const s = this.state;
+    return s.job ? s.materials.find((m) => m.id === s.job.materialId) || null : null;
+  }
+  pollDevice() {
+    const m = this.machine();
+    if (!m || m.conn !== 'Ethernet' || document.hidden || this.polling) return;
+    this.polling = true;
+    // status every tick; the controller's job queue every other tick
+    this.tick = (this.tick || 0) + 1;
+    const withJobs = this.tick % 2 === 0 || this.state.devJobs === null;
+    Promise.all([window.api.device.status(m.id), withJobs ? window.api.device.jobs(m.id) : null])
+      .then(([dev, jobs]) => this.setState((s) => ({ dev: { ...dev, mid: m.id }, devErr: null, devJobs: jobs ? { mid: m.id, list: jobs } : s.devJobs })))
+      .catch((err) => this.setState({ dev: null, devErr: { mid: m.id, msg: err.message } }))
+      .finally(() => { this.polling = false; });
+  }
+  // Apply a job change; record:true adds an undo step.
+  commit(job, opts, sel) {
+    const patch = { job };
+    if (sel) patch.sel = sel;
+    this.setState(patch);
+    return window.api.job.update(job, opts || { record: true })
+      .then(() => window.api.job.history())
+      .then((hist) => this.setState({ hist }))
+      .catch(LRC.fail);
+  }
+  run(fn) {
+    return (...a) => {
+      try {
+        const r = fn(...a);
+        if (r && r.catch) r.catch(LRC.fail);
+      } catch (err) { LRC.fail(err); }
+    };
+  }
+  closeMenus() { this.setState({ bar: null, sub: null, menu: false, reg: false, fill: false, matOpen: false }); }
+
+  // ---------------------------------------------------------------- file actions
+  async newJob() {
+    if (!(await this.okToDiscard())) return;
+    const job = await window.api.job.create(this.state.job && this.state.job.machineId);
+    this.setState({ job, sel: [], edit: {}, procSel: 0 });
+    this.refreshHist();
+  }
+  async okToDiscard() {
+    const j = this.state.job;
+    if (!j || !j.dirty || !j.entities.length) return true;
+    const r = await LRC.dialog({ title: 'Discard unsaved changes?', message: '"' + j.name + '" has changes that are not saved to a file.', buttons: [{ label: 'Cancel', value: null }, { label: 'Save first', value: 'save' }, { label: 'Discard', value: 'discard', danger: true }] });
+    if (!r) return false;
+    if (r.button === 'save') return !!(await this.save());
+    return true;
+  }
+  async openJob(file) {
+    if (!(await this.okToDiscard())) return;
+    const job = await window.api.job.open(file);
+    if (job) {
+      this.setState({ job, sel: [], edit: {}, procSel: 0 });
+      this.refreshHist();
+      LRC.toast('Opened ' + job.name);
+    }
+  }
+  async save(as) {
+    const job = await window.api.job.save(this.state.job, as);
+    if (job) {
+      this.setState({ job, recent: await window.api.job.recent() });
+      LRC.toast('Saved ' + job.path.split(/[\\/]/).pop(), { kind: 'ok' });
+    }
+    return job;
+  }
+  refreshHist() { window.api.job.history().then((hist) => this.setState({ hist })); }
+  async importFiles() {
+    const res = await window.api.job.importDialog();
+    if (res && res.length) this.placeImports(res);
+  }
+  // Put imported drawings on the sheet (or bed), keeping their size.
+  placeImports(results) {
+    if (!results.length) return;
+    let job = this.state.job;
+    const m = this.machine();
+    const bed = CC.bedOf(m);
+    const sh = job.sheet && job.sheet.on && m.type === 'laser' ? job.sheet : null;
+    const base = sh ? [sh.x + 10, sh.y + 10] : [10, 10];
+    const existing = CC.boxOf(job.entities);
+    let x = base[0], y = base[1];
+    if (CC.boxValid(existing)) { x = base[0]; y = Math.min(existing.y1 + 10, bed[1] - 10); }
+    const newIds = [];
+    const notes = [];
+    for (const r of results) {
+      if (!r.entities.length) { notes.push(r.name + ': no vector shapes found' + (Object.keys(r.skipped).length ? ' (skipped ' + Object.entries(r.skipped).map(([k, v]) => v + ' ' + k).join(', ') + ')' : '')); continue; }
+      if (y + r.height > bed[1]) y = base[1];
+      const g = r.entities.length > 1 ? CC.uid('g') : null;
+      const ents = r.entities.map((e) => ({ ...CC.translate(e, x, y), group: g, bed: 0 }));
+      newIds.push(...ents.map((e) => e.id));
+      job = { ...job, entities: job.entities.concat(ents) };
+      if (job.name === 'Untitled job') job = { ...job, name: r.name.replace(/\.[^.]+$/, '') };
+      const skipped = Object.entries(r.skipped || {});
+      notes.push(r.name + ': ' + r.entities.length + ' shape' + (r.entities.length === 1 ? '' : 's') + ' · ' + r.width.toFixed(1) + ' × ' + r.height.toFixed(1) + ' mm' + (skipped.length ? ' · skipped ' + skipped.map(([k, v]) => v + ' ' + k).join(', ') : ''));
+      y += r.height + 10;
+    }
+    this.commit(job, { record: true }, newIds);
+    notes.forEach((n) => LRC.toast(n, { ms: 6000 }));
+    if (this.canvas && newIds.length) setTimeout(() => this.canvas.fit(), 50);
+  }
+  async exportAs(fmt) {
+    const p = await window.api.job.exportAs(this.state.job, fmt);
+    if (p) LRC.toast('Exported ' + p.split(/[\\/]/).pop(), { kind: 'ok', action: 'Show', onAction: () => window.api.app.showItem(p) });
+  }
+  async renameJob() {
+    const r = await LRC.dialog({ title: 'Rename job', fields: [{ key: 'name', label: 'Job name', value: this.state.job.name, full: true }], buttons: [{ label: 'Cancel', value: null }, { label: 'Rename', value: 'ok', primary: true }] });
+    if (r && r.values.name && r.values.name.trim()) this.commit({ ...this.state.job, name: r.values.name.trim() }, { record: true });
+  }
+
+  // ---------------------------------------------------------------- edit actions
+  sel() { return this.state.sel; }
+  needSel() {
+    if (!this.state.sel.length) { LRC.toast('Select one or more objects first'); return false; }
+    return true;
+  }
+  undo() { window.api.job.undo().then((job) => { if (job) this.setState({ job, sel: this.state.sel.filter((id) => job.entities.some((e) => e.id === id)) }); this.refreshHist(); }).catch(LRC.fail); }
+  redo() { window.api.job.redo().then((job) => { if (job) this.setState({ job }); this.refreshHist(); }).catch(LRC.fail); }
+  copy(cut) {
+    if (!this.needSel()) return;
+    LRC.clip.set(LRC.ops.selected(this.state.job, this.state.sel));
+    if (cut) this.commit(LRC.ops.remove(this.state.job, this.state.sel), { record: true }, []);
+    LRC.toast((cut ? 'Cut ' : 'Copied ') + this.state.sel.length + ' object' + (this.state.sel.length > 1 ? 's' : ''));
+  }
+  // Rename the selection: one object gets the name as typed; several get
+  // "Name", "Name 2", "Name 3"… in their order in the job.
+  async rename(ids) {
+    const job = this.state.job;
+    const ents = job.entities.filter((e) => (ids || this.state.sel).includes(e.id));
+    if (!ents.length) return LRC.toast('Select one or more objects first');
+    const one = ents.length === 1;
+    const r = await LRC.dialog({
+      title: one ? 'Rename object' : 'Rename ' + ents.length + ' objects',
+      message: one ? '' : 'They are numbered in order: Name, Name 2, Name 3…',
+      fields: [{ key: 'name', label: 'Name', value: one ? ents[0].name : ents[0].name.replace(/ \d+$/, ''), full: true }],
+      buttons: [{ label: 'Cancel', value: null }, { label: 'Rename', value: 'ok', primary: true }]
+    });
+    const base = r && String(r.values.name || '').trim();
+    if (!base) return;
+    const names = new Map(ents.map((e, k) => [e.id, k ? base + ' ' + (k + 1) : base]));
+    this.commit({ ...job, entities: job.entities.map((e) => (names.has(e.id) ? { ...e, name: names.get(e.id) } : e)) }, { record: true });
+  }
+  paste(inPlace) {
+    const ents = LRC.clip.get();
+    if (!ents || !ents.length) return LRC.toast('Nothing to paste');
+    const b = CC.boxOf(ents);
+    const r = LRC.ops.paste(this.state.job, ents, inPlace ? [b.x0, b.y0] : null);
+    this.commit(r.job, { record: true }, r.sel);
+  }
+  op(fn) {
+    if (!this.needSel()) return;
+    const r = fn(this.state.job, this.state.sel);
+    if (r.job) this.commit(r.job, { record: true }, r.sel || this.state.sel);
+    else this.commit(r, { record: true });
+  }
+  alignRef() {
+    const m = this.machine();
+    const bed = CC.bedOf(m);
+    const sh = this.state.job.sheet;
+    return sh && sh.on && m.type === 'laser' ? { x0: sh.x, y0: sh.y, x1: sh.x + sh.w, y1: sh.y + sh.h } : { x0: 0, y0: 0, x1: bed[0], y1: bed[1] };
+  }
+  align(how) {
+    this.op((j, s) => LRC.ops.align(j, s, how, LRC.ops.selected(j, s).length > 1 && new Set(LRC.ops.selected(j, s).map((e) => e.group || e.id)).size > 1 ? null : this.alignRef()));
+  }
+  async offsetDlg() {
+    if (!this.needSel()) return;
+    const r = await LRC.dialog({ title: 'Offset path', message: 'Adds an outline around the selection. Use a negative distance to go inwards.', fields: [{ key: 'd', label: 'Distance', value: '2', unit: 'mm', type: 'number' }], buttons: [{ label: 'Cancel', value: null }, { label: 'Offset', value: 'ok', primary: true }] });
+    if (r && Number.isFinite(r.values.d) && r.values.d) this.op((j, s) => LRC.ops.offset(j, s, r.values.d));
+  }
+  async arrayDlg() {
+    if (!this.needSel()) return;
+    const r = await LRC.dialog({ title: 'Array', fields: [{ key: 'c', label: 'Columns', value: '3', type: 'number' }, { key: 'r', label: 'Rows', value: '2', type: 'number' }, { key: 'gx', label: 'Gap X', value: '5', unit: 'mm', type: 'number' }, { key: 'gy', label: 'Gap Y', value: '5', unit: 'mm', type: 'number' }], buttons: [{ label: 'Cancel', value: null }, { label: 'Create', value: 'ok', primary: true }] });
+    if (!r) return;
+    const c = Math.max(1, Math.min(100, Math.round(r.values.c) || 1)), rows = Math.max(1, Math.min(100, Math.round(r.values.r) || 1));
+    this.op((j, s) => LRC.ops.array(j, s, c, rows, r.values.gx || 0, r.values.gy || 0));
+  }
+  async rotateDlg() {
+    if (!this.needSel()) return;
+    const r = await LRC.dialog({ title: 'Rotate', fields: [{ key: 'a', label: 'Angle (clockwise)', value: '90', unit: '°', type: 'number' }], buttons: [{ label: 'Cancel', value: null }, { label: 'Rotate', value: 'ok', primary: true }] });
+    if (r && Number.isFinite(r.values.a)) this.op((j, s) => LRC.ops.rotate(j, s, r.values.a));
+  }
+  // Nest parts to use as little material as possible: on the sheet or bed
+  // (laser), or onto beds, adding beds as needed (plotter).
+  async nestDlg() {
+    const job = this.state.job, m = this.machine();
+    const isLaser = m.type === 'laser';
+    const sheetOn = isLaser && job.sheet && job.sheet.on;
+    const what = this.state.sel.length ? 'the selected parts' : 'all parts';
+    const r = await LRC.dialog({
+      title: 'Nest parts',
+      message: 'Packs ' + what + (isLaser ? ' as tightly as possible' : ' onto as few beds as possible, adding beds as needed') + '. Several layouts are tried and the one that uses the least material is kept. Grouped parts stay together.',
+      fields: [
+        { key: 's', label: 'Spacing', value: '5', unit: 'mm', type: 'number' },
+        { key: 'm', label: 'Edge margin', value: '10', unit: 'mm', type: 'number' },
+        { key: 'rot', label: 'Turn parts 90° where it fits better', type: 'seg', value: 'yes', options: [{ value: 'yes', label: 'Yes' }, { value: 'no', label: 'No' }], full: true }
+      ].concat(sheetOn ? [{ key: 'on', label: 'Nest on', type: 'seg', value: 'sheet', options: [{ value: 'sheet', label: 'Sheet' }, { value: 'bed', label: 'Whole bed' }], full: true }] : []),
+      buttons: [{ label: 'Cancel', value: null }, { label: 'Nest', value: 'ok', primary: true }]
+    });
+    if (!r) return;
+    const bed = CC.bedOf(m);
+    const area = sheetOn && r.values.on !== 'bed' ? { x: job.sheet.x, y: job.sheet.y, w: job.sheet.w, h: job.sheet.h } : { x: 0, y: 0, w: bed[0], h: bed[1] };
+    const res = LRC.ops.nest(job, this.state.sel, { area, spacing: r.values.s || 0, margin: r.values.m || 0, rotate: r.values.rot !== 'no', beds: !isLaser });
+    if (!res.nested) return LRC.toast('Nothing fits in that area — try a smaller spacing or margin');
+    this.commit(res.job, { record: true }, res.sel);
+    const where = isLaser ? (area.w === bed[0] && area.h === bed[1] ? 'the bed' : 'the sheet') : res.areas + ' bed' + (res.areas === 1 ? '' : 's');
+    LRC.toast('Nested ' + res.nested + ' part' + (res.nested === 1 ? '' : 's') + ' on ' + where + ' · ' + Math.round(res.util * 100) + ' % of the used material' +
+      (res.unplaced ? ' · ' + res.unplaced + " didn't fit and stayed where they were" : ''), { ms: 6000 });
+  }
+  async textAt(x, y, bed) {
+    const r = await LRC.dialog({ title: 'Text', message: 'Text is converted to outlines in IBM Plex Sans.', fields: [{ key: 't', label: 'Text', value: '', full: true }, { key: 's', label: 'Height', value: '10', unit: 'mm', type: 'number' }], buttons: [{ label: 'Cancel', value: null }, { label: 'Add', value: 'ok', primary: true }] });
+    if (!r || !r.values.t) return;
+    const ent = await LRC.textEntity(r.values.t, r.values.s || 10, x, y, this.drawAci());
+    this.commit({ ...this.state.job, entities: this.state.job.entities.concat({ ...ent, bed: bed || 0 }) }, { record: true }, [ent.id]);
+    this.setState({ tool: 'select' });
+  }
+  drawAci() {
+    const p = this.state.job.processes[this.state.procSel];
+    return p && p.aci && p.aci.length ? p.aci[0] : 7;
+  }
+  selectByAci(n) {
+    const ok = new Set(LRC.ops.pickableIds(this.state.job));
+    this.setState({ sel: this.state.job.entities.filter((e) => e.aci === n && ok.has(e.id)).map((e) => e.id) });
+  }
+  // Registration marks on: add a "Registration marks" process whose colours mark the objects the
+  // camera looks for. Nothing is placed automatically.
+  setRegMode(mode) {
+    const job = this.state.job;
+    let processes = job.processes;
+    let regIdx = processes.findIndex(CC.isRegProc);
+    if (mode !== 'off' && regIdx < 0) {
+      processes = processes.concat(CC.regProcess());
+      regIdx = processes.length - 1;
+    }
+    // switching off: drop the process again if no colours were given to it
+    if (mode === 'off' && regIdx >= 0 && !(processes[regIdx].aci || []).length) {
+      processes = processes.filter((_, k) => k !== regIdx);
+      regIdx = -1;
+    }
+    this.setState({ reg: false, ...(mode !== 'off' ? { procSel: regIdx, picker: true, tab: 'Processes', edit: {} } : { procSel: 0, edit: {} }) });
+    this.commit({ ...job, regMode: mode, processes }, { record: true });
+    if (mode !== 'off') LRC.toast('Registration marks on — pick the colour(s) your mark objects use for "Registration marks", or right-click the marks and choose a colour', { ms: 7000 });
+  }
+  // Give every selected object a colour (and so a process).
+  recolour(n, ids) {
+    ids = ids || this.state.sel;
+    if (!ids.length) return LRC.toast('Select one or more objects first');
+    this.commit(LRC.ops.setAci(this.state.job, ids, n), { record: true });
+    const k = CC.processOfAci(this.state.job, n);
+    LRC.toast(ids.length + ' object' + (ids.length > 1 ? 's' : '') + ' → ACI ' + n + (k >= 0 ? ' · ' + this.state.job.processes[k].name : ' · no process yet'));
+  }
+  async recolourOther(ids) {
+    const r = await LRC.dialog({ title: 'Colour index', message: 'AutoCAD Color Index 1–255.', fields: [{ key: 'n', label: 'ACI number', value: '', type: 'number' }], buttons: [{ label: 'Cancel', value: null }, { label: 'Apply', value: 'ok', primary: true }] });
+    const n = r && Math.round(r.values.n);
+    if (n >= 1 && n <= 255) this.recolour(n, ids);
+  }
+  // Right-click on the canvas.
+  contextMenu(x, y, sel, at) {
+    const job = this.state.job;
+    const ents = LRC.ops.selected(job, sel);
+    const has = ents.length > 0;
+    const grouped = ents.some((e) => e.group);
+    const locked = ents.some((e) => e.locked);
+    const acis = new Set(ents.map((e) => e.aci));
+    const run = (fn) => () => this.run(fn)();
+    const op = (fn) => run(() => this.op(fn));
+    const name = (n) => { const k = CC.processOfAci(job, n); return k >= 0 ? job.processes[k].name : 'no process'; };
+    const items = [];
+    if (has) {
+      items.push({ swatches: [1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => ({ n, hex: LRC.aci.hex(n), on: acis.size === 1 && acis.has(n), title: 'ACI ' + n + ' · ' + CC.aciName(n) + ' → ' + name(n), run: () => this.recolour(n, sel) })), label: 'Colour of ' + (ents.length === 1 ? ents[0].name : ents.length + ' objects'), other: () => this.run(() => this.recolourOther(sel))() });
+      items.push('-');
+      if (grouped) items.push({ l: 'Ungroup', k: 'Ctrl+Shift+G', run: op((j, s) => LRC.ops.ungroup(j, s)) });
+      if (ents.length > 1) items.push({ l: 'Group', k: 'Ctrl+G', run: op((j, s) => LRC.ops.group(j, s)) });
+      items.push({ l: 'Select same colour', run: () => this.selectByAci(ents[0].aci), off: acis.size !== 1 });
+      items.push('-');
+      items.push({ l: 'Cut', k: 'Ctrl+X', run: () => this.copy(true) }, { l: 'Copy', k: 'Ctrl+C', run: () => this.copy(false) });
+    }
+    items.push({ l: 'Paste here', k: 'Ctrl+V', off: !LRC.clip.get(), run: run(() => {
+      const ents2 = LRC.clip.get();
+      const r = LRC.ops.paste(job, ents2, [at.lx, at.ly]);
+      this.commit({ ...r.job, entities: r.job.entities.map((e) => (r.sel.includes(e.id) ? { ...e, bed: at.bed || 0 } : e)) }, { record: true }, r.sel);
+    }) });
+    if (has) {
+      items.push({ l: 'Rename…', k: 'F2', run: () => this.rename(sel) });
+      items.push({ l: 'Duplicate', k: 'Ctrl+D', run: op((j, s) => LRC.ops.duplicate(j, s)) });
+      items.push({ l: 'Delete', k: 'Del', run: run(() => this.commit(LRC.ops.remove(job, sel), { record: true }, [])) });
+      items.push('-');
+      items.push({ l: 'Rotate 90° clockwise', run: op((j, s) => LRC.ops.rotate(j, s, 90)) });
+      items.push({ l: 'Mirror horizontal', run: op((j, s) => LRC.ops.mirror(j, s, 'h')) });
+      items.push({ l: 'Mirror vertical', run: op((j, s) => LRC.ops.mirror(j, s, 'v')) });
+      items.push({ l: 'Bring to front', run: op((j, s) => LRC.ops.order(j, s, 'front')) }, { l: 'Send to back', run: op((j, s) => LRC.ops.order(j, s, 'back')) });
+      items.push('-');
+      items.push({ l: locked ? 'Unlock' : 'Lock', run: run(() => this.commit(LRC.ops.setFlag(job, sel, 'locked', !locked), { record: true })) });
+      items.push({ l: 'Hide', run: run(() => this.commit(LRC.ops.setFlag(job, sel, 'hidden', true), { record: true }, [])) });
+    } else {
+      items.push({ l: 'Select all', k: 'Ctrl+A', run: () => this.setState({ sel: LRC.ops.pickableIds(job) }) });
+    }
+    LRC.contextMenu(x, y, items);
+  }
+
+  // ---------------------------------------------------------------- machine & material
+  async pickMachine(id) {
+    const s = this.state;
+    const m = s.machines.find((x) => x.id === id);
+    if (!m || m.id === s.job.machineId) return this.setState({ menu: false });
+    let job = { ...s.job, machineId: m.id };
+    if (m.type !== s.job.machineType) {
+      const settings = await window.api.settings.get();
+      const want = settings.currentMaterial && settings.currentMaterial[m.type];
+      const mat = s.materials.find((x) => x.id === want && x.m.includes(m.type)) || s.materials.find((x) => x.m.includes(m.type));
+      const own = CC.presetsFor(mat, m);
+      const presets = own.length ? own : null;
+      if (!presets) return LRC.fail(new Error('No material with ' + m.type + ' presets — add one in Setup → Materials'));
+      const bed = CC.bedOf(m);
+      job = {
+        ...job, machineType: m.type, materialId: mat.id,
+        processes: presets.map((p) => ({ ...JSON.parse(JSON.stringify(p)), src: 'preset' })),
+        regMode: m.type === 'laser' && m.info && m.info.f && m.info.f.camera ? job.regMode || 'linear' : 'off',
+        sheet: { ...job.sheet, w: Math.min(job.sheet.w, bed[0]), h: Math.min(job.sheet.h, bed[1]) },
+        entities: job.entities.map((e) => ({ ...e, bed: m.type === 'laser' ? 0 : e.bed || 0 }))
+      };
+    } else {
+      // same kind of machine: processes still on their preset follow this
+      // machine's own presets (job overrides are kept)
+      const list = CC.presetsFor(s.materials.find((x) => x.id === job.materialId), m);
+      job = {
+        ...job,
+        processes: job.processes.map((p) => {
+          const pre = p.src === 'preset' ? list.find((x) => x.name === p.name) : null;
+          return pre ? { ...JSON.parse(JSON.stringify(pre)), src: 'preset', hidden: p.hidden } : p;
+        }),
+        regMode: m.type === 'laser' && m.info && m.info.f && m.info.f.camera ? job.regMode : 'off'
+      };
+    }
+    this.setState({ menu: false, procSel: 0, edit: {}, dev: null, devErr: null });
+    this.commit(job, { record: true });
+    window.api.settings.set({ currentMachine: m.id });
+  }
+  async pickMaterial(id) {
+    const s = this.state;
+    const mat = s.materials.find((x) => x.id === id);
+    const type = this.machine().type;
+    this.setState({ matOpen: false });
+    if (!mat) return;
+    const overrides = s.job.processes.some((p) => p.src === 'job');
+    if (overrides && !(await LRC.confirm('Switch material?', 'This job has process settings saved for this job only. Switching to ' + mat.name + ' replaces them with its presets.', 'Switch'))) return;
+    const presets = CC.presetsFor(mat, this.machine()).map((p) => ({ ...JSON.parse(JSON.stringify(p)), src: 'preset' }));
+    this.commit({ ...s.job, materialId: mat.id, processes: presets.length ? presets : s.job.processes }, { record: true });
+    this.setState({ edit: {}, procSel: 0 });
+    const settings = await window.api.settings.get();
+    window.api.settings.set({ currentMaterial: { ...(settings.currentMaterial || {}), [type]: mat.id } });
+  }
+
+  // ---------------------------------------------------------------- processes
+  effective(i) {
+    return this.state.job.processes[i] || null;
+  }
+  // Process edits go straight into the job as a job override. Rapid changes
+  // to the same field (typing, dragging a slider) share one undo step.
+  patchProcess(i, fn, field) {
+    const now = Date.now();
+    const record = !(this.lastEdit && this.lastEdit.i === i && this.lastEdit.field === field && now - this.lastEdit.at < 1500);
+    this.lastEdit = { i, field, at: now };
+    const processes = this.state.job.processes.map((p, k) => (k === i ? { ...fn(p), src: 'job' } : p));
+    this.commit({ ...this.state.job, processes }, { record });
+  }
+  setEdit(key, v) {
+    this.patchProcess(this.state.procSel, (p) => ({ ...p, [key]: v }), key);
+  }
+  setAdv(key, v) {
+    this.patchProcess(this.state.procSel, (p) => ({ ...p, adv: { ...(p.adv || {}), [key]: v } }), 'adv.' + key);
+  }
+  clearEdit() { /* edits are saved to the job as they happen */ }
+  // The material preset a job process came from (matched by name, else position).
+  presetFor(i) {
+    const mat = this.material();
+    const presets = CC.presetsFor(mat, this.machine());
+    const cur = this.state.job.processes[i];
+    return presets.find((x) => x.name === cur.name) || presets[i] || null;
+  }
+  // Before a job leaves the app: offer to undo job overrides.
+  async checkOverrides(what) {
+    const job = this.state.job;
+    const over = job.processes.filter((p) => p.src === 'job' && !CC.isRegProc(p) && p.out !== false);
+    if (!over.length) return true;
+    const r = await LRC.dialog({
+      title: 'Job overrides',
+      message: over.length + ' process' + (over.length > 1 ? 'es use' : ' uses') + ' settings changed for this job instead of the ' + (this.material() ? this.material().name : 'material') + ' presets:\n' + over.map((p) => '• ' + p.name).join('\n'),
+      buttons: [{ label: 'Go back', value: null }, { label: 'Revert to presets', value: 'revert' }, { label: 'Continue with changes', value: 'keep', primary: true }]
+    });
+    if (!r) return false;
+    if (r.button === 'revert') {
+      const processes = job.processes.map((p, i) => {
+        if (p.src !== 'job' || CC.isRegProc(p)) return p;
+        const pre = this.presetFor(i);
+        return pre ? { ...JSON.parse(JSON.stringify(pre)), aci: p.aci, src: 'preset' } : p;
+      });
+      await this.commit({ ...job, processes }, { record: true });
+      LRC.toast('Reverted to the material presets before ' + what);
+    }
+    return true;
+  }
+  async saveToMaterial() {
+    const i = this.state.procSel;
+    const mat = this.material();
+    if (!mat) return LRC.fail(new Error('This job has no material — pick one first'));
+    if (mat.locked) return LRC.fail(new Error(mat.name + ' is locked — unlock it in the material library to change its presets'));
+    const machine = this.machine(), type = machine.type;
+    const p = this.effective(i);
+    const clean = { ...p };
+    delete clean.src;
+    delete clean.hidden;
+    // saved to this machine's own presets for the material
+    const presets = CC.presetsFor(mat, machine).slice();
+    // match the preset by name first, otherwise by position
+    let k = presets.findIndex((x) => x.name === this.state.job.processes[i].name);
+    if (k < 0) k = i < presets.length ? i : presets.length;
+    presets[k] = clean;
+    const saved = await window.api.materials.save({ ...mat, m: mat.m.includes(type) ? mat.m : mat.m.concat(type), presets: { ...mat.presets, [machine.id]: presets } });
+    const processes = this.state.job.processes.map((x, n) => (n === i ? { ...p, src: 'preset' } : x));
+    this.clearEdit(i);
+    this.setState({ materials: this.state.materials.map((x) => (x.id === saved.id ? saved : x)) });
+    this.commit({ ...this.state.job, processes }, { record: true });
+    LRC.toast('Saved "' + p.name + '" to ' + mat.name, { kind: 'ok' });
+  }
+  revertToPreset() {
+    const i = this.state.procSel;
+    const mat = this.material();
+    const cur = this.state.job.processes[i];
+    const pre = this.presetFor(i);
+    if (!pre) return LRC.fail(new Error('No matching preset in ' + (mat ? mat.name : 'the material')));
+    const processes = this.state.job.processes.map((x, n) => (n === i ? { ...JSON.parse(JSON.stringify(pre)), aci: cur.aci, src: 'preset' } : x));
+    this.clearEdit(i);
+    this.commit({ ...this.state.job, processes }, { record: true });
+  }
+  async newProcess() {
+    const isLaser = this.machine().type === 'laser';
+    const used = new Set(this.state.job.processes.flatMap((p) => p.aci || []));
+    const free = [1, 2, 3, 4, 5, 6, 7, 8, 9].find((n) => !used.has(n));
+    const r = await LRC.dialog({
+      title: 'New process',
+      fields: [
+        { key: 'name', label: 'Name', value: isLaser ? 'New cut' : 'New tool pass', full: true },
+        isLaser ? { key: 'proc', label: 'Process', type: 'seg', value: 'Cut', options: ['Cut', 'Engrave'] } : { key: 'proc', label: 'Tool head', type: 'seg', value: 'T1 · Knife', options: ['T1 · Knife', 'T2 · V-cut 45°', 'T3 · Crease wheel', 'T4 · Pen'] },
+        { key: 'aci', label: 'Colour (ACI)', type: 'number', value: free ? String(free) : '' }
+      ],
+      buttons: [{ label: 'Cancel', value: null }, { label: 'Add', value: 'ok', primary: true }]
+    });
+    if (!r) return;
+    const aci = Math.round(r.values.aci);
+    const base = isLaser
+      ? { name: r.values.name || 'New process', proc: r.values.proc, power: r.values.proc === 'Engrave' ? 50 : 80, speed: r.values.proc === 'Engrave' ? 300 : 20, f: r.values.proc === 'Cut' ? 5000 : 500, passes: 1, air: r.values.proc === 'Cut' ? 'On' : 'Off', dash: false, dl: 5, gl: 2, out: true }
+      : { name: r.values.name || 'New process', tool: r.values.proc, speed: 300, passes: 1, dash: false, dl: 5, gl: 2, out: true };
+    const aciList = aci >= 1 && aci <= 255 ? [aci] : [];
+    // a colour belongs to one process only
+    const owner = this.state.job.processes.find((p) => (p.aci || []).some((n) => aciList.includes(n)));
+    if (owner) return LRC.fail(new Error('ACI ' + aci + ' is already used by "' + owner.name + '" — pick a free colour, or remove it from that process first'));
+    const processes = this.state.job.processes.concat({ ...base, aci: aciList, adv: {}, src: 'job' });
+    this.commit({ ...this.state.job, processes }, { record: true });
+    this.setState({ procSel: processes.length - 1, edit: {} });
+  }
+  async deleteProcess() {
+    const i = this.state.procSel;
+    const p = this.state.job.processes[i];
+    if (!p) return;
+    if (!(await LRC.confirm('Delete "' + p.name + '"?', 'Objects in its colours will have no process until you assign them to another one.', 'Delete', true))) return;
+    const processes = this.state.job.processes.filter((_, k) => k !== i);
+    this.setState({ procSel: Math.max(0, i - 1), edit: {} });
+    this.commit({ ...this.state.job, processes }, { record: true });
+  }
+  // Each colour belongs to exactly one process: a colour another process uses
+  // can't be added until it is removed there.
+  toggleAci(n) {
+    const i = this.state.procSel;
+    const procs = this.state.job.processes;
+    const had = (procs[i].aci || []).includes(n);
+    const owner = procs.findIndex((p, k) => k !== i && (p.aci || []).includes(n));
+    if (!had && owner >= 0) return LRC.toast('ACI ' + n + ' is already used by "' + procs[owner].name + '" — remove it there first');
+    const processes = procs.map((p, k) => (k === i ? { ...p, aci: had ? p.aci.filter((x) => x !== n) : (p.aci || []).concat(n).sort((a, b) => a - b) } : p));
+    this.commit({ ...this.state.job, processes }, { record: true });
+  }
+  async aciOther() {
+    const r = await LRC.dialog({ title: 'Colour index', message: 'AutoCAD Color Index 1–255. A colour can only belong to one process.', fields: [{ key: 'n', label: 'ACI number', value: '', type: 'number' }], buttons: [{ label: 'Cancel', value: null }, { label: 'Toggle', value: 'ok', primary: true }] });
+    const n = r && Math.round(r.values.n);
+    if (n >= 1 && n <= 255) this.toggleAci(n);
+  }
+
+  // ---------------------------------------------------------------- device
+  dev(cmd, args, msg) {
+    const m = this.machine();
+    return window.api.device.command(m.id, cmd, args).then((r) => { if (msg) LRC.toast(msg); this.pollDevice(); return r; }).catch(LRC.fail);
+  }
+  jobBox() {
+    const ents = this.state.job.entities.filter((e) => !e.hidden && (this.machine().type === 'laser' || !(e.bed || 0)));
+    return CC.boxOf(ents);
+  }
+  frame() {
+    const b = this.jobBox();
+    if (!CC.boxValid(b)) return LRC.toast('Nothing to frame');
+    this.dev('frame', { box: [b.x0, b.y0, b.x1, b.y1] }, 'Framing ' + CC.boxW(b).toFixed(0) + ' × ' + CC.boxH(b).toFixed(0) + ' mm');
+  }
+  async sendDialog(andStart) {
+    if (!(await this.checkOverrides('sending'))) return;
+    const s = this.state;
+    const m = this.machine();
+    const est = this.estimate();
+    const checks = CC.checkJob(s.job, m);
+    const job = s.job;
+    const res = await LRC.sendDialog({
+      title: andStart ? 'Send and start' : 'Send to machine',
+      sendLabel: andStart ? 'Send and start' : 'Send',
+      rows: [['Job', job.name], ['Machine', m.name], ['Material', this.material() ? this.material().name + ' · ' + this.material().t + ' mm' : '—'], ['Estimated time', CC.fmtDuration(est.total, true)], ['Processes', String(est.perProcess.length)]],
+      via: m.conn === 'Ethernet' ? 'Ethernet' : 'Local',
+      blocked: checks.filter((c) => c.block).map((c) => c.l),
+      warnings: checks.filter((c) => !c.ok && !c.block).map((c) => c.l),
+      check: () => (m.ip
+        ? window.api.device.status(m.id).catch((err) => { throw new Error(m.name + ' did not answer at ' + m.ip + ':' + (m.port || 8470) + ' (' + err.message + ')'); })
+        : Promise.reject(new Error(m.name + ' has no IP address — set it on the Machines page'))),
+      send: async (via) => {
+        const r = await window.api.device.send(job, via);
+        if (r && andStart && via === 'Ethernet') await window.api.device.command(m.id, 'start', {});
+        return r;
+      },
+      doneLabel: (r, via) => (via === 'Ethernet' ? (andStart ? 'Sent and started on ' : 'Sent to ') + m.name : 'Saved ' + r.where.split(/[\\/]/).pop())
+    });
+    if (!res) return;
+    if (res.conn !== 'Ethernet') LRC.toast('Saved ' + res.where.split(/[\\/]/).pop(), { kind: 'ok', action: 'Show', onAction: () => window.api.app.showItem(res.where) });
+    this.pollDevice();
+    window.api.materials.list().then((materials) => this.setState({ materials }));
+  }
+  async saveCopy() {
+    if (!(await this.checkOverrides('saving'))) return;
+    const p =await window.api.job.saveToComputer(this.state.job);
+    if (p) LRC.toast('Saved ' + p.split(/[\\/]/).pop(), { kind: 'ok', action: 'Show', onAction: () => window.api.app.showItem(p) });
+  }
+  // the controller's queue
+  async queueAction(fn, okMsg) {
+    this.setState({ queueBusy: true });
+    try {
+      await fn(this.machine().id);
+      if (okMsg) LRC.toast(okMsg);
+      const list = await window.api.device.jobs(this.machine().id);
+      this.setState({ devJobs: { mid: this.machine().id, list } });
+    } finally {
+      this.setState({ queueBusy: false });
+    }
+  }
+
+  // ---------------------------------------------------------------- shortcuts
+  shortcuts() {
+    const r = (fn) => this.run(fn);
+    const nudge = (dx, dy) => r(() => { if (this.state.sel.length) this.commit(LRC.ops.translate(this.state.job, this.state.sel, dx, dy), { record: true }); });
+    return {
+      'Ctrl+N': r(() => this.newJob()), 'Ctrl+O': r(() => this.openJob()), 'Ctrl+S': r(() => this.save()), 'Ctrl+Shift+S': r(() => this.save(true)),
+      'Ctrl+Shift+E': r(() => this.saveCopy()), 'Ctrl+I': r(() => this.importFiles()),
+      'Ctrl+Z': () => this.undo(), 'Ctrl+Y': () => this.redo(), 'Ctrl+Shift+Z': () => this.redo(),
+      'Ctrl+C': () => this.copy(false), 'Ctrl+X': () => this.copy(true), 'Ctrl+V': () => this.paste(false), 'Ctrl+Shift+V': () => this.paste(true),
+      'Ctrl+D': () => this.op((j, s) => LRC.ops.duplicate(j, s)),
+      F2: () => this.rename(),
+      Delete: () => { if (this.state.sel.length) this.commit(LRC.ops.remove(this.state.job, this.state.sel), { record: true }, []); },
+      Backspace: () => { if (this.state.sel.length) this.commit(LRC.ops.remove(this.state.job, this.state.sel), { record: true }, []); },
+      'Ctrl+A': () => this.setState({ sel: LRC.ops.pickableIds(this.state.job) }),
+      'Ctrl+Shift+I': () => { const s = new Set(this.state.sel); this.setState({ sel: LRC.ops.pickableIds(this.state.job).filter((id) => !s.has(id)) }); },
+      'Ctrl+G': () => this.op((j, s) => LRC.ops.group(j, s)), 'Ctrl+Shift+G': () => this.op((j, s) => LRC.ops.ungroup(j, s)),
+      Escape: () => { this.closeMenus(); this.setState({ sel: [], tool: 'select', sheetOpen: false }); },
+      ArrowLeft: nudge(-1, 0), ArrowRight: nudge(1, 0), ArrowUp: nudge(0, -1), ArrowDown: nudge(0, 1),
+      'Shift+ArrowLeft': nudge(-10, 0), 'Shift+ArrowRight': nudge(10, 0), 'Shift+ArrowUp': nudge(0, -10), 'Shift+ArrowDown': nudge(0, 10),
+      'Ctrl+R': () => { location.href = 'SimulationDetailed.dc.html'; }, 'Ctrl+M': () => { location.href = 'MaterialsDetailed.dc.html'; },
+      'Ctrl+/': () => this.showShortcuts(), F1: () => this.showShortcuts(),
+      V: () => this.setState({ tool: 'select' }), L: () => this.setState({ tool: 'line' }), R: () => this.setState({ tool: 'rect' }), E: () => this.setState({ tool: 'ellipse' }),
+      P: () => this.setState({ tool: 'polygon' }), T: () => this.setState({ tool: 'text' }), M: () => this.setState({ tool: 'measure' }),
+      '0': () => this.canvas && this.canvas.fit(), '+': () => this.canvas && this.canvas.zoomBy(1.25), '=': () => this.canvas && this.canvas.zoomBy(1.25), '-': () => this.canvas && this.canvas.zoomBy(0.8)
+    };
+  }
+  showShortcuts() {
+    LRC.dialog({
+      title: 'Keyboard shortcuts', buttons: [{ label: 'Close', value: 'ok', primary: true }],
+      fields: [{
+        key: 't', type: 'table', rows: [
+          ['New / open / save', 'Ctrl+N · Ctrl+O · Ctrl+S'], ['Import drawing', 'Ctrl+I'], ['Undo / redo', 'Ctrl+Z · Ctrl+Y'],
+          ['Cut / copy / paste', 'Ctrl+X · Ctrl+C · Ctrl+V'], ['Duplicate / delete', 'Ctrl+D · Del'], ['Rename', 'F2 · double-click in Objects'], ['Select all / invert', 'Ctrl+A · Ctrl+Shift+I'],
+          ['Group / ungroup', 'Ctrl+G · Ctrl+Shift+G'], ['Nudge 1 mm / 10 mm', 'Arrows · Shift+Arrows'], ['Move with copy', 'Alt+drag'],
+          ['Tools', 'V select · L line · R rect · E ellipse · P polygon · T text · M measure'], ['Zoom', 'Wheel · + / − · 0 fit'], ['Pan', 'Space+drag or right-drag'],
+          ['Simulation / setup: materials', 'Ctrl+R · Ctrl+M']
+        ]
+      }]
+    });
+  }
+
+  // ---------------------------------------------------------------- estimate
+  estimate() {
+    const job = this.state.job, m = this.machine();
+    if (this._est && this._est.job === job && this._est.m === m) return this._est.r;
+    const r = CC.estimate(job, m);
+    this._est = { job, m, r };
+    return r;
+  }
+
+  renderVals() {
+    // theme tokens (theme.css): accent fills, accent text/icons on surfaces, accent tint
+    const accent = 'var(--accent)';
+    const accentFg = 'var(--accent-fg)';
+    const accentSoft = 'var(--accent-soft)';
+    const noop = () => {};
+    const S = this.state;
+    const R = (fn) => this.run(fn);
+
+    const icons = {
+      logo: 'M4 20 20 4 M13 4h7v7',
+      import: 'M12 3v12 M7 10l5 5 5-5 M4 20h16',
+      undo: 'M9 14 4 9l5-5 M4 9h10.5a5.5 5.5 0 0 1 0 11H11',
+      redo: 'M15 14l5-5-5-5 M20 9H9.5a5.5 5.5 0 0 0 0 11H13',
+      group: 'M3 3h8v8H3z M13 13h8v8h-8z M7 11v4h6 M11 7h4v6',
+      alignL: 'M4 3v18 M8 6h11v5H8z M8 14h7v5H8z',
+      alignC: 'M12 3v18 M6 6h12v5H6z M8 14h8v5H8z',
+      distribute: 'M4 3v18 M20 3v18 M9 7h6v10H9z',
+      weld: 'M4 4h10v10H4z M10 10h10v10H10z',
+      offset: 'M8 8h8v8H8z M4 4h16v16H4z',
+      array: 'M4 4h6v6H4z M14 4h6v6h-6z M4 14h6v6H4z M14 14h6v6h-6z',
+      select: 'M5 3l14 7.5-6.2 1.7L10 18.5z',
+      node: 'M5 19C8 6 16 6 19 19 M3.5 17.5h3v3h-3z M17.5 17.5h3v3h-3z M10.5 6.5h3v3h-3z',
+      line: 'M5 19 19 5',
+      rect: 'M4 6h16v12H4z',
+      ellipse: 'M21 12a9 6.5 0 1 1-18 0a9 6.5 0 1 1 18 0z',
+      polygon: 'M12 3l8.5 6.2-3.2 9.8H6.7L3.5 9.2z',
+      text: 'M5 7V5h14v2 M12 5v14 M9 19h6',
+      image: 'M4 5h16v14H4z M4 16l5-5 4 4 3-3 4 4 M15.5 9.5h.01',
+      measure: 'M3 16.5 16.5 3 21 7.5 7.5 21z M7 12.5l2 2 M10 9.5l2 2 M13 6.5l2 2',
+      chev: 'M6 9l6 6 6-6',
+      check: 'M5 12.5l4.5 4.5L19 7',
+      warn: 'M12 4 2.5 20h19z M12 10v4 M12 17h.01',
+      eye: 'M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z M12 9.5a2.5 2.5 0 1 0 0 5a2.5 2.5 0 1 0 0-5z',
+      pencil: 'M4 20h4L19 9l-4-4L4 16z M13.5 6.5l4 4',
+      eyeOff: 'M3 3l18 18 M10.6 5.1A10.5 10.5 0 0 1 12 5c6.4 0 10 7 10 7a17 17 0 0 1-3.2 4.1 M6.6 6.6C3.8 8.4 2 12 2 12s3.6 7 10 7a9.6 9.6 0 0 0 5.4-1.6 M9.9 9.9a3 3 0 0 0 4.2 4.2',
+      reg: 'M12 2v4 M12 18v4 M2 12h4 M18 12h4 M12 8.5a3.5 3.5 0 1 0 0 7a3.5 3.5 0 1 0 0-7z',
+      focus: 'M3 8V3h5 M16 3h5v5 M21 16v5h-5 M8 21H3v-5 M12 9v6 M9 12h6',
+      rotary: 'M20 12a8 8 0 1 1-2.34-5.66 M20 4v5h-5',
+      heads: 'M9 3h6v5H9z M12 8v7 M8.5 15h7L12 21z',
+      conveyor: 'M3 15h18 M3 19h18 M7 15V9h10v6 M5 17h.01 M19 17h.01',
+      nest: 'M3 3h8v11H3z M13 3h8v6h-8z M13 11h8v10h-8z M3 16h8v5H3z',
+      bridges: 'M3 12h6 M15 12h6 M9 8v8 M15 8v8',
+      frame: 'M4 9V4h5 M15 4h5v5 M20 15v5h-5 M9 20H4v-5',
+      sim: 'M3 12h4l3-7 4 14 3-7h4',
+      queue: 'M4 6h16 M4 12h16 M4 18h10',
+      minus: 'M5 12h14',
+      plus: 'M12 5v14 M5 12h14',
+      chevR: 'M9 6l6 6-6 6',
+      chevU: 'M6 15l6-6 6 6',
+      up: 'M12 19V5 M6 11l6-6 6 6',
+      down: 'M12 5v14 M6 13l6 6 6-6',
+      left: 'M19 12H5 M11 6l-6 6 6 6',
+      right: 'M5 12h14 M13 6l6 6-6 6',
+      home: 'M4 11l8-7 8 7 M6 9.5V20h12V9.5',
+      sheet: 'M3 5h18v14H3z M7 9h6v6H7z',
+      download: 'M12 3v12 M7 10l5 5 5-5 M4 20h16',
+      send: 'M4 12l16-8-6 16-3-7z',
+      trash: 'M4 7h16 M9 7V4h6v3 M6 7l1 13h10l1-13',
+      x: 'M6 6l12 12 M18 6 6 18'
+    };
+
+    if (!S.ready || !S.job) {
+      return { accent, icons, noop, loading: true, menuBar: [], machines: [], mach: { name: 'Loading…', sub: '', type: '', tbg: 'var(--idle-dot)', toolsLabel: '' }, dev: { label: '', dot: 'var(--idle-dot)', fg: 'var(--text-3)', cls: '' }, tools: [], toolGroups: [], machTools: [], tabs: [], colours: [], checks: [], snaps: [], queue: [], objects: [], est: '', jobSummary: '', saveName: '', savedLabel: '', canvasEl: null, fill: { button: 'Fill' }, sheetPill: '', zoom: '', selInfo: '', isLaser: true };
+    }
+
+    const job = S.job;
+    const machine = this.machine();
+    const m = machine.type;
+    const isLaser = m === 'laser';
+    const bed = CC.bedOf(machine);
+    const material = this.material();
+    const est = this.estimate();
+    const selIds = S.sel;
+    const selEnts = LRC.ops.selected(job, selIds);
+
+    // ---- header: machine + device status
+    const TYPE = { laser: { type: 'LASER', tbg: 'var(--badge-laser)' }, plotter: { type: 'PLOTTER', tbg: 'var(--badge-plotter)' } };
+    const subOf = (x) => (x.ctrl ? x.ctrl + ' · ' : '') + (x.placeholder ? 'not set up' : x.conn === 'Ethernet' ? (x.ip || 'no IP') : 'save locally');
+    const mach = { ...TYPE[m], name: machine.name, sub: (machine.kind || '') + (machine.kind ? ' · ' : '') + subOf(machine), toolsLabel: machine.ctrl };
+    const machines = S.machines.map((x) => ({ ...TYPE[x.type], name: x.name, sub: subOf(x), on: x.id === machine.id, bg: x.id === machine.id ? accentSoft : 'transparent', pick: R(() => this.pickMachine(x.id)) }));
+    const online = S.dev && S.dev.mid === machine.id;
+    let dev;
+    // status pill: cls picks the .pill variant, dot/fg are its colours
+    if (machine.placeholder) dev = { label: 'Not set up', dot: 'var(--warn-dot)', fg: 'var(--warn)', cls: 'warn' };
+    else if (machine.conn !== 'Ethernet') dev = { label: 'Save locally', dot: 'var(--text-4)', fg: 'var(--text-2)', cls: '' };
+    else if (online) {
+      const stt = S.dev.state;
+      dev = stt === 'running' ? { label: 'Running ' + Math.round((S.dev.progress || 0) * 100) + '%', dot: accent, fg: accentFg, cls: 'accent' }
+        : stt === 'paused' ? { label: 'Paused', dot: 'var(--warn-dot)', fg: 'var(--warn)', cls: 'warn' }
+          : stt === 'alarm' ? { label: 'Alarm', dot: 'var(--err-dot)', fg: 'var(--err)', cls: 'err' }
+            : { label: 'Ready', dot: 'var(--ok-dot)', fg: 'var(--ok)', cls: 'ok' };
+    } else dev = S.devErr ? { label: 'Offline', dot: 'var(--err-dot)', fg: 'var(--err)', cls: 'err' } : { label: 'Checking…', dot: 'var(--idle-dot)', fg: 'var(--text-2)', cls: '' };
+
+    // features the machine has: controls for the others are hidden, not greyed out
+    const feat = (k) => !!(machine.info && machine.info.f && machine.info.f[k]);
+
+    // ---- registration marks
+    const DOT ={ tl: { x: 4, y: 4 }, tr: { x: 34, y: 4 }, bl: { x: 4, y: 20 }, br: { x: 34, y: 20 } };
+    const MODES = [
+      { id: 'off', l: 'Off', n: 'No marks', dots: [] },
+      { id: 'pos', l: 'Position & rotation', n: '2 dots', dots: ['tl', 'br'] },
+      { id: 'linear', l: 'Full linear', n: '3 dots', dots: ['tl', 'tr', 'bl'] },
+      { id: 'nonlinear', l: 'Non-linear', n: '3 dots', dots: ['tl', 'tr', 'bl'] }
+    ];
+    const mode = MODES.find((x) => x.id === (job.regMode || 'off')) || MODES[0];
+    const regModes = MODES.map((x) => ({
+      ...x, on: x.id === mode.id, bg: x.id === mode.id ? accentSoft : 'transparent',
+      dots: x.dots.map((k) => DOT[k]),
+      pick: () => this.setRegMode(x.id)
+    }));
+    const regLabel = mode.id === 'off' ? 'Off' : mode.l + ' · ' + mode.n;
+    const regOn = mode.id !== 'off';
+
+    // ---- processes
+    const ACI = [1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => ({ n, name: CC.aciName(n), hex: LRC.aci.hex(n), fg: LRC.aci.fg(n) }));
+    const chip = (n) => ({ n, hex: LRC.aci.hex(n), fg: LRC.aci.fg(n), title: 'ACI ' + n + ' · ' + CC.aciName(n) });
+    const procs = job.processes;
+    const selIdx = Math.min(S.procSel, Math.max(0, procs.length - 1));
+    const has = (o) => !!o && Object.keys(o).length > 0;
+    const usedAci = new Set(job.entities.filter((e) => !e.hidden).map((e) => e.aci));
+    const counts = {};
+    job.entities.forEach((e) => { counts[e.aci] = (counts[e.aci] || 0) + 1; });
+    const orphans = [...usedAci].filter((a) => CC.processOfAci(job, a) < 0).sort((a, b) => a - b);
+
+    const regOnNow = isLaser && (job.regMode || 'off') !== 'off';
+    const colours = procs.map((p0, i) => {
+      const p = this.effective(i);
+      const isReg = CC.isRegProc(p);
+      const badge = has(S.edit[i]) ? 'Edited' : p.src === 'job' && !isReg ? 'Job' : false;
+      const chips = (p.aci || []).map(chip);
+      const nObj = (p.aci || []).reduce((s, a) => s + (counts[a] || 0), 0);
+      const out = p.out !== false;
+      const shown = !p.hidden;
+      return {
+        hidden: isReg && !regOnNow,
+        chips, none: chips.length === 0, name: p.name, badge,
+        badgeBg: badge === 'Edited' ? 'var(--warn-soft)' : accentSoft, badgeFg: badge === 'Edited' ? 'var(--warn)' : accentFg,
+        proc: (isReg ? 'Camera marks, not cut' : isLaser ? p.proc : p.tool) + (nObj ? ' · ' + nObj + ' object' + (nObj > 1 ? 's' : '') : ''),
+        summary: isReg ? nObj + ' / ' + (CC.REG_NEEDED[job.regMode] || 3) + ' marks' : isLaser ? p.power + '% · ' + p.speed + ' mm/s' : p.speed + ' mm/s',
+        dashOn: !!p.dash, on: i === selIdx,
+        bg: i === selIdx ? accentSoft : 'var(--surface)', bd: i === selIdx ? accent : 'var(--line)', op: out && shown ? 1 : 0.55,
+        // the eye only hides the objects here (still sent and simulated)
+        outIcon: shown ? icons.eye : icons.eyeOff, outLabel: shown ? 'Hide these objects on the canvas' : 'Show these objects on the canvas',
+        // click a row to open its settings below it; click the open row again to close them
+        open: i === selIdx && S.procPanel, chevRot: i === selIdx && S.procPanel ? '180deg' : '0deg',
+        pick: () => this.setState((s) => (s.procSel === i ? { procPanel: !s.procPanel } : { procSel: i, procPanel: true, picker: false, procOpen: false, openPick: null })),
+        toggleOut: () => {
+          // hiding a process also drops its objects from the selection (they can't be picked while hidden)
+          const acis = new Set(p.aci || []);
+          const sel = shown ? S.sel.filter((id) => { const e = job.entities.find((x) => x.id === id); return e && !acis.has(e.aci); }) : S.sel;
+          this.commit({ ...job, processes: procs.map((x, k) => (k === i ? { ...x, hidden: shown } : x)) }, { record: true }, sel);
+        }
+      };
+    }).filter((c) => !c.hidden);
+
+    const hasSel = procs.length > 0;
+    const sc = hasSel ? this.effective(selIdx) : null;
+    const dirty = hasSel && has(S.edit[selIdx]);
+    const isCut = sc && sc.proc === 'Cut';
+    const selIsReg = sc && CC.isRegProc(sc);
+    const num = (k) => (e) => {
+      const raw = e.target.value;
+      const v = parseFloat(raw);
+      this.setEdit(k, Number.isFinite(v) ? v : raw);
+    };
+    let sel = { chips: [], adv: [], sliders: [], nums: [], selectOpts: [] };
+    if (hasSel) {
+      const selChips = (sc.aci || []).map(chip);
+      sel = {
+        c: selChips.length ? LRC.aci.stroke(selChips[0].n) : 'var(--text-3)',
+        chips: selChips, none: selChips.length === 0,
+        name: sc.name, setName: (e) => this.setEdit('name', e.target.value),
+        dirty, clean: !dirty, showRevert: sc.src === 'job' && !dirty && !!material,
+        saveCursor: sc.src === 'job' ? 'pointer' : 'default',
+        cantGlobal: !(dirty || sc.src === 'job') || !material, globalOpacity: (dirty || sc.src === 'job') && material ? 1 : 0.45,
+        globalTip: material ? (material.locked ? material.name + ' is locked' : 'Save these settings as the ' + material.name + ' preset for ' + machine.name) : 'No material on this job',
+        status: dirty ? 'Unsaved' : sc.src === 'job' ? 'Job override' : 'Material preset',
+        statusBg: dirty ? 'var(--warn-soft)' : sc.src === 'job' ? accentSoft : 'var(--sunken)',
+        statusFg: dirty ? 'var(--warn)' : sc.src === 'job' ? accentFg : 'var(--text-2)',
+        selectLabel: isLaser ? 'Process' : 'Tool head',
+        selectValue: isLaser ? sc.proc : sc.tool,
+        sliders: isLaser
+          ? [{ l: 'Power', v: sc.power, u: '%', min: 0, max: 100, step: 1, set: num('power') }, { l: 'Speed', v: sc.speed, u: 'mm/s', min: 1, max: Math.max(1000, Number(sc.speed) || 0), step: 1, set: num('speed') }]
+          : [{ l: 'Speed', v: sc.speed, u: 'mm/s', min: 10, max: Math.max(1000, Number(sc.speed) || 0), step: 10, set: num('speed') }],
+        nums: isLaser
+          ? [{ l: isCut ? 'Frequency' : 'DPI', v: String(sc.f), u: isCut ? 'Hz' : 'DPI', set: num('f') }, { l: 'Passes', v: String(sc.passes), u: '×', set: num('passes') }]
+            .concat(Number(sc.passes) > 1 ? [{ l: 'Dwell between passes', v: String(sc.dwell || 0), u: 's', set: num('dwell') }] : [])
+          : [{ l: 'Passes', v: String(sc.passes), u: '×', set: num('passes') }],
+        showLinks: !isLaser || isCut,
+        dashTitle: isLaser ? 'Generate links' : 'Dashed line',
+        dashLenLabel: isLaser ? 'Link length' : 'Dash length',
+        gapLabel: isLaser ? 'Gap length' : 'Gap',
+        dashOn: !!sc.dash,
+        dashLen: String(sc.dl), gapLen: String(sc.gl), setDl: num('dl'), setGl: num('gl'),
+        dashOpacity: sc.dash ? 1 : 0.45,
+        swBg: sc.dash ? accent : 'var(--track)', swJ: sc.dash ? 'flex-end' : 'flex-start',
+        dashArray: sc.dash ? (Number(sc.dl) * 4) + ' ' + (Number(sc.gl) * 4) : 'none',
+        previewLabel: sc.dash ? 'Dashed line preview' : 'Solid line preview'
+      };
+      const OPTS = {
+        'Source': ['CO2 DC', 'CO2 RF', 'Fiber'],
+        'Path planning': ['Standard', 'Inner geometries first', 'Optimised'],
+        'Process gas': ['Air assist', 'Off', 'Nitrogen'],
+        'Direction': ['Top down', 'Bottom up', 'Fastest'],
+        'Scan': ['Both ways', 'One way'],
+        'Engrave mode': ['Standard', 'Stamp', 'Relief'],
+        'High quality': ['Off', 'On'],
+        'Dithering': ['Floyd–Steinberg', 'Ordered', 'Jarvis', 'Stucki', 'None'],
+        'Process splitting': ['None', 'By colour', 'By object']
+      };
+      const ADV = !isLaser ? [] : isCut
+        ? [['pick', 'Source', 'CO2 DC'], ['text', 'Power correction', '7', ''], ['pick', 'Path planning', 'Standard'], ['pick', 'Process gas', 'Air assist'], ['text', 'Z-offset', '0', 'mm']]
+        : [['pick', 'Direction', 'Top down'], ['pick', 'Scan', 'Both ways'], ['pick', 'Source', 'CO2 DC'], ['text', 'Frequency', '0', 'Hz'], ['text', 'Power correction', '20', ''], ['pick', 'Engrave mode', 'Standard'], ['pick', 'High quality', 'Off'],
+          ['text', 'Extended overshoot', '0', 'mm'], ['pick', 'Process gas', 'Air assist'], ['pick', 'Dithering', 'Floyd–Steinberg'], ['pick', 'Process splitting', 'None'], ['check', 'Relief'], ['check', 'Engrave covered layers']];
+      const opt = (label, cur, onPick) => ({ l: label, on: label === cur, bg: label === cur ? accentSoft : 'transparent', pick: onPick });
+      // Direction and Scan are the process's own dir/uni fields (the estimator uses them)
+      const scan = CC.engraveScan(sc);
+      const SCAN = {
+        Direction: { v: { down: 'Top down', up: 'Bottom up', fastest: 'Fastest' }[scan.dir], set: (o) => this.setEdit('dir', { 'Top down': 'down', 'Bottom up': 'up', 'Fastest': 'fastest' }[o]) },
+        Scan: { v: scan.uni ? 'One way' : 'Both ways', set: (o) => this.setEdit('uni', o === 'One way') }
+      };
+      sel.adv = ADV.map(([kind, l, d, u]) => {
+        if (SCAN[l]) {
+          const k = selIdx + '|' + l, open = S.openPick === k;
+          return { isPick: true, l, v: SCAN[l].v, open, toggle: () => this.setState({ openPick: open ? null : k }), opts: open ? OPTS[l].map((o) => opt(o, SCAN[l].v, () => { SCAN[l].set(o); this.setState({ openPick: null }); })) : [] };
+        }
+        const v = sc.adv[l] !== undefined ? sc.adv[l] : d;
+        if (kind === 'text') return { isText: true, l, v: String(v), u: u || '', set: (e) => this.setAdv(l, e.target.value) };
+        if (kind === 'check') return { isCheck: true, l, on: !!sc.adv[l], toggle: () => this.setAdv(l, !sc.adv[l]) };
+        const k = selIdx + '|' + l;
+        const open = S.openPick === k;
+        return {
+          isPick: true, l, v, open,
+          toggle: () => this.setState({ openPick: open ? null : k }),
+          opts: open ? (OPTS[l] || [v]).map((o) => opt(o, v, () => { this.setAdv(l, o); this.setState({ openPick: null }); })) : []
+        };
+      });
+      if (selIsReg) {
+        // reg marks are read by the camera: only their colours matter
+        Object.assign(sel, { sliders: [], nums: [], showLinks: false, status: 'Registration marks', statusBg: 'var(--sunken)', statusFg: 'var(--text-2)' });
+        sel.adv = [];
+      }
+      const selOpts = isLaser ? ['Cut', 'Engrave'].concat(regOnNow ? [CC.REG_PROC] : []) : ['T1 · Knife', 'T2 · V-cut 45°', 'T3 · Crease wheel', 'T4 · Pen'];
+      sel.selectOpen = S.procOpen;
+      sel.toggleSelect = () => this.setState((s) => ({ procOpen: !s.procOpen }));
+      sel.selectOpts = S.procOpen ? selOpts.map((o) => opt(o, sel.selectValue, () => { this.setEdit(isLaser ? 'proc' : 'tool', o); this.setState({ procOpen: false }); })) : [];
+    }
+    const aci = ACI.map((a) => {
+      const on = hasSel && (procs[selIdx].aci || []).includes(a.n);
+      const owner = procs.findIndex((p) => (p.aci || []).includes(a.n));
+      const taken = owner >= 0 && owner !== selIdx;
+      return {
+        ...a, on, taken,
+        title: 'ACI ' + a.n + ' · ' + a.name + (taken ? ' · already used by ' + procs[owner].name : '') + (counts[a.n] ? ' · ' + counts[a.n] + ' in job' : ''),
+        bg: on ? accentSoft : 'var(--surface)', ring: on ? '0 0 0 2px ' + accent : '0 0 0 1px var(--line)', op: taken ? 0.45 : 1,
+        toggle: () => this.toggleAci(a.n)
+      };
+    });
+
+    // ---- sheet
+    const SH = job.sheet || { on: false, w: 600, h: 400, x: 0, y: 0 };
+    const setSheet = (patch) => this.commit({ ...job, sheet: { ...SH, ...patch } }, { record: true });
+    const draftField = (key, actual, commitFn) => {
+      const d = S.draft[key];
+      const commit = () => {
+        const v = S.draft[key];
+        if (v === undefined) return;
+        const draft = { ...this.state.draft };
+        delete draft[key];
+        this.setState({ draft });
+        commitFn(v);
+      };
+      return {
+        v: d !== undefined ? d : actual,
+        set: (e) => { const v = e.target.value; this.setState((s) => ({ draft: { ...s.draft, [key]: v } })); },
+        commit,
+        key: (e) => { if (e.key === 'Enter') { e.preventDefault(); commit(); e.target.blur(); } if (e.key === 'Escape') { const draft = { ...this.state.draft }; delete draft[key]; this.setState({ draft }); } }
+      };
+    };
+    const sheetFields = [['Width', 'w'], ['Height', 'h'], ['X position', 'x'], ['Y position', 'y']].map(([l, k]) => ({
+      l, ...draftField('sheet.' + k, String(SH[k]), (v) => {
+        const n = Math.max(0, Math.round(parseFloat(v) || 0));
+        if (n !== SH[k]) setSheet({ [k]: n });
+      })
+    }));
+    const sheetPresets = (isLaser ? [['600 × 400', 600, 400], ['500 × 300', 500, 300], ['A3', 420, 297], ['A4', 297, 210]] : [['1220 × 800', 1220, 800], ['1000 × 700', 1000, 700], ['A1', 841, 594]])
+      .map(([l, w, h]) => ({ l, pick: () => setSheet({ w, h, x: Math.min(SH.x, Math.max(0, bed[0] - w)), y: Math.min(SH.y, Math.max(0, bed[1] - h)) }) }));
+
+    // ---- fill
+    const area = S.fillArea === 'sheet' && !SH.on ? 'bed' : S.fillArea;
+    const fillAreaOpt = (id, l) => {
+      const off = id === 'sheet' && !SH.on;
+      const on = area === id;
+      return { l, on, off, bg: on ? 'var(--seg-on)' : 'transparent', sh: on ? 'var(--shadow-1)' : 'none', fg: on ? 'var(--text)' : 'var(--text-3)', op: off ? 0.45 : 1, cur: off ? 'default' : 'pointer', pick: () => { if (!off) this.setState({ fillArea: id }); } };
+    };
+    const fillOpt = (id, l) => ({ l, on: S.fillMode === id, bg: S.fillMode === id ? 'var(--seg-on)' : 'transparent', sh: S.fillMode === id ? 'var(--shadow-1)' : 'none', fg: S.fillMode === id ? 'var(--text)' : 'var(--text-3)', pick: () => this.setState({ fillMode: id }) });
+    const spacing = Math.max(0, parseFloat(S.fillSpacing) || 0), margin = Math.max(0, parseFloat(S.fillMargin) || 0);
+    const cw = parseFloat(S.fillCustom.w) || 0, ch = parseFloat(S.fillCustom.h) || 0;
+    const areaRect = area === 'sheet' ? { x: SH.x, y: SH.y, w: SH.w, h: SH.h } : area === 'custom' ? { x: SH.on && isLaser ? SH.x : 0, y: SH.on && isLaser ? SH.y : 0, w: cw, h: ch } : { x: 0, y: 0, w: bed[0], h: bed[1] };
+    const plan = selEnts.length ? LRC.ops.fillPlan(job, selIds, areaRect, spacing, margin) : null;
+    const wantCount = S.fillMode === 'count' ? Math.max(1, Math.round(parseFloat(S.fillCount) || 1)) : null;
+    const areaName = area === 'sheet' ? 'sheet' : area === 'custom' ? 'area' : 'bed';
+    let fillResult, fillOk = false;
+    if (!plan) fillResult = 'Select the object to copy first';
+    else if (!plan.per) fillResult = 'The selection does not fit the ' + areaName;
+    else if (wantCount === null) { fillResult = plan.per + ' cop' + (plan.per === 1 ? 'y fits' : 'ies fit') + ' on the ' + areaName + ' (' + plan.cols + ' × ' + plan.rows + ')'; fillOk = true; }
+    else {
+      const need = Math.ceil(wantCount / plan.per);
+      fillOk = true;
+      fillResult = need <= 1 ? wantCount + ' copies fit on the ' + areaName : wantCount + ' copies need ' + need + ' ' + areaName + 's' + (isLaser ? ' — ' + plan.per + ' will be placed' : ' — adds ' + (need - 1) + ' bed' + (need > 2 ? 's' : ''));
+    }
+    const applyFill = () => {
+      if (!plan || !plan.per) return;
+      let areas = [areaRect];
+      if (!isLaser && wantCount !== null) {
+        const need = Math.ceil(wantCount / plan.per);
+        areas = Array.from({ length: need }, (_, k) => ({ ...areaRect, bed: k }));
+      }
+      const r = LRC.ops.fill(job, selIds, areas, wantCount === null ? null : wantCount, spacing, margin);
+      const nb = Math.max(job.beds || 1, areas.length);
+      this.setState({ fill: false });
+      this.commit({ ...r.job, beds: nb }, { record: true }, r.sel);
+      LRC.toast('Placed ' + r.placed + ' cop' + (r.placed === 1 ? 'y' : 'ies'));
+    };
+    const fill = {
+      button: 'Fill', title: 'Fill' + (selEnts.length ? ' · ' + (selEnts.length === 1 ? selEnts[0].name : selEnts.length + ' objects') : ''),
+      areas: [fillAreaOpt('bed', 'Bed'), fillAreaOpt('sheet', 'Sheet'), fillAreaOpt('custom', 'Custom')],
+      isCustom: area === 'custom', cw: S.fillCustom.w, ch: S.fillCustom.h,
+      setCw: (e) => { const v = e.target.value; this.setState((s) => ({ fillCustom: { ...s.fillCustom, w: v } })); },
+      setCh: (e) => { const v = e.target.value; this.setState((s) => ({ fillCustom: { ...s.fillCustom, h: v } })); },
+      modes: [fillOpt('max', 'As many as fit'), fillOpt('count', 'Set a number')],
+      isCount: S.fillMode === 'count', count: S.fillCount, setCount: (e) => this.setState({ fillCount: e.target.value }),
+      spacing: S.fillSpacing, setSpacing: (e) => this.setState({ fillSpacing: e.target.value }),
+      margin: S.fillMargin, setMargin: (e) => this.setState({ fillMargin: e.target.value }),
+      result: fillResult, resBg: fillOk ? 'var(--ok-soft)' : 'var(--warn-soft)', resFg: fillOk ? 'var(--ok)' : 'var(--warn)', resIcon: fillOk ? icons.check : icons.warn,
+      cant: !fillOk, op: fillOk ? 1 : 0.45, apply: applyFill
+    };
+
+    // ---- menu bar
+    const closeAll = () => this.setState({ bar: null, sub: null });
+    const act = (fn) => () => { closeAll(); this.run(fn)(); };
+    const noSel = !selIds.length;
+    const recentSub = S.recent.length ? S.recent.map((r) => ({ l: r.name || r.path.split(/[\\/]/).pop(), run: act(() => this.openJob(r.path)) })) : [{ l: 'No recent jobs', run: closeAll }];
+    const MENUS = [
+      ['File', [
+        ['New job', 'Ctrl+N', null, () => this.newJob()], ['Open…', 'Ctrl+O', null, () => this.openJob()], ['Open recent', null, recentSub], '-',
+        ['Save', 'Ctrl+S', null, () => this.save()], ['Save as…', 'Ctrl+Shift+S', null, () => this.save(true)], ['Save to computer…', 'Ctrl+Shift+E', null, () => this.saveCopy()], '-',
+        ['Import…', 'Ctrl+I', null, () => this.importFiles()],
+        ['Export', null, [{ l: 'DXF', run: act(() => this.exportAs('dxf')) }, { l: 'SVG', run: act(() => this.exportAs('svg')) }, { l: 'PDF', run: act(() => this.exportAs('pdf')) }, { l: 'Print sheet with registration marks', run: act(() => this.exportAs('print')) }, { l: 'Job sheet (settings + time)', run: act(() => this.exportAs('sheet')) }]], '-',
+        ['Job settings…', null, null, () => this.jobSettings()], ['Close job', 'Ctrl+W', null, () => this.newJob()]
+      ]],
+      ['Edit', [
+        ['Undo', 'Ctrl+Z', null, () => this.undo(), null, !S.hist.undo], ['Redo', 'Ctrl+Y', null, () => this.redo(), null, !S.hist.redo], '-',
+        ['Cut', 'Ctrl+X', null, () => this.copy(true), null, noSel], ['Copy', 'Ctrl+C', null, () => this.copy(false), null, noSel], ['Paste', 'Ctrl+V', null, () => this.paste(false)], ['Paste in place', 'Ctrl+Shift+V', null, () => this.paste(true)],
+        ['Duplicate', 'Ctrl+D', null, () => this.op((j, s) => LRC.ops.duplicate(j, s)), null, noSel], ['Delete', 'Del', null, () => this.commit(LRC.ops.remove(job, selIds), { record: true }, []), null, noSel], '-',
+        ['Select all', 'Ctrl+A', null, () => this.setState({ sel: LRC.ops.pickableIds(job) })],
+        ['Select by colour', null, [...new Set(job.entities.map((e) => e.aci))].sort((a, b) => a - b).map((n) => ({ l: 'ACI ' + n + ' · ' + CC.aciName(n) + ' (' + counts[n] + ')', run: act(() => this.selectByAci(n)) }))],
+        ['Invert selection', 'Ctrl+Shift+I', null, () => { const s = new Set(selIds); this.setState({ sel: LRC.ops.pickableIds(job).filter((id) => !s.has(id)) }); }], '-',
+        ['Preferences…', 'Ctrl+,', null, () => this.preferences()]
+      ]],
+      ['Arrange', [
+        ['Group', 'Ctrl+G', null, () => this.op((j, s) => LRC.ops.group(j, s)), null, selIds.length < 2], ['Ungroup', 'Ctrl+Shift+G', null, () => this.op((j, s) => LRC.ops.ungroup(j, s)), null, noSel], '-',
+        ['Align', null, [['Left', 'left'], ['Centre', 'centre'], ['Right', 'right'], ['Top', 'top'], ['Middle', 'middle'], ['Bottom', 'bottom']].map(([l, k]) => ({ l, run: act(() => this.align(k)) }))],
+        ['Distribute', null, [{ l: 'Horizontally', run: act(() => this.op((j, s) => LRC.ops.distribute(j, s, 'x'))) }, { l: 'Vertically', run: act(() => this.op((j, s) => LRC.ops.distribute(j, s, 'y'))) }]],
+        ['Order', null, [['Bring to front', 'front'], ['Bring forward', 'forward'], ['Send backward', 'backward'], ['Send to back', 'back']].map(([l, k]) => ({ l, run: act(() => this.op((j, s) => LRC.ops.order(j, s, k))) }))],
+        ['Mirror', null, [{ l: 'Horizontal', run: act(() => this.op((j, s) => LRC.ops.mirror(j, s, 'h'))) }, { l: 'Vertical', run: act(() => this.op((j, s) => LRC.ops.mirror(j, s, 'v'))) }]],
+        ['Rotate', null, [{ l: '90° clockwise', run: act(() => this.op((j, s) => LRC.ops.rotate(j, s, 90))) }, { l: '90° anticlockwise', run: act(() => this.op((j, s) => LRC.ops.rotate(j, s, -90))) }, { l: '180°', run: act(() => this.op((j, s) => LRC.ops.rotate(j, s, 180))) }, { l: 'Custom angle…', run: act(() => this.rotateDlg()) }]], '-',
+        ['Weld shapes', null, null, () => this.op((j, s) => LRC.ops.weld(j, s)), null, selIds.length < 2], ['Offset path…', null, null, () => this.offsetDlg(), null, noSel], ['Array…', null, null, () => this.arrayDlg(), null, noSel],
+        ['Fill…', null, null, () => this.setState({ fill: true })],
+        ['Nest parts…', null, null, () => this.nestDlg()]
+      ]],
+      ['Setup', [
+        ['Machines…', null, null, null, 'MachineSetupDetailed.dc.html'], ['Materials…', 'Ctrl+M', null, null, 'MaterialsDetailed.dc.html'], '-',
+        ['Test grid…', null, null, null, 'MaterialsDetailed.dc.html']
+      ]],
+      ['Help', [
+        ['Keyboard shortcuts', 'Ctrl+/', null, () => this.showShortcuts()], '-',
+        ['Check for updates…', null, null, () => LRC.support.checkUpdates(true)],
+        ['Report a bug…', null, null, () => LRC.support.reportBug()],
+        ['Open reports folder', null, null, () => LRC.support.openReports()], '-',
+        ['About', null, null, () => this.about()]
+      ]]
+    ];
+    const menuBar = MENUS.map(([name, items]) => {
+      const open = S.bar === name;
+      return {
+        l: name, open, bg: open ? 'var(--hover)' : 'transparent',
+        toggle: () => this.setState((s) => ({ bar: s.bar === name ? null : name, sub: null, menu: false, reg: false, fill: false, matOpen: false })),
+        items: !open ? [] : items.map((it) => {
+          if (it === '-') return { isSep: true };
+          const [l, k, sub, run, href, off] = it;
+          if (href) return { isLink: true, l, k: k || '', href };
+          if (sub) {
+            const so = S.sub === l;
+            return { isSub: true, l, open: so, bg: so ? 'var(--hover)' : 'transparent', toggle: () => this.setState((s) => ({ sub: s.sub === l ? null : l })), sub: so ? sub : [] };
+          }
+          return { isPlain: true, l, k: k || '', off: !!off, op: off ? 0.45 : 1, run: run ? act(run) : closeAll };
+        })
+      };
+    });
+
+    // ---- objects panel
+    const LIST_MAX = 250;
+    const offAci = LRC.ops.offAci(job);
+    const objects = job.entities.slice(0, LIST_MAX).map((e) => {
+      const on = selIds.includes(e.id);
+      const b = CC.entityBox(e);
+      const procOff = offAci.has(e.aci);
+      return {
+        name: e.name + (e.locked ? ' · locked' : '') + (e.group ? ' · grouped' : ''),
+        meta: (e.type || 'Path') + ' · ' + CC.boxW(b).toFixed(1) + ' × ' + CC.boxH(b).toFixed(1) + ' mm' + (!isLaser ? ' · bed ' + ((e.bed || 0) + 1) : ''),
+        chips: [chip(e.aci)], on, op: e.hidden || procOff ? 0.45 : 1, off: procOff,
+        bg: on ? accentSoft : 'transparent', bd: on ? accent : 'transparent',
+        pick: (ev) => { if (!procOff) this.setState({ sel: ev && ev.shiftKey ? (on ? selIds.filter((x) => x !== e.id) : selIds.concat(e.id)) : LRC.ops.expand(job, [e.id]) }); },
+        // rename in place: the pencil (or a double-click) turns the name into a text box
+        rename: () => { if (!procOff) this.setState({ renaming: e.id }); },
+        edit: (ev) => { ev.stopPropagation(); if (!procOff) this.setState({ renaming: e.id }); },
+        editing: S.renaming === e.id, notEditing: S.renaming !== e.id, plainName: e.name,
+        nameEl: S.renaming === e.id ? React.createElement('input', {
+          className: 'cell', defaultValue: e.name, autoFocus: true, 'aria-label': 'Object name',
+          style: { height: 26, fontFamily: 'inherit', fontWeight: 500 },
+          onFocus: (ev) => ev.target.select(),
+          onClick: (ev) => ev.stopPropagation(), onDoubleClick: (ev) => ev.stopPropagation(),
+          onKeyDown: (ev) => {
+            ev.stopPropagation();
+            if (ev.key === 'Enter') ev.target.blur();
+            if (ev.key === 'Escape') { this.cancelRename = true; ev.target.blur(); }
+          },
+          onBlur: (ev) => {
+            const v = ev.target.value.trim();
+            const keep = this.cancelRename;
+            this.cancelRename = false;
+            this.setState({ renaming: null });
+            if (!keep && v && v !== e.name) this.commit({ ...this.state.job, entities: this.state.job.entities.map((x) => (x.id === e.id ? { ...x, name: v } : x)) }, { record: true });
+          }
+        }) : null,
+        menu: (ev) => {
+          ev.preventDefault();
+          if (procOff) return;
+          const sel = on ? selIds : LRC.ops.expand(job, [e.id]);
+          if (!on) this.setState({ sel });
+          const bb = CC.entityBox(e);
+          this.contextMenu(ev.clientX, ev.clientY, sel, { lx: bb.x1 + 5, ly: bb.y0, bed: e.bed || 0 });
+        }
+      };
+    });
+    const sb = CC.boxOf(selEnts);
+    const objName = selEnts.length === 1 ? selEnts[0].name : selEnts.length + ' objects';
+    const fmt = (v) => (Number.isFinite(v) ? v.toFixed(2) : '');
+    const setP = (k) => (v) => {
+      const n = parseFloat(String(v).replace(',', '.'));
+      if (k === 'aci') {
+        const a = Math.round(n);
+        if (a >= 1 && a <= 255) this.commit(LRC.ops.setAci(job, selIds, a), { record: true });
+        return;
+      }
+      if (!Number.isFinite(n)) return;
+      this.commit(LRC.ops.setProps(job, selIds, { [k]: n, lock: S.lockRatio }), { record: true });
+    };
+    const objProps = selEnts.length ? [
+      ['X', 'x', fmt(sb.x0), 'mm'], ['Y', 'y', fmt(sb.y0), 'mm'], ['Width', 'w', fmt(CC.boxW(sb)), 'mm'], ['Height', 'h', fmt(CC.boxH(sb)), 'mm'],
+      ['Rotation', 'rot', String(Math.round(((selEnts[0].rot || 0) + 360) % 360 * 10) / 10), '°']
+    ].map(([l, k, v, u]) => ({ l, u, ro: false, ...draftField('obj.' + k + '.' + selIds.join(','), v, setP(k)) })) : [];
+    // colour swatches: recolour everything selected
+    const selAcis = new Set(selEnts.map((e) => e.aci));
+    const procNameOf = (n) => { const k = CC.processOfAci(job, n); return k >= 0 ? procs[k].name : 'no process'; };
+    const objColours = ACI.map((a) => {
+      const on = selAcis.size === 1 && selAcis.has(a.n);
+      return {
+        ...a, on, title: 'ACI ' + a.n + ' · ' + a.name + ' → ' + procNameOf(a.n),
+        ring: on ? '0 0 0 2px var(--surface), 0 0 0 4px ' + accent : 'var(--chip-ring)',
+        pick: () => this.recolour(a.n)
+      };
+    });
+    const objColourLabel = selAcis.size === 1 ? 'ACI ' + [...selAcis][0] + ' → ' + procNameOf([...selAcis][0]) : selAcis.size + ' colours';
+    const anyLocked = selEnts.some((e) => e.locked);
+    const hiddenCount = job.entities.filter((e) => e.hidden).length;
+
+    // ---- move panel
+    const canJog = machine.conn === 'Ethernet' && online;
+    const segBtn = (on) => ({ bg: on ? 'var(--seg-on)' : 'transparent', sh: on ? 'var(--shadow-1)' : 'none', fg: on ? 'var(--text)' : 'var(--text-3)' });
+    const steps = ['0.1', '1', '10', '100'].map((v) => ({ l: v, on: S.step === v, ...segBtn(S.step === v), pick: () => this.setState({ step: v }) }));
+    const stepN = parseFloat(S.step);
+    const jogCmd = (axis, sign) => () => this.dev('jog', { axis, distance: sign * stepN });
+    const io = online ? S.dev.io || {} : {};
+    const mtog = (l, k) => {
+      const on = !!io[k];
+      return { l, on, swBg: on ? accent : 'var(--track)', swJ: on ? 'flex-end' : 'flex-start', toggle: () => this.dev('io', { [k]: !on }) };
+    };
+    const mact = (l, fn) => ({ l, run: R(fn), off: !canJog, op: canJog ? 1 : 0.45 }); // disabled = 0.45
+    const p0 = online ? S.dev.pos || {} : null;
+    const moveNote = machine.conn !== 'Ethernet'
+      ? machine.name + ' is set up to save jobs locally. Jogging needs an Ethernet connection to its controller (Machines page).'
+      : !online ? 'Not connected to ' + machine.name + (machine.ip ? ' at ' + machine.ip : '') + (S.devErr ? ' — ' + S.devErr.msg : '') + '. Jog controls work once the controller answers.' : null;
+
+    // ---- queue
+    // the queue is the machine controller's own job list (polled with the status)
+    // [label, pill background, pill text, .pill variant]
+    const STATUS = { queued: ['Waiting', 'var(--sunken)', 'var(--text-2)', ''], running: ['Running', accentSoft, accentFg, 'accent'], done: ['Done', 'var(--ok-soft)', 'var(--ok)', 'ok'], stopped: ['Stopped', 'var(--err-soft)', 'var(--err)', 'err'] };
+    const qList = online && S.devJobs && S.devJobs.mid === machine.id ? S.devJobs.list : [];
+    const waitingIds = qList.filter((q) => q.status === 'queued').map((q) => q.id);
+    const moveQ = (id, d) => R(() => {
+      const o = waitingIds.slice();
+      const i = o.indexOf(id), j = i + d;
+      if (i < 0 || j < 0 || j >= o.length) return;
+      [o[i], o[j]] = [o[j], o[i]];
+      return this.queueAction((mid) => window.api.device.orderJobs(mid, o));
+    });
+    const queue = qList.map((q, i) => {
+      const st = STATUS[q.status] || [q.status, 'var(--sunken)', 'var(--text-2)', ''];
+      return {
+        n: i + 1, name: q.name, status: st[0] + (q.status === 'running' ? ' ' + Math.round((q.progress || 0) * 100) + '%' : ''),
+        meta: [q.seconds ? 'est. ' + CC.fmtDuration(q.seconds, true) : '', q.finishedAt ? 'finished ' + new Date(q.finishedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : q.receivedAt ? 'received ' + new Date(q.receivedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''].filter(Boolean).join(' · '),
+        sbg: st[1], sfg: st[2], cls: st[3], bg: q.status === 'running' ? 'var(--surface)' : 'var(--surface-2)',
+        waiting: q.status === 'queued', removable: q.status !== 'running', running: q.status === 'running', pct: Math.round((q.progress || 0) * 100) + '%',
+        up: moveQ(q.id, -1), down: moveQ(q.id, 1),
+        remove: R(() => this.queueAction((mid) => window.api.device.removeJob(mid, q.id), 'Removed "' + q.name + '" from ' + machine.name))
+      };
+    });
+    const queueNote = machine.conn !== 'Ethernet' ? machine.name + ' saves jobs locally, so it has no queue to show. Set an Ethernet connection on the Machines page to see the machine’s queue.'
+      : !online ? 'Not connected to ' + machine.name + (machine.ip ? ' at ' + machine.ip : '') + ' — the queue shows once the controller answers.'
+        : !qList.length ? 'Nothing in the machine’s queue. Jobs appear here when you send them.' : false;
+
+    // ---- tools
+    const tool = (l, d, id, key, msg) => {
+      const on = S.tool === id;
+      return { l, d, on, tip: l + (key ? ' (' + key + ')' : ''), bg: on ? accentSoft : 'transparent', fg: on ? accentFg : 'var(--text-2)', pick: () => (msg ? LRC.toast(msg, { ms: 5000 }) : this.setState({ tool: id })) };
+    };
+    const snap = (l, k) => {
+      const on = !!S.snap[k];
+      return { l, on, bd: on ? accent : 'var(--line-strong)', bg: on ? accentSoft : 'var(--surface)', fg: on ? accentFg : 'var(--text-2)', toggle: () => this.setState((s) => ({ snap: { ...s.snap, [k]: !on } })) };
+    };
+    const tb = (l, d, fn, off) => ({ l, d, run: R(fn), off: !!off });
+
+    // ---- footer
+    const checks = CC.checkJob(job, machine).map((c) => ({
+      l: c.l, icon: c.ok ? icons.check : icons.warn,
+      cls: c.ok ? 'ok' : c.warn ? 'warn' : 'err',
+      bg: c.ok ? 'var(--ok-soft)' : c.warn ? 'var(--warn-soft)' : 'var(--err-soft)', fg: c.ok ? 'var(--ok)' : c.warn ? 'var(--warn)' : 'var(--err)'
+    }));
+    const outProcs = procs.filter((p) => p.out !== false && (p.aci || []).some((a) => usedAci.has(a))).length;
+    const nObj = job.entities.filter((e) => !e.hidden).length;
+    const jobSummary = outProcs + ' process' + (outProcs === 1 ? '' : 'es') + ' · ' + (isLaser ? (SH.on ? SH.w + ' × ' + SH.h + ' sheet' : 'full bed') : est.beds + ' bed' + (est.beds > 1 ? 's' : '')) + ' · ' + nObj + ' object' + (nObj === 1 ? '' : 's') + (est.total ? ' · ' + CC.fmtLen(est.cutLen) + ' cut' : '');
+
+    // ---- canvas
+    const canvasEl = React.createElement(LRC.JobCanvas, {
+      job, machine, sel: selIds, tool: S.tool, accent, snap: S.snap, drawAci: this.drawAci(),
+      canvasRef: (c) => { this.canvas = c; },
+      onSelect: (sel) => this.setState({ sel }),
+      onCommit: (j, opts, sel) => { this.commit(j, opts, sel); if (S.tool !== 'select' && S.tool !== 'measure') this.setState({ tool: 'select' }); },
+      onView: (v) => { if (v.zoom + '%' !== this.state.zoom) this.setState({ zoom: v.zoom + '%' }); },
+      onText: (x, y, b) => this.run(() => this.textAt(x, y, b))(),
+      onContext: (x, y, sel, at) => this.contextMenu(x, y, sel, at)
+    });
+
+    const fmtSaved = job.path ? (job.dirty ? 'Unsaved changes · ' : 'Saved · ') + job.path.split(/[\\/]/).pop() : (job.entities.length ? 'Not saved yet' : 'New job');
+    const tab = (l, badge) => {
+      const on = S.tab === l;
+      return { l, on, badge: badge || false, bd: on ? accent : 'transparent', fg: on ? 'var(--text)' : 'var(--text-3)', w: on ? 600 : 500, pick: () => this.setState({ tab: l }) };
+    };
+    const matList = S.materials.filter((x) => x.m.includes(m)).map((x) => ({
+      name: x.name + ' · ' + x.t + ' mm', sub: x.g + (x.locked ? ' · locked' : ''), sw: x.sw, on: material && x.id === material.id,
+      bg: material && x.id === material.id ? accentSoft : 'transparent', pick: R(() => this.pickMaterial(x.id))
+    }));
+
+    return {
+      accent, accentSoft, icons, noop, isLaser, isPlotter: !isLaser, mach, machines, dev,
+      menuOpen: S.menu,
+      toggleMenu: () => this.setState((s) => ({ menu: !s.menu, reg: false, fill: false, bar: null })),
+      regOpen: S.reg, regBd: regOn ? accent : 'var(--line-strong)', regSh: regOn ? 'inset 0 0 0 1px ' + accent : 'none', regIc: regOn ? accentFg : 'var(--text-3)',
+      toggleReg: () => this.setState((s) => ({ reg: !s.reg, menu: false, fill: false })),
+      regModes, regLabel, regAvail: isLaser && feat('camera'),
+      fillOpen: S.fill, fillBd: S.fill ? accent : 'var(--line-strong)', toggleFill: () => this.setState((s) => ({ fill: !s.fill, menu: false, reg: false, sheetOpen: false })), fill,
+      sheetFields, sheetPresets,
+      saveName: job.name, savedLabel: fmtSaved, renameJob: R(() => this.renameJob()),
+      sheetOpen: S.sheetOpen, sheetBd: S.sheetOpen ? accent : 'var(--line-strong)',
+      toggleSheet: () => this.setState((s) => ({ sheetOpen: !s.sheetOpen, fill: false, menu: false, reg: false, bar: null })),
+      sheetOn: !!SH.on, sheetOff: !SH.on,
+      toggleSheetOn: () => setSheet({ on: !SH.on }),
+      sheetSwBg: SH.on ? accent : 'var(--track)', sheetSwJ: SH.on ? 'flex-end' : 'flex-start',
+      sheetFieldsOp: SH.on ? 1 : 0.45,
+      sheetPill: SH.on ? 'On' : 'Off', sheetPillBg: SH.on ? accentSoft : 'var(--sunken)', sheetPillFg: SH.on ? accentFg : 'var(--text-3)',
+      centreSheet: () => setSheet({ x: Math.max(0, Math.round((bed[0] - SH.w) / 2)), y: Math.max(0, Math.round((bed[1] - SH.h) / 2)) }),
+      menuBar,
+      importFiles: R(() => this.importFiles()),
+      tabProcesses: S.tab === 'Processes', tabObjects: S.tab === 'Objects', tabMove: S.tab === 'Move', tabQueue: S.tab === 'Queue',
+      objects, objCount: job.entities.length + ' object' + (job.entities.length === 1 ? '' : 's') + (selIds.length ? ' · ' + selIds.length + ' selected' : ''),
+      objMore: job.entities.length > LIST_MAX ? '+ ' + (job.entities.length - LIST_MAX) + ' more (select on the canvas)' : false,
+      hasObjSel: selEnts.length > 0, objName, objProps, objColours, objColourLabel,
+      objColourOther: R(() => this.recolourOther()),
+      lockRatio: S.lockRatio, toggleLockRatio: () => this.setState((s) => ({ lockRatio: !s.lockRatio })),
+      lockLabel: anyLocked ? 'Unlock' : 'Lock',
+      lockSel: () => this.commit(LRC.ops.setFlag(job, selIds, 'locked', !anyLocked), { record: true }),
+      hideSel: () => this.commit(LRC.ops.setFlag(job, selIds, 'hidden', true), { record: true }, []),
+      deleteSel: () => this.commit(LRC.ops.remove(job, selIds), { record: true }, []),
+      hasHidden: hiddenCount > 0, hiddenCount,
+      showAll: () => this.commit({ ...job, entities: job.entities.map((e) => (e.hidden ? { ...e, hidden: false } : e)) }, { record: true }),
+      pos: p0 ? (isLaser ? [{ l: 'X', v: Number(p0.x || 0).toFixed(2) }, { l: 'Y', v: Number(p0.y || 0).toFixed(2) }, { l: 'Z', v: Number(p0.z || 0).toFixed(2) }] : [{ l: 'X', v: Number(p0.x || 0).toFixed(1) }, { l: 'Y', v: Number(p0.y || 0).toFixed(1) }]) : [{ l: 'X', v: '—' }, { l: 'Y', v: '—' }],
+      devState: online ? S.dev.state + (S.dev.message ? ' · ' + S.dev.message : '') : 'not connected',
+      moveNote: moveNote || false, moveNoteBg: 'var(--sunken)', moveNoteFg: 'var(--text-2)',
+      jogOff: !canJog, jogOp: canJog ? 1 : 0.45,
+      jog: { xPlus: jogCmd('x', 1), xMinus: jogCmd('x', -1), yPlus: jogCmd('y', 1), yMinus: jogCmd('y', -1), zPlus: jogCmd('z', 1), zMinus: jogCmd('z', -1), home: () => this.dev('home', {}, 'Homing') },
+      steps,
+      moveActions: isLaser
+        ? [mact('Frame', () => this.frame()), feat('autofocus') && mact('Auto-focus', () => this.dev('autofocus', {}, 'Auto-focus')), mact('Test fire', () => this.testFire()), mact('Pause / resume', () => this.dev(S.dev && S.dev.state === 'paused' ? 'resume' : 'pause'))].filter(Boolean)
+        : [mact('Frame', () => this.frame()), feat('conveyor') && mact('Feed one bed', () => this.dev('feed', {}, 'Feeding one bed')), mact('Tool change', () => this.toolChange()), mact('Pause / resume', () => this.dev(S.dev && S.dev.state === 'paused' ? 'resume' : 'pause'))].filter(Boolean),
+      moveToggles: (isLaser ? [feat('air') && mtog('Air assist', 'air'), mtog('Red pointer', 'pointer')] : [feat('pointer') && mtog('Laser pointer', 'pointer'), feat('vacuum') && mtog('Vacuum', 'vacuum')]).filter(Boolean),
+      stopMachine: () => this.dev('stop', {}, 'Stop sent'),
+      queue, qMachine: machine.name, queueCount: waitingIds.length + ' waiting', queueNote, queueNoteBg: 'var(--sunken)', queueNoteFg: 'var(--text-2)',
+      queueOnline: online && machine.conn === 'Ethernet',
+      queueStart: R(() => this.queueAction((mid) => window.api.device.command(mid, 'start', {}), 'Queue started on ' + machine.name)),
+      queueBusy: S.queueBusy || !waitingIds.length, queueOp: S.queueBusy || !waitingIds.length ? 0.45 : 1,
+      hasDone: qList.some((q) => q.status === 'done' || q.status === 'stopped'),
+      queueClear: R(() => this.queueAction(async (mid) => { for (const q of qList.filter((x) => x.status === 'done' || x.status === 'stopped')) await window.api.device.removeJob(mid, q.id); }, 'Cleared finished jobs')),
+      toolGroups: [
+        { items: [tb('Undo (Ctrl+Z)', icons.undo, () => this.undo(), !S.hist.undo), tb('Redo (Ctrl+Y)', icons.redo, () => this.redo(), !S.hist.redo)] },
+        { items: [tb('Group (Ctrl+G)', icons.group, () => this.op((j, s) => LRC.ops.group(j, s)), selIds.length < 2), tb('Align left', icons.alignL, () => this.align('left'), noSel), tb('Align centre', icons.alignC, () => this.align('centre'), noSel), tb('Distribute horizontally', icons.distribute, () => this.op((j, s) => LRC.ops.distribute(j, s, 'x')), selIds.length < 3)] },
+        { items: [tb('Weld shapes', icons.weld, () => this.op((j, s) => LRC.ops.weld(j, s)), selIds.length < 2), tb('Offset path', icons.offset, () => this.offsetDlg(), noSel), tb('Array', icons.array, () => this.arrayDlg(), noSel)] }
+      ],
+      machTools: isLaser
+        ? [
+          feat('autofocus') && { l: 'Auto-focus', d: icons.focus, run: () => this.dev('autofocus', {}, 'Auto-focus'), tip: 'Run auto-focus on the machine', bd: 'var(--line-strong)' },
+          feat('rotary') && { l: 'Rotary' + (job.rotary ? ' on' : ''), d: icons.rotary, run: () => this.rotaryDlg(), tip: 'Rotary attachment settings for this job', bd: job.rotary ? accent : 'var(--line-strong)' },
+          { l: 'Nest parts', d: icons.nest, run: () => this.nestDlg(), tip: 'Pack parts to use as little material as possible', bd: 'var(--line-strong)' }
+        ].filter(Boolean)
+        : [
+          { l: 'Tool heads', d: icons.heads, run: () => this.headsDlg(), tip: 'Loaded tool heads', bd: 'var(--line-strong)' },
+          feat('conveyor') && { l: 'Conveyor', d: icons.conveyor, run: () => this.conveyorDlg(), tip: 'Beds and conveyor feeds', bd: 'var(--line-strong)' },
+          { l: 'Nest parts', d: icons.nest, run: () => this.nestDlg(), tip: 'Pack parts onto as few beds as possible', bd: 'var(--line-strong)' },
+          { l: 'Bridges', d: icons.bridges, run: () => this.bridgesDlg(), tip: 'Hold-in bridges for the selected process', bd: 'var(--line-strong)' }
+        ].filter(Boolean),
+      tools: [
+        tool('Select', icons.select, 'select', 'V'), tool('Edit nodes', icons.node, 'nodes', null, 'Node editing is not available yet — edit shapes in your CAD program and re-import'),
+        tool('Line', icons.line, 'line', 'L'), tool('Rectangle', icons.rect, 'rect', 'R'),
+        tool('Ellipse', icons.ellipse, 'ellipse', 'E'), tool('Polygon', icons.polygon, 'polygon', 'P'), tool('Text', icons.text, 'text', 'T'),
+        tool('Import image', icons.image, 'image', null, 'Raster images are not supported yet — import vector artwork (DXF, PDF, SVG or PLT)'), tool('Measure', icons.measure, 'measure', 'M')
+      ],
+      canvasEl, empty: !job.entities.length,
+      zoom: S.zoom, zoomIn: () => this.canvas && this.canvas.zoomBy(1.25), zoomOut: () => this.canvas && this.canvas.zoomBy(0.8), zoomFit: () => this.canvas && this.canvas.fit(), zoomActual: () => this.canvas && this.canvas.zoomActual(),
+      addBed: () => this.commit({ ...job, beds: (job.beds || 1) + 1 }, { record: true }),
+      removeBed: () => {
+        const n = Math.max(1, est.beds);
+        if (job.entities.some((e) => (e.bed || 0) === n - 1)) return LRC.toast('Bed ' + n + ' has parts on it — move or delete them first');
+        this.commit({ ...job, beds: Math.max(1, n - 1) }, { record: true });
+      },
+      noRemoveBed: est.beds <= 1 && (job.beds || 1) <= 1, removeBedOp: est.beds <= 1 && (job.beds || 1) <= 1 ? 0.45 : 1,
+      selInfo: selIds.length ? selIds.length + ' selected · ' + CC.boxW(sb).toFixed(1) + ' × ' + CC.boxH(sb).toFixed(1) + ' mm' : '',
+      snaps: [snap('Grid', 'grid'), snap('Objects', 'objects'), snap('Centre', 'centre')],
+      tabs: [tab('Processes'), tab('Objects', job.entities.length ? String(job.entities.length) : false), tab('Move'), tab('Queue', waitingIds.length ? String(waitingIds.length) : false)],
+      aci, pickerOpen: S.picker, pickerBd: S.picker ? accent : 'var(--line-strong)', aciOther: R(() => this.aciOther()),
+      togglePicker: () => this.setState((s) => ({ picker: !s.picker })),
+      canRecolour: selIds.length > 0 && hasSel && (procs[selIdx].aci || []).length > 0,
+      recolourSel: () => this.commit(LRC.ops.setAci(job, selIds, procs[selIdx].aci[0]), { record: true }),
+      advOpen: S.adv, advRot: S.adv ? '180deg' : '0deg',
+      toggleAdv: () => this.setState((s) => ({ adv: !s.adv })),
+      matOpen: S.matOpen, matBd: S.matOpen ? accent : 'var(--line-strong)', toggleMat: () => this.setState((s) => ({ matOpen: !s.matOpen })), matList,
+      mat: material ? { name: material.name + ' · ' + material.t + ' mm', sub: machine.name + ' presets' + (material.locked ? ' · locked' : ''), sw: material.sw } : { name: 'No material', sub: 'Pick a material for its presets', sw: 'var(--sunken)' },
+      coloursUsed: procs.length + ' process' + (procs.length === 1 ? '' : 'es'),
+      orphanNote: orphans.length ? 'No process for ' + orphans.map((a) => 'ACI ' + a + ' (' + counts[a] + ')').join(', ') + ' — these objects will not be output. Assign the colour with Edit below.' : false,
+      colours, hasSel, sel, newProcess: R(() => this.newProcess()), deleteProcess: R(() => this.deleteProcess()),
+      toggleDash: () => this.setEdit('dash', !(sc && sc.dash)),      saveGlobal: R(() => this.saveToMaterial()), revertJob: R(() => this.revertToPreset()),
+      est: est.total ? 'Est. ' + CC.fmtDuration(est.total, true) : 'Est. —',
+      jobSummary, checks,
+      sendJob: R(() => this.sendDialog(false))
+    };
+  }
+
+  // ---------------------------------------------------------------- small dialogs
+  async testFire() {
+    const r = await LRC.dialog({ title: 'Test fire', message: 'Fires the laser at the current head position. Make sure the lid is closed and the material is in place.', fields: [{ key: 'p', label: 'Power', value: '10', unit: '%', type: 'number' }, { key: 't', label: 'Duration', value: '100', unit: 'ms', type: 'number' }], buttons: [{ label: 'Cancel', value: null }, { label: 'Fire', value: 'ok', danger: true }] });
+    if (r) this.dev('testfire', { power: r.values.p, ms: r.values.t }, 'Test fire sent');
+  }
+  toggleIo(k) {
+    const io = (this.state.dev && this.state.dev.io) || {};
+    this.dev('io', { [k]: !io[k] });
+  }
+  toolChange() {
+    const heads = (this.machine().info && this.machine().info.heads) || [];
+    LRC.dialog({ title: 'Tool change', fields: [{ key: 's', label: 'Tool head', type: 'seg', value: heads[0] ? heads[0].slot : 'T1', options: heads.map((x) => ({ value: x.slot, label: x.slot + ' ' + x.tool })) }], buttons: [{ label: 'Cancel', value: null }, { label: 'Change', value: 'ok', primary: true }] })
+      .then((r) => r && this.dev('toolchange', { slot: r.values.s }, 'Tool change to ' + r.values.s));
+  }
+  openHmi() {
+    const m = this.machine();
+    if (m.conn !== 'Ethernet' || !m.ip) return LRC.toast(m.name + ' has no network address — set its IP on the Machines page');
+    window.api.app.openExternal('http://' + m.ip + ':' + (m.port || 8470) + '/').catch(LRC.fail);
+  }
+  async rotaryDlg() {
+    const j = this.state.job;
+    const r = await LRC.dialog({ title: 'Rotary', message: 'Sent with the job so the controller switches to the rotary axis.', fields: [{ key: 'on', label: 'Use the rotary attachment for this job', type: 'check', value: !!j.rotary }, { key: 'd', label: 'Object diameter', value: String((j.rotary && j.rotary.d) || 80), unit: 'mm', type: 'number' }], buttons: [{ label: 'Cancel', value: null }, { label: 'Apply', value: 'ok', primary: true }] });
+    if (r) this.commit({ ...j, rotary: r.values.on ? { d: r.values.d || 80 } : null }, { record: true });
+  }
+  headsDlg() {
+    const heads = (this.machine().info && this.machine().info.heads) || [];
+    const used = new Set(this.state.job.processes.filter((p) => p.out !== false).map((p) => CC.toolSlot(p.tool)));
+    LRC.dialog({ title: 'Tool heads · ' + this.machine().name, message: 'Read from the machine. Change heads on its HMI, then sync on the Machines page.', fields: [{ key: 't', type: 'table', rows: heads.map((x) => [x.slot + ' · ' + x.tool + (used.has(x.slot) ? ' · used by this job' : ''), x.loaded ? 'Loaded' : 'Empty']) }], buttons: [{ label: 'Close', value: 'ok', primary: true }] });
+  }
+  async conveyorDlg() {
+    const j = this.state.job;
+    const info = this.machine().info || {};
+    const r = await LRC.dialog({ title: 'Conveyor', fields: [{ key: 'b', label: 'Beds in this job', value: String(Math.max(j.beds || 1, this.estimate().beds)), type: 'number' }, { key: 'n', type: 'note', label: 'Feed length ' + (info.feedLen || CC.bedOf(this.machine())[1]) + ' mm · the conveyor advances one bed between each.' }], buttons: [{ label: 'Cancel', value: null }, { label: 'Apply', value: 'ok', primary: true }] });
+    if (!r) return;
+    const want = Math.max(1, Math.round(r.values.b) || 1);
+    const used = CC.bedCount({ entities: j.entities });
+    if (want < used) return LRC.toast('Bed ' + used + ' has parts on it — move them before removing beds');
+    this.commit({ ...j, beds: want }, { record: true });
+  }
+  async bridgesDlg() {
+    const i = this.state.procSel;
+    const p = this.effective(i);
+    if (!p) return;
+    const r = await LRC.dialog({ title: 'Bridges · ' + p.name, message: 'Leaves small uncut bridges so parts stay in the sheet.', fields: [{ key: 'on', label: 'Bridges on', type: 'check', value: !!p.dash }, { key: 'dl', label: 'Cut length', value: String(p.dl), unit: 'mm', type: 'number' }, { key: 'gl', label: 'Bridge width', value: String(p.gl), unit: 'mm', type: 'number' }], buttons: [{ label: 'Cancel', value: null }, { label: 'Apply', value: 'ok', primary: true }] });
+    if (!r) return;
+    this.setState((s) => ({ edit: { ...s.edit, [i]: { ...(s.edit[i] || {}), dash: !!r.values.on, dl: r.values.dl || p.dl, gl: r.values.gl || p.gl } } }));
+  }
+  async jobSettings() {
+    const j = this.state.job;
+    const co = CC.cutOrderOf(j);
+    const r = await LRC.dialog({
+      title: 'Job settings',
+      fields: [
+        { key: 'name', label: 'Job name', value: j.name, full: true },
+        { key: 'notes', label: 'Notes for the operator', value: j.notes || '', full: true },
+        { key: 'order', label: 'Cut order', type: 'seg', value: co.order, options: [{ value: 'file', label: 'As drawn' }, { value: 'speed', label: 'Fastest' }, { value: 'heat', label: 'Spread heat' }] },
+        { key: 'inside', label: 'Cut inside shapes first', type: 'seg', value: co.inside, options: [{ value: 'part', label: 'Per part' }, { value: 'all', label: 'All insides first' }, { value: 'off', label: 'Off' }] }
+      ],
+      buttons: [{ label: 'Cancel', value: null }, { label: 'Save', value: 'ok', primary: true }]
+    });
+    if (!r) return;
+    const next = { ...j, name: r.values.name || j.name, notes: r.values.notes, cutOrder: { order: r.values.order, inside: r.values.inside } };
+    delete next.optimise;
+    this.commit(next, { record: true });
+  }
+  async preferences() {
+    const info = await window.api.app.info();
+    LRC.dialog({ title: 'Preferences', fields: [{ key: 'theme', label: 'Theme', type: 'seg', value: LRC.theme.pref, options: [{ value: 'system', label: 'System' }, { value: 'light', label: 'Light' }, { value: 'dark', label: 'Dark' }], onChange: (v) => LRC.theme.set(v) }, { key: 't', type: 'table', rows: [['Data folder', info.dataDir], ['Reports folder', info.reportsDir], ['Version', info.version]] }, { key: 'n', type: 'note', label: 'Machines and materials are stored in the data folder. Jobs are only kept when you save them — the app starts with a new job each time.' }], buttons: [{ label: 'Close', value: 'ok', primary: true }] });
+  }
+  async about() {
+    const info = await window.api.app.info();
+    LRC.dialog({ title: 'Pathline', message: 'Version ' + info.version + '\nPrepare laser and plotter jobs — import, set speeds and feeds, simulate, and send to the machine controller.', buttons: [{ label: 'Close', value: 'ok', primary: true }] });
+  }
+}
+</script>
+</body>
+</html>

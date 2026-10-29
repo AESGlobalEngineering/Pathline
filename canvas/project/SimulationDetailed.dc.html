@@ -1,0 +1,491 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Simulation</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#2457D6}a:hover{color:#1A43AB}
+button,select,input{font:inherit;color:inherit}
+.ib{display:inline-flex;align-items:center;justify-content:center;width:36px;height:36px;border:1px solid #D5D9DF;border-radius:8px;background:#FFFFFF;cursor:pointer;color:#3A414C;padding:0;box-sizing:border-box}
+.ib:hover{border-color:#AEB5C0}
+.tb{display:inline-flex;align-items:center;gap:8px;height:36px;padding:0 12px;border:1px solid #D5D9DF;border-radius:8px;background:#FFFFFF;cursor:pointer;font-size:13px;color:#15181E;white-space:nowrap;text-decoration:none;box-sizing:border-box}
+.tb:hover{border-color:#AEB5C0;color:#15181E}
+.mono{font-family:'IBM Plex Mono',ui-monospace,monospace}
+.lbl{font-size:12px;color:#5B6370}
+input[type=range]{width:100%;margin:0}
+svg.i{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round;flex:none}
+</style>
+</helmet>
+<div style="min-height: 100vh; display: flex; flex-direction: column; background: #F3F4F6; color: #15181E; font-family: 'IBM Plex Sans', system-ui, sans-serif; font-size: 13px">
+
+  <!-- ===== Header ===== -->
+  <header style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; padding: 10px 16px; background: #FFFFFF; border-bottom: 1px solid #E1E4E8">
+    <nav aria-label="Sections" style="display: flex; padding: 3px; gap: 2px; background: #F0F1F4; border-radius: 8px">
+      <a href="MainDetailed.dc.html" style="display: inline-flex; align-items: center; height: 30px; padding: 0 12px; border-radius: 6px; text-decoration: none; font-weight: 500; color: #5B6370">Job</a>
+      <a href="MaterialsDetailed.dc.html" style="display: inline-flex; align-items: center; height: 30px; padding: 0 12px; border-radius: 6px; text-decoration: none; font-weight: 500; color: #5B6370">Materials</a>
+      <a href="MachineSetupDetailed.dc.html" style="display: inline-flex; align-items: center; height: 30px; padding: 0 12px; border-radius: 6px; text-decoration: none; font-weight: 500; color: #5B6370">Machines</a>
+      <a href="SimulationDetailed.dc.html" aria-current="page" style="display: inline-flex; align-items: center; height: 30px; padding: 0 12px; border-radius: 6px; text-decoration: none; font-weight: 500; background: #FFFFFF; box-shadow: 0 1px 2px rgba(21, 24, 30, 0.14); color: #15181E">Simulation</a>
+    </nav>
+    <div style="display: flex; flex-direction: column; line-height: 1.25">
+      <h1 style="margin: 0; font-size: 15px; font-weight: 600">Simulation</h1>
+      <span class="lbl">batch-14 · window signs</span>
+    </div>
+    <div role="radiogroup" aria-label="Machine" style="display: flex; padding: 3px; gap: 2px; background: #F0F1F4; border-radius: 8px; margin-left: 8px">
+      <sc-for list="{{modes}}" as="o" hint-placeholder-count="2">
+        <button role="radio" aria-checked="{{o.on}}" onClick="{{o.pick}}" style="display: inline-flex; align-items: center; gap: 8px; height: 30px; padding: 0 12px; border: 0; border-radius: 6px; background: {{o.bg}}; box-shadow: {{o.sh}}; color: {{o.fg}}; cursor: pointer; font-weight: 500">
+          <span style="height: 18px; padding: 0 5px; border-radius: 4px; display: inline-flex; align-items: center; font-size: 10px; font-weight: 600; letter-spacing: 0.04em; background: {{o.tbg}}; color: #FFFFFF">{{o.type}}</span>{{o.l}}
+        </button>
+      </sc-for>
+    </div>
+    <span style="flex: 1"></span>
+    <a class="tb" href="MainDetailed.dc.html">Back to design</a>
+    <a href="HMI.dc.html" style="display: inline-flex; align-items: center; gap: 8px; height: 36px; padding: 0 18px; border: 0; border-radius: 8px; background: {{accent}}; color: #FFFFFF; font-weight: 600; text-decoration: none; cursor: pointer"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.send}}"></path></svg>Send to machine</a>
+  </header>
+
+  <div style="flex: 1; display: flex; flex-wrap: wrap; min-height: 0">
+
+    <!-- ===== Left: display + processes ===== -->
+    <aside aria-label="Display options" style="flex: 1 1 260px; min-width: 0; background: #FFFFFF; border-right: 1px solid #E1E4E8; padding: 16px; display: flex; flex-direction: column; gap: 14px">
+      <h2 style="margin: 0; font-size: 13px; font-weight: 600">Display</h2>
+      <div style="display: flex; flex-direction: column; gap: 6px">
+        <sc-for list="{{toggles}}" as="t" hint-placeholder-count="5">
+          <div style="display: flex; align-items: center; justify-content: space-between; min-height: 32px">
+            <span style="color: #3A414C">{{t.l}}</span>
+            <button role="switch" aria-checked="{{t.on}}" aria-label="{{t.l}}" onClick="{{t.toggle}}" style="width: 36px; height: 22px; border: 0; border-radius: 11px; padding: 3px; box-sizing: border-box; background: {{t.swBg}}; display: flex; justify-content: {{t.swJ}}; cursor: pointer">
+              <span style="width: 16px; height: 16px; border-radius: 50%; background: #FFFFFF; box-shadow: 0 1px 2px rgba(21, 24, 30, 0.3)"></span>
+            </button>
+          </div>
+        </sc-for>
+      </div>
+      <div style="height: 1px; background: #E1E4E8"></div>
+      <h2 style="margin: 0; font-size: 13px; font-weight: 600">Processes</h2>
+      <div style="display: flex; flex-direction: column; gap: 4px">
+        <sc-for list="{{procs}}" as="p" hint-placeholder-count="3">
+          <label style="display: flex; align-items: center; gap: 10px; min-height: 34px; padding: 0 6px; border-radius: 8px; background: {{p.bg}}">
+            <input type="checkbox" checked="{{p.shown}}" onChange="{{p.toggle}}" style="width: 16px; height: 16px; margin: 0; accent-color: {{accent}}">
+            <span style="display: flex; gap: 3px">
+              <sc-for list="{{p.chips}}" as="k" hint-placeholder-count="1"><span class="mono" title="ACI {{k.n}}" style="width: 18px; height: 18px; border-radius: 4px; background: {{k.hex}}; color: {{k.fg}}; font-size: 10px; font-weight: 500; display: inline-flex; align-items: center; justify-content: center; box-shadow: inset 0 0 0 1px rgba(21, 24, 30, 0.18)">{{k.n}}</span></sc-for>
+            </span>
+            <span style="flex: 1; min-width: 0; font-weight: {{p.w}}">{{p.name}}</span>
+            <span class="mono lbl">{{p.time}}</span>
+          </label>
+        </sc-for>
+      </div>
+    </aside>
+
+    <!-- ===== Centre: preview + timeline ===== -->
+    <main style="flex: 999 1 640px; min-width: 0; display: flex; flex-direction: column">
+      <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; padding: 10px 16px; background: #FFFFFF; border-bottom: 1px solid #E1E4E8">
+        <span style="display: inline-flex; align-items: center; gap: 8px">
+          <span aria-hidden="true" style="width: 10px; height: 10px; border-radius: 50%; background: {{now.col}}; box-shadow: inset 0 0 0 1px rgba(21, 24, 30, 0.2)"></span>
+          <span style="font-weight: 600">{{now.name}}</span>
+          <span class="lbl">{{now.step}}</span>
+        </span>
+        <span class="mono lbl">X {{now.x}}  Y {{now.y}} mm</span>
+        <span style="flex: 1"></span>
+        <sc-if value="{{isPlotter}}" hint-placeholder-val="{{false}}">
+          <div role="radiogroup" aria-label="Bed" style="display: flex; padding: 3px; gap: 2px; background: #F0F1F4; border-radius: 8px">
+            <sc-for list="{{beds}}" as="b" hint-placeholder-count="3">
+              <button role="radio" aria-checked="{{b.on}}" onClick="{{b.pick}}" style="height: 28px; padding: 0 12px; border: 0; border-radius: 6px; background: {{b.bg}}; box-shadow: {{b.sh}}; color: {{b.fg}}; cursor: pointer; font-weight: 500">{{b.l}}</button>
+            </sc-for>
+          </div>
+        </sc-if>
+        <button class="tb" style="height: 32px">Fit</button>
+      </div>
+
+      <div style="flex: 1; min-height: 420px; display: flex; align-items: center; justify-content: center; padding: 28px; background-color: #E9EBEE; background-image: radial-gradient(#CDD2D9 1px, transparent 1px); background-size: 16px 16px">
+
+        <!-- LASER scene -->
+        <sc-if value="{{isLaser}}" hint-placeholder-val="{{true}}">
+          <svg viewBox="0 0 800 500" role="img" aria-label="Laser toolpath preview" style="width: 100%; max-width: 1000px; height: auto; display: block; box-shadow: 0 2px 8px rgba(21, 24, 30, 0.08)">
+            <defs>
+              <pattern id="sim-hatch" width="4" height="4" patternUnits="userSpaceOnUse"><path d="M0 2h4" stroke="#15181E" stroke-width="1.2"></path></pattern>
+            </defs>
+            <rect x="0" y="0" width="800" height="500" fill="#FFFFFF" stroke="#CDD2D9"></rect>
+            <rect x="50" y="45" width="600" height="380" fill="#FFFFFF" stroke="#AEB5C0"></rect>
+            <rect x="104" y="124" width="92" height="52" fill="{{L.fill}}" opacity="{{L.e0.op}}"></rect>
+            <rect x="264" y="124" width="92" height="52" fill="{{L.fill}}" opacity="{{L.e1.op}}"></rect>
+            <rect x="424" y="124" width="92" height="52" fill="{{L.fill}}" opacity="{{L.e2.op}}"></rect>
+            <rect x="104" y="284" width="92" height="52" fill="{{L.fill}}" opacity="{{L.e3.op}}"></rect>
+            <rect x="264" y="284" width="92" height="52" fill="{{L.fill}}" opacity="{{L.e4.op}}"></rect>
+            <rect x="424" y="284" width="92" height="52" fill="{{L.fill}}" opacity="{{L.e5.op}}"></rect>
+            <rect x="82" y="82" width="136" height="136" rx="14" fill="none" stroke="#FF0000" stroke-width="{{L.c0.sw}}" opacity="{{L.c0.op}}"></rect>
+            <rect x="242" y="82" width="136" height="136" rx="68" fill="none" stroke="#FF0000" stroke-width="{{L.c1.sw}}" opacity="{{L.c1.op}}"></rect>
+            <rect x="402" y="82" width="136" height="136" rx="14" fill="none" stroke="#FF0000" stroke-width="{{L.c2.sw}}" opacity="{{L.c2.op}}"></rect>
+            <rect x="82" y="242" width="136" height="136" rx="14" fill="none" stroke="#FF0000" stroke-width="{{L.c3.sw}}" opacity="{{L.c3.op}}"></rect>
+            <rect x="242" y="242" width="136" height="136" rx="68" fill="none" stroke="#FF0000" stroke-width="{{L.c4.sw}}" opacity="{{L.c4.op}}"></rect>
+            <rect x="402" y="242" width="136" height="136" rx="14" fill="none" stroke="#FF0000" stroke-width="{{L.c5.sw}}" opacity="{{L.c5.op}}"></rect>
+            <line x1="580" y1="65" x2="580" y2="405" stroke="#00C000" stroke-width="{{L.t.sw}}" stroke-dasharray="12 3" opacity="{{L.t.op}}"></line>
+            <polyline points="104,124 264,124 424,124 104,284 264,284 424,284 150,82 310,82 470,82 150,242 310,242 470,242 580,65" fill="none" stroke="#5B6370" stroke-width="1.2" stroke-dasharray="4 4" visibility="{{vis.travel}}"></polyline>
+            <circle cx="150" cy="82" r="4" fill="#15181E" visibility="{{vis.starts}}"></circle>
+            <circle cx="310" cy="82" r="4" fill="#15181E" visibility="{{vis.starts}}"></circle>
+            <circle cx="470" cy="82" r="4" fill="#15181E" visibility="{{vis.starts}}"></circle>
+            <circle cx="150" cy="242" r="4" fill="#15181E" visibility="{{vis.starts}}"></circle>
+            <circle cx="310" cy="242" r="4" fill="#15181E" visibility="{{vis.starts}}"></circle>
+            <circle cx="470" cy="242" r="4" fill="#15181E" visibility="{{vis.starts}}"></circle>
+            <path d="M168 78l7 4-7 4 M328 78l7 4-7 4 M488 78l7 4-7 4 M168 238l7 4-7 4 M328 238l7 4-7 4 M488 238l7 4-7 4 M576 230l4 7 4-7" fill="none" stroke="#15181E" stroke-width="1.8" visibility="{{vis.arrows}}"></path>
+            <text x="150" y="238" text-anchor="middle" font-size="12" fill="#5B6370" font-family="IBM Plex Mono, monospace" visibility="{{vis.order}}">7</text>
+            <text x="310" y="238" text-anchor="middle" font-size="12" fill="#5B6370" font-family="IBM Plex Mono, monospace" visibility="{{vis.order}}">8</text>
+            <text x="470" y="238" text-anchor="middle" font-size="12" fill="#5B6370" font-family="IBM Plex Mono, monospace" visibility="{{vis.order}}">9</text>
+            <text x="150" y="398" text-anchor="middle" font-size="12" fill="#5B6370" font-family="IBM Plex Mono, monospace" visibility="{{vis.order}}">10</text>
+            <text x="310" y="398" text-anchor="middle" font-size="12" fill="#5B6370" font-family="IBM Plex Mono, monospace" visibility="{{vis.order}}">11</text>
+            <text x="470" y="398" text-anchor="middle" font-size="12" fill="#5B6370" font-family="IBM Plex Mono, monospace" visibility="{{vis.order}}">12</text>
+            <text x="596" y="240" font-size="12" fill="#5B6370" font-family="IBM Plex Mono, monospace" visibility="{{vis.order}}">13</text>
+            <g transform="translate({{head.x}} {{head.y}})">
+              <circle r="9" fill="none" stroke="{{accent}}" stroke-width="2"></circle>
+              <path d="M-15 0h30 M0 -15v30" stroke="{{accent}}" stroke-width="1.5"></path>
+            </g>
+          </svg>
+        </sc-if>
+
+        <!-- PLOTTER scene -->
+        <sc-if value="{{isPlotter}}" hint-placeholder-val="{{false}}">
+          <svg viewBox="0 0 800 500" role="img" aria-label="Plotter toolpath preview" style="width: 100%; max-width: 1000px; height: auto; display: block; box-shadow: 0 2px 8px rgba(21, 24, 30, 0.08)">
+            <rect x="0" y="0" width="800" height="500" fill="#FFFFFF" stroke="#CDD2D9"></rect>
+            <rect x="440" y="150" width="120" height="8" fill="#000000" opacity="{{P.p.op}}"></rect>
+            <rect x="440" y="170" width="90" height="8" fill="#000000" opacity="{{P.p.op}}"></rect>
+            <rect x="110" y="120" width="240" height="180" fill="none" stroke="#0000FF" stroke-width="{{P.v.sw}}" opacity="{{P.v.op}}"></rect>
+            <line x1="570" y1="90" x2="570" y2="330" stroke="#00C000" stroke-width="{{P.cr.sw}}" opacity="{{P.cr.op}}"></line>
+            <rect x="80" y="90" width="300" height="240" fill="none" stroke="#FF0000" stroke-width="{{P.ka.sw}}" opacity="{{P.ka.op}}"></rect>
+            <rect x="420" y="90" width="300" height="240" fill="none" stroke="#FF0000" stroke-width="{{P.kb.sw}}" opacity="{{P.kb.op}}"></rect>
+            <rect x="80" y="370" width="640" height="60" fill="none" stroke="#FF00FF" stroke-width="{{P.pf.sw}}" stroke-dasharray="16 4" opacity="{{P.pf.op}}"></rect>
+            <polyline points="440,154 110,120 570,90 80,90 420,90 80,370" fill="none" stroke="#5B6370" stroke-width="1.2" stroke-dasharray="4 4" visibility="{{vis.travel}}"></polyline>
+            <circle cx="80" cy="90" r="4" fill="#FFFFFF" stroke="#15181E" stroke-width="1.5" visibility="{{vis.lifts}}"></circle>
+            <circle cx="380" cy="90" r="4" fill="#FFFFFF" stroke="#15181E" stroke-width="1.5" visibility="{{vis.lifts}}"></circle>
+            <circle cx="380" cy="330" r="4" fill="#FFFFFF" stroke="#15181E" stroke-width="1.5" visibility="{{vis.lifts}}"></circle>
+            <circle cx="80" cy="330" r="4" fill="#FFFFFF" stroke="#15181E" stroke-width="1.5" visibility="{{vis.lifts}}"></circle>
+            <circle cx="420" cy="90" r="4" fill="#FFFFFF" stroke="#15181E" stroke-width="1.5" visibility="{{vis.lifts}}"></circle>
+            <circle cx="720" cy="90" r="4" fill="#FFFFFF" stroke="#15181E" stroke-width="1.5" visibility="{{vis.lifts}}"></circle>
+            <circle cx="720" cy="330" r="4" fill="#FFFFFF" stroke="#15181E" stroke-width="1.5" visibility="{{vis.lifts}}"></circle>
+            <circle cx="420" cy="330" r="4" fill="#FFFFFF" stroke="#15181E" stroke-width="1.5" visibility="{{vis.lifts}}"></circle>
+            <circle cx="440" cy="154" r="4" fill="#15181E" visibility="{{vis.starts}}"></circle>
+            <circle cx="110" cy="120" r="4" fill="#15181E" visibility="{{vis.starts}}"></circle>
+            <circle cx="570" cy="90" r="4" fill="#15181E" visibility="{{vis.starts}}"></circle>
+            <circle cx="80" cy="370" r="4" fill="#15181E" visibility="{{vis.starts}}"></circle>
+            <path d="M226 86l7 4-7 4 M496 86l7 4-7 4 M226 116l7 4-7 4 M396 366l7 4-7 4 M566 206l4 7 4-7" fill="none" stroke="#15181E" stroke-width="1.8" visibility="{{vis.arrows}}"></path>
+            <g transform="translate({{head.x}} {{head.y}})">
+              <circle r="9" fill="none" stroke="{{accent}}" stroke-width="2"></circle>
+              <path d="M-15 0h30 M0 -15v30" stroke="{{accent}}" stroke-width="1.5"></path>
+            </g>
+          </svg>
+        </sc-if>
+      </div>
+
+      <!-- timeline -->
+      <div style="display: flex; flex-direction: column; gap: 10px; padding: 12px 16px 14px; background: #FFFFFF; border-top: 1px solid #E1E4E8">
+        <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px">
+          <button class="ib" onClick="{{prevOp}}" aria-label="Previous operation"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.prev}}"></path></svg></button>
+          <button onClick="{{togglePlay}}" aria-label="{{playLabel}}" style="width: 44px; height: 44px; border: 0; border-radius: 22px; background: {{accent}}; color: #FFFFFF; display: inline-flex; align-items: center; justify-content: center; cursor: pointer"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width: 20px; height: 20px"><path d="{{playIcon}}"></path></svg></button>
+          <button class="ib" onClick="{{nextOp}}" aria-label="Next operation"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.next}}"></path></svg></button>
+          <span class="mono" style="font-weight: 500; min-width: 110px">{{clock}}</span>
+          <span style="flex: 1"></span>
+          <span class="lbl">Speed</span>
+          <div role="radiogroup" aria-label="Playback speed" style="display: flex; padding: 3px; gap: 2px; background: #F0F1F4; border-radius: 8px">
+            <sc-for list="{{speeds}}" as="s" hint-placeholder-count="4">
+              <button role="radio" aria-checked="{{s.on}}" onClick="{{s.pick}}" class="mono" style="height: 28px; padding: 0 10px; border: 0; border-radius: 6px; background: {{s.bg}}; box-shadow: {{s.sh}}; color: {{s.fg}}; cursor: pointer; font-size: 12px">{{s.l}}</button>
+            </sc-for>
+          </div>
+        </div>
+        <div style="position: relative">
+          <div aria-hidden="true" style="display: flex; height: 14px; border-radius: 4px; overflow: hidden; box-shadow: inset 0 0 0 1px #DDE0E5">
+            <sc-for list="{{bar}}" as="g" hint-placeholder-count="12"><span style="flex: {{g.f}} 1 0; background: {{g.bg}}; opacity: {{g.op}}; border-right: 1px solid #FFFFFF"></span></sc-for>
+          </div>
+          <span aria-hidden="true" style="position: absolute; left: {{marker}}; top: -4px; bottom: -4px; width: 2px; margin-left: -1px; background: #15181E"></span>
+        </div>
+        <input type="range" min="0" max="{{T}}" step="1" value="{{t}}" onChange="{{scrub}}" aria-label="Job position" style="accent-color: {{accent}}">
+      </div>
+    </main>
+
+    <!-- ===== Right: breakdown ===== -->
+    <aside aria-label="Job breakdown" style="flex: 1 1 300px; min-width: 0; background: #FFFFFF; border-left: 1px solid #E1E4E8; padding: 16px; display: flex; flex-direction: column; gap: 14px">
+      <div style="display: flex; flex-direction: column; gap: 2px">
+        <span class="lbl">Total job time</span>
+        <span class="mono" style="font-size: 26px; font-weight: 500">{{total}}</span>
+      </div>
+      <div style="height: 6px; border-radius: 3px; background: #EEF0F3; overflow: hidden"><div style="height: 100%; width: {{marker}}; background: {{accent}}"></div></div>
+      <div style="display: flex; flex-direction: column; gap: 8px">
+        <sc-for list="{{breakdown}}" as="b" hint-placeholder-count="4">
+          <div style="display: flex; align-items: center; gap: 10px">
+            <span aria-hidden="true" style="width: 10px; height: 10px; flex: none; border-radius: 3px; background: {{b.col}}; box-shadow: inset 0 0 0 1px rgba(21, 24, 30, 0.2)"></span>
+            <span style="flex: 1; min-width: 0; color: #3A414C">{{b.l}}</span>
+            <span class="mono">{{b.v}}</span>
+          </div>
+        </sc-for>
+      </div>
+      <div style="height: 1px; background: #E1E4E8"></div>
+      <div style="display: flex; flex-direction: column; gap: 8px">
+        <sc-for list="{{stats}}" as="s" hint-placeholder-count="3">
+          <div style="display: flex; justify-content: space-between; gap: 8px"><span style="color: #3A414C">{{s.l}}</span><span class="mono">{{s.v}}</span></div>
+        </sc-for>
+      </div>
+      <button class="tb" onClick="{{optimise}}" disabled="{{optimised}}" style="justify-content: center; opacity: {{optOpacity}}">{{optLabel}}</button>
+      <div style="height: 1px; background: #E1E4E8"></div>
+      <h2 style="margin: 0; font-size: 13px; font-weight: 600">Checks</h2>
+      <div style="display: flex; flex-direction: column; gap: 6px">
+        <sc-for list="{{checks}}" as="k" hint-placeholder-count="3">
+          <span style="display: inline-flex; align-items: center; gap: 8px; min-height: 28px; padding: 0 10px; border-radius: 8px; background: #EDF7F1; color: #1B6B43; font-size: 12px; font-weight: 500">
+            <svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width: 14px; height: 14px"><path d="{{icons.check}}"></path></svg>{{k}}
+          </span>
+        </sc-for>
+      </div>
+    </aside>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#2457D6","options":["#2457D6","#0B7F75","#C2410C","#15181E"]},"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  state = {
+    mode: 'laser',
+    t: 140,
+    playing: false,
+    speed: 16,
+    hidden: {},
+    vis: { travel: true, arrows: true, starts: false, order: false, heat: false, lifts: true },
+    optimised: { laser: false, plotter: false }
+  };
+
+  segsFor(mode) {
+    const out = [];
+    let at = 0;
+    const add = (o) => { out.push({ ...o, start: at, end: at + o.dur }); at += o.dur; };
+    if (mode === 'laser') {
+      for (let i = 0; i < 6; i++) add({ id: 'e' + i, proc: 'eng', kind: 'op', dur: 44, n: i });
+      for (let i = 0; i < 6; i++) add({ id: 'c' + i, proc: 'cut', kind: 'op', dur: 18, n: i });
+      add({ id: 't', proc: 'tear', kind: 'op', dur: 8, n: 0 });
+    } else {
+      for (let b = 0; b < 3; b++) {
+        add({ id: 'p', proc: 'pen', kind: 'op', dur: 40, bed: b });
+        add({ id: 'chg', proc: 'chg', kind: 'change', dur: 10, bed: b });
+        add({ id: 'v', proc: 'vcut', kind: 'op', dur: 110, bed: b });
+        add({ id: 'chg', proc: 'chg', kind: 'change', dur: 10, bed: b });
+        add({ id: 'cr', proc: 'crease', kind: 'op', dur: 40, bed: b });
+        add({ id: 'chg', proc: 'chg', kind: 'change', dur: 10, bed: b });
+        add({ id: 'ka', proc: 'knife', kind: 'op', dur: 95, bed: b });
+        add({ id: 'kb', proc: 'knife', kind: 'op', dur: 95, bed: b });
+        add({ id: 'pf', proc: 'perf', kind: 'op', dur: 70, bed: b });
+        if (b < 2) add({ id: 'feed', proc: 'feed', kind: 'feed', dur: 5, bed: b });
+      }
+    }
+    return out;
+  }
+
+  componentDidMount() {
+    this.timer = setInterval(() => {
+      if (!this.state.playing) return;
+      const segs = this.segsFor(this.state.mode);
+      const T = segs[segs.length - 1].end;
+      const nt = this.state.t + 0.25 * this.state.speed;
+      if (nt >= T) this.setState({ t: T, playing: false });
+      else this.setState({ t: nt });
+    }, 250);
+  }
+
+  componentWillUnmount() {
+    clearInterval(this.timer);
+  }
+
+  renderVals() {
+    const accent = this.props.accent ?? '#2457D6';
+    const soft = (h, k) => {
+      const n = parseInt(String(h).slice(1, 7), 16);
+      if (Number.isNaN(n)) return '#EEF2FC';
+      const mix = (c) => Math.round(c + (255 - c) * k);
+      return 'rgb(' + mix(n >> 16) + ', ' + mix((n >> 8) & 255) + ', ' + mix(n & 255) + ')';
+    };
+    const accentSoft = soft(accent, 0.9);
+    const icons = {
+      back: 'M15 6l-6 6 6 6',
+      send: 'M4 12l16-8-6 16-3-7z',
+      prev: 'M6 5v14 M18 6l-9 6 9 6z',
+      next: 'M18 5v14 M6 6l9 6-9 6z',
+      play: 'M7 4.5v15l12.5-7.5z',
+      pause: 'M8 5v14 M16 5v14',
+      check: 'M5 12.5l4.5 4.5L19 7'
+    };
+
+    const mode = this.state.mode;
+    const isLaser = mode === 'laser';
+    const segs = this.segsFor(mode);
+    const T = segs[segs.length - 1].end;
+    const t = Math.min(this.state.t, T);
+    const finished = t >= T;
+    const cur = finished ? segs[segs.length - 1] : (segs.find((s) => t < s.end) || segs[0]);
+    const fmt = (s) => {
+      const v = Math.round(s);
+      return Math.floor(v / 60) + ':' + String(v % 60).padStart(2, '0');
+    };
+
+    const ACI = { 1: '#FF0000', 3: '#00FF00', 5: '#0000FF', 6: '#FF00FF', 7: '#000000', 8: '#808080' };
+    const FG = { 1: '#FFFFFF', 3: '#15181E', 5: '#FFFFFF', 6: '#FFFFFF', 7: '#FFFFFF', 8: '#FFFFFF' };
+    const PROCS = isLaser
+      ? [{ key: 'eng', name: 'Engrave fill', aci: [7], col: '#000000' }, { key: 'cut', name: 'Cut contour', aci: [1, 6], col: '#FF0000' }, { key: 'tear', name: 'Tear-off line', aci: [3], col: '#00C000' }]
+      : [
+        { key: 'pen', name: 'Pen', aci: [7, 8], col: '#000000' }, { key: 'vcut', name: 'V-cut 45°', aci: [5], col: '#0000FF' },
+        { key: 'crease', name: 'Crease', aci: [3], col: '#00C000' }, { key: 'knife', name: 'Knife through', aci: [1], col: '#FF0000' },
+        { key: 'perf', name: 'Perforate', aci: [6], col: '#FF00FF' }
+      ];
+    const colOf = (k) => (PROCS.find((p) => p.key === k) || {}).col;
+    const isHidden = (k) => !!this.state.hidden[mode + '|' + k];
+    const sumFor = (k) => segs.filter((s) => s.proc === k).reduce((a, s) => a + s.dur, 0);
+
+    const stateOf = (s) => (t >= s.end ? 'done' : t >= s.start ? 'cur' : 'todo');
+    const attr = (s) => {
+      const st = stateOf(s);
+      return { op: isHidden(s.proc) ? 0 : st === 'todo' ? 0.18 : 1, sw: st === 'cur' ? 4 : 2.5 };
+    };
+    const vis = {};
+    Object.keys(this.state.vis).forEach((k) => { vis[k] = this.state.vis[k] ? 'visible' : 'hidden'; });
+
+    // element attributes
+    const L = { fill: this.state.vis.heat ? '#F76B15' : 'url(#sim-hatch)' };
+    const P = {};
+    const viewBed = isLaser ? 0 : (cur.bed || 0);
+    segs.forEach((s) => {
+      if (s.kind !== 'op') return;
+      if (isLaser) L[s.id] = attr(s);
+      else if (s.bed === viewBed) P[s.id] = attr(s);
+    });
+
+    // head position
+    const f = cur.dur ? Math.min(1, Math.max(0, (t - cur.start) / cur.dur)) : 0;
+    const perim = (x, y, w, h, k, off) => {
+      const per = 2 * (w + h);
+      let d = ((k + (off || 0)) % 1) * per;
+      if (d < w) return [x + d, y];
+      d -= w;
+      if (d < h) return [x + w, y + d];
+      d -= h;
+      if (d < w) return [x + w - d, y + h];
+      d -= w;
+      return [x, y + h - d];
+    };
+    let hx = 0;
+    let hy = 0;
+    if (isLaser) {
+      const IT = [[90, 90], [250, 90], [410, 90], [90, 250], [250, 250], [410, 250]];
+      if (cur.id[0] === 'e') {
+        const [x, y] = IT[cur.n];
+        const rows = 14;
+        const r = Math.min(rows - 1, Math.floor(f * rows));
+        const fr = f * rows - r;
+        hx = x + 14 + 92 * (r % 2 ? 1 - fr : fr);
+        hy = y + 34 + 52 * (r / (rows - 1));
+      } else if (cur.id[0] === 'c') {
+        const [x, y] = IT[cur.n];
+        [hx, hy] = perim(x - 8, y - 8, 136, 136, f, 0.125);
+      } else {
+        hx = 580;
+        hy = 65 + 340 * f;
+      }
+    } else {
+      const R = { v: [110, 120, 240, 180], ka: [80, 90, 300, 240], kb: [420, 90, 300, 240], pf: [80, 370, 640, 60] };
+      if (cur.id === 'cr') { hx = 570; hy = 90 + 240 * f; }
+      else if (cur.id === 'p') { hx = 440 + 120 * f; hy = f < 0.5 ? 154 : 174; }
+      else if (R[cur.id]) { const r = R[cur.id]; [hx, hy] = perim(r[0], r[1], r[2], r[3], f, 0); }
+      else if (cur.kind === 'change') { hx = 770; hy = 30; }
+      else { hx = 20; hy = 20; }
+    }
+    const mmX = isLaser ? (hx * 813) / 800 : hx * 2;
+    const mmY = isLaser ? (hy * 508) / 500 : hy * 2;
+
+    // now readout
+    const opsOfProc = segs.filter((s) => s.proc === cur.proc && (isLaser || s.bed === cur.bed));
+    const stepIdx = opsOfProc.indexOf(cur) + 1;
+    let nowName = finished ? 'Complete' : (PROCS.find((p) => p.key === cur.proc) || {}).name;
+    let nowStep = '';
+    if (!finished) {
+      if (cur.kind === 'change') { nowName = 'Tool change'; nowStep = 'Bed ' + (cur.bed + 1); }
+      else if (cur.kind === 'feed') { nowName = 'Conveyor feed'; nowStep = 'Bed ' + (cur.bed + 1) + ' → ' + (cur.bed + 2); }
+      else nowStep = (isLaser ? '' : 'Bed ' + (cur.bed + 1) + ' · ') + stepIdx + ' of ' + opsOfProc.length;
+    }
+
+    // timeline bar
+    const bar = segs.map((s) => ({
+      f: s.dur,
+      bg: s.kind === 'change' ? '#E1E4E8' : s.kind === 'feed' ? 'repeating-linear-gradient(45deg, #AEB5C0 0 3px, #E1E4E8 3px 6px)' : colOf(s.proc),
+      op: s.kind === 'op' && isHidden(s.proc) ? 0.25 : 1
+    }));
+
+    const opStarts = segs.filter((s) => s.kind === 'op').map((s) => s.start);
+    const prevOp = () => {
+      const p = opStarts.filter((x) => x < t - 0.5);
+      this.setState({ t: p.length ? p[p.length - 1] : 0, playing: false });
+    };
+    const nextOp = () => {
+      const n = opStarts.find((x) => x > t + 0.5);
+      this.setState({ t: n !== undefined ? n : T, playing: false });
+    };
+
+    const seg = (on) => ({
+      bg: on ? '#FFFFFF' : 'transparent',
+      sh: on ? '0 1px 2px rgba(21, 24, 30, 0.14)' : 'none',
+      fg: on ? '#15181E' : '#5B6370'
+    });
+    const modes = [
+      { k: 'laser', l: 'Trotec Speedy 360', type: 'LASER', tbg: '#15181E' },
+      { k: 'plotter', l: 'Flatbed 1', type: 'PLOTTER', tbg: '#0B7F75' }
+    ].map((o) => ({ ...o, ...seg(o.k === mode), on: o.k === mode, pick: () => this.setState({ mode: o.k, t: 0, playing: false }) }));
+
+    const bedStarts = [0, 1, 2].map((b) => (segs.find((s) => s.bed === b) || { start: 0 }).start);
+    const beds = [0, 1, 2].map((b) => ({ l: 'Bed ' + (b + 1), on: viewBed === b, ...seg(viewBed === b), pick: () => this.setState({ t: bedStarts[b], playing: false }) }));
+
+    const speeds = [1, 4, 16, 64].map((v) => ({ l: v + '×', on: this.state.speed === v, ...seg(this.state.speed === v), pick: () => this.setState({ speed: v }) }));
+
+    const toggleDefs = isLaser
+      ? [['travel', 'Travel moves'], ['arrows', 'Direction'], ['starts', 'Start points'], ['order', 'Cut order'], ['heat', 'Power heatmap']]
+      : [['travel', 'Travel moves'], ['arrows', 'Direction'], ['starts', 'Start points'], ['lifts', 'Knife lift points']];
+    const toggles = toggleDefs.map(([k, l]) => {
+      const on = !!this.state.vis[k];
+      return { l, on, swBg: on ? accent : '#C9CED6', swJ: on ? 'flex-end' : 'flex-start', toggle: () => this.setState((s) => ({ vis: { ...s.vis, [k]: !on } })) };
+    });
+
+    const procs = PROCS.map((p) => {
+      const hidden = isHidden(p.key);
+      const active = !finished && cur.proc === p.key;
+      return {
+        name: p.name, time: fmt(sumFor(p.key)), shown: !hidden,
+        chips: p.aci.map((n) => ({ n, hex: ACI[n], fg: FG[n] })),
+        bg: active ? accentSoft : 'transparent', w: active ? 600 : 400,
+        toggle: () => this.setState((s) => ({ hidden: { ...s.hidden, [mode + '|' + p.key]: !hidden } }))
+      };
+    });
+
+    const opt = this.state.optimised[mode];
+    const breakdown = PROCS.map((p) => ({ l: p.name, v: fmt(sumFor(p.key)), col: p.col }))
+      .concat(isLaser ? [] : [{ l: 'Tool changes', v: fmt(sumFor('chg')), col: '#E1E4E8' }, { l: 'Conveyor feeds', v: fmt(sumFor('feed')), col: '#AEB5C0' }]);
+    const stats = isLaser
+      ? [{ l: 'Travel distance', v: opt ? '7.1 m' : '9.4 m' }, { l: 'Cut length', v: '3.8 m' }, { l: 'Engraved area', v: '287 cm²' }]
+      : [{ l: 'Travel distance', v: opt ? '24.8 m' : '31.2 m' }, { l: 'Cut length', v: '22.6 m' }, { l: 'Tool changes', v: '9' }, { l: 'Beds', v: '3' }];
+
+    return {
+      accent, icons, isLaser, isPlotter: !isLaser, modes, beds, speeds, toggles, procs, vis, L, P,
+      head: { x: hx.toFixed(1), y: hy.toFixed(1) },
+      now: { name: nowName, step: nowStep, col: finished ? '#30A46C' : (cur.kind === 'op' ? colOf(cur.proc) : '#AEB5C0'), x: mmX.toFixed(1), y: mmY.toFixed(1) },
+      bar, marker: ((t / T) * 100).toFixed(2) + '%',
+      T, t: Math.round(t),
+      clock: fmt(t) + ' / ' + fmt(T),
+      total: fmt(T),
+      scrub: (e) => this.setState({ t: Number(e.target.value), playing: false }),
+      togglePlay: () => this.setState((s) => ({ playing: !s.playing, t: s.t >= T ? 0 : s.t })),
+      playIcon: this.state.playing ? icons.pause : icons.play,
+      playLabel: this.state.playing ? 'Pause' : 'Play',
+      prevOp, nextOp,
+      breakdown, stats,
+      optimised: opt,
+      optOpacity: opt ? 0.5 : 1,
+      optLabel: opt ? 'Order optimised' : 'Optimise order',
+      optimise: () => this.setState((s) => ({ optimised: { ...s.optimised, [mode]: true } })),
+      checks: isLaser ? ['All paths closed', 'Job inside bed', 'Reg marks · Full linear'] : ['Heads T1–T4 loaded', 'Parts inside bed edges', 'Conveyor ready']
+    };
+  }
+}
+</script>
+</body>
+</html>

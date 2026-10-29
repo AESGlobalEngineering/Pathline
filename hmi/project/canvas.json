@@ -1,0 +1,28 @@
+{
+  "v": 3,
+  "createdOnFiles": { "v": 1, "at": "2026-10-28T12:00:00Z" },
+  "title": "Pathline",
+  "launch": { "view": "canvas" },
+  "pages": [],
+  "boards": {
+    "MainDetailed.dc.html": { "x": 0, "y": 0, "w": 1440, "h": 900, "title": "Pathline · Job workspace", "expand": "fill", "is_interactive": true },
+    "MaterialsDetailed.dc.html": { "x": 1520, "y": 0, "w": 1440, "h": 900, "title": "Pathline · Material library", "expand": "fill", "is_interactive": true },
+    "MachineSetupDetailed.dc.html": { "x": 3040, "y": 0, "w": 1440, "h": 900, "title": "Pathline · Machine setup", "expand": "fill", "is_interactive": true },
+    "SimulationDetailed.dc.html": { "x": 4560, "y": 0, "w": 1440, "h": 900, "title": "Pathline · Simulation", "expand": "fill", "is_interactive": true },
+    "HMI.dc.html": { "x": 0, "y": 1320, "w": 1440, "h": 900, "title": "Pathline Run · HMI", "expand": "fill", "is_interactive": true },
+    "Brand.dc.html": { "x": 1520, "y": 1320, "w": 1280, "h": 820, "title": "Brand · name & logo" }
+  },
+  "order": [
+    "MainDetailed.dc.html",
+    "MaterialsDetailed.dc.html",
+    "MachineSetupDetailed.dc.html",
+    "SimulationDetailed.dc.html",
+    "HMI.dc.html",
+    "Brand.dc.html"
+  ],
+  "notes": {
+    "row1": { "x": 0, "y": -300, "text": "Pathline · design app", "kind": "title1", "maxW": 6000 },
+    "row2": { "x": 0, "y": 1020, "text": "Pathline Run · HMI and brand", "kind": "title1", "maxW": 2800 }
+  },
+  "designSystems": []
+}

@@ -1,0 +1,1207 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Pathline Run HMI</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+/* Pathline Run HMI. Tokens and components copied from src/ui/theme.css (this artboard
+   can't link it), scoped to .hmi so dark mode works via .hmi[data-theme="dark"].
+   Touch screen: controls are 44 px (--ctl-h), not the app's 36. */
+body{margin:0}
+.hmi{
+  color-scheme:light;
+  --bg:#F3F4F6;--surface:#FFFFFF;--surface-2:#F8F9FA;--sunken:#EDEFF2;--hover:#EEF0F3;
+  --canvas:#E7E9EC;--canvas-dot:#CDD2D9;--seg-on:#FFFFFF;--knob:#FFFFFF;
+  --line:#E1E4E8;--line-soft:#EEF0F3;--line-strong:#D5D9DF;--line-hover:#AEB5C0;--track:#C9CED6;
+  --text:#111214;--text-2:#3A414C;--text-3:#5B6370;--text-4:#8A919C;
+  --accent:#D62828;--accent-hover:#BC1F1F;--accent-fg:#C21F1F;--accent-soft:#FCECEB;--accent-ring:rgba(214,40,40,0.22);--on-accent:#FFFFFF;
+  --ok:#1B6B43;--ok-soft:#EDF7F1;--ok-dot:#30A46C;
+  --warn:#8A4B00;--warn-soft:#FFF1DB;--warn-dot:#E5A000;
+  --err:#B42318;--err-soft:#FDECEC;--err-dot:#E5484D;--idle-dot:#AEB5C0;
+  --badge-laser:#111214;--badge-plotter:#0B7F75;
+  --shadow-1:0 1px 2px rgba(17,18,20,0.14);--shadow-pop:0 14px 36px rgba(17,18,20,0.16);--shadow-dlg:0 20px 48px rgba(17,18,20,0.24);
+  --scrim:rgba(17,18,20,0.32);--chip-ring:inset 0 0 0 1px rgba(17,18,20,0.18);
+  --bed:#FFFFFF;--bed-line:#CDD2D9;--sheet:#FBFBFC;
+  /* HMI run buttons: Start = ok green, Pause = warn (fills with white icons) */
+  --go:#1B6B43;--pause:#8A4B00;
+  --ctl-h:44px;--ctl-r:10px;--card-r:12px;
+  --font:'IBM Plex Sans',system-ui,sans-serif;--mono:'IBM Plex Mono',ui-monospace,monospace;
+  height:100vh;display:flex;flex-direction:column;background:var(--bg);color:var(--text);font:14px var(--font)
+}
+.hmi[data-theme="dark"]{
+  color-scheme:dark;
+  --bg:#0E0F11;--surface:#17181B;--surface-2:#1C1E22;--sunken:#0F1012;--hover:#24262B;
+  --canvas:#0B0C0E;--canvas-dot:#2A2D33;--seg-on:#2C2F36;--knob:#FFFFFF;
+  --line:#2A2D33;--line-soft:#222429;--line-strong:#3A3E46;--line-hover:#555B66;--track:#4A4F59;
+  --text:#ECEDEF;--text-2:#C3C7CE;--text-3:#9AA1AC;--text-4:#727985;
+  --accent:#D62828;--accent-hover:#E5332D;--accent-fg:#FF6159;--accent-soft:rgba(239,59,51,0.16);--accent-ring:rgba(239,59,51,0.35);--on-accent:#FFFFFF;
+  --ok:#5CCB95;--ok-soft:rgba(48,164,108,0.16);--ok-dot:#30A46C;
+  --warn:#F2B65C;--warn-soft:rgba(229,160,0,0.16);--warn-dot:#E5A000;
+  --err:#FF7B72;--err-soft:rgba(229,72,77,0.16);--err-dot:#E5484D;--idle-dot:#6F7682;
+  --badge-laser:#4A4F59;--badge-plotter:#0E8A7F;
+  --shadow-1:0 1px 2px rgba(0,0,0,0.5);--shadow-pop:0 14px 36px rgba(0,0,0,0.55);--shadow-dlg:0 20px 48px rgba(0,0,0,0.6);
+  --scrim:rgba(0,0,0,0.55);--chip-ring:inset 0 0 0 1px rgba(255,255,255,0.22);
+  --bed-line:#3A3E46;
+  --go:#238553;--pause:#A86400
+}
+
+/* base */
+.hmi a{color:var(--accent-fg)}.hmi a:hover{color:var(--accent-hover)}
+.hmi button,.hmi select,.hmi input{font:inherit;color:inherit}
+.hmi button:disabled{opacity:0.45;cursor:default !important}
+.hmi ::selection{background:var(--accent-ring)}
+.hmi *{scrollbar-color:var(--line-hover) transparent;scrollbar-width:thin}
+.hmi :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.hmi input[type=checkbox]{accent-color:var(--accent)}
+.hmi input::placeholder{color:var(--text-4)}
+.hmi .mono,.hmi .num{font-family:var(--mono)}
+.hmi .lbl{font-size:12px;color:var(--text-3)}
+.hmi svg.i{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.hmi .h-sec{margin:0;font-size:16px;font-weight:600;color:var(--text)}
+.hmi .hr{height:1px;background:var(--line);border:0;margin:0}
+
+/* header */
+.hmi .hmi-bar{min-height:64px;display:flex;flex-wrap:wrap;align-items:stretch;gap:8px 16px;padding:0 16px;background:var(--surface);border-bottom:1px solid var(--line);position:relative;z-index:30}
+.hmi .brand{display:flex;align-items:center;gap:10px;flex:none;color:var(--text)}
+.hmi .brand .word{font-weight:600;font-size:17px;letter-spacing:-0.01em;white-space:nowrap}
+.hmi .brand-mark{display:inline-flex;flex:none;border-radius:8px}
+.hmi[data-theme="dark"] .brand-mark{box-shadow:0 0 0 1px var(--line-strong)}
+.hmi .theme-btn .when-dark{display:none}
+.hmi[data-theme="dark"] .theme-btn .when-dark{display:block}
+.hmi[data-theme="dark"] .theme-btn .when-light{display:none}
+
+/* buttons */
+.hmi .tb{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:var(--ctl-h);padding:0 14px;border:1px solid var(--line-strong);border-radius:var(--ctl-r);background:var(--surface);cursor:pointer;font-size:14px;color:var(--text);white-space:nowrap;text-decoration:none;box-sizing:border-box}
+.hmi .tb:hover{border-color:var(--line-hover);color:var(--text)}
+.hmi .tb.sm{height:40px;padding:0 12px;font-size:13px}
+.hmi .btn-primary{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:var(--ctl-h);padding:0 20px;border:0;border-radius:var(--ctl-r);background:var(--accent);color:var(--on-accent);font-size:14px;font-weight:600;cursor:pointer;white-space:nowrap;box-sizing:border-box}
+.hmi .btn-primary:hover{background:var(--accent-hover);color:var(--on-accent)}
+.hmi .btn-primary:disabled:hover{background:var(--accent)}
+.hmi .ib{display:inline-flex;align-items:center;justify-content:center;width:var(--ctl-h);height:var(--ctl-h);border:0;border-radius:var(--ctl-r);background:transparent;cursor:pointer;color:var(--text-2);padding:0;flex:none;box-sizing:border-box}
+.hmi .ib:hover{background:var(--hover);color:var(--text)}
+.hmi .run-btn{width:64px;height:64px;border:0;border-radius:12px;color:var(--on-accent);display:inline-flex;align-items:center;justify-content:center;flex:none}
+.hmi .run-btn.stop{border:1px solid var(--line-strong);background:var(--surface);cursor:pointer}
+
+/* fields */
+.hmi .fld{display:flex;align-items:center;height:var(--ctl-h);border:1px solid var(--line-strong);border-radius:var(--ctl-r);background:var(--surface);padding:0 12px;gap:6px;box-sizing:border-box;min-width:0}
+.hmi .fld input{border:0;outline:0;width:100%;min-width:0;font:14px var(--mono);background:transparent;color:var(--text);padding:0}
+.hmi .fld input.sans{font-family:var(--font)}
+.hmi .fld:focus-within{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-ring)}
+.hmi .fld .lbl{flex:none}
+.hmi .cell{width:100%;min-width:0;height:var(--ctl-h);border:1px solid var(--line-strong);border-radius:var(--ctl-r);padding:0 10px;box-sizing:border-box;font:14px var(--mono);background:var(--surface);color:var(--text)}
+.hmi .cell:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-ring)}
+.hmi .dd{display:inline-flex;align-items:center;justify-content:space-between;gap:8px;width:100%;height:var(--ctl-h);padding:0 10px 0 12px;border:1px solid var(--line-strong);border-radius:var(--ctl-r);background:var(--surface);color:var(--text);font:14px var(--font);cursor:pointer;text-align:left;box-sizing:border-box;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hmi .dd:hover{border-color:var(--line-hover)}
+.hmi .dd[aria-expanded="true"]{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-ring)}
+.hmi .dd svg.i{color:var(--text-3);width:16px;height:16px}
+
+/* popovers and menus */
+.hmi .pop{display:flex;flex-direction:column;padding:4px;border:1px solid var(--line);border-radius:10px;background:var(--surface);box-shadow:var(--shadow-pop);color:var(--text);box-sizing:border-box}
+.hmi .pop .opt{display:flex;width:100%;align-items:center;justify-content:space-between;gap:24px;min-height:44px;padding:0 12px;border:0;border-radius:6px;background:transparent;cursor:pointer;text-align:left;white-space:nowrap;color:var(--text);box-sizing:border-box}
+.hmi .pop .opt:hover{background:var(--hover)}
+.hmi .pop .opt[aria-selected="true"],.hmi .pop .opt[aria-checked="true"]{background:var(--accent-soft)}
+.hmi .pop .opt svg.i{width:16px;height:16px;color:var(--accent-fg)}
+.hmi .pop .sep{height:1px;background:var(--line);margin:4px 6px}
+
+/* choices */
+.hmi .seg{display:inline-flex;padding:3px;gap:2px;background:var(--sunken);border-radius:var(--ctl-r);box-sizing:border-box;flex:none}
+.hmi .seg > button{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:38px;padding:0 14px;border:0;border-radius:7px;background:transparent;color:var(--text-3);font-weight:500;cursor:pointer;white-space:nowrap;box-sizing:border-box}
+.hmi .seg > button:hover{color:var(--text)}
+.hmi .seg > [aria-checked="true"]{background:var(--seg-on);color:var(--text);box-shadow:var(--shadow-1)}
+.hmi .seg.fill{display:flex}
+.hmi .seg.fill > *{flex:1 1 auto}
+.hmi .tabs{display:flex;flex-wrap:wrap;align-items:stretch;gap:2px;border-bottom:1px solid var(--line)}
+.hmi .tabs > button{display:inline-flex;align-items:center;gap:8px;height:var(--ctl-h);padding:0 16px;border:0;border-bottom:3px solid transparent;margin-bottom:-1px;background:transparent;color:var(--text-3);font-weight:500;cursor:pointer}
+.hmi .tabs > button:hover{color:var(--text)}
+.hmi .tabs > [aria-selected="true"],.hmi .tabs > [aria-current="page"]{color:var(--text);font-weight:600;border-bottom-color:var(--accent)}
+.hmi .tabs .count{min-width:20px;height:20px;padding:0 6px;box-sizing:border-box;border-radius:10px;background:var(--sunken);color:var(--text-2);font:500 12px var(--mono);display:inline-flex;align-items:center;justify-content:center}
+/* the four views live in the header and share its bottom border */
+.hmi .tabs.views{border-bottom:0;justify-content:center;gap:4px}
+.hmi .tabs.views > button{height:auto;min-width:104px;justify-content:center;padding:0 18px;font-size:15px}
+.hmi .tabs.views svg.i{width:22px;height:22px}
+
+/* switch (touch size) */
+.hmi .sw{width:48px;height:28px;flex:none;border:0;border-radius:14px;padding:3px;box-sizing:border-box;background:var(--track);display:inline-flex;justify-content:flex-start;cursor:pointer;transition:background 0.12s}
+.hmi .sw::after{content:'';width:22px;height:22px;border-radius:50%;background:var(--knob);box-shadow:0 1px 2px rgba(0,0,0,0.3)}
+.hmi .sw[aria-checked="true"]{background:var(--accent);justify-content:flex-end}
+
+/* containers */
+.hmi .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--card-r)}
+.hmi .viewport{background-color:var(--canvas);background-image:radial-gradient(var(--canvas-dot) 1px,transparent 1px);background-size:16px 16px}
+
+/* status and tags */
+.hmi .pill{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 10px;border-radius:13px;font-size:12px;font-weight:500;white-space:nowrap;background:var(--sunken);color:var(--text-2);box-sizing:border-box}
+.hmi .pill::before{content:'';width:7px;height:7px;border-radius:50%;background:var(--idle-dot);flex:none}
+.hmi .pill.ok{background:var(--ok-soft);color:var(--ok)}
+.hmi .pill.ok::before{background:var(--ok-dot)}
+.hmi .pill.warn{background:var(--warn-soft);color:var(--warn)}
+.hmi .pill.warn::before{background:var(--warn-dot)}
+.hmi .pill.err{background:var(--err-soft);color:var(--err)}
+.hmi .pill.err::before{background:var(--err-dot)}
+.hmi .pill.accent{background:var(--accent-soft);color:var(--accent-fg)}
+.hmi .pill.accent::before{background:var(--accent)}
+.hmi .pill.lg{height:48px;padding:0 20px 0 18px;gap:12px;border-radius:24px;font-size:26px;font-weight:600}
+.hmi .pill.lg::before{width:12px;height:12px}
+.hmi .tag{display:inline-flex;align-items:center;height:26px;padding:0 10px;border-radius:6px;font-size:12px;font-weight:600;white-space:nowrap;flex:none;background:var(--sunken);color:var(--text-2)}
+.hmi .tag.warn{background:var(--warn-soft);color:var(--warn)}
+.hmi .badge{display:inline-flex;align-items:center;justify-content:center;height:22px;padding:0 7px;border-radius:5px;font-size:11px;font-weight:600;letter-spacing:0.04em;color:#FFFFFF;background:var(--badge-laser);flex:none}
+/* ACI swatch: background is the real ACI colour (data), set inline */
+.hmi .chip{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:4px;font:500 10px var(--mono);box-shadow:var(--chip-ring);flex:none}
+</style>
+</helmet>
+<div class="hmi" data-theme="{{theme}}">
+
+  <!-- ===== Header ===== -->
+  <header class="hmi-bar">
+    <div style="display: flex; align-items: center; gap: 10px">
+      <div style="position: relative">
+        <button class="ib" onClick="{{toggleNav}}" aria-label="Menu" aria-haspopup="menu" aria-expanded="{{navOpen}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.menu}}"></path></svg></button>
+        <sc-if value="{{navOpen}}" hint-placeholder-val="{{false}}">
+          <div role="menu" aria-label="Menu" class="pop" style="position: absolute; left: 0; top: 52px; min-width: 230px">
+            <button role="menuitem" class="opt" onClick="{{goSetup}}">Machine setup</button>
+            <button role="menuitem" class="opt" onClick="{{toggleNav}}">Diagnostics</button>
+            <div role="separator" class="sep"></div>
+            <button role="menuitem" class="opt" onClick="{{toggleNav}}">About</button>
+          </div>
+        </sc-if>
+      </div>
+      <div class="brand">
+        <span class="brand-mark"><svg viewBox="0 0 64 64" width="34" height="34" aria-hidden="true" style="flex: none; display: block"><rect width="64" height="64" rx="15" fill="#111214"></rect><g transform="translate(14 14) scale(0.5625)" style="stroke-width: 6; stroke-linejoin: round"><polygon points="6,6 50,6 6,50" fill="#EF3B33" stroke="#EF3B33"></polygon><polygon points="58,14 58,58 14,58" fill="#FFFFFF" stroke="#FFFFFF"></polygon></g></svg></span>
+        <span class="word">Pathline <span style="font-weight: 400">Run</span></span>
+      </div>
+    </div>
+
+    <nav aria-label="Views" class="tabs views" style="flex: 1 1 280px">
+      <sc-for list="{{views}}" as="v" hint-placeholder-count="3">
+        <button onClick="{{v.pick}}" aria-current="{{v.cur}}">
+          <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{v.d}}"></path></svg>
+          <span>{{v.l}}</span>
+          <sc-if value="{{v.badge}}" hint-placeholder-val="{{false}}"><span class="count">{{v.badge}}</span></sc-if>
+        </button>
+      </sc-for>
+    </nav>
+
+    <div style="display: flex; align-items: center; gap: 8px">
+      <button class="ib theme-btn" onClick="{{toggleTheme}}" aria-label="Light or dark theme" title="Light or dark theme">
+        <svg class="i when-light" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.moon}}"></path></svg>
+        <svg class="i when-dark" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.sun}}"></path></svg>
+      </button>
+      <button class="ib" aria-label="Notifications" style="position: relative"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.bell}}"></path></svg><span aria-hidden="true" style="position: absolute; top: 10px; right: 11px; width: 7px; height: 7px; border-radius: 50%; background: var(--err-dot)"></span></button>
+      <div style="position: relative">
+        <button onClick="{{toggleMach}}" aria-haspopup="menu" aria-expanded="{{machOpen}}" style="display: flex; align-items: center; gap: 10px; height: 48px; padding: 0 10px 0 8px; border: 1px solid var(--line-strong); border-radius: var(--ctl-r); background: var(--surface); color: var(--text); cursor: pointer; text-align: left">
+          <span class="badge" style="background: {{mach.tbg}}">{{mach.type}}</span>
+          <span style="display: flex; flex-direction: column; line-height: 1.2"><span style="font-weight: 600">{{mach.name}}</span><span class="lbl">{{mach.sub}}</span></span>
+          <span aria-hidden="true" style="width: 9px; height: 9px; border-radius: 50%; background: {{machDot}}"></span>
+          <svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width: 16px; height: 16px; color: var(--text-3)"><path d="{{icons.chev}}"></path></svg>
+        </button>
+        <sc-if value="{{machOpen}}" hint-placeholder-val="{{false}}">
+          <div role="menu" aria-label="Machines" class="pop" style="position: absolute; right: 0; top: 56px; width: 300px; padding: 6px; border-radius: 12px">
+            <sc-for list="{{machines}}" as="mc" hint-placeholder-count="2">
+              <button role="menuitemradio" aria-checked="{{mc.on}}" onClick="{{mc.pick}}" style="display: flex; width: 100%; align-items: center; gap: 10px; padding: 10px; border: 0; border-radius: 8px; background: {{mc.bg}}; color: var(--text); cursor: pointer; text-align: left">
+                <span class="badge" style="min-width: 62px; background: {{mc.tbg}}">{{mc.type}}</span>
+                <span style="flex: 1; display: flex; flex-direction: column; line-height: 1.25"><span style="font-weight: 600">{{mc.name}}</span><span class="lbl">{{mc.sub}}</span></span>
+              </button>
+            </sc-for>
+          </div>
+        </sc-if>
+      </div>
+      <span style="display: inline-flex; align-items: center; gap: 8px">
+        <span aria-hidden="true" style="width: 32px; height: 32px; border-radius: 50%; background: var(--sunken); display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600; color: var(--text-2)">OP</span>
+        <span style="color: var(--text-2)">Operator</span>
+      </span>
+    </div>
+  </header>
+
+  <!-- ===== Import file ===== -->
+  <sc-if value="{{imp.isOpen}}" hint-placeholder-val="{{false}}">
+    <div style="position: fixed; inset: 0; z-index: 100; background: var(--scrim); display: flex; align-items: center; justify-content: center; padding: 16px">
+      <div role="dialog" aria-label="Import file" style="width: 100%; max-width: 480px; background: var(--surface); color: var(--text); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow-dlg); padding: 22px; display: flex; flex-direction: column; gap: 16px">
+        <span class="h-sec" style="font-size: 18px">Import file</span>
+        <div style="display: flex; align-items: center; gap: 12px; padding: 14px; border: 1.5px dashed var(--line-hover); border-radius: 10px; background: var(--surface-2)">
+          <svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width: 26px; height: 26px; color: var(--text-3)"><path d="{{icons.file}}"></path></svg>
+          <span style="flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.3">
+            <span style="font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{imp.fileName}}</span>
+            <span class="lbl">Job file, DXF, SVG or PDF</span>
+          </span>
+          <label class="tb" style="position: relative; cursor: pointer">
+            Choose file
+            <input type="file" accept=".cjob,.dxf,.svg,.pdf" onChange="{{imp.choose}}" aria-label="Choose file" style="position: absolute; inset: 0; opacity: 0; cursor: pointer">
+          </label>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 6px">
+          <span class="lbl">Material</span>
+          <div role="radiogroup" aria-label="Material" class="seg fill" style="flex-wrap: wrap">
+            <sc-for list="{{imp.mats}}" as="o" hint-placeholder-count="3">
+              <button role="radio" aria-checked="{{o.on}}" onClick="{{o.pick}}">{{o.l}}</button>
+            </sc-for>
+          </div>
+        </div>
+        <div style="display: flex; justify-content: flex-end; gap: 8px">
+          <button class="tb" onClick="{{imp.close}}">Cancel</button>
+          <button class="btn-primary" onClick="{{imp.add}}" disabled="{{imp.noFile}}" style="opacity: {{imp.addOp}}; cursor: {{imp.addCur}}">Add to queue</button>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- ===== Queue view ===== -->
+  <sc-if value="{{viewQueue}}" hint-placeholder-val="{{true}}">
+    <div style="flex: 1; display: flex; gap: 12px; padding: 12px; min-height: 0; overflow: auto">
+      <aside aria-label="Job queue" class="card" style="flex: 1 1 300px; min-width: 0; min-height: 0; display: flex; flex-direction: column">
+        <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 14px 14px 10px">
+          <span class="h-sec">Queue</span>
+          <span class="lbl" style="white-space: nowrap">{{queueCount}}</span>
+          <span style="flex: 1"></span>
+          <button class="tb sm" onClick="{{imp.open}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width: 16px; height: 16px"><path d="{{icons.upload}}"></path></svg>Import</button>
+          <sc-if value="{{isPlotter}}" hint-placeholder-val="{{false}}">
+            <button class="tb sm" onClick="{{selectAll}}">{{selectAllLabel}}</button>
+          </sc-if>
+        </div>
+        <div style="flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding: 0 12px 12px">
+          <sc-for list="{{jobs}}" as="j" hint-placeholder-count="3">
+            <div style="position: relative; display: flex; gap: 10px; padding: 10px; border-radius: 10px; background: {{j.bg}}; box-shadow: inset 0 0 0 {{j.ring}} {{j.bd}}">
+              <sc-if value="{{isPlotter}}" hint-placeholder-val="{{false}}">
+                <input type="checkbox" checked="{{j.on}}" onChange="{{j.pick}}" aria-label="Select {{j.name}}" style="width: 22px; height: 22px; margin: 2px 0 0; flex: none; accent-color: {{accent}}">
+              </sc-if>
+              <button onClick="{{j.pick}}" aria-pressed="{{j.on}}" style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; border: 0; background: transparent; color: var(--text); padding: 0; text-align: left; cursor: pointer">
+                <span style="position: relative; display: block; width: 100%; aspect-ratio: {{j.ar}}; background: var(--bed); box-shadow: 0 0 0 1px var(--bed-line); border-radius: 4px; overflow: hidden">
+                  <sc-for list="{{j.shapes}}" as="s" hint-placeholder-count="4">
+                    <span aria-hidden="true" style="position: absolute; left: {{s.x}}%; top: {{s.y}}%; width: {{s.w}}%; height: {{s.h}}%; box-sizing: border-box; border: 1.5px {{s.st}} {{s.c}}; border-radius: {{s.r}}; background: {{s.fill}}"></span>
+                  </sc-for>
+                </span>
+                <span style="display: flex; flex-direction: column; gap: 1px; line-height: 1.3">
+                  <span style="font-weight: 600">{{j.n}}. {{j.name}}</span>
+                  <span class="lbl">{{j.mat}}</span>
+                  <span class="lbl mono">{{j.received}} · {{j.est}}</span>
+                </span>
+              </button>
+              <sc-if value="{{j.running}}" hint-placeholder-val="{{false}}">
+                <span class="pill accent" style="position: absolute; top: 16px; right: 16px; box-shadow: var(--shadow-1)">Running</span>
+              </sc-if>
+            </div>
+          </sc-for>
+          <sc-if value="{{queueEmpty}}" hint-placeholder-val="{{false}}">
+            <div style="padding: 28px 8px; text-align: center; color: var(--text-3)">Queue empty</div>
+          </sc-if>
+        </div>
+        <div style="display: flex; gap: 8px; padding: 12px; border-top: 1px solid var(--line)">
+          <button class="tb" onClick="{{removeSel}}" aria-label="Remove selected jobs"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width: 18px; height: 18px"><path d="{{icons.trash}}"></path></svg>Remove</button>
+        </div>
+      </aside>
+
+      <main class="card" style="flex: 999 1 720px; min-width: 0; display: flex; flex-direction: column">
+        <div style="flex: 1; display: flex; flex-wrap: wrap; gap: 24px; padding: 22px">
+          <div style="flex: 1 1 380px; min-width: 0; display: flex; flex-direction: column; gap: 14px">
+            <div style="display: flex; flex-direction: column; gap: 4px">
+              <h1 style="margin: 0; font-size: 28px; font-weight: 600; line-height: 1.2; color: var(--text)">{{cur.title}}</h1>
+              <span style="color: var(--text-2)">{{cur.sub}}</span>
+            </div>
+
+            <sc-if value="{{cur.single}}" hint-placeholder-val="{{true}}">
+              <div style="display: flex; flex-direction: column; gap: 6px">
+                <sc-for list="{{cur.procs}}" as="p" hint-placeholder-count="3">
+                  <div style="display: flex; align-items: center; gap: 10px; min-height: 34px; padding: 0 2px; border-bottom: 1px solid var(--line-soft)">
+                    <span style="display: flex; gap: 3px">
+                      <sc-for list="{{p.chips}}" as="k" hint-placeholder-count="1"><span class="chip" title="ACI {{k.n}}" style="background: {{k.hex}}; color: {{k.fg}}">{{k.n}}</span></sc-for>
+                    </span>
+                    <span style="flex: 1; min-width: 0">{{p.name}}</span>
+                    <span class="mono" style="font-size: 13px; color: var(--text-2)">{{p.pv}}</span>
+                  </div>
+                </sc-for>
+              </div>
+              <span style="color: var(--text-2)">Executed <span class="mono">{{cur.executed}}</span></span>
+            </sc-if>
+
+            <sc-if value="{{cur.multi}}" hint-placeholder-val="{{false}}">
+              <div style="display: flex; flex-direction: column; gap: 6px">
+                <sc-for list="{{cur.rows}}" as="r" hint-placeholder-count="2">
+                  <div style="display: flex; align-items: center; gap: 10px; min-height: 38px; border-bottom: 1px solid var(--line-soft)">
+                    <span class="mono" style="width: 26px; height: 26px; border-radius: 6px; background: {{r.col}}; color: #FFFFFF; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 500">{{r.n}}</span>
+                    <span style="flex: 1; min-width: 0">{{r.name}}</span>
+                    <span class="lbl">{{r.beds}}</span>
+                    <span class="mono" style="font-size: 13px">{{r.est}}</span>
+                  </div>
+                </sc-for>
+              </div>
+              <span style="align-self: flex-start; display: inline-flex; align-items: center; gap: 8px; height: 32px; padding: 0 12px; border-radius: 16px; background: {{cur.convBg}}; color: {{cur.convFg}}; font-weight: 500; font-size: 13px">
+                <svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width: 16px; height: 16px"><path d="{{icons.conveyor}}"></path></svg>{{cur.convText}}
+              </span>
+            </sc-if>
+
+            <div style="display: flex; margin-top: 4px"><span class="pill lg {{status.cls}}">{{status.text}}</span></div>
+
+            <div style="display: flex; flex-direction: column; gap: 6px">
+              <sc-for list="{{runOpts}}" as="o" hint-placeholder-count="2">
+                <div style="display: flex; align-items: center; gap: 12px; min-height: 44px">
+                  <button role="switch" class="sw" aria-checked="{{o.on}}" aria-label="{{o.l}}" onClick="{{o.toggle}}"></button>
+                  <span style="font-size: 16px">{{o.l}}</span>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+
+          <div style="flex: 1 1 440px; min-width: 0; display: flex; flex-direction: column; gap: 10px">
+            <div class="viewport" style="position: relative; min-height: 320px; display: flex; align-items: center; justify-content: center; padding: 18px; border: 1px solid var(--line); border-radius: 10px">
+              <sc-if value="{{cur.single}}" hint-placeholder-val="{{true}}">
+                <div style="position: relative; width: 100%; aspect-ratio: {{cur.ar}}; background: var(--bed); box-shadow: 0 0 0 1px var(--bed-line), 0 2px 6px rgba(17, 18, 20, 0.08)">
+                  <sc-for list="{{cur.shapes}}" as="s" hint-placeholder-count="4">
+                    <span aria-hidden="true" style="position: absolute; left: {{s.x}}%; top: {{s.y}}%; width: {{s.w}}%; height: {{s.h}}%; box-sizing: border-box; border: 2px {{s.st}} {{s.c}}; border-radius: {{s.r}}; background: {{s.fill}}"></span>
+                  </sc-for>
+                  <span aria-hidden="true" style="position: absolute; left: {{anchor.x}}; top: {{anchor.y}}; width: 14px; height: 14px; margin: -7px 0 0 -7px; border-radius: 50%; border: 2px solid #30A46C; background: #FFFFFF"></span>
+                  <sc-if value="{{head.show}}" hint-placeholder-val="{{false}}">
+                    <span aria-hidden="true" style="position: absolute; left: {{head.x}}; top: {{head.y}}; width: 20px; height: 20px; margin: -10px 0 0 -10px; border-radius: 50%; border: 2px solid {{accent}}; box-shadow: 0 0 0 4px var(--accent-ring)"></span>
+                  </sc-if>
+                </div>
+              </sc-if>
+              <sc-if value="{{cur.multi}}" hint-placeholder-val="{{false}}">
+                <div style="width: 100%; display: flex; flex-wrap: wrap; gap: 12px; justify-content: center">
+                  <sc-for list="{{cur.beds}}" as="b" hint-placeholder-count="3">
+                    <div style="flex: 0 1 170px; display: flex; flex-direction: column; gap: 6px">
+                      <span class="lbl" style="color: {{b.fg}}; font-weight: {{b.w}}">{{b.l}}</span>
+                      <div style="position: relative; width: 100%; aspect-ratio: 1.6; background: var(--bed); box-shadow: 0 0 0 {{b.ring}} {{b.bd}}">
+                        <sc-for list="{{b.shapes}}" as="s" hint-placeholder-count="3">
+                          <span aria-hidden="true" style="position: absolute; left: {{s.x}}%; top: {{s.y}}%; width: {{s.w}}%; height: {{s.h}}%; box-sizing: border-box; border: 1.5px {{s.st}} {{s.c}}; border-radius: {{s.r}}; background: {{s.fill}}"></span>
+                        </sc-for>
+                        <span aria-hidden="true" style="position: absolute; right: 4px; bottom: 4px; width: 18px; height: 18px; border-radius: 4px; background: {{b.col}}; color: #FFFFFF; font-size: 11px; display: inline-flex; align-items: center; justify-content: center" class="mono">{{b.n}}</span>
+                      </div>
+                    </div>
+                  </sc-for>
+                </div>
+              </sc-if>
+              <sc-if value="{{cur.none}}" hint-placeholder-val="{{false}}">
+                <span style="color: var(--text-3)">No job selected</span>
+              </sc-if>
+            </div>
+            <div style="display: flex; justify-content: flex-end; gap: 8px">
+              <button class="ib" aria-label="Zoom to job"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.zoom}}"></path></svg></button>
+              <button class="ib" aria-label="Show whole bed"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.fit}}"></path></svg></button>
+            </div>
+          </div>
+        </div>
+
+        <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 14px 18px; padding: 16px 22px; border-top: 1px solid var(--line)">
+          <button class="run-btn" onClick="{{startPause}}" aria-label="{{playLabel}}" disabled="{{cantStart}}" style="background: {{playBg}}; cursor: {{playCursor}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width: 28px; height: 28px"><path d="{{playIcon}}"></path></svg></button>
+          <button class="run-btn stop" onClick="{{stop}}" aria-label="Stop" disabled="{{notRunning}}" style="color: {{stopFg}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width: 24px; height: 24px"><path d="{{icons.stop}}"></path></svg></button>
+          <button class="tb" style="height: 64px; padding: 0 18px"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.frame}}"></path></svg>Frame</button>
+          <div style="flex: 1 1 280px; min-width: 0; display: flex; flex-direction: column; gap: 8px">
+            <div style="height: 14px; border-radius: 7px; background: var(--sunken); box-shadow: inset 0 0 0 1px var(--line); overflow: hidden"><div style="height: 100%; width: {{progress}}; background: {{accent}}"></div></div>
+            <div style="display: flex; justify-content: space-between; gap: 8px"><span style="color: var(--text-2)">{{progLabel}}</span><span class="mono" style="color: var(--text-2)">{{timeLine}}</span></div>
+          </div>
+          <div style="display: flex; flex-direction: column; align-items: flex-end">
+            <span class="lbl">{{timerLabel}}</span>
+            <span class="mono" style="font-size: 60px; font-weight: 500; line-height: 1; color: var(--text)">{{timer}}</span>
+          </div>
+        </div>
+      </main>
+    </div>
+  </sc-if>
+
+  <!-- ===== Jog view ===== -->
+  <sc-if value="{{viewJog}}" hint-placeholder-val="{{false}}">
+    <div style="flex: 1; display: flex; flex-wrap: wrap; gap: 12px; padding: 12px; align-content: flex-start; min-height: 0; overflow: auto">
+      <section aria-label="Jog" class="card" style="flex: 2 1 560px; min-width: 0; padding: 22px; display: flex; flex-direction: column; gap: 20px">
+        <h2 class="h-sec">Position</h2>
+        <div style="display: flex; flex-wrap: wrap; gap: 36px">
+          <sc-for list="{{posList}}" as="p" hint-placeholder-count="2">
+            <div style="display: flex; flex-direction: column; gap: 2px"><span class="lbl">{{p.l}} <span class="mono">mm</span></span><span class="mono" style="font-size: 36px; font-weight: 500">{{p.v}}</span></div>
+          </sc-for>
+        </div>
+        <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 28px">
+          <div style="display: grid; grid-template-columns: repeat(3, 76px); grid-template-rows: repeat(3, 76px); gap: 8px">
+            <span></span>
+            <button class="tb" onClick="{{jog.up}}" aria-label="Jog Y minus" style="height: 76px; padding: 0"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width: 26px; height: 26px"><path d="{{icons.up}}"></path></svg></button>
+            <span></span>
+            <button class="tb" onClick="{{jog.left}}" aria-label="Jog X minus" style="height: 76px; padding: 0"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width: 26px; height: 26px"><path d="{{icons.left}}"></path></svg></button>
+            <button class="tb" onClick="{{jog.home}}" aria-label="Home" style="height: 76px; padding: 0"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width: 26px; height: 26px"><path d="{{icons.home}}"></path></svg></button>
+            <button class="tb" onClick="{{jog.right}}" aria-label="Jog X plus" style="height: 76px; padding: 0"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width: 26px; height: 26px"><path d="{{icons.right}}"></path></svg></button>
+            <span></span>
+            <button class="tb" onClick="{{jog.down}}" aria-label="Jog Y plus" style="height: 76px; padding: 0"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width: 26px; height: 26px"><path d="{{icons.down}}"></path></svg></button>
+            <span></span>
+          </div>
+          <sc-if value="{{isLaser}}" hint-placeholder-val="{{true}}">
+            <div style="display: flex; flex-direction: column; gap: 8px; align-items: center">
+              <span class="lbl">Focus (Z)</span>
+              <button class="tb" onClick="{{jog.zUp}}" aria-label="Z up" style="width: 76px; height: 76px; padding: 0; font-size: 16px; font-weight: 600">Z+</button>
+              <button class="tb" onClick="{{jog.zDown}}" aria-label="Z down" style="width: 76px; height: 76px; padding: 0; font-size: 16px; font-weight: 600">Z−</button>
+            </div>
+          </sc-if>
+          <div style="display: flex; flex-direction: column; gap: 14px">
+            <div style="display: flex; flex-direction: column; gap: 6px">
+              <span class="lbl">Step</span>
+              <div role="radiogroup" aria-label="Step size" class="seg">
+                <sc-for list="{{steps}}" as="s" hint-placeholder-count="4">
+                  <button role="radio" aria-checked="{{s.on}}" onClick="{{s.pick}}" class="mono" style="min-width: 56px">{{s.l}}</button>
+                </sc-for>
+              </div>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 6px">
+              <span class="lbl">Speed</span>
+              <div role="radiogroup" aria-label="Jog speed" class="seg">
+                <sc-for list="{{speeds}}" as="s" hint-placeholder-count="3">
+                  <button role="radio" aria-checked="{{s.on}}" onClick="{{s.pick}}" style="min-width: 70px">{{s.l}}</button>
+                </sc-for>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section aria-label="Machine" class="card" style="flex: 1 1 360px; min-width: 0; padding: 22px; display: flex; flex-direction: column; gap: 14px">
+        <h2 class="h-sec">Machine</h2>
+        <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px">
+          <sc-for list="{{actions}}" as="a" hint-placeholder-count="6">
+            <button class="tb" onClick="{{a.run}}" style="height: 52px">{{a.l}}</button>
+          </sc-for>
+        </div>
+        <div class="hr" style="margin: 4px 0"></div>
+        <h2 class="h-sec">Status</h2>
+        <div style="display: flex; flex-direction: column; gap: 4px">
+          <sc-for list="{{io}}" as="o" hint-placeholder-count="4">
+            <div style="display: flex; align-items: center; justify-content: space-between; min-height: 48px; border-bottom: 1px solid var(--line-soft)">
+              <span>{{o.l}}</span>
+              <sc-if value="{{o.isToggle}}" hint-placeholder-val="{{true}}">
+                <button role="switch" class="sw" aria-checked="{{o.on}}" aria-label="{{o.l}}" onClick="{{o.toggle}}"></button>
+              </sc-if>
+              <sc-if value="{{o.isPill}}" hint-placeholder-val="{{false}}">
+                <span class="pill {{o.cls}}">{{o.v}}</span>
+              </sc-if>
+            </div>
+          </sc-for>
+        </div>
+      </section>
+    </div>
+  </sc-if>
+
+  <!-- ===== History view ===== -->
+  <sc-if value="{{viewHistory}}" hint-placeholder-val="{{false}}">
+    <div style="flex: 1; padding: 12px; display: flex; min-height: 0; overflow: auto">
+      <section aria-label="History" class="card" style="flex: 1; min-width: 0; display: flex; flex-direction: column">
+        <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 14px 18px; border-bottom: 1px solid var(--line)">
+          <h2 class="h-sec">History</h2>
+          <div role="radiogroup" aria-label="Filter" class="seg">
+            <sc-for list="{{histFilters}}" as="f" hint-placeholder-count="3">
+              <button role="radio" aria-checked="{{f.on}}" onClick="{{f.pick}}">{{f.l}}</button>
+            </sc-for>
+          </div>
+          <span style="flex: 1"></span>
+          <span class="lbl">{{histCount}}</span>
+        </div>
+        <div style="overflow-x: auto">
+          <div role="table" aria-label="Job history" style="min-width: 860px">
+            <div role="row" style="display: grid; grid-template-columns: minmax(200px, 2fr) minmax(160px, 1.4fr) 160px 110px 120px 130px; gap: 12px; align-items: center; padding: 10px 18px; border-bottom: 1px solid var(--line)">
+              <span role="columnheader" class="lbl" style="font-weight: 500">Job</span>
+              <span role="columnheader" class="lbl" style="font-weight: 500">Material</span>
+              <span role="columnheader" class="lbl" style="font-weight: 500">Started</span>
+              <span role="columnheader" class="lbl" style="font-weight: 500">Duration</span>
+              <span role="columnheader" class="lbl" style="font-weight: 500">Result</span>
+              <span></span>
+            </div>
+            <sc-for list="{{history}}" as="h" hint-placeholder-count="3">
+              <div role="row" style="display: grid; grid-template-columns: minmax(200px, 2fr) minmax(160px, 1.4fr) 160px 110px 120px 130px; gap: 12px; align-items: center; padding: 10px 18px; border-bottom: 1px solid var(--line-soft)">
+                <span role="cell" style="font-weight: 500">{{h.name}}</span>
+                <span role="cell" style="color: var(--text-2)">{{h.mat}}</span>
+                <span role="cell" class="mono" style="font-size: 13px">{{h.started}}</span>
+                <span role="cell" class="mono" style="font-size: 13px">{{h.dur}}</span>
+                <span role="cell"><span class="pill {{h.cls}}">{{h.result}}</span></span>
+                <span role="cell"><button class="tb sm" onClick="{{h.rerun}}">Run again</button></span>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </section>
+    </div>
+  </sc-if>
+
+  <!-- ===== Setup view ===== -->
+  <sc-if value="{{viewSetup}}" hint-placeholder-val="{{false}}">
+    <div style="flex: 1; padding: 12px; display: flex; flex-direction: column; gap: 12px; min-height: 0; overflow: auto">
+      <section aria-label="Machine" class="card" style="padding: 16px 18px; display: flex; flex-wrap: wrap; align-items: center; gap: 14px">
+        <span class="badge" style="height: 28px; padding: 0 9px; border-radius: 6px; background: {{mach.tbg}}">{{mach.type}}</span>
+        <div style="flex: 1 1 280px; min-width: 0; display: flex; flex-direction: column; gap: 4px">
+          <label class="fld" style="height: 48px; max-width: 420px"><input class="sans" value="{{su.name}}" onChange="{{su.setName}}" aria-label="Machine name" style="font-size: 17px; font-weight: 600"></label>
+          <span class="lbl">{{su.kind}} · {{su.ctrl}} · Firmware {{su.fw}}</span>
+        </div>
+        <sc-if value="{{su.dirty}}" hint-placeholder-val="{{false}}">
+          <span class="tag warn">Unsaved changes</span>
+          <button class="tb" onClick="{{su.discard}}">Discard</button>
+        </sc-if>
+        <button class="btn-primary" onClick="{{su.save}}" disabled="{{su.clean}}" style="padding: 0 22px; opacity: {{su.saveOp}}; cursor: {{su.saveCur}}">Save to machine</button>
+      </section>
+
+      <div role="tablist" aria-label="Setup sections" class="tabs">
+        <sc-for list="{{su.tabs}}" as="t" hint-placeholder-count="5">
+          <button role="tab" aria-selected="{{t.on}}" onClick="{{t.pick}}">{{t.l}}</button>
+        </sc-for>
+      </div>
+
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 12px; align-items: start">
+        <sc-for list="{{su.cards}}" as="cd" hint-placeholder-count="2">
+          <section aria-label="{{cd.title}}" class="card" style="padding: 18px; display: flex; flex-direction: column; gap: 12px; grid-column: {{cd.span}}">
+            <h2 class="h-sec">{{cd.title}}</h2>
+
+            <sc-if value="{{cd.isFields}}" hint-placeholder-val="{{true}}">
+              <div style="display: flex; flex-direction: column; gap: 10px">
+                <sc-for list="{{cd.fields}}" as="f" hint-placeholder-count="4">
+                  <sc-if value="{{f.isText}}" hint-placeholder-val="{{true}}">
+                    <label style="display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 230px); align-items: center; gap: 12px; min-height: 44px">
+                      <span style="color: var(--text-2)">{{f.l}}</span>
+                      <span class="fld"><input class="mono" value="{{f.v}}" onChange="{{f.set}}"><span class="lbl mono">{{f.u}}</span></span>
+                    </label>
+                  </sc-if>
+                  <sc-if value="{{f.isSeg}}" hint-placeholder-val="{{false}}">
+                    <div style="display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px; min-height: 44px">
+                      <span style="color: var(--text-2)">{{f.l}}</span>
+                      <div role="radiogroup" aria-label="{{f.l}}" class="seg">
+                        <sc-for list="{{f.opts}}" as="o" hint-placeholder-count="2">
+                          <button role="radio" aria-checked="{{o.on}}" onClick="{{o.pick}}">{{o.l}}</button>
+                        </sc-for>
+                      </div>
+                    </div>
+                  </sc-if>
+                  <sc-if value="{{f.isToggle}}" hint-placeholder-val="{{false}}">
+                    <div style="display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px; min-height: 44px">
+                      <span style="color: var(--text-2)">{{f.l}}</span>
+                      <button role="switch" class="sw" aria-checked="{{f.on}}" aria-label="{{f.l}}" onClick="{{f.toggle}}"></button>
+                    </div>
+                  </sc-if>
+                  <sc-if value="{{f.isPick}}" hint-placeholder-val="{{false}}">
+                    <div style="display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 230px); align-items: start; gap: 12px; min-height: 44px">
+                      <span style="color: var(--text-2); line-height: 44px">{{f.l}}</span>
+                      <div style="display: flex; flex-direction: column; gap: 4px; min-width: 0">
+                        <button class="dd" onClick="{{f.toggle}}" aria-haspopup="listbox" aria-expanded="{{f.open}}" aria-label="{{f.l}}: {{f.v}}">{{f.v}}<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.chev}}"></path></svg></button>
+                        <sc-if value="{{f.open}}" hint-placeholder-val="{{false}}">
+                          <div role="listbox" aria-label="{{f.l}}" class="pop">
+                            <sc-for list="{{f.opts}}" as="o" hint-placeholder-count="3">
+                              <button role="option" class="opt" aria-selected="{{o.on}}" onClick="{{o.pick}}">{{o.l}}<sc-if value="{{o.on}}" hint-placeholder-val="{{false}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.check}}"></path></svg></sc-if></button>
+                            </sc-for>
+                          </div>
+                        </sc-if>
+                      </div>
+                    </div>
+                  </sc-if>
+                  <sc-if value="{{f.isCorner}}" hint-placeholder-val="{{false}}">
+                    <div style="display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px; min-height: 44px">
+                      <span style="color: var(--text-2)">{{f.l}}</span>
+                      <div role="radiogroup" aria-label="{{f.l}}" style="display: grid; grid-template-columns: repeat(2, 36px); gap: 4px; padding: 4px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface)">
+                        <sc-for list="{{f.corners}}" as="c" hint-placeholder-count="4">
+                          <button role="radio" aria-checked="{{c.on}}" aria-label="{{c.label}}" onClick="{{c.pick}}" style="width: 36px; height: 28px; border: 0; border-radius: 4px; background: {{c.bg}}; cursor: pointer"></button>
+                        </sc-for>
+                      </div>
+                    </div>
+                  </sc-if>
+                  <sc-if value="{{f.isAction}}" hint-placeholder-val="{{false}}">
+                    <div style="display: flex; align-items: center; justify-content: flex-end; gap: 12px; min-height: 44px; padding-top: 6px; border-top: 1px solid var(--line-soft)">
+                      <span class="lbl" style="flex: 1">{{f.result}}</span>
+                      <button class="tb" onClick="{{f.run}}">{{f.btn}}</button>
+                    </div>
+                  </sc-if>
+                </sc-for>
+              </div>
+            </sc-if>
+
+            <sc-if value="{{cd.isBed}}" hint-placeholder-val="{{false}}">
+              <div class="viewport" style="display: flex; justify-content: center; padding: 22px 12px; border-radius: 10px">
+                <div role="img" aria-label="{{cd.label}}" style="position: relative; width: min(100%, {{cd.maxW}}px); aspect-ratio: {{cd.ar}}; border-radius: 4px; background-color: var(--bed); box-shadow: 0 0 0 1px var(--bed-line); background-image: linear-gradient(#F1F2F4 1px, transparent 1px), linear-gradient(90deg, #F1F2F4 1px, transparent 1px); background-size: 10% 10%">
+                  <span style="position: absolute; left: {{cd.ox}}; top: {{cd.oy}}; width: 12px; height: 12px; border-radius: 50%; background: var(--bed); box-shadow: 0 0 0 2px {{accent}}"></span>
+                  <sc-if value="{{cd.conveyor}}" hint-placeholder-val="{{false}}">
+                    <span style="position: absolute; left: 100%; top: 0; bottom: 0; width: 40%; border: 1px dashed var(--line-hover); border-left: 0; border-radius: 0 4px 4px 0"></span>
+                  </sc-if>
+                </div>
+              </div>
+            </sc-if>
+
+            <sc-if value="{{cd.isHeads}}" hint-placeholder-val="{{false}}">
+              <div role="table" aria-label="Tool heads" style="display: flex; flex-direction: column">
+                <div role="row" style="display: grid; grid-template-columns: 52px minmax(160px, 1fr) 120px 120px 100px; gap: 10px; align-items: center; padding: 0 0 8px; border-bottom: 1px solid var(--line)">
+                  <span role="columnheader" class="lbl" style="font-weight: 500">Slot</span>
+                  <span role="columnheader" class="lbl" style="font-weight: 500">Tool</span>
+                  <span role="columnheader" class="lbl" style="font-weight: 500">Offset X mm</span>
+                  <span role="columnheader" class="lbl" style="font-weight: 500">Offset Y mm</span>
+                  <span role="columnheader" class="lbl" style="font-weight: 500">Status</span>
+                </div>
+                <sc-for list="{{su.heads}}" as="h" hint-placeholder-count="4">
+                  <div role="row" style="display: grid; grid-template-columns: 52px minmax(160px, 1fr) 120px 120px 100px; gap: 10px; align-items: start; padding: 8px 0; border-bottom: 1px solid var(--line-soft)">
+                    <span role="cell" class="mono" style="width: 44px; height: 44px; border-radius: 8px; background: var(--sunken); color: var(--text); display: inline-flex; align-items: center; justify-content: center; font-weight: 500">{{h.slot}}</span>
+                    <span role="cell" style="display: flex; flex-direction: column; gap: 4px">
+                      <button class="dd" onClick="{{h.toggle}}" aria-haspopup="listbox" aria-expanded="{{h.open}}" aria-label="{{h.slot}} tool: {{h.tool}}">{{h.tool}}<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.chev}}"></path></svg></button>
+                      <sc-if value="{{h.open}}" hint-placeholder-val="{{false}}">
+                        <div role="listbox" aria-label="{{h.slot}} tool" class="pop">
+                          <sc-for list="{{h.opts}}" as="o" hint-placeholder-count="4">
+                            <button role="option" class="opt" aria-selected="{{o.on}}" onClick="{{o.pick}}">{{o.l}}<sc-if value="{{o.on}}" hint-placeholder-val="{{false}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.check}}"></path></svg></sc-if></button>
+                          </sc-for>
+                        </div>
+                      </sc-if>
+                    </span>
+                    <span role="cell"><input class="cell" value="{{h.x}}" onChange="{{h.setX}}" aria-label="{{h.slot}} offset X"></span>
+                    <span role="cell"><input class="cell" value="{{h.y}}" onChange="{{h.setY}}" aria-label="{{h.slot}} offset Y"></span>
+                    <span role="cell" style="display: flex; align-items: center; height: 44px"><span class="pill ok">Loaded</span></span>
+                  </div>
+                </sc-for>
+              </div>
+            </sc-if>
+          </section>
+        </sc-for>
+      </div>
+    </div>
+  </sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"startMachine":{"editor":"enum","options":["laser","plotter"],"default":"laser"},"startTheme":{"editor":"enum","options":["light","dark","system"],"default":"system"},"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  state = {
+    m: null,
+    // dark theme: follows the system until the operator flips the header button
+    dark: typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(prefers-color-scheme: dark)').matches,
+    themeSet: false,
+    view: 'queue',
+    navOpen: false,
+    machOpen: false,
+    queue: { laser: ['j1', 'j2', 'j3'], plotter: ['p1', 'p2', 'p3', 'p4'] },
+    sel: { laser: ['j1'], plotter: ['p1', 'p2'] },
+    run: null,
+    lastDone: null,
+    executed: { j2: 3, j3: 1, p3: 2 },
+    opts: { remove: true, anchor: true, anchorP: false, conveyor: true },
+    lid: true, air: true, ptr: false, vac: true,
+    step: '10', speed: 'Normal',
+    pos: { laser: { x: 212.4, y: 88, z: 0 }, plotter: { x: 1840, y: 412.5 } },
+    histFilter: 'All',
+    setTab: null,
+    impOpen: false,
+    impFile: null,
+    impMat: 0,
+    imported: {},
+    sEdits: {},
+    sSaved: {},
+    sDirty: false,
+    openPick: null,
+    history: {
+      laser: [
+        { id: 'j4', name: 'batch-13 · door plates', mat: 'Cast acrylic 3 mm', started: '28/10/2026 08:41', dur: '00:05:12', result: 'Completed' },
+        { id: 'j2', name: 'coasters ×12', mat: 'Birch ply 3 mm', started: '27/10/2026 16:20', dur: '00:04:05', result: 'Completed' },
+        { id: 'j5', name: 'test grid', mat: 'MDF 6 mm', started: '27/10/2026 15:02', dur: '00:01:48', result: 'Stopped' }
+      ],
+      plotter: [
+        { id: 'p5', name: 'menu boards', mat: 'Foam board 5 mm', started: '28/10/2026 07:58', dur: '00:18:30', result: 'Completed' },
+        { id: 'p3', name: 'shelf wobblers ×40', mat: 'Polyester film 0.25 mm', started: '27/10/2026 14:10', dur: '00:09:00', result: 'Completed' }
+      ]
+    }
+  };
+
+  componentDidMount() {
+    this.timer = setInterval(() => {
+      const r = this.state.run;
+      if (!r || r.paused) return;
+      const t = r.t + 0.25 * 20;
+      if (t < r.total) { this.setState({ run: { ...r, t } }); return; }
+      this.setState((s) => {
+        const hist = r.ids.map((id) => ({ id, name: this.job(id).name, mat: this.job(id).mat, started: r.started, dur: this.hms(this.job(id).time), result: 'Completed' }));
+        const executed = { ...s.executed };
+        r.ids.forEach((id) => { executed[id] = (executed[id] || 0) + 1; });
+        const queue = s.opts.remove ? { ...s.queue, [r.m]: s.queue[r.m].filter((id) => !r.ids.includes(id)) } : s.queue;
+        const sel = s.opts.remove ? { ...s.sel, [r.m]: [] } : s.sel;
+        return { run: null, lastDone: r.m, executed, queue, sel, history: { ...s.history, [r.m]: hist.concat(s.history[r.m]) } };
+      });
+    }, 250);
+  }
+
+  componentWillUnmount() {
+    clearInterval(this.timer);
+  }
+
+  hms(sec) {
+    const v = Math.max(0, Math.round(sec));
+    const p = (n) => String(n).padStart(2, '0');
+    return p(Math.floor(v / 3600)) + ':' + p(Math.floor((v % 3600) / 60)) + ':' + p(v % 60);
+  }
+
+  stamp() {
+    const d = new Date();
+    const p = (n) => String(n).padStart(2, '0');
+    return p(d.getDate()) + '/' + p(d.getMonth() + 1) + '/' + d.getFullYear() + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+  }
+
+  job(id) {
+    const R = (x, y, w, h, c, extra) => ({ x, y, w, h, c, st: 'solid', r: '2px', fill: 'transparent', ...(extra || {}) });
+    const L1 = [R(6, 9, 64, 76, '#AEB5C0', { r: '0' })]
+      .concat([[11, 18], [25, 18], [39, 18], [11, 50], [25, 50], [39, 50]].map(([x, y], i) => R(x, y, 9, 19, '#FF0000', { r: i === 1 || i === 4 ? '50%' : '3px' })))
+      .concat([R(55, 13, 0, 68, '#00C000', { st: 'dashed' })]);
+    const L2 = [];
+    for (let r = 0; r < 3; r++) for (let c = 0; c < 4; c++) L2.push(R(10 + c * 14, 14 + r * 26, 10, 16, '#FF0000', { r: '50%' }));
+    const L3 = [R(10, 10, 74, 79, '#FF0000', { r: '6px' }), R(25, 44, 44, 10, '#000000', { fill: '#000000' })];
+    const P1 = [R(6, 10, 40, 56, '#FF0000'), R(10, 16, 32, 44, '#0000FF'), R(54, 10, 40, 56, '#FF0000'), R(74, 10, 0, 56, '#00C000'), R(58, 28, 12, 4, '#000000', { fill: '#000000' }), R(6, 74, 88, 16, '#FF00FF', { st: 'dashed' })];
+    const P2 = [R(8, 8, 84, 84, '#FF0000'), R(14, 14, 72, 72, '#0000FF')];
+    const P3 = [];
+    for (let r = 0; r < 2; r++) for (let c = 0; c < 4; c++) P3.push(R(8 + c * 23, 12 + r * 44, 16, 32, '#FF0000', { r: '50%' }));
+    const P4 = [R(6, 10, 26, 80, '#FF0000'), R(37, 10, 26, 80, '#FF0000'), R(68, 10, 26, 80, '#FF0000'), R(19, 10, 0, 80, '#00C000'), R(50, 10, 0, 80, '#00C000'), R(81, 10, 0, 80, '#00C000')];
+    const LP = [{ aci: [7], name: 'Engrave fill', pv: 'P 60 %  V 400 mm/s' }, { aci: [1, 6], name: 'Cut contour', pv: 'P 90 %  V 20 mm/s' }, { aci: [3], name: 'Tear-off line', pv: 'P 90 %  V 20 mm/s' }];
+    const PP = [{ aci: [7, 8], name: 'Pen', pv: 'T4 · 500 mm/s' }, { aci: [5], name: 'V-cut 45°', pv: 'T2 · 250 mm/s' }, { aci: [3], name: 'Crease', pv: 'T3 · 300 mm/s' }, { aci: [1], name: 'Knife through', pv: 'T1 · 400 mm/s' }, { aci: [6], name: 'Perforate', pv: 'T1 · 400 mm/s' }];
+    const JOBS = {
+      j1: { m: 'laser', name: 'batch-14 · window signs', mat: 'Printed acrylic 3 mm', time: 380, received: '28/10 09:12', shapes: L1, procs: LP },
+      j2: { m: 'laser', name: 'coasters ×12', mat: 'Birch ply 3 mm', time: 245, received: '28/10 08:55', shapes: L2, procs: [{ aci: [7], name: 'Engrave fill', pv: 'P 55 %  V 350 mm/s' }, { aci: [1], name: 'Cut', pv: 'P 85 %  V 18 mm/s' }] },
+      j3: { m: 'laser', name: 'sign blank 600 × 400', mat: 'Cast acrylic 5 mm', time: 580, received: '27/10 17:40', shapes: L3, procs: [{ aci: [1], name: 'Cut', pv: 'P 95 %  V 8 mm/s' }, { aci: [5], name: 'Engrave outline', pv: 'P 40 %  V 300 mm/s' }] },
+      j4: { m: 'laser', name: 'batch-13 · door plates', mat: 'Cast acrylic 3 mm', time: 312, received: '28/10 08:30', shapes: L3, procs: LP },
+      j5: { m: 'laser', name: 'test grid', mat: 'MDF 6 mm', time: 210, received: '27/10 14:58', shapes: L2, procs: LP.slice(0, 2) },
+      p1: { m: 'plotter', name: 'batch-14 · window signs', mat: 'Foam board 5 mm', time: 1450, beds: 3, received: '28/10 09:14', shapes: P1, procs: PP },
+      p2: { m: 'plotter', name: 'foam display A1', mat: 'Foam board 5 mm', time: 720, beds: 1, received: '28/10 08:47', shapes: P2, procs: PP.slice(1, 4) },
+      p3: { m: 'plotter', name: 'shelf wobblers ×40', mat: 'Polyester film 0.25 mm', time: 540, beds: 1, received: '28/10 08:20', shapes: P3, procs: [PP[3]] },
+      p4: { m: 'plotter', name: 'box inserts', mat: 'Corrugated 3 mm', time: 900, beds: 2, received: '27/10 16:05', shapes: P4, procs: [PP[2], PP[3]] },
+      p5: { m: 'plotter', name: 'menu boards', mat: 'Foam board 5 mm', time: 1110, beds: 2, received: '28/10 07:40', shapes: P2, procs: PP.slice(1, 4) }
+    };
+    return JOBS[id] || this.state.imported[id];
+  }
+
+  renderVals() {
+    const accent = 'var(--accent)';
+    const accentSoft = 'var(--accent-soft)';
+    const startTheme = this.props.startTheme ?? 'system';
+    const dark = this.state.themeSet || startTheme === 'system' ? this.state.dark : startTheme === 'dark';
+    const icons = {
+      menu: 'M4 7h16 M4 12h16 M4 17h16',
+      sun: 'M12 8a4 4 0 1 0 0 8a4 4 0 1 0 0-8z M12 2v2 M12 20v2 M4.9 4.9l1.4 1.4 M17.7 17.7l1.4 1.4 M2 12h2 M20 12h2 M4.9 19.1l1.4-1.4 M17.7 6.3l1.4-1.4',
+      moon: 'M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z',
+      queue: 'M4 5h16v5H4z M4 14h16v5H4z',
+      jog: 'M12 3v18 M3 12h18 M12 3l-3 3 M12 3l3 3 M12 21l-3-3 M12 21l3-3 M3 12l3-3 M3 12l3 3 M21 12l-3-3 M21 12l-3 3',
+      history: 'M12 7v5l3 2 M3.5 12a8.5 8.5 0 1 0 2.5-6 M3 4v4h4',
+      bell: 'M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z M10 20h4',
+      chev: 'M6 9l6 6 6-6',
+      trash: 'M4 7h16 M9 7V4h6v3 M6 7l1 13h10l1-13',
+      conveyor: 'M3 15h18 M3 19h18 M7 15V9h10v6',
+      zoom: 'M10.5 4a6.5 6.5 0 1 0 0 13a6.5 6.5 0 1 0 0-13z M20 20l-4.8-4.8 M8 10.5h5 M10.5 8v5',
+      fit: 'M4 9V4h5 M15 4h5v5 M20 15v5h-5 M9 20H4v-5',
+      play: 'M7 4.5v15l12.5-7.5z',
+      pause: 'M8 5v14 M16 5v14',
+      stop: 'M6 6h12v12H6z',
+      frame: 'M4 9V4h5 M15 4h5v5 M20 15v5h-5 M9 20H4v-5',
+      up: 'M12 19V5 M6 11l6-6 6 6',
+      down: 'M12 5v14 M6 13l6 6 6-6',
+      left: 'M19 12H5 M11 6l-6 6 6 6',
+      right: 'M5 12h14 M13 6l6 6-6 6',
+      home: 'M4 11l8-7 8 7 M6 9.5V20h12V9.5',
+      upload: 'M12 15V3 M7 8l5-5 5 5 M4 20h16',
+      file: 'M6 3h8l4 4v14H6z M14 3v4h4',
+      gear: 'M12 9a3 3 0 1 0 0 6a3 3 0 1 0 0-6z M12 2v3 M12 19v3 M4.9 4.9l2.1 2.1 M17 17l2.1 2.1 M2 12h3 M19 12h3 M4.9 19.1L7 17 M17 7l2.1-2.1',
+      check: 'M5 12.5l4.5 4.5L19 7'
+    };
+    const ACI = { 1: ['#FF0000', '#FFFFFF'], 3: ['#00FF00', '#15181E'], 5: ['#0000FF', '#FFFFFF'], 6: ['#FF00FF', '#FFFFFF'], 7: ['#000000', '#FFFFFF'], 8: ['#808080', '#FFFFFF'] };
+    // job identity colours on beds (data colours: no brand red, readable in both themes)
+    const JOBCOL = ['#3E63DD', '#0B7F75', '#C2410C', '#6E56CF'];
+
+    const m = this.state.m ?? this.props.startMachine ?? 'laser';
+    const isLaser = m === 'laser';
+    // .seg, .sw, .tabs and .pill style themselves from aria-checked / aria-selected / class
+
+    const MACH = {
+      laser: { name: 'Trotec Speedy 360', sub: 'CO2 80 W', type: 'LASER', tbg: 'var(--badge-laser)' },
+      plotter: { name: 'Flatbed 1', sub: 'Ruida · conveyor', type: 'PLOTTER', tbg: 'var(--badge-plotter)' }
+    };
+    const machines = ['laser', 'plotter'].map((k) => ({ ...MACH[k], on: k === m, bg: k === m ? accentSoft : 'transparent', pick: () => this.setState({ m: k, machOpen: false, lastDone: null }) }));
+
+    const queueIds = this.state.queue[m];
+    const run = this.state.run && this.state.run.m === m ? this.state.run : null;
+    const selIds = this.state.sel[m].filter((id) => queueIds.includes(id));
+    const pickJob = (id) => () => this.setState((s) => {
+      const cur = s.sel[m];
+      let next;
+      if (isLaser) next = [id];
+      else next = cur.includes(id) ? cur.filter((x) => x !== id) : cur.concat(id);
+      return { sel: { ...s.sel, [m]: next }, lastDone: null };
+    });
+    const fmtShort = (sec) => {
+      const v = Math.round(sec);
+      return Math.floor(v / 60) + ' min ' + String(v % 60).padStart(2, '0') + ' s';
+    };
+    const jobs = queueIds.map((id, i) => {
+      const j = this.job(id);
+      const on = selIds.includes(id);
+      return {
+        n: i + 1, name: j.name, mat: j.mat, received: j.received, est: fmtShort(j.time) + (j.beds ? ' · ' + j.beds + (j.beds > 1 ? ' beds' : ' bed') : ''),
+        ar: isLaser ? '813 / 508' : '1.6', shapes: j.shapes,
+        on, running: !!run && run.ids.includes(id),
+        bg: on ? accentSoft : 'var(--surface-2)', bd: on ? accent : 'var(--line)', ring: on ? '2px' : '1px',
+        pick: pickJob(id)
+      };
+    });
+
+    // current selection
+    const conveyor = !isLaser && this.state.opts.conveyor;
+    const ids = run ? run.ids : selIds;
+    const single = ids.length === 1;
+    const multi = ids.length > 1;
+    let total = 0;
+    let cur;
+    if (single) {
+      const j = this.job(ids[0]);
+      total = j.time;
+      cur = {
+        single: true, multi: false, none: false,
+        title: j.name, sub: j.mat + ' · ' + MACH[m].name,
+        procs: j.procs.map((p) => ({ name: p.name, pv: p.pv, chips: p.aci.map((n) => ({ n, hex: ACI[n][0], fg: ACI[n][1] })) })),
+        executed: this.state.executed[ids[0]] || 0,
+        ar: isLaser ? '813 / 508' : '1.6', shapes: j.shapes
+      };
+    } else if (multi) {
+      const js = ids.map((id) => this.job(id));
+      const bedsTotal = js.reduce((a, j) => a + (j.beds || 1), 0);
+      total = js.reduce((a, j) => a + j.time, 0) + (conveyor ? (bedsTotal - 1) * 5 : 0);
+      const beds = [];
+      js.forEach((j, ji) => { for (let b = 0; b < (j.beds || 1); b++) beds.push({ j, ji }); });
+      const frac = run ? run.t / run.total : -1;
+      const activeBed = run ? Math.min(beds.length - 1, Math.floor(frac * beds.length)) : -1;
+      cur = {
+        single: false, multi: true, none: false,
+        title: ids.length + ' jobs selected',
+        sub: (conveyor ? 'Run back to back with conveyor' : 'Run one after another') + ' · ' + MACH[m].name,
+        rows: js.map((j, ji) => ({ n: ji + 1, name: j.name, beds: (j.beds || 1) + ((j.beds || 1) > 1 ? ' beds' : ' bed'), est: this.hms(j.time), col: JOBCOL[ji % JOBCOL.length] })),
+        convText: conveyor ? 'Conveyor · ' + bedsTotal + ' beds, ' + (bedsTotal - 1) + ' feeds' : 'Conveyor off · ' + ids.length + ' separate loads',
+        convBg: conveyor ? accentSoft : 'var(--sunken)', convFg: conveyor ? 'var(--accent-fg)' : 'var(--text-2)',
+        beds: beds.map((b, i) => ({
+          n: b.ji + 1, l: 'Bed ' + (i + 1), shapes: b.j.shapes, col: JOBCOL[b.ji % JOBCOL.length],
+          bd: i === activeBed ? accent : 'var(--bed-line)', ring: i === activeBed ? '2px' : '1px',
+          fg: i === activeBed ? 'var(--accent-fg)' : 'var(--text-3)', w: i === activeBed ? 600 : 400
+        }))
+      };
+    } else {
+      cur = { single: false, multi: false, none: true, title: 'No job selected', sub: 'Choose a job from the queue', procs: [], rows: [], beds: [], shapes: [], executed: 0 };
+    }
+    if (run) total = run.total;
+
+    // status
+    const notReady = isLaser && !this.state.lid;
+    let status;
+    // cls = .pill variant
+    if (notReady) status = { text: 'Device not ready', cls: 'err' };
+    else if (run && !run.paused) status = { text: 'Running', cls: 'accent' };
+    else if (run && run.paused) status = { text: 'Paused', cls: 'warn' };
+    else if (this.state.lastDone === m) status = { text: 'Job complete', cls: 'ok' };
+    else if (cur.none) status = { text: 'Idle', cls: '' };
+    else status = { text: 'Ready', cls: 'ok' };
+
+    const t = run ? run.t : 0;
+    const frac = run ? t / run.total : 0;
+    const startPause = () => {
+      if (notReady || cur.none) return;
+      if (run) { this.setState({ run: { ...run, paused: !run.paused } }); return; }
+      this.setState({ run: { m, ids: ids.slice(), t: 0, total, paused: false, started: this.stamp() }, lastDone: null });
+    };
+    const stop = () => {
+      if (!run) return;
+      this.setState((s) => ({
+        run: null,
+        history: { ...s.history, [m]: run.ids.map((id) => ({ id, name: this.job(id).name, mat: this.job(id).mat, started: run.started, dur: this.hms(run.t), result: 'Stopped' })).concat(s.history[m]) }
+      }));
+    };
+
+    const opt = (l, k) => {
+      const on = !!this.state.opts[k];
+      return { l, on, toggle: () => this.setState((s) => ({ opts: { ...s.opts, [k]: !on } })) };
+    };
+    const runOpts = [opt('Remove completed job from queue', 'remove')].concat(isLaser ? [opt('Anchor point to laser', 'anchor')] : [opt('Run from anchor point', 'anchorP'), opt('Run with conveyor', 'conveyor')]);
+
+    // jog
+    const P = this.state.pos[m];
+    const step = Number(this.state.step);
+    const BED = isLaser ? [813, 508] : [1600, 1000];
+    const clamp = (v, max) => Math.min(max, Math.max(0, Math.round(v * 10) / 10));
+    const move = (dx, dy, dz) => () => this.setState((s) => {
+      const p = s.pos[m];
+      const np = { ...p, x: clamp(p.x + dx * step, BED[0]), y: clamp(p.y + dy * step, BED[1]) };
+      if (p.z !== undefined) np.z = Math.round((p.z + (dz || 0) * Math.min(step, 10)) * 10) / 10;
+      return { pos: { ...s.pos, [m]: np } };
+    });
+    const jog = {
+      up: move(0, -1), down: move(0, 1), left: move(-1, 0), right: move(1, 0),
+      zUp: move(0, 0, 1), zDown: move(0, 0, -1),
+      home: () => this.setState((s) => ({ pos: { ...s.pos, [m]: isLaser ? { x: 0, y: 0, z: s.pos[m].z } : { x: 0, y: 0 } } }))
+    };
+    const posList = [{ l: 'X', v: P.x.toFixed(1) }, { l: 'Y', v: P.y.toFixed(1) }].concat(isLaser ? [{ l: 'Z', v: P.z.toFixed(1) }] : []);
+    const steps = ['0.1', '1', '10', '100'].map((v) => ({ l: v, on: this.state.step === v, pick: () => this.setState({ step: v }) }));
+    const speeds = ['Slow', 'Normal', 'Fast'].map((v) => ({ l: v, on: this.state.speed === v, pick: () => this.setState({ speed: v }) }));
+    const actions = (isLaser
+      ? ['Home', 'Go to origin', 'Set origin here', 'Frame job', 'Auto-focus', 'Test fire']
+      : ['Home', 'Go to origin', 'Set origin here', 'Frame job', 'Feed one bed', 'Tool change']
+    ).map((l) => ({ l, run: l === 'Home' ? jog.home : () => {} }));
+    const tog = (l, k) => {
+      const on = !!this.state[k];
+      return { isToggle: true, isPill: false, l, on, toggle: () => this.setState({ [k]: !on }) };
+    };
+    const pill = (l, v, ok) => ({ isToggle: false, isPill: true, l, v, cls: ok ? 'ok' : 'err' });
+    const io = isLaser
+      ? [tog('Lid closed', 'lid'), tog('Air assist', 'air'), tog('Red pointer', 'ptr'), pill('Exhaust', 'Running', true), pill('Water cooling', '18.4 °C', true)]
+      : [tog('Vacuum', 'vac'), tog('Laser pointer', 'ptr'), pill('Conveyor', 'Ready', true), pill('Tool heads', 'T1–T4 loaded', true)];
+
+    // history
+    const hf = this.state.histFilter;
+    const histAll = this.state.history[m];
+    const history = histAll.filter((h) => hf === 'All' || h.result === hf).map((h) => ({
+      ...h,
+      cls: h.result === 'Completed' ? 'ok' : 'warn',
+      rerun: () => this.setState((s) => ({
+        queue: s.queue[m].includes(h.id) ? s.queue : { ...s.queue, [m]: s.queue[m].concat(h.id) },
+        sel: { ...s.sel, [m]: isLaser ? [h.id] : s.sel[m].includes(h.id) ? s.sel[m] : s.sel[m].concat(h.id) },
+        view: 'queue', lastDone: null
+      }))
+    }));
+    const histFilters = ['All', 'Completed', 'Stopped'].map((l) => ({ l, on: hf === l, pick: () => this.setState({ histFilter: l }) }));
+
+    const view = this.state.view;
+    const views = [
+      { k: 'queue', l: 'Queue', d: icons.queue, badge: String(queueIds.length) },
+      { k: 'jog', l: 'Jog', d: icons.jog, badge: false },
+      { k: 'history', l: 'History', d: icons.history, badge: false },
+      { k: 'setup', l: 'Setup', d: icons.gear, badge: false }
+    ].map((v) => ({ ...v, cur: v.k === view ? 'page' : 'false', pick: () => this.setState({ view: v.k }) }));
+
+    const allSel = queueIds.length > 0 && selIds.length === queueIds.length;
+
+    // import a local file into the queue
+    const IMP_MATS = isLaser ? ['Printed acrylic 3 mm', 'Birch ply 3 mm', 'Cast acrylic 5 mm'] : ['Foam board 5 mm', 'Corrugated 3 mm', 'Polyester film 0.25 mm'];
+    const impMat = Math.min(this.state.impMat, IMP_MATS.length - 1);
+    const imp = {
+      isOpen: this.state.impOpen,
+      open: () => this.setState({ impOpen: true, impFile: null }),
+      close: () => this.setState({ impOpen: false }),
+      fileName: this.state.impFile || 'No file chosen',
+      noFile: !this.state.impFile,
+      addOp: this.state.impFile ? 1 : 0.45,
+      addCur: this.state.impFile ? 'pointer' : 'default',
+      choose: (e) => {
+        const f = e.target.files && e.target.files[0];
+        if (f) this.setState({ impFile: f.name });
+      },
+      mats: IMP_MATS.map((l, i) => ({ l, on: i === impMat, pick: () => this.setState({ impMat: i }) })),
+      add: () => {
+        const file = this.state.impFile;
+        if (!file) return;
+        const id = 'u' + Date.now();
+        const base = this.job(isLaser ? 'j3' : 'p2');
+        const job = { ...base, m, name: file.replace(/\.[^.]+$/, ''), mat: IMP_MATS[impMat], received: this.stamp().slice(0, 5) + ' ' + this.stamp().slice(-5) };
+        this.setState((s) => ({
+          imported: { ...s.imported, [id]: job },
+          queue: { ...s.queue, [m]: s.queue[m].concat(id) },
+          sel: { ...s.sel, [m]: isLaser ? [id] : s.sel[m].concat(id) },
+          impOpen: false, impFile: null, lastDone: null, view: 'queue'
+        }));
+      }
+    };
+
+    // machine setup (lives on the HMI; the design app reads it)
+    const su = (() => {
+      const SM = {
+        laser: { name: 'Trotec Speedy 360', kind: 'Laser · CO2', ctrl: 'Trotec', fw: '4.2.1', ip: '192.168.1.40', bed: [813, 508], speed: 3550, acc: 50000, source: 'CO2', power: 80, lens: '2.0"', pwm: 5000, minPower: 8, f: { camera: true, autofocus: true, rotary: false, air: true, pass: false, interlock: true } },
+        plotter: { name: 'Flatbed 1', kind: 'Plotter · 4 heads', ctrl: 'Ruida', fw: 'RDC6445 · 1.8', ip: '192.168.1.52', bed: [1600, 1000], speed: 1000, acc: 8000, f: { conveyor: true, vacuum: true, pointer: true, camera: false, detect: true } }
+      };
+      const raw = SM[m];
+      const lsr = m === 'laser';
+      const E = this.state.sEdits;
+      const get = (k, d) => (E[m + '|' + k] !== undefined ? E[m + '|' + k] : d);
+      const setTo = (k, v) => () => this.setState((s) => ({ sEdits: { ...s.sEdits, [m + '|' + k]: v }, sDirty: true }));
+      const setText = (k) => (e) => {
+        const v = e.target.value;
+        this.setState((s) => ({ sEdits: { ...s.sEdits, [m + '|' + k]: v }, sDirty: true }));
+      };
+      const feat = (k) => get('f_' + k, raw.f[k]);
+      const OPTS = {
+        'Driver': ['Trotec', 'Ruida'],
+        'Type': ['CO2', 'Fiber', 'Diode'],
+        'Lens': ['1.5"', '2.0"', '2.5"', '4.0"', 'Fixed'],
+        'Default reg marks': ['Off', 'Position & rotation · 2 dots', 'Full linear · 3 dots', 'Non-linear · 3 dots']
+      };
+      const F = {
+        text: (l, k, d, u) => ({ isText: true, l, v: get(k, d), u: u || '', set: setText(k) }),
+        seg: (l, k, d, opts) => {
+          const c = get(k, d);
+          return { isSeg: true, l, opts: opts.map((o) => ({ l: o, on: c === o, pick: setTo(k, o) })) };
+        },
+        toggle: (l, k, d) => {
+          const on = !!get(k, d);
+          return { isToggle: true, l, on, toggle: setTo(k, !on) };
+        },
+        feature: (l, k) => {
+          const on = !!feat(k);
+          return { isToggle: true, l, on, toggle: setTo('f_' + k, !on) };
+        },
+        pick: (l, d) => {
+          const pk = 'p_' + l;
+          const v = get(pk, d);
+          const ok = m + '|' + l;
+          const open = this.state.openPick === ok;
+          return {
+            isPick: true, l, v, open,
+            toggle: () => this.setState({ openPick: open ? null : ok }),
+            opts: open ? (OPTS[l] || [d]).map((o) => ({
+              l: o, on: o === v,
+              pick: () => this.setState((s) => ({ sEdits: { ...s.sEdits, [m + '|' + pk]: o }, sDirty: true, openPick: null }))
+            })) : []
+          };
+        },
+        corner: (l, k, d) => {
+          const c0 = get(k, d);
+          const names = { tl: 'Origin top left', tr: 'Origin top right', bl: 'Origin bottom left', br: 'Origin bottom right' };
+          return { isCorner: true, l, corners: ['tl', 'tr', 'bl', 'br'].map((c) => ({ c, on: c0 === c, label: names[c], bg: c0 === c ? accent : 'var(--track)', pick: setTo(k, c) })) };
+        },
+        action: (l, btn, result) => ({ isAction: true, l, btn, result: result || '', run: () => {} })
+      };
+      const card = (title, fields, span) => ({ title, fields, isFields: true, span: span || 'auto' });
+
+      const netCard = card('Network', [
+        F.seg('IP mode', 'ipMode', 'Static', ['DHCP', 'Static']),
+        F.text('IP address', 'ip', raw.ip),
+        F.text('Subnet mask', 'mask', '255.255.255.0'),
+        F.text('Gateway', 'gw', '192.168.1.1')
+      ]);
+      const jobCard = card('Job defaults', [
+        F.corner('Origin', 'origin', 'tl'),
+        F.seg('Units', 'units', 'mm', ['mm', 'inch']),
+        F.toggle('Home on start', 'home', true),
+        F.toggle('Keep completed jobs in history', 'keepHist', true)
+      ]);
+      const w = Number(get('bedW', raw.bed[0])) || raw.bed[0];
+      const h = Number(get('bedH', raw.bed[1])) || raw.bed[1];
+      const origin = get('origin', 'tl');
+      const bedCard = card('Bed', [
+        F.text('Width', 'bedW', String(raw.bed[0]), 'mm'),
+        F.text('Height', 'bedH', String(raw.bed[1]), 'mm'),
+        F.text('Max speed', 'speed', String(raw.speed), 'mm/s'),
+        F.text('Acceleration', 'acc', String(raw.acc), 'mm/s²')
+      ]);
+      const ar = w / h;
+      const bedPreview = {
+        title: 'Work area', isBed: true, span: 'auto',
+        ar: String(ar), maxW: String(Math.round(240 * ar)),
+        label: 'Work area ' + w + ' by ' + h + ' millimetres',
+        ox: origin.includes('l') ? '-6px' : 'calc(100% - 6px)',
+        oy: origin.includes('t') ? '-6px' : 'calc(100% - 6px)',
+        conveyor: !lsr && !!feat('conveyor')
+      };
+
+      let tabsDef;
+      let byTab;
+      let heads = [];
+      if (lsr) {
+        tabsDef = ['General', 'Work area', 'Laser source'].concat(feat('camera') ? ['Camera'] : []).concat(['Features']);
+        byTab = {
+          'General': [netCard, jobCard],
+          'Work area': [bedCard, bedPreview],
+          'Laser source': [
+            card('Source', [
+              F.pick('Type', raw.source), F.text('Rated power', 'power', String(raw.power), 'W'), F.pick('Lens', raw.lens),
+              F.text('PWM frequency', 'pwm', String(raw.pwm), 'Hz'), F.text('Minimum power', 'minPower', String(raw.minPower), '%')
+            ]),
+            card('Focus & air', [
+              F.feature('Auto-focus', 'autofocus'), F.text('Focus offset', 'focus', '0.0', 'mm'),
+              F.feature('Air assist control', 'air'), F.seg('Air assist default', 'airDefault', 'High', ['Low', 'High'])
+            ])
+          ],
+          'Camera': [
+            card('Print & cut camera', [
+              F.seg('Mark type', 'markType', 'Dot', ['Dot', 'Cross']), F.text('Mark diameter', 'markD', '5.0', 'mm'),
+              F.pick('Default reg marks', 'Full linear · 3 dots'), F.toggle('Ask before each job', 'askReg', false)
+            ]),
+            card('Calibration', [
+              F.text('Camera offset X', 'camX', '-42.15', 'mm'), F.text('Camera offset Y', 'camY', '18.60', 'mm'),
+              F.action('Calibrate', 'Calibrate offset', 'Calibrated 12 Oct 2026')
+            ])
+          ],
+          'Features': [
+            card('Features', [
+              F.feature('Print & cut camera', 'camera'), F.feature('Auto-focus', 'autofocus'), F.feature('Rotary', 'rotary'),
+              F.feature('Air assist control', 'air'), F.feature('Pass-through', 'pass')
+            ]),
+            card('Safety', [F.feature('Exhaust interlock', 'interlock'), F.toggle('Lid interlock', 'lid', true), F.text('Exhaust run-on', 'exhaust', '10', 's')])
+          ]
+        };
+      } else {
+        const TOOLS = ['Knife', 'V-cut 45°', 'Crease wheel', 'Pen', 'Drag knife'];
+        heads = [['T1', 'Knife', '0.00', '0.00'], ['T2', 'V-cut 45°', '24.50', '0.00'], ['T3', 'Crease wheel', '49.00', '0.00'], ['T4', 'Pen', '73.50', '0.00']].map(([slot, t0, x, y]) => {
+          const tk = 'h' + slot + 'tool';
+          const tool = get(tk, t0);
+          const hk = m + '|head|' + slot;
+          const open = this.state.openPick === hk;
+          return {
+            slot, tool, open,
+            toggle: () => this.setState({ openPick: open ? null : hk }),
+            opts: open ? TOOLS.map((o) => ({ l: o, on: o === tool, pick: () => this.setState((s) => ({ sEdits: { ...s.sEdits, [m + '|' + tk]: o }, sDirty: true, openPick: null })) })) : [],
+            x: get('h' + slot + 'x', x), y: get('h' + slot + 'y', y),
+            setX: setText('h' + slot + 'x'), setY: setText('h' + slot + 'y')
+          };
+        });
+        tabsDef = ['General', 'Work area', 'Tool heads'].concat(feat('conveyor') ? ['Conveyor'] : []).concat(['Features']);
+        byTab = {
+          'General': [netCard, jobCard],
+          'Work area': [bedCard, bedPreview, card('Vacuum', [F.toggle('On at job start', 'vacStart', true), F.toggle('Off at job end', 'vacEnd', true), F.text('Release delay', 'vacDelay', '3', 's')])],
+          'Tool heads': [
+            { title: 'Tool heads', isHeads: true, span: '1 / -1' },
+            card('Laser pointer', [F.text('Offset X', 'ptrX', '-31.20', 'mm'), F.text('Offset Y', 'ptrY', '12.75', 'mm'), F.action('Measure', 'Measure offset', 'Measured 21 Oct 2026')]),
+            card('Head detection', [F.feature('Detect loaded heads', 'detect'), F.toggle('Stop if head missing', 'headStop', true)])
+          ],
+          'Conveyor': [
+            card('Conveyor', [
+              F.text('Feed length', 'feedLen', String(raw.bed[1]), 'mm'), F.text('Feed overlap', 'feedOver', '5.0', 'mm'),
+              F.toggle('Auto-feed between beds', 'autoFeed', true), F.toggle('Vacuum off while feeding', 'feedVac', true),
+              F.action('Test', 'Feed one bed', '')
+            ]),
+            bedPreview
+          ],
+          'Features': [card('Features', [F.feature('Conveyor', 'conveyor'), F.feature('Vacuum', 'vacuum'), F.feature('Laser pointer', 'pointer'), F.feature('Print & cut camera', 'camera')])]
+        };
+      }
+      const tab = tabsDef.includes(this.state.setTab) ? this.state.setTab : 'General';
+      return {
+        name: get('name', raw.name), setName: setText('name'),
+        kind: raw.kind, ctrl: get('p_Driver', raw.ctrl), fw: raw.fw,
+        tabs: tabsDef.map((l) => ({ l, on: l === tab, pick: () => this.setState({ setTab: l, openPick: null }) })),
+        cards: byTab[tab] || [],
+        heads,
+        dirty: this.state.sDirty, clean: !this.state.sDirty,
+        saveOp: this.state.sDirty ? 1 : 0.45, saveCur: this.state.sDirty ? 'pointer' : 'default',
+        save: () => this.setState((s) => ({ sSaved: { ...s.sEdits }, sDirty: false })),
+        discard: () => this.setState((s) => ({ sEdits: { ...s.sSaved }, sDirty: false, openPick: null }))
+      };
+    })();
+
+    return {
+      accent, icons, isLaser, isPlotter: !isLaser,
+      theme: dark ? 'dark' : 'light',
+      toggleTheme: () => this.setState({ dark: !dark, themeSet: true }),
+      navOpen: this.state.navOpen, toggleNav: () => this.setState((s) => ({ navOpen: !s.navOpen, machOpen: false })),
+      machOpen: this.state.machOpen, toggleMach: () => this.setState((s) => ({ machOpen: !s.machOpen, navOpen: false })),
+      mach: MACH[m], machines, machDot: notReady ? 'var(--err-dot)' : 'var(--ok-dot)',
+      views, viewQueue: view === 'queue', viewJog: view === 'jog', viewHistory: view === 'history', viewSetup: view === 'setup',
+      su, imp, goSetup: () => this.setState({ view: 'setup', navOpen: false }),
+      jobs, queueEmpty: queueIds.length === 0, queueCount: queueIds.length + (queueIds.length === 1 ? ' job' : ' jobs'),
+      selectAllLabel: allSel ? 'Clear' : 'Select all',
+      selectAll: () => this.setState((s) => ({ sel: { ...s.sel, [m]: allSel ? [] : queueIds.slice() } })),
+      removeSel: () => this.setState((s) => ({ queue: { ...s.queue, [m]: s.queue[m].filter((id) => run ? run.ids.includes(id) || !selIds.includes(id) : !selIds.includes(id)) }, sel: { ...s.sel, [m]: [] } })),
+      cur, status, runOpts,
+      anchor: (isLaser ? this.state.opts.anchor : this.state.opts.anchorP)
+        ? { x: ((P.x / BED[0]) * 100).toFixed(1) + '%', y: ((P.y / BED[1]) * 100).toFixed(1) + '%' }
+        : { x: '0%', y: '0%' },
+      head: run ? { show: single, x: (8 + 80 * ((frac * 7) % 1)).toFixed(1) + '%', y: (15 + 70 * frac).toFixed(1) + '%' } : { show: false, x: '0%', y: '0%' },
+      startPause, stop,
+      cantStart: notReady || cur.none,
+      notRunning: !run,
+      stopFg: 'var(--err)',
+      playIcon: run && !run.paused ? icons.pause : icons.play,
+      playLabel: run && !run.paused ? 'Pause' : run ? 'Resume' : 'Start',
+      playBg: run && !run.paused ? 'var(--pause)' : 'var(--go)',
+      playCursor: notReady || cur.none ? 'not-allowed' : 'pointer',
+      progress: (frac * 100).toFixed(1) + '%',
+      progLabel: run ? (run.paused ? 'Paused' : 'Running') + ' · ' + Math.round(frac * 100) + ' %' : 'Not started',
+      timeLine: run ? this.hms(t) + ' / ' + this.hms(total) : 'Estimated ' + this.hms(total),
+      timerLabel: run ? 'Remaining' : 'Estimated time',
+      timer: this.hms(run ? total - t : total),
+      posList, jog, steps, speeds, actions, io,
+      history, histFilters, histCount: history.length + ' jobs'
+    };
+  }
+}
+</script>
+</body>
+</html>

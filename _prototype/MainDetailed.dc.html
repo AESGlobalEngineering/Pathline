@@ -1,0 +1,1328 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Main page – job workspace</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#2457D6}a:hover{color:#1A43AB}
+button{font:inherit;color:inherit}
+.ib{display:inline-flex;align-items:center;justify-content:center;width:36px;height:36px;border:0;border-radius:8px;background:transparent;cursor:pointer;color:#3A414C;padding:0}
+.ib:hover{background:#EEF0F3}
+.tb{display:inline-flex;align-items:center;gap:8px;height:36px;padding:0 12px;border:1px solid #D5D9DF;border-radius:8px;background:#FFFFFF;cursor:pointer;font-size:13px;color:#15181E;white-space:nowrap;text-decoration:none;box-sizing:border-box}
+.tb:hover{border-color:#AEB5C0;color:#15181E}
+.mono{font-family:'IBM Plex Mono',ui-monospace,monospace}
+.lbl{font-size:12px;color:#5B6370}
+.fld{display:flex;align-items:center;height:34px;border:1px solid #D5D9DF;border-radius:8px;background:#FFFFFF;padding:0 10px;gap:6px;box-sizing:border-box}
+.fld input{border:0;outline:0;width:100%;min-width:0;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:13px;background:transparent;color:#15181E;padding:0}
+.fld:focus-within{border-color:#2457D6;box-shadow:0 0 0 3px #DCE6FB}
+input[type=range]{width:100%;margin:0}
+svg.i{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round;flex:none}
+</style>
+</helmet>
+<div style="min-height: 100vh; display: flex; flex-direction: column; background: #F3F4F6; color: #15181E; font-family: 'IBM Plex Sans', system-ui, sans-serif; font-size: 13px">
+
+  <!-- ===== Top bar ===== -->
+  <header style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px 20px; padding: 8px 14px; background: #FFFFFF; border-bottom: 1px solid #E1E4E8; position: relative; z-index: 30">
+    <div style="display: flex; align-items: center; gap: 10px">
+      <span aria-hidden="true" style="width: 30px; height: 30px; border-radius: 8px; background: #15181E; display: inline-flex; align-items: center; justify-content: center; color: #FFFFFF">
+        <svg class="i" viewBox="0 0 24 24" style="width: 16px; height: 16px"><path d="{{icons.logo}}"></path></svg>
+      </span>
+      <div style="display: flex; flex-direction: column; line-height: 1.25">
+        <span style="font-weight: 600">{{saveName}}</span>
+        <span class="lbl">{{savedLabel}}</span>
+      </div>
+      <button class="ib" onClick="{{openSave}}" aria-label="Save to computer" title="Save to computer"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.download}}"></path></svg></button>
+    </div>
+    <nav aria-label="Menu" style="display: flex; gap: 2px">
+      <sc-for list="{{menuBar}}" as="mb" hint-placeholder-count="6">
+        <div style="position: relative">
+          <button onClick="{{mb.toggle}}" aria-haspopup="menu" aria-expanded="{{mb.open}}" style="height: 32px; padding: 0 10px; border: 0; border-radius: 6px; background: {{mb.bg}}; cursor: pointer; color: #3A414C">{{mb.l}}</button>
+          <sc-if value="{{mb.open}}" hint-placeholder-val="{{false}}">
+            <div role="menu" aria-label="{{mb.l}}" style="position: absolute; left: 0; top: 38px; min-width: 250px; background: #FFFFFF; border: 1px solid #E1E4E8; border-radius: 10px; box-shadow: 0 14px 36px rgba(21, 24, 30, 0.16); padding: 4px; z-index: 50">
+              <sc-for list="{{mb.items}}" as="it" hint-placeholder-count="6">
+                <sc-if value="{{it.isSep}}" hint-placeholder-val="{{false}}"><div role="separator" style="height: 1px; background: #E1E4E8; margin: 4px 6px"></div></sc-if>
+                <sc-if value="{{it.isLink}}" hint-placeholder-val="{{false}}"><a role="menuitem" href="{{it.href}}" style="display: flex; align-items: center; justify-content: space-between; gap: 24px; height: 32px; padding: 0 10px; border-radius: 6px; text-decoration: none; color: #15181E; white-space: nowrap">{{it.l}}<span class="mono lbl">{{it.k}}</span></a></sc-if>
+                <sc-if value="{{it.isPlain}}" hint-placeholder-val="{{true}}"><button role="menuitem" onClick="{{it.run}}" style="display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 24px; height: 32px; padding: 0 10px; border: 0; border-radius: 6px; background: transparent; cursor: pointer; text-align: left; white-space: nowrap">{{it.l}}<span class="mono lbl">{{it.k}}</span></button></sc-if>
+                <sc-if value="{{it.isSub}}" hint-placeholder-val="{{false}}">
+                  <div style="position: relative">
+                    <button role="menuitem" aria-haspopup="menu" aria-expanded="{{it.open}}" onClick="{{it.toggle}}" style="display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 24px; height: 32px; padding: 0 6px 0 10px; border: 0; border-radius: 6px; background: {{it.bg}}; cursor: pointer; text-align: left; white-space: nowrap">{{it.l}}<svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width: 15px; height: 15px; color: #5B6370"><path d="{{icons.chevR}}"></path></svg></button>
+                    <sc-if value="{{it.open}}" hint-placeholder-val="{{false}}">
+                      <div role="menu" aria-label="{{it.l}}" style="position: absolute; left: 100%; top: -4px; margin-left: 6px; min-width: 220px; background: #FFFFFF; border: 1px solid #E1E4E8; border-radius: 10px; box-shadow: 0 14px 36px rgba(21, 24, 30, 0.16); padding: 4px">
+                        <sc-for list="{{it.sub}}" as="s" hint-placeholder-count="4">
+                          <button role="menuitem" onClick="{{s.run}}" style="display: flex; width: 100%; align-items: center; height: 32px; padding: 0 10px; border: 0; border-radius: 6px; background: transparent; cursor: pointer; text-align: left; white-space: nowrap">{{s.l}}</button>
+                        </sc-for>
+                      </div>
+                    </sc-if>
+                  </div>
+                </sc-if>
+              </sc-for>
+            </div>
+          </sc-if>
+        </div>
+      </sc-for>
+    </nav>
+    <span style="flex: 1"></span>
+    <nav aria-label="Sections" style="display: flex; padding: 3px; gap: 2px; background: #F0F1F4; border-radius: 8px">
+      <a href="MainDetailed.dc.html" aria-current="page" style="display: inline-flex; align-items: center; height: 30px; padding: 0 12px; border-radius: 6px; text-decoration: none; font-weight: 500; background: #FFFFFF; box-shadow: 0 1px 2px rgba(21, 24, 30, 0.14); color: #15181E">Job</a>
+      <a href="MaterialsDetailed.dc.html" style="display: inline-flex; align-items: center; height: 30px; padding: 0 12px; border-radius: 6px; text-decoration: none; font-weight: 500; color: #5B6370">Materials</a>
+      <a href="MachineSetupDetailed.dc.html" style="display: inline-flex; align-items: center; height: 30px; padding: 0 12px; border-radius: 6px; text-decoration: none; font-weight: 500; color: #5B6370">Machines</a>
+      <a href="SimulationDetailed.dc.html" style="display: inline-flex; align-items: center; height: 30px; padding: 0 12px; border-radius: 6px; text-decoration: none; font-weight: 500; color: #5B6370">Simulation</a>
+    </nav>
+    <div style="position: relative">
+      <button onClick="{{toggleMenu}}" aria-haspopup="menu" aria-expanded="{{menuOpen}}" style="display: flex; align-items: center; gap: 10px; height: 44px; padding: 0 10px 0 8px; border: 1px solid #D5D9DF; border-radius: 10px; background: #FFFFFF; cursor: pointer; text-align: left">
+        <span style="height: 22px; padding: 0 7px; border-radius: 5px; display: inline-flex; align-items: center; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; background: {{mach.tbg}}; color: #FFFFFF">{{mach.type}}</span>
+        <span style="display: flex; flex-direction: column; line-height: 1.2">
+          <span style="font-weight: 600">{{mach.name}}</span>
+          <span class="lbl">{{mach.sub}}</span>
+        </span>
+        <span style="display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: #1B6B43"><span aria-hidden="true" style="width: 8px; height: 8px; border-radius: 50%; background: #30A46C"></span>Ready</span>
+        <svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="color: #5B6370"><path d="{{icons.chev}}"></path></svg>
+      </button>
+      <sc-if value="{{menuOpen}}" hint-placeholder-val="{{false}}">
+        <div role="menu" aria-label="Machines" style="position: absolute; right: 0; top: 52px; width: 300px; background: #FFFFFF; border: 1px solid #E1E4E8; border-radius: 12px; box-shadow: 0 14px 36px rgba(21, 24, 30, 0.16); padding: 6px">
+          <sc-for list="{{machines}}" as="mc" hint-placeholder-count="2">
+            <button role="menuitemradio" aria-checked="{{mc.on}}" onClick="{{mc.pick}}" style="display: flex; width: 100%; align-items: center; gap: 10px; padding: 10px; border: 0; border-radius: 8px; background: {{mc.bg}}; cursor: pointer; text-align: left">
+              <span style="height: 22px; min-width: 62px; justify-content: center; border-radius: 5px; display: inline-flex; align-items: center; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; background: {{mc.tbg}}; color: #FFFFFF">{{mc.type}}</span>
+              <span style="flex: 1; display: flex; flex-direction: column; line-height: 1.25"><span style="font-weight: 600">{{mc.name}}</span><span class="lbl">{{mc.sub}}</span></span>
+              <sc-if value="{{mc.on}}" hint-placeholder-val="{{false}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="color: {{accent}}"><path d="{{icons.check}}"></path></svg></sc-if>
+            </button>
+          </sc-for>
+          <div style="height: 1px; background: #E1E4E8; margin: 6px 4px"></div>
+          <a href="MachineSetupDetailed.dc.html" style="display: block; padding: 10px; border-radius: 8px; text-decoration: none">Machine setup…</a>
+        </div>
+      </sc-if>
+    </div>
+  </header>
+
+  <!-- ===== Save to computer ===== -->
+  <sc-if value="{{saveOpen}}" hint-placeholder-val="{{false}}">
+    <div style="position: fixed; inset: 0; z-index: 100; background: rgba(21, 24, 30, 0.32); display: flex; align-items: center; justify-content: center; padding: 16px">
+      <div role="dialog" aria-label="Save to computer" style="width: 100%; max-width: 440px; background: #FFFFFF; border-radius: 14px; box-shadow: 0 20px 48px rgba(21, 24, 30, 0.24); padding: 20px; display: flex; flex-direction: column; gap: 14px">
+        <span style="font-weight: 600; font-size: 16px">Save to computer</span>
+        <label style="display: flex; flex-direction: column; gap: 6px">
+          <span class="lbl">File name</span>
+          <span class="fld"><input type="text" value="{{saveName}}" onChange="{{setSaveName}}" style="font-family: 'IBM Plex Sans', system-ui, sans-serif"><span class="lbl">{{saveExt}}</span></span>
+        </label>
+        <div style="display: flex; flex-direction: column; gap: 6px">
+          <span class="lbl">Format</span>
+          <div role="radiogroup" aria-label="Format" style="display: flex; padding: 3px; gap: 2px; background: #F0F1F4; border-radius: 8px">
+            <sc-for list="{{saveFmts}}" as="f" hint-placeholder-count="3">
+              <button role="radio" aria-checked="{{f.on}}" onClick="{{f.pick}}" style="flex: 1; height: 32px; border: 0; border-radius: 6px; background: {{f.bg}}; box-shadow: {{f.sh}}; color: {{f.fg}}; cursor: pointer; font-weight: 500">{{f.l}}</button>
+            </sc-for>
+          </div>
+        </div>
+        <div style="display: flex; align-items: center; justify-content: space-between; min-height: 34px; opacity: {{presetsOp}}">
+          <span id="save-presets">Include material presets</span>
+          <button role="switch" aria-checked="{{savePresets}}" aria-labelledby="save-presets" onClick="{{toggleSavePresets}}" disabled="{{presetsOff}}" style="width: 44px; height: 26px; border: 0; border-radius: 13px; padding: 3px; box-sizing: border-box; background: {{presetsSwBg}}; display: flex; justify-content: {{presetsSwJ}}; cursor: pointer">
+            <span style="width: 20px; height: 20px; border-radius: 50%; background: #FFFFFF; box-shadow: 0 1px 2px rgba(21, 24, 30, 0.3)"></span>
+          </button>
+        </div>
+        <div style="display: flex; justify-content: flex-end; gap: 8px; padding-top: 4px">
+          <button class="tb" onClick="{{closeSave}}">Cancel</button>
+          <button onClick="{{doSave}}" style="display: inline-flex; align-items: center; gap: 8px; height: 36px; padding: 0 18px; border: 0; border-radius: 8px; background: {{accent}}; color: #FFFFFF; font-weight: 600; cursor: pointer"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.download}}"></path></svg>Save</button>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- ===== Toolbar ===== -->
+  <div role="toolbar" aria-label="Tools" style="display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px 10px; background: #FFFFFF; border-bottom: 1px solid #E1E4E8; position: relative; z-index: 20">
+    <div style="display: flex; gap: 6px; padding-right: 8px; border-right: 1px solid #E1E4E8; position: relative">
+      <button class="tb"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.import}}"></path></svg>Import</button>
+      <button class="tb" onClick="{{toggleFill}}" aria-haspopup="dialog" aria-expanded="{{fillOpen}}" style="border-color: {{fillBd}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.array}}"></path></svg>{{fill.button}}</button>
+      <sc-if value="{{fillOpen}}" hint-placeholder-val="{{false}}">
+        <div role="dialog" aria-label="Fill" style="position: absolute; left: 0; top: 44px; width: 330px; background: #FFFFFF; border: 1px solid #E1E4E8; border-radius: 12px; box-shadow: 0 14px 36px rgba(21, 24, 30, 0.16); padding: 14px; display: flex; flex-direction: column; gap: 12px">
+          <span style="font-weight: 600; font-size: 14px">{{fill.button}}</span>
+          <div style="display: flex; flex-direction: column; gap: 6px">
+            <span class="lbl">Fill area</span>
+            <div role="radiogroup" aria-label="Fill area" style="display: flex; padding: 3px; gap: 2px; background: #F0F1F4; border-radius: 8px">
+              <sc-for list="{{fill.areas}}" as="a" hint-placeholder-count="3">
+                <button role="radio" aria-checked="{{a.on}}" aria-disabled="{{a.off}}" onClick="{{a.pick}}" style="flex: 1; height: 30px; border: 0; border-radius: 6px; background: {{a.bg}}; box-shadow: {{a.sh}}; color: {{a.fg}}; opacity: {{a.op}}; cursor: {{a.cur}}; font-weight: 500">{{a.l}}</button>
+              </sc-for>
+            </div>
+            <sc-if value="{{fill.isCustom}}" hint-placeholder-val="{{false}}">
+              <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px">
+                <label style="display: flex; flex-direction: column; gap: 6px; min-width: 0">
+                  <span class="lbl">Width</span>
+                  <span class="fld"><input type="text" value="{{fill.cw}}" onChange="{{fill.setCw}}"><span class="lbl">mm</span></span>
+                </label>
+                <label style="display: flex; flex-direction: column; gap: 6px; min-width: 0">
+                  <span class="lbl">Height</span>
+                  <span class="fld"><input type="text" value="{{fill.ch}}" onChange="{{fill.setCh}}"><span class="lbl">mm</span></span>
+                </label>
+              </div>
+            </sc-if>
+          </div>
+          <div role="radiogroup" aria-label="Copies" style="display: flex; padding: 3px; gap: 2px; background: #F0F1F4; border-radius: 8px">
+            <sc-for list="{{fill.modes}}" as="f" hint-placeholder-count="2">
+              <button role="radio" aria-checked="{{f.on}}" onClick="{{f.pick}}" style="flex: 1; height: 30px; border: 0; border-radius: 6px; background: {{f.bg}}; box-shadow: {{f.sh}}; color: {{f.fg}}; cursor: pointer; font-weight: 500">{{f.l}}</button>
+            </sc-for>
+          </div>
+          <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px">
+            <sc-if value="{{fill.isCount}}" hint-placeholder-val="{{false}}">
+              <label style="display: flex; flex-direction: column; gap: 6px; min-width: 0; grid-column: 1 / -1">
+                <span class="lbl">Copies</span>
+                <span class="fld"><input type="text" value="12" onChange="{{noop}}"><span class="lbl">×</span></span>
+              </label>
+            </sc-if>
+            <label style="display: flex; flex-direction: column; gap: 6px; min-width: 0">
+              <span class="lbl">Spacing</span>
+              <span class="fld"><input type="text" value="5.0" onChange="{{noop}}"><span class="lbl">mm</span></span>
+            </label>
+            <label style="display: flex; flex-direction: column; gap: 6px; min-width: 0">
+              <span class="lbl">Edge margin</span>
+              <span class="fld"><input type="text" value="10.0" onChange="{{noop}}"><span class="lbl">mm</span></span>
+            </label>
+          </div>
+          <div style="display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 8px; background: {{accentSoft}}">
+            <svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width: 16px; height: 16px; color: {{accent}}"><path d="{{icons.check}}"></path></svg>
+            <span>{{fill.result}}</span>
+          </div>
+          <div style="display: flex; justify-content: flex-end; gap: 8px">
+            <button class="tb" onClick="{{toggleFill}}">Cancel</button>
+            <button onClick="{{toggleFill}}" style="height: 36px; padding: 0 18px; border: 0; border-radius: 8px; background: {{accent}}; color: #FFFFFF; font-weight: 600; cursor: pointer">Fill</button>
+          </div>
+        </div>
+      </sc-if>
+      <button class="tb" onClick="{{toggleSheet}}" aria-haspopup="dialog" aria-expanded="{{sheetOpen}}" style="border-color: {{sheetBd}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.sheet}}"></path></svg>Sheet<span style="height: 18px; padding: 0 6px; border-radius: 4px; font-size: 11px; font-weight: 600; display: inline-flex; align-items: center; background: {{sheetPillBg}}; color: {{sheetPillFg}}">{{sheetPill}}</span></button>
+      <sc-if value="{{sheetOpen}}" hint-placeholder-val="{{false}}">
+        <div role="dialog" aria-label="Sheet" style="position: absolute; left: 120px; top: 44px; width: 320px; background: #FFFFFF; border: 1px solid #E1E4E8; border-radius: 12px; box-shadow: 0 14px 36px rgba(21, 24, 30, 0.16); padding: 14px; display: flex; flex-direction: column; gap: 12px">
+          <div style="display: flex; align-items: center; justify-content: space-between">
+            <span id="sheet-label" style="font-weight: 600; font-size: 14px">Sheet</span>
+            <button role="switch" aria-checked="{{sheetOn}}" aria-labelledby="sheet-label" onClick="{{toggleSheetOn}}" style="width: 44px; height: 26px; border: 0; border-radius: 13px; padding: 3px; box-sizing: border-box; background: {{sheetSwBg}}; display: flex; justify-content: {{sheetSwJ}}; cursor: pointer">
+              <span style="width: 20px; height: 20px; border-radius: 50%; background: #FFFFFF; box-shadow: 0 1px 2px rgba(21, 24, 30, 0.3)"></span>
+            </button>
+          </div>
+          <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; opacity: {{sheetFieldsOp}}">
+            <sc-for list="{{sheetFields}}" as="f" hint-placeholder-count="4">
+              <label style="display: flex; flex-direction: column; gap: 6px; min-width: 0">
+                <span class="lbl">{{f.l}}</span>
+                <span class="fld"><input type="text" class="mono" value="{{f.v}}" onChange="{{f.set}}" disabled="{{sheetOff}}"><span class="lbl">mm</span></span>
+              </label>
+            </sc-for>
+          </div>
+          <div style="display: flex; flex-wrap: wrap; gap: 6px; opacity: {{sheetFieldsOp}}">
+            <sc-for list="{{sheetPresets}}" as="p" hint-placeholder-count="3">
+              <button class="tb" onClick="{{p.pick}}" disabled="{{sheetOff}}" style="height: 28px; padding: 0 10px; font-size: 12px">{{p.l}}</button>
+            </sc-for>
+          </div>
+          <div style="display: flex; justify-content: space-between; gap: 8px">
+            <button class="tb" onClick="{{centreSheet}}" disabled="{{sheetOff}}" style="opacity: {{sheetFieldsOp}}">Centre on bed</button>
+            <button onClick="{{toggleSheet}}" style="height: 36px; padding: 0 18px; border: 0; border-radius: 8px; background: {{accent}}; color: #FFFFFF; font-weight: 600; cursor: pointer">Done</button>
+          </div>
+        </div>
+      </sc-if>
+    </div>
+    <sc-for list="{{toolGroups}}" as="g" hint-placeholder-count="3">
+      <div style="display: flex; gap: 2px; padding-right: 8px; border-right: 1px solid #E1E4E8">
+        <sc-for list="{{g.items}}" as="t" hint-placeholder-count="3">
+          <button class="ib" aria-label="{{t.l}}" title="{{t.l}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{t.d}}"></path></svg></button>
+        </sc-for>
+      </div>
+    </sc-for>
+    <span style="flex: 1"></span>
+    <span class="lbl" style="margin-right: 2px">{{mach.toolsLabel}}</span>
+    <sc-if value="{{isLaser}}" hint-placeholder-val="{{true}}">
+      <div style="position: relative">
+        <button class="tb" onClick="{{toggleReg}}" aria-haspopup="menu" aria-expanded="{{regOpen}}" style="border-color: {{accent}}; box-shadow: 0 0 0 1px {{accent}} inset">
+          <svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="color: {{accent}}"><path d="{{icons.reg}}"></path></svg>
+          <span>Reg marks:</span><span style="font-weight: 600">{{regLabel}}</span>
+          <svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="color: #5B6370"><path d="{{icons.chev}}"></path></svg>
+        </button>
+        <sc-if value="{{regOpen}}" hint-placeholder-val="{{false}}">
+          <div role="menu" aria-label="Registration marks" style="position: absolute; right: 0; top: 44px; width: 340px; background: #FFFFFF; border: 1px solid #E1E4E8; border-radius: 12px; box-shadow: 0 14px 36px rgba(21, 24, 30, 0.16); padding: 6px">
+            <div style="padding: 8px 10px 4px; font-weight: 600">Registration marks</div>
+            <sc-for list="{{regModes}}" as="r" hint-placeholder-count="4">
+              <button role="menuitemradio" aria-checked="{{r.on}}" onClick="{{r.pick}}" style="display: flex; width: 100%; align-items: center; gap: 12px; padding: 10px; border: 0; border-radius: 8px; background: {{r.bg}}; cursor: pointer; text-align: left">
+                <span aria-hidden="true" style="position: relative; width: 44px; height: 30px; flex: none; border-radius: 3px; background: #FFFFFF; box-shadow: 0 0 0 1px #AEB5C0">
+                  <sc-for list="{{r.dots}}" as="d" hint-placeholder-count="3"><span style="position: absolute; left: {{d.x}}px; top: {{d.y}}px; width: 6px; height: 6px; border-radius: 50%; background: #15181E"></span></sc-for>
+                </span>
+                <span style="flex: 1; display: flex; flex-direction: column; line-height: 1.3">
+                  <span style="font-weight: 600">{{r.l}}</span>
+                  <span class="lbl">{{r.n}}</span>
+                </span>
+                <sc-if value="{{r.on}}" hint-placeholder-val="{{false}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="color: {{accent}}"><path d="{{icons.check}}"></path></svg></sc-if>
+              </button>
+            </sc-for>
+          </div>
+        </sc-if>
+      </div>
+    </sc-if>
+    <sc-for list="{{machTools}}" as="t" hint-placeholder-count="2">
+      <button class="tb"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{t.d}}"></path></svg>{{t.l}}</button>
+    </sc-for>
+  </div>
+
+  <!-- ===== Body ===== -->
+  
+
+  <!-- ===== Run bar ===== -->
+  <div style="flex: 1; display: flex; flex-wrap: wrap; min-height: 0">
+    <main style="flex: 999 1 600px; min-width: 0; display: flex; min-height: 600px">
+      <nav aria-label="Drawing tools" style="width: 52px; flex: none; background: #FFFFFF; border-right: 1px solid #E1E4E8; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px 0">
+        <sc-for list="{{tools}}" as="t" hint-placeholder-count="9">
+          <button class="ib" aria-label="{{t.l}}" title="{{t.l}}" aria-pressed="{{t.on}}" style="width: 40px; height: 40px; background: {{t.bg}}; color: {{t.fg}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{t.d}}"></path></svg></button>
+        </sc-for>
+      </nav>
+
+      <div style="flex: 1; min-width: 0; display: flex; flex-direction: column">
+        <!-- ruler -->
+        <div style="display: flex; height: 22px; background: #FFFFFF; border-bottom: 1px solid #E1E4E8">
+          <span style="width: 22px; flex: none; border-right: 1px solid #E1E4E8"></span>
+          <div class="mono" aria-hidden="true" style="flex: 1; display: flex; justify-content: space-between; padding: 3px 40px 0; font-size: 11px; color: #5B6370; background-image: repeating-linear-gradient(90deg, #C9CED6 0 1px, transparent 1px 12px); background-size: 100% 5px; background-repeat: repeat-x; background-position: left bottom">
+            <sc-for list="{{rulerX}}" as="r" hint-placeholder-count="9"><span>{{r}}</span></sc-for>
+          </div>
+        </div>
+        <div style="flex: 1; display: flex; min-height: 0">
+          <div aria-hidden="true" style="width: 22px; flex: none; background-color: #FFFFFF; border-right: 1px solid #E1E4E8; background-image: repeating-linear-gradient(180deg, #C9CED6 0 1px, transparent 1px 12px); background-size: 5px 100%; background-repeat: repeat-y; background-position: right top"></div>
+
+          <!-- viewport -->
+          <div style="flex: 1; min-width: 0; position: relative; overflow: hidden; background-color: #E9EBEE; background-image: radial-gradient(#CDD2D9 1px, transparent 1px); background-size: 16px 16px; display: flex; align-items: center; justify-content: center; padding: 40px">
+
+            <!-- LASER: print & cut sheet on the bed -->
+            <sc-if value="{{isLaser}}" hint-placeholder-val="{{true}}">
+              <div style="position: relative; width: 100%; max-width: 940px; aspect-ratio: 813 / 508; border-radius: 4px; background-color: #FFFFFF; box-shadow: 0 0 0 1px #CDD2D9, 0 2px 6px rgba(21, 24, 30, 0.06); background-image: linear-gradient(#F1F2F4 1px, transparent 1px), linear-gradient(90deg, #F1F2F4 1px, transparent 1px); background-size: 5% 8%">
+                <span aria-hidden="true" style="position: absolute; left: -6px; top: -6px; width: 12px; height: 12px; border-radius: 50%; background: #FFFFFF; box-shadow: 0 0 0 2px {{accent}}"></span>
+                <div onPointerDown="{{sheetV.down}}" onPointerMove="{{sheetV.move}}" onPointerUp="{{sheetV.up}}" aria-label="{{sheetV.label}}" style="position: absolute; left: {{sheetV.left}}; top: {{sheetV.top}}; width: {{sheetV.w}}; height: {{sheetV.h}}; background: {{sheetV.bg}}; box-shadow: {{sheetV.sh}}; cursor: {{sheetV.cursor}}; touch-action: none">
+                  <div style="position: absolute; left: 8%; top: 12%; width: 62%; height: 76%; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); grid-template-rows: repeat(2, minmax(0, 1fr)); gap: 16%">
+                    <sc-for list="{{prints}}" as="p" hint-placeholder-count="6">
+                      <div style="position: relative; border-radius: {{p.r}}; background: {{p.bg}}; outline: 2px solid #FF0000; outline-offset: 5px; display: flex; align-items: center; justify-content: center; color: #FFFFFF; font-weight: 600; font-size: 14px; letter-spacing: 0.06em">
+                        {{p.t}}
+                        <sc-if value="{{p.sel}}" hint-placeholder-val="{{false}}">
+                          <span aria-hidden="true" style="position: absolute; inset: -12px; border: 1.5px solid {{accent}}"></span>
+                          <span aria-hidden="true" style="position: absolute; left: -16px; top: -16px; width: 8px; height: 8px; background: #FFFFFF; border: 1.5px solid {{accent}}"></span>
+                          <span aria-hidden="true" style="position: absolute; right: -16px; top: -16px; width: 8px; height: 8px; background: #FFFFFF; border: 1.5px solid {{accent}}"></span>
+                          <span aria-hidden="true" style="position: absolute; left: -16px; bottom: -16px; width: 8px; height: 8px; background: #FFFFFF; border: 1.5px solid {{accent}}"></span>
+                          <span aria-hidden="true" style="position: absolute; right: -16px; bottom: -16px; width: 8px; height: 8px; background: #FFFFFF; border: 1.5px solid {{accent}}"></span>
+                        </sc-if>
+                      </div>
+                    </sc-for>
+                  </div>
+                  <div aria-hidden="true" style="position: absolute; left: 77%; top: 5%; bottom: 5%; border-left: 2.5px dashed #00FF00"></div>
+                  <div aria-hidden="true" style="position: absolute; left: 81%; top: 14%; right: 6%; bottom: 14%; display: flex; flex-direction: column; justify-content: space-between">
+                    <span style="height: 10%; background: #15181E; border-radius: 2px"></span>
+                    <span style="height: 4%; width: 70%; background: #AEB5C0; border-radius: 2px"></span>
+                    <span style="height: 4%; width: 85%; background: #AEB5C0; border-radius: 2px"></span>
+                    <span style="height: 22%; background: repeating-linear-gradient(90deg, #15181E 0 2px, transparent 2px 4px, #15181E 4px 5px, transparent 5px 8px)"></span>
+                  </div>
+                  <sc-for list="{{sheetDots}}" as="d" hint-placeholder-count="3">
+                    <span aria-hidden="true" style="position: absolute; left: {{d.x}}%; top: {{d.y}}%; width: 12px; height: 12px; margin: -6px 0 0 -6px; border-radius: 50%; background: #15181E; box-shadow: 0 0 0 3px #FFFFFF"></span>
+                  </sc-for>
+                </div>
+              </div>
+            </sc-if>
+
+            <!-- PLOTTER: conveyor beds -->
+            <sc-if value="{{isPlotter}}" hint-placeholder-val="{{false}}">
+              <div style="width: 100%; max-width: 1180px; display: flex; flex-direction: column; gap: 14px">
+                <div style="display: flex; gap: 16px; align-items: flex-start">
+                  <sc-for list="{{beds}}" as="b" hint-placeholder-count="3">
+                    <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px">
+                      <span style="font-weight: 600; color: {{b.fg}}">{{b.l}}</span>
+                      <div style="position: relative; aspect-ratio: 1.6; border-radius: 4px; background-color: #FFFFFF; box-shadow: 0 0 0 {{b.ring}} {{b.bd}}; background-image: linear-gradient(#F1F2F4 1px, transparent 1px), linear-gradient(90deg, #F1F2F4 1px, transparent 1px); background-size: 10% 16%">
+                        <sc-if value="{{sheetV.on}}" hint-placeholder-val="{{false}}">
+                          <span aria-hidden="true" style="position: absolute; left: {{sheetV.left}}; top: {{sheetV.top}}; width: {{sheetV.w}}; height: {{sheetV.h}}; background: #F7F8FA; box-shadow: 0 0 0 1px #AEB5C0"></span>
+                        </sc-if>
+                        <sc-for list="{{b.parts}}" as="p" hint-placeholder-count="6">
+                          <span aria-hidden="true" style="position: absolute; left: {{p.x}}%; top: {{p.y}}%; width: {{p.w}}%; height: {{p.h}}%; box-sizing: border-box; border: 2px {{p.st}} {{p.c}}; background: {{p.fill}}; border-radius: 2px"></span>
+                        </sc-for>
+                        <sc-if value="{{sheetV.on}}" hint-placeholder-val="{{false}}">
+                          <span onPointerDown="{{sheetV.down}}" onPointerMove="{{sheetV.move}}" onPointerUp="{{sheetV.up}}" aria-label="{{sheetV.label}}" style="position: absolute; left: {{sheetV.left}}; top: {{sheetV.top}}; width: {{sheetV.w}}; height: {{sheetV.h}}; cursor: move; touch-action: none"></span>
+                        </sc-if>
+                        <sc-if value="{{b.now}}" hint-placeholder-val="{{false}}">
+                          <span aria-hidden="true" style="position: absolute; left: -6px; top: -6px; width: 12px; height: 12px; border-radius: 50%; background: #FFFFFF; box-shadow: 0 0 0 2px {{accent}}"></span>
+                        </sc-if>
+                      </div>
+                    </div>
+                  </sc-for>
+                  <button aria-label="Add bed" style="flex: none; width: 56px; height: 140px; margin-top: 26px; border: 1.5px dashed #AEB5C0; border-radius: 8px; background: transparent; color: #5B6370; cursor: pointer; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; font-size: 12px">
+                    <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.plus}}"></path></svg>Bed
+                  </button>
+                </div>
+              </div>
+            </sc-if>
+          </div>
+        </div>
+
+        <!-- canvas footer -->
+        <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 6px 10px; background: #FFFFFF; border-top: 1px solid #E1E4E8">
+          <div style="display: flex; align-items: center; border: 1px solid #D5D9DF; border-radius: 8px">
+            <button class="ib" aria-label="Zoom out" style="width: 32px; height: 30px"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.minus}}"></path></svg></button>
+            <span class="mono" style="min-width: 44px; text-align: center; font-size: 12px">{{zoom}}</span>
+            <button class="ib" aria-label="Zoom in" style="width: 32px; height: 30px"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.plus}}"></path></svg></button>
+          </div>
+          <button class="tb" style="height: 32px">Fit</button>
+          <span class="mono lbl">{{cursor}}</span>
+          <span style="flex: 1"></span>
+          <span class="lbl">Snap</span>
+          <sc-for list="{{snaps}}" as="s" hint-placeholder-count="3">
+            <button aria-pressed="{{s.on}}" style="height: 28px; padding: 0 10px; border-radius: 14px; border: 1px solid {{s.bd}}; background: {{s.bg}}; color: {{s.fg}}; cursor: pointer; font-size: 12px">{{s.l}}</button>
+          </sc-for>
+        </div>
+      </div>
+    </main>
+
+    <!-- ===== Right dock ===== -->
+    <aside aria-label="Job settings" style="flex: 1 1 340px; min-width: 0; background: #FFFFFF; border-left: 1px solid #E1E4E8; display: flex; flex-direction: column">
+      <div role="tablist" aria-label="Panels" style="display: flex; gap: 2px; padding: 4px 10px 0; border-bottom: 1px solid #E1E4E8">
+        <sc-for list="{{tabs}}" as="t" hint-placeholder-count="4">
+          <button role="tab" aria-selected="{{t.on}}" onClick="{{t.pick}}" style="display: inline-flex; align-items: center; gap: 6px; height: 40px; padding: 0 12px; border: 0; background: transparent; border-bottom: 2px solid {{t.bd}}; color: {{t.fg}}; font-weight: {{t.w}}; cursor: pointer">
+            {{t.l}}
+            <sc-if value="{{t.badge}}" hint-placeholder-val="{{false}}"><span style="min-width: 18px; height: 18px; padding: 0 5px; box-sizing: border-box; border-radius: 9px; background: #E1E4E8; color: #3A414C; font-size: 11px; display: inline-flex; align-items: center; justify-content: center">{{t.badge}}</span></sc-if>
+          </button>
+        </sc-for>
+      </div>
+
+      <sc-if value="{{tabProcesses}}" hint-placeholder-val="{{true}}">
+      <div style="padding: 14px; display: flex; flex-direction: column; gap: 14px">
+        <!-- material -->
+        <a href="MaterialsDetailed.dc.html" style="display: flex; align-items: center; gap: 12px; width: 100%; box-sizing: border-box; padding: 10px 12px; border: 1px solid #D5D9DF; border-radius: 10px; background: #FFFFFF; text-align: left; text-decoration: none; color: #15181E">
+          <span aria-hidden="true" style="width: 38px; height: 38px; flex: none; border-radius: 8px; background: {{mat.sw}}; box-shadow: inset 0 0 0 1px rgba(21, 24, 30, 0.10)"></span>
+          <span style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px">
+            <span class="lbl">Material</span>
+            <span style="font-weight: 600; font-size: 14px">{{mat.name}}</span>
+            <span class="lbl">{{mat.sub}}</span>
+          </span>
+          <svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="color: #5B6370"><path d="{{icons.chev}}"></path></svg>
+        </a>
+
+        <!-- colour list -->
+        <div style="display: flex; flex-direction: column; gap: 8px">
+          <div style="display: flex; justify-content: space-between; align-items: baseline">
+            <span style="font-weight: 600; font-size: 14px">Processes</span>
+            <span class="lbl">{{coloursUsed}}</span>
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 4px">
+            <sc-for list="{{colours}}" as="c" hint-placeholder-count="4">
+              <div style="display: flex; align-items: center; border-radius: 8px; background: {{c.bg}}; box-shadow: inset 0 0 0 1px {{c.bd}}">
+                <button onClick="{{c.pick}}" aria-pressed="{{c.on}}" style="flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; padding: 9px 4px 9px 10px; border: 0; background: transparent; cursor: pointer; text-align: left">
+                  <span style="display: flex; gap: 3px; flex: none; min-width: 18px">
+                    <sc-for list="{{c.chips}}" as="k" hint-placeholder-count="1"><span class="mono" title="{{k.title}}" style="width: 18px; height: 18px; border-radius: 4px; background: {{k.hex}}; color: {{k.fg}}; font-size: 10px; font-weight: 500; display: inline-flex; align-items: center; justify-content: center; box-shadow: inset 0 0 0 1px rgba(21, 24, 30, 0.18)">{{k.n}}</span></sc-for>
+                    <sc-if value="{{c.none}}" hint-placeholder-val="{{false}}"><span role="img" aria-label="No colour" style="width: 18px; height: 18px; box-sizing: border-box; border-radius: 4px; border: 1.5px dashed #AEB5C0"></span></sc-if>
+                  </span>
+                  <span style="flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.3">
+                    <span style="display: flex; align-items: center; gap: 6px"><span style="font-weight: 500">{{c.name}}</span><sc-if value="{{c.badge}}" hint-placeholder-val="{{false}}"><span style="height: 18px; padding: 0 6px; border-radius: 4px; font-size: 11px; font-weight: 600; display: inline-flex; align-items: center; background: {{c.badgeBg}}; color: {{c.badgeFg}}">{{c.badge}}</span></sc-if></span>
+                    <span class="lbl">{{c.proc}}</span>
+                  </span>
+                  <sc-if value="{{c.dashOn}}" hint-placeholder-val="{{false}}">
+                    <svg width="22" height="8" role="img" aria-label="Dashed"><line x1="0" y1="4" x2="22" y2="4" stroke="#3A414C" stroke-width="2" stroke-dasharray="5 3"></line></svg>
+                  </sc-if>
+                  <span class="mono" style="font-size: 12px; color: #3A414C; white-space: nowrap">{{c.summary}}</span>
+                </button>
+                <button class="ib" aria-label="Output on for this colour" title="Output on" style="color: #5B6370"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.eye}}"></path></svg></button>
+              </div>
+            </sc-for>
+          </div>
+          <button class="tb" style="justify-content: center"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.plus}}"></path></svg>New process</button>
+        </div>
+
+        <!-- selected colour -->
+        <section aria-label="Selected colour settings" style="border: 1px solid #E1E4E8; border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 14px">
+          <div style="display: flex; align-items: center; gap: 10px">
+            <span style="flex: 1; min-width: 0; font-weight: 600; font-size: 14px">{{sel.name}}</span>
+            <span style="height: 22px; padding: 0 8px; border-radius: 5px; font-size: 11px; font-weight: 600; display: inline-flex; align-items: center; background: {{sel.statusBg}}; color: {{sel.statusFg}}">{{sel.status}}</span>
+          </div>
+
+          <div style="display: flex; flex-direction: column; gap: 6px">
+            <span class="lbl">Colours (ACI)</span>
+            <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 6px">
+              <sc-for list="{{sel.chips}}" as="k" hint-placeholder-count="1">
+                <span class="mono" title="{{k.title}}" style="width: 26px; height: 26px; border-radius: 6px; background: {{k.hex}}; color: {{k.fg}}; font-size: 11px; font-weight: 500; display: inline-flex; align-items: center; justify-content: center; box-shadow: inset 0 0 0 1px rgba(21, 24, 30, 0.18)">{{k.n}}</span>
+              </sc-for>
+              <sc-if value="{{sel.none}}" hint-placeholder-val="{{false}}"><span style="height: 26px; padding: 0 8px; box-sizing: border-box; border-radius: 6px; border: 1.5px dashed #AEB5C0; display: inline-flex; align-items: center; color: #5B6370; font-size: 12px">None</span></sc-if>
+              <button class="tb" onClick="{{togglePicker}}" aria-expanded="{{pickerOpen}}" style="height: 28px; padding: 0 10px; font-size: 12px; border-color: {{pickerBd}}">Edit</button>
+            </div>
+            <sc-if value="{{pickerOpen}}" hint-placeholder-val="{{false}}">
+              <div role="group" aria-label="Assign colours" style="display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; padding: 8px; border: 1px solid #E1E4E8; border-radius: 10px; background: #FAFAFB">
+                <sc-for list="{{aci}}" as="a" hint-placeholder-count="9">
+                  <button aria-pressed="{{a.on}}" onClick="{{a.toggle}}" title="{{a.title}}" aria-label="{{a.title}}" style="display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 6px 2px; border: 0; border-radius: 8px; background: {{a.bg}}; box-shadow: {{a.ring}}; cursor: pointer">
+                    <span aria-hidden="true" style="width: 24px; height: 24px; border-radius: 5px; background: {{a.hex}}; box-shadow: inset 0 0 0 1px rgba(21, 24, 30, 0.18)"></span>
+                    <span class="mono" style="display: inline-flex; align-items: center; gap: 3px; font-size: 11px; color: #3A414C">{{a.n}}<sc-if value="{{a.taken}}" hint-placeholder-val="{{false}}"><span aria-hidden="true" style="width: 5px; height: 5px; border-radius: 50%; background: #8A919C"></span></sc-if></span>
+                  </button>
+                </sc-for>
+                <button class="tb" style="height: auto; justify-content: center; font-size: 12px; padding: 6px 2px">ACI #</button>
+              </div>
+            </sc-if>
+          </div>
+
+          <div style="display: flex; flex-direction: column; gap: 6px">
+            <span class="lbl">{{sel.selectLabel}}</span>
+            <button class="tb" onClick="{{sel.toggleSelect}}" aria-haspopup="listbox" aria-expanded="{{sel.selectOpen}}" style="width: 100%; justify-content: space-between">{{sel.selectValue}}<svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="color: #5B6370"><path d="{{icons.chev}}"></path></svg></button>
+            <sc-if value="{{sel.selectOpen}}" hint-placeholder-val="{{false}}">
+              <div role="listbox" aria-label="{{sel.selectLabel}}" style="display: flex; flex-direction: column; padding: 4px; border: 1px solid #E1E4E8; border-radius: 8px; background: #FFFFFF; box-shadow: 0 8px 20px rgba(21, 24, 30, 0.10)">
+                <sc-for list="{{sel.selectOpts}}" as="o" hint-placeholder-count="3">
+                  <button role="option" aria-selected="{{o.on}}" onClick="{{o.pick}}" style="display: flex; align-items: center; justify-content: space-between; height: 32px; padding: 0 10px; border: 0; border-radius: 6px; background: {{o.bg}}; cursor: pointer; text-align: left">{{o.l}}<sc-if value="{{o.on}}" hint-placeholder-val="{{false}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width: 16px; height: 16px; color: {{accent}}"><path d="{{icons.check}}"></path></svg></sc-if></button>
+                </sc-for>
+              </div>
+            </sc-if>
+          </div>
+
+          <sc-for list="{{sel.sliders}}" as="s" hint-placeholder-count="2">
+            <label style="display: flex; flex-direction: column; gap: 8px">
+              <span style="display: flex; justify-content: space-between; align-items: baseline"><span>{{s.l}}</span><span class="mono" style="font-weight: 500">{{s.v}} {{s.u}}</span></span>
+              <input type="range" min="{{s.min}}" max="{{s.max}}" step="{{s.step}}" value="{{s.v}}" onChange="{{s.set}}" style="accent-color: {{accent}}">
+            </label>
+          </sc-for>
+
+          <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px">
+            <sc-for list="{{sel.nums}}" as="n" hint-placeholder-count="4">
+              <label style="display: flex; flex-direction: column; gap: 6px; min-width: 0">
+                <span class="lbl">{{n.l}}</span>
+                <span class="fld"><input type="text" value="{{n.v}}" onChange="{{noop}}"><span class="lbl">{{n.u}}</span></span>
+              </label>
+            </sc-for>
+          </div>
+
+          <sc-if value="{{isLaser}}" hint-placeholder-val="{{true}}">
+            <button onClick="{{toggleAdv}}" aria-expanded="{{advOpen}}" style="align-self: flex-start; display: inline-flex; align-items: center; gap: 4px; height: 30px; padding: 0; border: 0; background: transparent; color: {{accent}}; font-weight: 500; cursor: pointer">
+              <svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="transform: rotate({{advRot}})"><path d="{{icons.chev}}"></path></svg>Advanced
+            </button>
+            <sc-if value="{{advOpen}}" hint-placeholder-val="{{false}}">
+              <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px">
+                <sc-for list="{{sel.adv}}" as="f" hint-placeholder-count="4">
+                  <sc-if value="{{f.isText}}" hint-placeholder-val="{{true}}">
+                    <label style="display: flex; flex-direction: column; gap: 6px; min-width: 0">
+                      <span class="lbl">{{f.l}}</span>
+                      <span class="fld"><input type="text" value="{{f.v}}" onChange="{{noop}}"><span class="lbl">{{f.u}}</span></span>
+                    </label>
+                  </sc-if>
+                  <sc-if value="{{f.isPick}}" hint-placeholder-val="{{false}}">
+                    <div style="display: flex; flex-direction: column; gap: 6px; min-width: 0">
+                      <span class="lbl">{{f.l}}</span>
+                      <button class="tb" onClick="{{f.toggle}}" aria-haspopup="listbox" aria-expanded="{{f.open}}" aria-label="{{f.l}}: {{f.v}}" style="height: 34px; width: 100%; justify-content: space-between; padding: 0 10px">{{f.v}}<svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="color: #5B6370"><path d="{{icons.chev}}"></path></svg></button>
+                      <sc-if value="{{f.open}}" hint-placeholder-val="{{false}}">
+                        <div role="listbox" aria-label="{{f.l}}" style="display: flex; flex-direction: column; padding: 4px; border: 1px solid #E1E4E8; border-radius: 8px; background: #FFFFFF; box-shadow: 0 8px 20px rgba(21, 24, 30, 0.10)">
+                          <sc-for list="{{f.opts}}" as="o" hint-placeholder-count="3">
+                            <button role="option" aria-selected="{{o.on}}" onClick="{{o.pick}}" style="display: flex; align-items: center; justify-content: space-between; min-height: 30px; padding: 0 8px; border: 0; border-radius: 6px; background: {{o.bg}}; cursor: pointer; text-align: left">{{o.l}}<sc-if value="{{o.on}}" hint-placeholder-val="{{false}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width: 15px; height: 15px; color: {{accent}}"><path d="{{icons.check}}"></path></svg></sc-if></button>
+                          </sc-for>
+                        </div>
+                      </sc-if>
+                    </div>
+                  </sc-if>
+                  <sc-if value="{{f.isCheck}}" hint-placeholder-val="{{false}}">
+                    <label style="display: flex; align-items: center; gap: 8px; align-self: end; height: 34px">
+                      <input type="checkbox" onChange="{{noop}}" style="width: 18px; height: 18px; margin: 0; accent-color: {{accent}}">
+                      <span>{{f.l}}</span>
+                    </label>
+                  </sc-if>
+                </sc-for>
+              </div>
+            </sc-if>
+          </sc-if>
+
+          <sc-if value="{{sel.showLinks}}" hint-placeholder-val="{{true}}">
+          <div style="height: 1px; background: #E1E4E8"></div>
+
+          <div style="display: flex; flex-direction: column; gap: 10px">
+            <div style="display: flex; align-items: center; justify-content: space-between">
+              <span id="dash-label" style="font-weight: 500">{{sel.dashTitle}}</span>
+              <button role="switch" aria-checked="{{sel.dashOn}}" aria-labelledby="dash-label" onClick="{{toggleDash}}" style="width: 44px; height: 26px; flex: none; border-radius: 13px; border: 0; padding: 3px; box-sizing: border-box; background: {{sel.swBg}}; cursor: pointer; display: flex; justify-content: {{sel.swJ}}">
+                <span style="width: 20px; height: 20px; border-radius: 50%; background: #FFFFFF; box-shadow: 0 1px 2px rgba(21, 24, 30, 0.3)"></span>
+              </button>
+            </div>
+            <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; opacity: {{sel.dashOpacity}}">
+              <label style="display: flex; flex-direction: column; gap: 6px; min-width: 0">
+                <span class="lbl">{{sel.dashLenLabel}}</span>
+                <span class="fld"><input type="text" value="{{sel.dashLen}}" onChange="{{noop}}"><span class="lbl">mm</span></span>
+              </label>
+              <label style="display: flex; flex-direction: column; gap: 6px; min-width: 0">
+                <span class="lbl">{{sel.gapLabel}}</span>
+                <span class="fld"><input type="text" value="{{sel.gapLen}}" onChange="{{noop}}"><span class="lbl">mm</span></span>
+              </label>
+            </div>
+            <sc-if value="{{isLaser}}" hint-placeholder-val="{{true}}">
+              <label style="display: flex; flex-direction: column; gap: 6px; min-width: 0; opacity: {{sel.dashOpacity}}">
+                <span class="lbl">Power ratio</span>
+                <span class="fld"><input type="text" value="{{sel.ratio}}" onChange="{{noop}}"><span class="lbl">%</span></span>
+              </label>
+            </sc-if>
+            <svg width="100%" height="12" viewBox="0 0 300 12" preserveAspectRatio="none" role="img" aria-label="{{sel.previewLabel}}"><line x1="1" y1="6" x2="299" y2="6" stroke="{{sel.c}}" stroke-width="3" stroke-dasharray="{{sel.dashArray}}"></line></svg>
+          </div>
+          </sc-if>
+
+          <div style="height: 1px; background: #E1E4E8"></div>
+
+          <div style="display: flex; flex-direction: column; gap: 8px">
+            <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px">
+              <button class="tb" onClick="{{saveJob}}" disabled="{{sel.clean}}" style="justify-content: center; opacity: {{sel.saveOpacity}}; cursor: {{sel.saveCursor}}">Save for this job</button>
+              <button onClick="{{saveGlobal}}" disabled="{{sel.clean}}" style="height: 36px; border: 0; border-radius: 8px; background: {{accent}}; color: #FFFFFF; font-weight: 600; opacity: {{sel.saveOpacity}}; cursor: {{sel.saveCursor}}">Save to material</button>
+            </div>
+            <sc-if value="{{sel.dirty}}" hint-placeholder-val="{{false}}">
+              <button class="tb" onClick="{{resetEdit}}" style="justify-content: center">Discard changes</button>
+            </sc-if>
+            <sc-if value="{{sel.showRevert}}" hint-placeholder-val="{{false}}">
+              <button class="tb" onClick="{{revertJob}}" style="justify-content: center">Revert to material preset</button>
+            </sc-if>
+          </div>
+        </section>
+      </div>
+      </sc-if>
+
+      <!-- objects -->
+      <sc-if value="{{tabObjects}}" hint-placeholder-val="{{false}}">
+        <div style="padding: 14px; display: flex; flex-direction: column; gap: 12px">
+          <div style="display: flex; justify-content: space-between; align-items: baseline">
+            <span style="font-weight: 600; font-size: 14px">Objects</span>
+            <span class="lbl">{{objCount}}</span>
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 2px">
+            <sc-for list="{{objects}}" as="o" hint-placeholder-count="6">
+              <button onClick="{{o.pick}}" aria-pressed="{{o.on}}" style="display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 10px; border: 0; border-radius: 8px; background: {{o.bg}}; box-shadow: inset 0 0 0 1px {{o.bd}}; cursor: pointer; text-align: left">
+                <span style="display: flex; gap: 3px; min-width: 32px">
+                  <sc-for list="{{o.chips}}" as="k" hint-placeholder-count="1"><span class="mono" title="{{k.title}}" style="width: 16px; height: 16px; border-radius: 4px; background: {{k.hex}}; color: {{k.fg}}; font-size: 9px; font-weight: 500; display: inline-flex; align-items: center; justify-content: center; box-shadow: inset 0 0 0 1px rgba(21, 24, 30, 0.18)">{{k.n}}</span></sc-for>
+                </span>
+                <span style="flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.3">
+                  <span style="font-weight: 500">{{o.name}}</span>
+                  <span class="mono lbl">{{o.meta}}</span>
+                </span>
+              </button>
+            </sc-for>
+          </div>
+          <section aria-label="Object properties" style="border: 1px solid #E1E4E8; border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 12px">
+            <span style="font-weight: 600; font-size: 14px">{{objName}}</span>
+            <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px">
+              <sc-for list="{{objProps}}" as="p" hint-placeholder-count="6">
+                <label style="display: flex; flex-direction: column; gap: 6px; min-width: 0">
+                  <span class="lbl">{{p.l}}</span>
+                  <span class="fld"><input type="text" value="{{p.v}}" onChange="{{noop}}"><span class="lbl">{{p.u}}</span></span>
+                </label>
+              </sc-for>
+            </div>
+            <div style="display: flex; gap: 8px">
+              <button class="tb" style="flex: 1; justify-content: center">Lock</button>
+              <button class="tb" style="flex: 1; justify-content: center">Hide</button>
+              <button class="tb" style="flex: 1; justify-content: center">Delete</button>
+            </div>
+          </section>
+        </div>
+      </sc-if>
+
+      <!-- move -->
+      <sc-if value="{{tabMove}}" hint-placeholder-val="{{false}}">
+        <div style="padding: 14px; display: flex; flex-direction: column; gap: 14px">
+          <section aria-label="Machine position" style="border: 1px solid #E1E4E8; border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 10px">
+            <span class="lbl">Machine position</span>
+            <div style="display: flex; gap: 20px">
+              <sc-for list="{{pos}}" as="p" hint-placeholder-count="2">
+                <div style="display: flex; flex-direction: column; gap: 2px"><span class="lbl">{{p.l}}</span><span class="mono" style="font-size: 18px; font-weight: 500">{{p.v}}</span></div>
+              </sc-for>
+            </div>
+          </section>
+          <section aria-label="Jog" style="border: 1px solid #E1E4E8; border-radius: 12px; padding: 14px; display: flex; flex-direction: column; align-items: center; gap: 12px">
+            <div style="display: grid; grid-template-columns: repeat(3, 56px); grid-template-rows: repeat(3, 56px); gap: 6px">
+              <span></span>
+              <button class="tb" aria-label="Jog Y plus" style="height: 56px; justify-content: center; padding: 0"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.up}}"></path></svg></button>
+              <span></span>
+              <button class="tb" aria-label="Jog X minus" style="height: 56px; justify-content: center; padding: 0"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.left}}"></path></svg></button>
+              <button class="tb" aria-label="Home" style="height: 56px; justify-content: center; padding: 0"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.home}}"></path></svg></button>
+              <button class="tb" aria-label="Jog X plus" style="height: 56px; justify-content: center; padding: 0"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.right}}"></path></svg></button>
+              <span></span>
+              <button class="tb" aria-label="Jog Y minus" style="height: 56px; justify-content: center; padding: 0"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.down}}"></path></svg></button>
+              <span></span>
+            </div>
+            <div role="radiogroup" aria-label="Step size" style="display: flex; padding: 3px; gap: 2px; background: #F0F1F4; border-radius: 8px">
+              <sc-for list="{{steps}}" as="s" hint-placeholder-count="4">
+                <button role="radio" aria-checked="{{s.on}}" onClick="{{s.pick}}" class="mono" style="height: 28px; padding: 0 10px; border: 0; border-radius: 6px; background: {{s.bg}}; box-shadow: {{s.sh}}; color: {{s.fg}}; cursor: pointer; font-size: 12px">{{s.l}}</button>
+              </sc-for>
+              <span class="lbl" style="align-self: center; padding: 0 6px">mm</span>
+            </div>
+          </section>
+          <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px">
+            <sc-for list="{{moveActions}}" as="a" hint-placeholder-count="4">
+              <button class="tb" style="justify-content: center">{{a}}</button>
+            </sc-for>
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 6px">
+            <sc-for list="{{moveToggles}}" as="t" hint-placeholder-count="2">
+              <div style="display: flex; align-items: center; justify-content: space-between; min-height: 34px">
+                <span>{{t.l}}</span>
+                <button role="switch" aria-checked="{{t.on}}" aria-label="{{t.l}}" onClick="{{t.toggle}}" style="width: 44px; height: 26px; border: 0; border-radius: 13px; padding: 3px; box-sizing: border-box; background: {{t.swBg}}; display: flex; justify-content: {{t.swJ}}; cursor: pointer">
+                  <span style="width: 20px; height: 20px; border-radius: 50%; background: #FFFFFF; box-shadow: 0 1px 2px rgba(21, 24, 30, 0.3)"></span>
+                </button>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- queue -->
+      <sc-if value="{{tabQueue}}" hint-placeholder-val="{{false}}">
+        <div style="padding: 14px; display: flex; flex-direction: column; gap: 10px">
+          <div style="display: flex; justify-content: space-between; align-items: baseline">
+            <span style="font-weight: 600; font-size: 14px">Queue</span>
+            <span class="lbl">{{queueCount}}</span>
+          </div>
+          <sc-for list="{{queue}}" as="q" hint-placeholder-count="3">
+            <div style="display: flex; align-items: center; gap: 10px; padding: 10px; border: 1px solid #E1E4E8; border-radius: 10px; background: {{q.bg}}">
+              <span class="mono" style="width: 26px; height: 26px; flex: none; border-radius: 6px; background: #F0F1F4; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 500">{{q.n}}</span>
+              <span style="flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.3">
+                <span style="font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{q.name}}</span>
+                <span class="lbl">{{q.meta}}</span>
+              </span>
+              <span style="height: 22px; padding: 0 8px; border-radius: 11px; display: inline-flex; align-items: center; font-size: 11px; font-weight: 600; background: {{q.sbg}}; color: {{q.sfg}}">{{q.status}}</span>
+              <div style="display: flex; flex-direction: column">
+                <button class="ib" onClick="{{q.up}}" aria-label="Move {{q.name}} up" style="width: 28px; height: 22px"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width: 14px; height: 14px"><path d="{{icons.chevU}}"></path></svg></button>
+                <button class="ib" onClick="{{q.down}}" aria-label="Move {{q.name}} down" style="width: 28px; height: 22px"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width: 14px; height: 14px"><path d="{{icons.chev}}"></path></svg></button>
+              </div>
+            </div>
+          </sc-for>
+          <div style="display: flex; gap: 8px; padding-top: 4px">
+            <button class="tb" style="flex: 1; justify-content: center"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.plus}}"></path></svg>Add current job</button>
+            <button style="flex: 1; height: 36px; border: 0; border-radius: 8px; background: {{accent}}; color: #FFFFFF; font-weight: 600; cursor: pointer">Start queue</button>
+          </div>
+        </div>
+      </sc-if>
+    </aside>
+  </div><footer style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; padding: 10px 14px; background: #FFFFFF; border-top: 1px solid #E1E4E8">
+    <div style="display: flex; flex-direction: column; gap: 1px">
+      <span style="font-weight: 600; font-size: 14px">{{est}}</span>
+      <span class="lbl">{{jobSummary}}</span>
+    </div>
+    <div style="display: flex; flex-wrap: wrap; gap: 6px">
+      <sc-for list="{{checks}}" as="k" hint-placeholder-count="3">
+        <span style="display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: 14px; background: #EDF7F1; color: #1B6B43; font-size: 12px; font-weight: 500">
+          <svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width: 14px; height: 14px"><path d="{{icons.check}}"></path></svg>{{k}}
+        </span>
+      </sc-for>
+    </div>
+    <span style="flex: 1"></span>
+    <button class="tb" style="height: 42px"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.frame}}"></path></svg>Frame</button>
+    <a class="tb" href="SimulationDetailed.dc.html" style="height: 42px"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.sim}}"></path></svg>Simulate</a>
+    <a class="tb" href="../HMI/HMI.dc.html" style="height: 42px"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.queue}}"></path></svg>Add to queue</a>
+    <a href="../HMI/HMI.dc.html" style="display: inline-flex; align-items: center; gap: 8px; height: 42px; padding: 0 22px; border: 0; border-radius: 8px; background: {{accent}}; color: #FFFFFF; font-weight: 600; font-size: 14px; text-decoration: none; cursor: pointer"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.send}}"></path></svg>Send to machine</a>
+  </footer>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#2457D6","options":["#2457D6","#0B7F75","#C2410C","#15181E"]},"startMachine":{"editor":"enum","options":["laser","plotter"],"default":"laser"},"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  state = {
+    machine: null,
+    menu: false,
+    reg: false,
+    fill: false,
+    fillMode: 'max',
+    fillArea: 'sheet',
+    fillCustom: { w: '300', h: '200' },
+    sheetOpen: false,
+    saveOpen: false,
+    saveName: 'batch-14 · window signs',
+    saveFmt: 'cjob',
+    savePresets: true,
+    savedAs: null,
+    sheet: {
+      laser: { on: true, w: 520, h: 386, x: 49, y: 46 },
+      plotter: { on: false, w: 1220, h: 800, x: 190, y: 100 }
+    },
+    regMode: 'linear',
+    sel: { laser: 1, plotter: 1 },
+    dash: { laser: [false, true, false, false, false], plotter: [false, true, false, false, false] },
+    assign: { laser: [[1, 6], [3], [5], [7], []], plotter: [[1], [6], [5], [3], [7, 8]] },
+    picker: false,
+    adv: false,
+    bar: null,
+    sub: null,
+    tab: 'Processes',
+    procOpen: false,
+    pv: {},
+    openPick: null,
+    objSel: 0,
+    step: '10',
+    mt: { air: true, ptr: false, vac: true },
+    qOrder: ['a', 'b', 'c', 'd'],
+    edit: { laser: {}, plotter: {} },
+    job: { laser: {}, plotter: {} },
+    global: { laser: {}, plotter: {} }
+  };
+
+  renderVals() {
+    const accent = this.props.accent ?? '#2457D6';
+    const m = this.state.machine ?? this.props.startMachine ?? 'laser';
+    const isLaser = m === 'laser';
+    const soft = (h, t) => {
+      const n = parseInt(String(h).slice(1, 7), 16);
+      if (Number.isNaN(n)) return '#EEF2FC';
+      const mix = (c) => Math.round(c + (255 - c) * t);
+      return 'rgb(' + mix(n >> 16) + ', ' + mix((n >> 8) & 255) + ', ' + mix(n & 255) + ')';
+    };
+    const accentSoft = soft(accent, 0.9);
+    const noop = () => {};
+
+    const icons = {
+      logo: 'M4 20 20 4 M13 4h7v7',
+      import: 'M12 3v12 M7 10l5 5 5-5 M4 20h16',
+      undo: 'M9 14 4 9l5-5 M4 9h10.5a5.5 5.5 0 0 1 0 11H11',
+      redo: 'M15 14l5-5-5-5 M20 9H9.5a5.5 5.5 0 0 0 0 11H13',
+      group: 'M3 3h8v8H3z M13 13h8v8h-8z M7 11v4h6 M11 7h4v6',
+      alignL: 'M4 3v18 M8 6h11v5H8z M8 14h7v5H8z',
+      alignC: 'M12 3v18 M6 6h12v5H6z M8 14h8v5H8z',
+      distribute: 'M4 3v18 M20 3v18 M9 7h6v10H9z',
+      weld: 'M4 4h10v10H4z M10 10h10v10H10z',
+      offset: 'M8 8h8v8H8z M4 4h16v16H4z',
+      array: 'M4 4h6v6H4z M14 4h6v6h-6z M4 14h6v6H4z M14 14h6v6h-6z',
+      select: 'M5 3l14 7.5-6.2 1.7L10 18.5z',
+      node: 'M5 19C8 6 16 6 19 19 M3.5 17.5h3v3h-3z M17.5 17.5h3v3h-3z M10.5 6.5h3v3h-3z',
+      line: 'M5 19 19 5',
+      rect: 'M4 6h16v12H4z',
+      ellipse: 'M21 12a9 6.5 0 1 1-18 0a9 6.5 0 1 1 18 0z',
+      polygon: 'M12 3l8.5 6.2-3.2 9.8H6.7L3.5 9.2z',
+      text: 'M5 7V5h14v2 M12 5v14 M9 19h6',
+      image: 'M4 5h16v14H4z M4 16l5-5 4 4 3-3 4 4 M15.5 9.5h.01',
+      measure: 'M3 16.5 16.5 3 21 7.5 7.5 21z M7 12.5l2 2 M10 9.5l2 2 M13 6.5l2 2',
+      chev: 'M6 9l6 6 6-6',
+      check: 'M5 12.5l4.5 4.5L19 7',
+      eye: 'M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z M12 9.5a2.5 2.5 0 1 0 0 5a2.5 2.5 0 1 0 0-5z',
+      reg: 'M12 2v4 M12 18v4 M2 12h4 M18 12h4 M12 8.5a3.5 3.5 0 1 0 0 7a3.5 3.5 0 1 0 0-7z',
+      focus: 'M3 8V3h5 M16 3h5v5 M21 16v5h-5 M8 21H3v-5 M12 9v6 M9 12h6',
+      rotary: 'M20 12a8 8 0 1 1-2.34-5.66 M20 4v5h-5',
+      heads: 'M9 3h6v5H9z M12 8v7 M8.5 15h7L12 21z',
+      conveyor: 'M3 15h18 M3 19h18 M7 15V9h10v6 M5 17h.01 M19 17h.01',
+      nest: 'M3 3h8v11H3z M13 3h8v6h-8z M13 11h8v10h-8z M3 16h8v5H3z',
+      bridges: 'M3 12h6 M15 12h6 M9 8v8 M15 8v8',
+      frame: 'M4 9V4h5 M15 4h5v5 M20 15v5h-5 M9 20H4v-5',
+      sim: 'M3 12h4l3-7 4 14 3-7h4',
+      queue: 'M4 6h16 M4 12h16 M4 18h10',
+      play: 'M7 4.5v15l12.5-7.5z',
+      minus: 'M5 12h14',
+      plus: 'M12 5v14 M5 12h14',
+      info: 'M12 3a9 9 0 1 0 0 18a9 9 0 1 0 0-18z M12 11v5 M12 8h.01',
+      arrowR: 'M4 12h16 M14 6l6 6-6 6',
+      chevR: 'M9 6l6 6-6 6',
+      chevU: 'M6 15l6-6 6 6',
+      up: 'M12 19V5 M6 11l6-6 6 6',
+      down: 'M12 5v14 M6 13l6 6 6-6',
+      left: 'M19 12H5 M11 6l-6 6 6 6',
+      right: 'M5 12h14 M13 6l6 6-6 6',
+      home: 'M4 11l8-7 8 7 M6 9.5V20h12V9.5',
+      sheet: 'M3 5h18v14H3z M7 9h6v6H7z',
+      download: 'M12 3v12 M7 10l5 5 5-5 M4 20h16',
+      send: 'M4 12l16-8-6 16-3-7z'
+    };
+
+    const MACH = {
+      laser: { name: 'Trotec Speedy 360', sub: 'CO2 80 W · print & cut camera', type: 'LASER', tbg: '#15181E', toolsLabel: 'Trotec' },
+      plotter: { name: 'Flatbed 1', sub: 'Ruida · 4 heads · conveyor', type: 'PLOTTER', tbg: '#0B7F75', toolsLabel: 'Flatbed' }
+    };
+    const mach = MACH[m];
+    const machines = ['laser', 'plotter'].map((k) => ({
+      ...MACH[k], on: k === m, bg: k === m ? accentSoft : 'transparent',
+      pick: () => this.setState({ machine: k, menu: false, reg: false })
+    }));
+
+    // registration marks
+    const DOT = { tl: { x: 4, y: 4 }, tr: { x: 34, y: 4 }, bl: { x: 4, y: 20 }, br: { x: 34, y: 20 } };
+    const SHEET = { tl: { x: 3, y: 4 }, tr: { x: 97, y: 4 }, bl: { x: 3, y: 96 }, br: { x: 97, y: 96 } };
+    const MODES = [
+      { id: 'off', l: 'Off', n: 'No marks', dots: [] },
+      { id: 'pos', l: 'Position & rotation', n: '2 dots', dots: ['tl', 'br'] },
+      { id: 'linear', l: 'Full linear', n: '3 dots', dots: ['tl', 'tr', 'bl'] },
+      { id: 'nonlinear', l: 'Non-linear', n: '3 dots', dots: ['tl', 'tr', 'bl'] }
+    ];
+    const mode = MODES.find((x) => x.id === this.state.regMode) || MODES[2];
+    const regModes = MODES.map((x) => ({
+      ...x, on: x.id === mode.id, bg: x.id === mode.id ? accentSoft : 'transparent',
+      dots: x.dots.map((k) => DOT[k]),
+      pick: () => this.setState({ regMode: x.id, reg: false })
+    }));
+    const regLabel = mode.id === 'off' ? 'Off' : mode.l + ' · ' + mode.n;
+
+    // colours
+    const LASER = [
+      { c: '#E5484D', name: 'Cut contour', proc: 'Cut', power: 90, speed: 20, f: '5000', fu: 'Hz', passes: 1, air: 'On', dl: 5, gl: 2 },
+      { c: '#30A46C', name: 'Tear-off line', proc: 'Cut', power: 90, speed: 20, f: '5000', fu: 'Hz', passes: 1, air: 'On', dl: 4, gl: 1 },
+      { c: '#3E63DD', name: 'Engrave outline', proc: 'Engrave', power: 45, speed: 300, f: '500', fu: 'PPI', passes: 1, air: 'Off', dl: 5, gl: 2 },
+      { c: '#15181E', name: 'Engrave fill', proc: 'Engrave', power: 60, speed: 400, f: '500', fu: 'PPI', passes: 1, air: 'Off', dl: 5, gl: 2 },
+      { c: '#5B6370', name: 'Kiss cut', proc: 'Cut', power: 40, speed: 60, f: '5000', fu: 'Hz', passes: 1, air: 'On', dl: 5, gl: 2 }
+    ];
+    const PLOT = [
+      { c: '#E5484D', name: 'Knife through', tool: 'T1 · Knife', speed: 400, passes: 1, dl: 5, gl: 2 },
+      { c: '#F76B15', name: 'Perforate', tool: 'T1 · Knife', speed: 400, passes: 1, dl: 8, gl: 2 },
+      { c: '#3E63DD', name: 'V-cut 45°', tool: 'T2 · V-cut 45°', speed: 250, passes: 1, dl: 5, gl: 2 },
+      { c: '#30A46C', name: 'Crease', tool: 'T3 · Crease wheel', speed: 300, passes: 1, dl: 5, gl: 2 },
+      { c: '#15181E', name: 'Pen', tool: 'T4 · Pen', speed: 500, passes: 1, dl: 5, gl: 2 }
+    ];
+    const base = isLaser ? LASER : PLOT;
+    const ed = this.state.edit[m], jb = this.state.job[m], gl = this.state.global[m];
+    const has = (o) => !!o && Object.keys(o).length > 0;
+    const list = base.map((c, i) => ({ ...c, ...(gl[i] || {}), ...(jb[i] || {}), ...(ed[i] || {}) }));
+    const dashArr = this.state.dash[m];
+    const selIdx = Math.min(this.state.sel[m], list.length - 1);
+
+    // DXF / AutoCAD Color Index
+    const ACI = [
+      { n: 1, name: 'Red', hex: '#FF0000', fg: '#FFFFFF' }, { n: 2, name: 'Yellow', hex: '#FFFF00', fg: '#15181E' },
+      { n: 3, name: 'Green', hex: '#00FF00', fg: '#15181E' }, { n: 4, name: 'Cyan', hex: '#00FFFF', fg: '#15181E' },
+      { n: 5, name: 'Blue', hex: '#0000FF', fg: '#FFFFFF' }, { n: 6, name: 'Magenta', hex: '#FF00FF', fg: '#FFFFFF' },
+      { n: 7, name: 'White / black', hex: '#000000', fg: '#FFFFFF' }, { n: 8, name: 'Grey', hex: '#808080', fg: '#FFFFFF' },
+      { n: 9, name: 'Light grey', hex: '#C0C0C0', fg: '#15181E' }
+    ];
+    const assign = this.state.assign[m];
+    const chipsFor = (i) => (assign[i] || []).map((n) => {
+      const a = ACI[n - 1];
+      return { ...a, title: 'ACI ' + n + ' · ' + a.name };
+    });
+    const ownerOf = (n) => assign.findIndex((l) => l.includes(n));
+    const aci = ACI.map((a) => {
+      const on = (assign[selIdx] || []).includes(a.n);
+      const owner = ownerOf(a.n);
+      const taken = owner >= 0 && owner !== selIdx;
+      return {
+        ...a, on, taken,
+        title: 'ACI ' + a.n + ' · ' + a.name + (taken ? ' · used by ' + list[owner].name : ''),
+        bg: on ? accentSoft : '#FFFFFF',
+        ring: on ? '0 0 0 2px ' + accent : '0 0 0 1px #E1E4E8',
+        toggle: () => this.setState((s) => {
+          const cur = s.assign[m];
+          const had = cur[selIdx].includes(a.n);
+          const next = cur.map((l) => l.filter((x) => x !== a.n));
+          if (!had) next[selIdx] = next[selIdx].concat(a.n).sort((x, y) => x - y);
+          return { assign: { ...s.assign, [m]: next } };
+        })
+      };
+    });
+
+    const colours = list.map((c, i) => {
+      const badge = has(ed[i]) ? 'Edited' : has(jb[i]) ? 'Job' : false;
+      const chips = chipsFor(i);
+      return {
+        chips, none: chips.length === 0,
+        name: c.name, badge,
+        badgeBg: badge === 'Edited' ? '#FFF1DB' : accentSoft,
+        badgeFg: badge === 'Edited' ? '#8A4B00' : accent,
+        proc: isLaser ? c.proc : c.tool,
+        summary: isLaser ? c.power + '% · ' + c.speed + ' mm/s' : c.speed + ' mm/s',
+        dashOn: dashArr[i],
+        on: i === selIdx,
+        bg: i === selIdx ? accentSoft : '#FFFFFF',
+        bd: i === selIdx ? accent : '#E1E4E8',
+        pick: () => this.setState((s) => ({ sel: { ...s.sel, [m]: i }, picker: false }))
+      };
+    });
+    const selChips = chipsFor(selIdx);
+    const sc = list[selIdx];
+    const dashOn = dashArr[selIdx];
+    const dirty = has(ed[selIdx]);
+    const hasJob = has(jb[selIdx]);
+    const setVal = (key) => (e) => {
+      const v = parseFloat(e.target.value);
+      this.setState((s) => {
+        const cur = s.edit[m][selIdx] || {};
+        return { edit: { ...s.edit, [m]: { ...s.edit[m], [selIdx]: { ...cur, [key]: v } } } };
+      });
+    };
+    const clearEdit = (s) => {
+      const e = { ...s.edit[m] };
+      delete e[selIdx];
+      return { ...s.edit, [m]: e };
+    };
+    const saveJob = () => this.setState((s) => ({
+      job: { ...s.job, [m]: { ...s.job[m], [selIdx]: { ...(s.job[m][selIdx] || {}), ...(s.edit[m][selIdx] || {}) } } },
+      edit: clearEdit(s)
+    }));
+    const saveGlobal = () => this.setState((s) => {
+      const j = { ...s.job[m] };
+      const merged = { ...(s.global[m][selIdx] || {}), ...(j[selIdx] || {}), ...(s.edit[m][selIdx] || {}) };
+      delete j[selIdx];
+      return { global: { ...s.global, [m]: { ...s.global[m], [selIdx]: merged } }, job: { ...s.job, [m]: j }, edit: clearEdit(s) };
+    });
+    const resetEdit = () => this.setState((s) => ({ edit: clearEdit(s) }));
+    const revertJob = () => this.setState((s) => {
+      const j = { ...s.job[m] };
+      delete j[selIdx];
+      return { job: { ...s.job, [m]: j }, edit: clearEdit(s) };
+    });
+    const sel = {
+      c: selChips.length ? (selChips[0].n === 7 ? '#15181E' : selChips[0].hex) : '#5B6370',
+      chips: selChips,
+      none: selChips.length === 0,
+      name: sc.name,
+      dirty,
+      clean: !dirty,
+      showRevert: hasJob && !dirty,
+      saveOpacity: dirty ? 1 : 0.45,
+      saveCursor: dirty ? 'pointer' : 'default',
+      status: dirty ? 'Unsaved' : hasJob ? 'Job override' : 'Material preset',
+      statusBg: dirty ? '#FFF1DB' : hasJob ? accentSoft : '#F0F1F4',
+      statusFg: dirty ? '#8A4B00' : hasJob ? accent : '#3A414C',
+      selectLabel: isLaser ? 'Process' : 'Tool head',
+      selectValue: isLaser ? sc.proc : sc.tool,
+      sliders: isLaser
+        ? [{ l: 'Power', v: sc.power, u: '%', min: 0, max: 100, step: 1, set: setVal('power') }, { l: 'Speed', v: sc.speed, u: 'mm/s', min: 1, max: 1000, step: 1, set: setVal('speed') }]
+        : [{ l: 'Speed', v: sc.speed, u: 'mm/s', min: 0, max: 1000, step: 10, set: setVal('speed') }],
+      nums: isLaser
+        ? [{ l: sc.proc === 'Cut' ? 'Frequency' : 'DPI', v: sc.f, u: sc.proc === 'Cut' ? 'Hz' : 'DPI' }, { l: 'Passes', v: String(sc.passes), u: '×' }]
+        : [{ l: 'Passes', v: String(sc.passes), u: '×' }],
+      adv: !isLaser ? [] : sc.proc === 'Cut'
+        ? [{ isPick: true, l: 'Source', v: 'CO2 DC' }, { isText: true, l: 'Power correction', v: '7', u: '' }, { isPick: true, l: 'Path planning', v: 'Standard' }, { isPick: true, l: 'Process gas', v: 'Air assist' }]
+        : [
+          { isPick: true, l: 'Source', v: 'CO2 DC' }, { isText: true, l: 'Frequency', v: '0', u: 'Hz' }, { isText: true, l: 'Power correction', v: '20', u: '' },
+          { isPick: true, l: 'Direction', v: 'Bottom up' }, { isPick: true, l: 'Engrave mode', v: 'Standard' }, { isPick: true, l: 'High quality', v: 'Off' },
+          { isText: true, l: 'Extended overshoot', v: '0', u: 'mm' }, { isPick: true, l: 'Process gas', v: 'Air assist' }, { isPick: true, l: 'Dithering', v: 'Floyd–Steinberg' },
+          { isPick: true, l: 'Process splitting', v: 'None' }, { isCheck: true, l: 'Relief' }, { isCheck: true, l: 'Engrave covered layers' }
+        ],
+      showLinks: !isLaser || sc.proc === 'Cut',
+      dashTitle: isLaser ? 'Generate links' : 'Dashed line',
+      dashLenLabel: isLaser ? 'Link length' : 'Dash length',
+      gapLabel: isLaser ? 'Gap length' : 'Gap',
+      ratio: '50',
+      dashOn,
+      dashLen: sc.dl.toFixed(1),
+      gapLen: sc.gl.toFixed(1),
+      dashOpacity: dashOn ? 1 : 0.45,
+      swBg: dashOn ? accent : '#C9CED6',
+      swJ: dashOn ? 'flex-end' : 'flex-start',
+      dashArray: dashOn ? (sc.dl * 4) + ' ' + (sc.gl * 4) : 'none',
+      previewLabel: dashOn ? 'Dashed line preview' : 'Solid line preview'
+    };
+    const toggleDash = () => this.setState((s) => {
+      const next = s.dash[m].slice();
+      next[selIdx] = !next[selIdx];
+      return { dash: { ...s.dash, [m]: next } };
+    });
+
+    // canvas content
+    const PRINTS = [
+      { t: 'OPEN', bg: '#3E63DD', r: '10px' }, { t: 'SALE', bg: '#CE2C31', r: '50%' }, { t: 'NEW', bg: '#0B7F75', r: '10px' },
+      { t: '−20%', bg: '#C2410C', r: '10px' }, { t: 'EXIT', bg: '#15181E', r: '50%' }, { t: 'INFO', bg: '#6E56CF', r: '10px' }
+    ];
+    const prints = PRINTS.map((p, i) => ({ ...p, sel: i === 0 }));
+    const sheetDots = mode.dots.map((k) => SHEET[k]);
+
+    const fillMode = this.state.fillMode;
+    const toggleFill = () => this.setState((s) => ({ fill: !s.fill, menu: false, reg: false }));
+    const fillOpt = (id, l) => ({
+      l, on: fillMode === id,
+      bg: fillMode === id ? '#FFFFFF' : 'transparent',
+      sh: fillMode === id ? '0 1px 2px rgba(21, 24, 30, 0.14)' : 'none',
+      fg: fillMode === id ? '#15181E' : '#5B6370',
+      pick: () => this.setState({ fillMode: id })
+    });
+    // sheet
+    const SH = this.state.sheet[m];
+    const BED = isLaser ? [813, 508] : [1600, 1000];
+    const pct = (v, tot) => ((Number(v) / tot) * 100).toFixed(2) + '%';
+    const setSheet = (patch) => this.setState((s) => ({ sheet: { ...s.sheet, [m]: { ...s.sheet[m], ...patch } } }));
+    const sheetV = {
+      on: !!SH.on,
+      label: SH.on ? 'Sheet ' + SH.w + ' × ' + SH.h + ' mm, drag to move' : 'Job area',
+      left: SH.on ? pct(SH.x, BED[0]) : '6%',
+      top: SH.on ? pct(SH.y, BED[1]) : '9%',
+      w: SH.on ? pct(SH.w, BED[0]) : '64%',
+      h: SH.on ? pct(SH.h, BED[1]) : '76%',
+      bg: SH.on ? '#FFFFFF' : 'transparent',
+      sh: SH.on ? '0 0 0 1px #AEB5C0, 0 6px 14px rgba(21, 24, 30, 0.10)' : 'none',
+      cursor: SH.on ? 'move' : 'default',
+      down: (e) => {
+        if (!SH.on) return;
+        const bed = e.currentTarget.parentElement.getBoundingClientRect();
+        this.drag = { sx: e.clientX, sy: e.clientY, x0: Number(SH.x), y0: Number(SH.y), kx: BED[0] / bed.width, ky: BED[1] / bed.height };
+        try { e.currentTarget.setPointerCapture(e.pointerId); } catch (err) { /* capture not supported */ }
+      },
+      move: (e) => {
+        const d = this.drag;
+        if (!d) return;
+        const x = Math.round(Math.min(Math.max(0, d.x0 + (e.clientX - d.sx) * d.kx), Math.max(0, BED[0] - SH.w)));
+        const y = Math.round(Math.min(Math.max(0, d.y0 + (e.clientY - d.sy) * d.ky), Math.max(0, BED[1] - SH.h)));
+        setSheet({ x, y });
+      },
+      up: () => { this.drag = null; }
+    };
+    const sheetNum = (k) => (e) => {
+      const v = Math.max(0, Math.round(Number(e.target.value) || 0));
+      setSheet({ [k]: v });
+    };
+    const sheetFields = [['Width', 'w'], ['Height', 'h'], ['X position', 'x'], ['Y position', 'y']].map(([l, k]) => ({ l, v: String(SH[k]), set: sheetNum(k) }));
+    const sheetPresets = (isLaser ? [['600 × 400', 600, 400], ['500 × 300', 500, 300], ['A3', 420, 297]] : [['1220 × 800', 1220, 800], ['1000 × 700', 1000, 700], ['A1', 841, 594]])
+      .map(([l, w, h]) => ({ l, pick: () => setSheet({ w, h, x: Math.min(SH.x, Math.max(0, BED[0] - w)), y: Math.min(SH.y, Math.max(0, BED[1] - h)) }) }));
+
+    // fill
+    const area = this.state.fillArea === 'sheet' && !SH.on ? 'bed' : this.state.fillArea;
+    const fillAreaOpt = (id, l) => {
+      const off = id === 'sheet' && !SH.on;
+      const on = area === id;
+      return {
+        l, on, off,
+        bg: on ? '#FFFFFF' : 'transparent', sh: on ? '0 1px 2px rgba(21, 24, 30, 0.14)' : 'none', fg: on ? '#15181E' : '#5B6370',
+        op: off ? 0.4 : 1, cur: off ? 'default' : 'pointer',
+        pick: () => { if (!off) this.setState({ fillArea: id }); }
+      };
+    };
+    const cw = this.state.fillCustom.w, ch = this.state.fillCustom.h;
+    const RESULTS = isLaser
+      ? { bed: ['9 copies fit on the bed', '12 copies need 2 beds'], sheet: ['6 copies fit on the sheet', '12 copies need 2 sheets'], custom: ['4 copies fit in ' + cw + ' × ' + ch + ' mm', '12 copies need 3 areas'] }
+      : { bed: ['18 copies fit over 3 beds', '12 copies fit on 2 beds'], sheet: ['6 copies fit on the sheet', '12 copies need 2 sheets'], custom: ['4 copies fit in ' + cw + ' × ' + ch + ' mm', '12 copies need 3 areas'] };
+    const fill = {
+      button: 'Fill',
+      obj: isLaser ? '“OPEN” label' : 'sign panel',
+      areas: [fillAreaOpt('bed', 'Bed'), fillAreaOpt('sheet', 'Sheet'), fillAreaOpt('custom', 'Custom')],
+      isCustom: area === 'custom',
+      cw, ch,
+      setCw: (e) => { const v = e.target.value; this.setState((s) => ({ fillCustom: { ...s.fillCustom, w: v } })); },
+      setCh: (e) => { const v = e.target.value; this.setState((s) => ({ fillCustom: { ...s.fillCustom, h: v } })); },
+      modes: [fillOpt('max', 'As many as fit'), fillOpt('count', 'Set a number')],
+      isCount: fillMode === 'count',
+      result: RESULTS[area][fillMode === 'max' ? 0 : 1]
+    };
+
+    const pdash = this.state.dash.plotter;
+    const PARTS = [
+      { x: 6, y: 10, w: 40, h: 56, c: '#FF0000', k: 0 },
+      { x: 10, y: 16, w: 32, h: 44, c: '#0000FF', k: 2 },
+      { x: 54, y: 10, w: 40, h: 56, c: '#FF0000', k: 0 },
+      { x: 74, y: 10, w: 0, h: 56, c: '#00FF00', k: 3 },
+      { x: 58, y: 28, w: 12, h: 4, c: '#000000', k: 4, fill: '#000000' },
+      { x: 6, y: 74, w: 88, h: 16, c: '#FF00FF', k: 1 }
+    ];
+    const parts = PARTS.map((p) => ({ ...p, st: pdash[p.k] ? 'dashed' : 'solid', fill: p.fill || 'transparent' }));
+    const bed = (l, d, now) => ({ l, d, now, parts, fg: now ? accent : '#15181E', bd: now ? accent : '#CDD2D9', ring: now ? '2px' : '1px' });
+
+    // dock tabs
+    const tab = (l, badge) => {
+      const on = this.state.tab === l;
+      return { l, on, badge: badge || false, bd: on ? accent : 'transparent', fg: on ? '#15181E' : '#5B6370', w: on ? 600 : 400, pick: () => this.setState({ tab: l }) };
+    };
+
+    // dropdowns
+    const opt = (label, cur, onPick) => ({ l: label, on: label === cur, bg: label === cur ? accentSoft : 'transparent', pick: onPick });
+    const OPTS = {
+      'Source': ['CO2 DC', 'CO2 RF', 'Fiber'],
+      'Path planning': ['Standard', 'Inner geometries first', 'Optimised'],
+      'Process gas': ['Air assist', 'Off', 'Nitrogen'],
+      'Direction': ['Top down', 'Bottom up'],
+      'Engrave mode': ['Standard', 'Stamp', 'Relief'],
+      'High quality': ['Off', 'On'],
+      'Dithering': ['Floyd–Steinberg', 'Ordered', 'Jarvis', 'Stucki', 'None'],
+      'Process splitting': ['None', 'By colour', 'By object']
+    };
+    sel.adv = sel.adv.map((f) => {
+      if (!f.isPick) return f;
+      const k = m + '|' + selIdx + '|' + f.l;
+      const v = this.state.pv[k] || f.v;
+      const open = this.state.openPick === k;
+      return {
+        ...f, v, open,
+        toggle: () => this.setState({ openPick: open ? null : k }),
+        opts: open ? (OPTS[f.l] || [f.v]).map((o) => opt(o, v, () => this.setState((s) => ({ pv: { ...s.pv, [k]: o }, openPick: null })))) : []
+      };
+    });
+    const selKey = isLaser ? 'proc' : 'tool';
+    const selOpts = isLaser ? ['Cut', 'Engrave', 'Mark'] : ['T1 · Knife', 'T2 · V-cut 45°', 'T3 · Crease wheel', 'T4 · Pen'];
+    sel.selectOpen = this.state.procOpen;
+    sel.toggleSelect = () => this.setState((s) => ({ procOpen: !s.procOpen }));
+    sel.selectOpts = this.state.procOpen ? selOpts.map((o) => opt(o, sel.selectValue, () => this.setState((s) => {
+      const cur = s.edit[m][selIdx] || {};
+      return { edit: { ...s.edit, [m]: { ...s.edit[m], [selIdx]: { ...cur, [selKey]: o } } }, procOpen: false };
+    }))) : [];
+
+    // menu bar
+    const closeAll = () => this.setState({ bar: null, sub: null });
+    const MENUS = [
+      ['File', [
+        ['New job', 'Ctrl+N'], ['Open…', 'Ctrl+O'], ['Open recent', null, ['batch-13 · door plates', 'coasters ×12', 'sign blank 600 × 400', 'foam display A1']], '-',
+        ['Save', 'Ctrl+S'], ['Save as…', 'Ctrl+Shift+S'], ['Save to computer…', 'Ctrl+Shift+E', null, () => this.setState({ bar: null, sub: null, saveOpen: true })], '-',
+        ['Import…', 'Ctrl+I'], ['Export', null, ['DXF', 'SVG', 'PDF', 'Print sheet with reg marks']], '-',
+        ['Job settings…'], ['Close job', 'Ctrl+W']
+      ]],
+      ['Edit', [
+        ['Undo', 'Ctrl+Z'], ['Redo', 'Ctrl+Y'], '-',
+        ['Cut', 'Ctrl+X'], ['Copy', 'Ctrl+C'], ['Paste', 'Ctrl+V'], ['Paste in place', 'Ctrl+Shift+V'], ['Duplicate', 'Ctrl+D'], ['Delete', 'Del'], '-',
+        ['Select all', 'Ctrl+A'], ['Select by colour', null, ACI.map((a) => 'ACI ' + a.n + ' · ' + a.name)], ['Invert selection', 'Ctrl+Shift+I'], '-',
+        ['Preferences…', 'Ctrl+,']
+      ]],
+      ['Arrange', [
+        ['Group', 'Ctrl+G'], ['Ungroup', 'Ctrl+Shift+G'], '-',
+        ['Align', null, ['Left', 'Centre', 'Right', 'Top', 'Middle', 'Bottom']], ['Distribute', null, ['Horizontally', 'Vertically']],
+        ['Order', null, ['Bring to front', 'Bring forward', 'Send backward', 'Send to back']], ['Mirror', null, ['Horizontal', 'Vertical']],
+        ['Rotate', null, ['90° clockwise', '90° anticlockwise', '180°']], '-',
+        ['Weld shapes'], ['Offset path…'], ['Array…'], [fill.button + '…', null, null, () => this.setState({ bar: null, sub: null, fill: true })]
+      ].concat(isLaser ? [] : [['Nest parts…']])],
+      ['Machine', [
+        ['Frame', 'Ctrl+F'], ['Start job', 'F5'], ['Pause', 'F6'], ['Stop', 'Esc'], '-', ['Home'], ['Go to origin'], ['Set origin here'], '-'
+      ].concat(isLaser ? [['Auto-focus'], ['Test fire']] : [['Feed one bed'], ['Vacuum on / off'], ['Laser pointer on / off']])
+        .concat(['-', ['Open HMI…', null, null, null, '../HMI/HMI.dc.html'], ['Machine setup…', null, null, null, 'MachineSetupDetailed.dc.html']])],
+      ['Tools', [
+        ['Material library…', 'Ctrl+M', null, null, 'MaterialsDetailed.dc.html'], ['Machine setup…', null, null, null, 'MachineSetupDetailed.dc.html'],
+        ['Simulation…', 'Ctrl+R', null, null, 'SimulationDetailed.dc.html'], '-',
+        ['Measure', 'M'], ['Trace image…'], ['Test grid…', null, null, null, 'MaterialsDetailed.dc.html']
+      ]],
+      ['Help', [['Keyboard shortcuts', 'Ctrl+/'], ['User guide', 'F1'], ['Check for updates'], '-', ['About']]]
+    ];
+    const menuBar = MENUS.map(([name, items]) => {
+      const open = this.state.bar === name;
+      return {
+        l: name, open, bg: open ? '#EEF0F3' : 'transparent',
+        toggle: () => this.setState((s) => ({ bar: s.bar === name ? null : name, sub: null, menu: false, reg: false, fill: false })),
+        items: !open ? [] : items.map((it) => {
+          if (it === '-') return { isSep: true };
+          const [l, k, sub, run, href] = it;
+          if (href) return { isLink: true, l, k: k || '', href };
+          if (sub) {
+            const so = this.state.sub === l;
+            return {
+              isSub: true, l, open: so, bg: so ? '#EEF0F3' : 'transparent',
+              toggle: () => this.setState((s) => ({ sub: s.sub === l ? null : l })),
+              sub: so ? sub.map((x) => ({ l: x, run: closeAll })) : []
+            };
+          }
+          return { isPlain: true, l, k: k || '', run: run || closeAll };
+        })
+      };
+    });
+
+    // objects panel
+    const OBJ = isLaser
+      ? [['OPEN label', 'Rectangle', '40 × 40', [1, 6]], ['SALE label', 'Circle', 'Ø 40', [1, 6]], ['NEW label', 'Rectangle', '40 × 40', [1, 6]], ['−20% label', 'Rectangle', '40 × 40', [1, 6]], ['EXIT label', 'Circle', 'Ø 40', [1, 6]], ['INFO label', 'Rectangle', '40 × 40', [1, 6]], ['Tear-off line', 'Line', '380', [3]], ['Label artwork', 'Image', '600 × 400', [7]]]
+      : [['Sign panel A', 'Rectangle', '450 × 360', [1]], ['V-cut border', 'Rectangle', '360 × 270', [5]], ['Sign panel B', 'Rectangle', '450 × 360', [1]], ['Fold line', 'Line', '360', [3]], ['Panel label', 'Text', '180 × 12', [7]], ['Tear strip', 'Rectangle', '960 × 90', [6]]];
+    const objSel = Math.min(this.state.objSel, OBJ.length - 1);
+    const objects = OBJ.map(([name, type, size, aciList], i) => ({
+      name, meta: type + ' · ' + size + ' mm',
+      chips: aciList.map((n) => ({ ...ACI[n - 1], title: 'ACI ' + n + ' · ' + ACI[n - 1].name })),
+      on: i === objSel, bg: i === objSel ? accentSoft : 'transparent', bd: i === objSel ? accent : 'transparent',
+      pick: () => this.setState({ objSel: i })
+    }));
+    const objProps = (isLaser
+      ? [['X', '58.0', 'mm'], ['Y', '62.5', 'mm'], ['Width', '40.0', 'mm'], ['Height', '40.0', 'mm'], ['Rotation', '0.0', '°'], ['Corner radius', '4.0', 'mm']]
+      : [['X', '120.0', 'mm'], ['Y', '180.0', 'mm'], ['Width', '450.0', 'mm'], ['Height', '360.0', 'mm'], ['Rotation', '0.0', '°'], ['Corner radius', '0.0', 'mm']]
+    ).map(([l, v, u]) => ({ l, v, u }));
+
+    // move panel
+    const segBtn = (on) => ({ bg: on ? '#FFFFFF' : 'transparent', sh: on ? '0 1px 2px rgba(21, 24, 30, 0.14)' : 'none', fg: on ? '#15181E' : '#5B6370' });
+    const steps = ['0.1', '1', '10', '100'].map((v) => ({ l: v, on: this.state.step === v, ...segBtn(this.state.step === v), pick: () => this.setState({ step: v }) }));
+    const mtog = (l, k) => {
+      const on = !!this.state.mt[k];
+      return { l, on, swBg: on ? accent : '#C9CED6', swJ: on ? 'flex-end' : 'flex-start', toggle: () => this.setState((s) => ({ mt: { ...s.mt, [k]: !on } })) };
+    };
+
+    // queue panel
+    const Q = {
+      a: { name: 'batch-14 · window signs', meta: (isLaser ? 'Printed acrylic 3 mm · 6 min 20 s' : 'Foam board 5 mm · 24 min 10 s'), status: 'Ready', sbg: accentSoft, sfg: accent },
+      b: { name: 'coasters ×12', meta: 'Birch ply 3 mm · 4 min 05 s', status: 'Waiting', sbg: '#F0F1F4', sfg: '#3A414C' },
+      c: { name: 'sign blank 600 × 400', meta: 'Cast acrylic 5 mm · 9 min 40 s', status: 'Waiting', sbg: '#F0F1F4', sfg: '#3A414C' },
+      d: { name: 'batch-13 · door plates', meta: 'Finished 09:42', status: 'Done', sbg: '#EDF7F1', sfg: '#1B6B43' }
+    };
+    const qOrder = this.state.qOrder;
+    const moveQ = (id, d) => () => this.setState((s) => {
+      const o = s.qOrder.slice();
+      const i = o.indexOf(id);
+      const j = i + d;
+      if (j < 0 || j >= o.length) return null;
+      [o[i], o[j]] = [o[j], o[i]];
+      return { qOrder: o };
+    });
+    const queue = qOrder.map((id, i) => ({ ...Q[id], n: i + 1, bg: id === 'a' ? '#FFFFFF' : '#FAFAFB', up: moveQ(id, -1), down: moveQ(id, 1) }));
+    const tool = (l, d, on) => ({ l, d, on, bg: on ? accentSoft : 'transparent', fg: on ? accent : '#3A414C' });
+    const snap = (l, on) => ({ l, on, bd: on ? accent : '#D5D9DF', bg: on ? accentSoft : '#FFFFFF', fg: on ? accent : '#3A414C' });
+
+    return {
+      accent, accentSoft, icons, noop, isLaser, isPlotter: !isLaser, mach, machines,
+      menuOpen: this.state.menu,
+      toggleMenu: () => this.setState((s) => ({ menu: !s.menu, reg: false, fill: false })),
+      regOpen: this.state.reg,
+      toggleReg: () => this.setState((s) => ({ reg: !s.reg, menu: false, fill: false })),
+      regModes, regLabel,
+      fillOpen: this.state.fill, fillBd: this.state.fill ? accent : '#D5D9DF', toggleFill, fill,
+      sheetV, sheetFields, sheetPresets,
+      ...(() => {
+        const fmt = this.state.saveFmt;
+        const EXT = { cjob: '.cjob', dxf: '.dxf', svg: '.svg' };
+        const isJob = fmt === 'cjob';
+        const segS = (on) => ({ bg: on ? '#FFFFFF' : 'transparent', sh: on ? '0 1px 2px rgba(21, 24, 30, 0.14)' : 'none', fg: on ? '#15181E' : '#5B6370' });
+        const presetsOn = isJob && this.state.savePresets;
+        const doSave = () => {
+          const file = (this.state.saveName || 'job').replace(/[\\/:*?"<>|]/g, '-') + EXT[fmt];
+          const body = fmt === 'cjob'
+            ? JSON.stringify({ format: 'cjob', version: 1, name: this.state.saveName, machine: m, sheet: this.state.sheet[m], processes: this.state.assign[m], includesPresets: this.state.savePresets }, null, 2)
+            : fmt === 'svg'
+              ? '<svg xmlns="http://www.w3.org/2000/svg" width="' + BED[0] + 'mm" height="' + BED[1] + 'mm" viewBox="0 0 ' + BED[0] + ' ' + BED[1] + '"></svg>\n'
+              : '0\nSECTION\n2\nENTITIES\n0\nENDSEC\n0\nEOF\n';
+          try {
+            const url = URL.createObjectURL(new Blob([body], { type: 'application/octet-stream' }));
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = file;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            setTimeout(() => URL.revokeObjectURL(url), 2000);
+          } catch (err) { /* downloads unavailable in this host */ }
+          this.setState({ saveOpen: false, savedAs: file });
+        };
+        return {
+          saveOpen: this.state.saveOpen,
+          openSave: () => this.setState({ saveOpen: true, bar: null, sub: null, fill: false, sheetOpen: false }),
+          closeSave: () => this.setState({ saveOpen: false }),
+          saveName: this.state.saveName,
+          setSaveName: (e) => { const v = e.target.value; this.setState({ saveName: v }); },
+          savedLabel: this.state.savedAs ? 'Saved to ' + this.state.savedAs : 'Saved 2 min ago',
+          saveExt: EXT[fmt],
+          saveFmts: [['cjob', 'Job file'], ['dxf', 'DXF'], ['svg', 'SVG']].map(([k, l]) => ({ l, on: fmt === k, ...segS(fmt === k), pick: () => this.setState({ saveFmt: k }) })),
+          savePresets: presetsOn, presetsOff: !isJob, presetsOp: isJob ? 1 : 0.45,
+          presetsSwBg: presetsOn ? accent : '#C9CED6', presetsSwJ: presetsOn ? 'flex-end' : 'flex-start',
+          toggleSavePresets: () => this.setState((s) => ({ savePresets: !s.savePresets })),
+          doSave
+        };
+      })(),
+      sheetOpen: this.state.sheetOpen,
+      sheetBd: this.state.sheetOpen ? accent : '#D5D9DF',
+      toggleSheet: () => this.setState((s) => ({ sheetOpen: !s.sheetOpen, fill: false, menu: false, reg: false, bar: null })),
+      sheetOn: !!SH.on, sheetOff: !SH.on,
+      toggleSheetOn: () => setSheet({ on: !SH.on }),
+      sheetSwBg: SH.on ? accent : '#C9CED6', sheetSwJ: SH.on ? 'flex-end' : 'flex-start',
+      sheetFieldsOp: SH.on ? 1 : 0.45,
+      sheetPill: SH.on ? 'On' : 'Off',
+      sheetPillBg: SH.on ? accentSoft : '#F0F1F4', sheetPillFg: SH.on ? accent : '#5B6370',
+      centreSheet: () => setSheet({ x: Math.max(0, Math.round((BED[0] - SH.w) / 2)), y: Math.max(0, Math.round((BED[1] - SH.h) / 2)) }),
+      menuBar,
+      tabProcesses: this.state.tab === 'Processes', tabObjects: this.state.tab === 'Objects',
+      tabMove: this.state.tab === 'Move', tabQueue: this.state.tab === 'Queue',
+      objects, objCount: OBJ.length + ' objects', objName: OBJ[objSel][0], objProps,
+      pos: isLaser ? [{ l: 'X', v: '212.40' }, { l: 'Y', v: '88.00' }, { l: 'Z', v: '0.00' }] : [{ l: 'X', v: '1840.0' }, { l: 'Y', v: '412.5' }],
+      steps,
+      moveActions: isLaser ? ['Home', 'Go to origin', 'Set origin', 'Frame', 'Auto-focus', 'Test fire'] : ['Home', 'Go to origin', 'Set origin', 'Frame', 'Feed one bed', 'Tool change'],
+      moveToggles: isLaser ? [mtog('Air assist', 'air'), mtog('Red pointer', 'ptr')] : [mtog('Laser pointer', 'ptr'), mtog('Vacuum', 'vac')],
+      queue, queueCount: qOrder.length + ' jobs',
+      toolGroups: [
+        { items: [{ l: 'Undo', d: icons.undo }, { l: 'Redo', d: icons.redo }] },
+        { items: [{ l: 'Group', d: icons.group }, { l: 'Align left', d: icons.alignL }, { l: 'Align centre', d: icons.alignC }, { l: 'Distribute', d: icons.distribute }] },
+        { items: [{ l: 'Weld shapes', d: icons.weld }, { l: 'Offset path', d: icons.offset }, { l: 'Array', d: icons.array }] }
+      ],
+      machTools: isLaser
+        ? [{ l: 'Auto-focus', d: icons.focus }, { l: 'Rotary', d: icons.rotary }]
+        : [{ l: 'Tool heads', d: icons.heads }, { l: 'Conveyor', d: icons.conveyor }, { l: 'Nest parts', d: icons.nest }, { l: 'Bridges', d: icons.bridges }],
+      tools: [
+        tool('Select', icons.select, true), tool('Edit nodes', icons.node), tool('Line', icons.line), tool('Rectangle', icons.rect),
+        tool('Ellipse', icons.ellipse), tool('Polygon', icons.polygon), tool('Text', icons.text), tool('Import image', icons.image), tool('Measure', icons.measure)
+      ],
+      rulerX: isLaser ? ['0', '100', '200', '300', '400', '500', '600', '700', '800'] : ['0', '600', '1200', '1800', '2400', '3000', '3600', '4200', '4800'],
+      prints, sheetDots,
+      beds: [bed('Bed 1', 'On the table now', true), bed('Bed 2', 'After feed 1', false), bed('Bed 3', 'After feed 2', false)],
+      zoom: isLaser ? '100%' : '35%',
+      cursor: isLaser ? 'X 212.40  Y 88.00 mm' : 'X 1840.0  Y 412.5 mm',
+      snaps: [snap('Grid', true), snap('Objects', true), snap('Centre', false)],
+      tabs: [tab('Processes'), tab('Objects'), tab('Move'), tab('Queue', '4')],
+      aci, pickerOpen: this.state.picker, pickerBd: this.state.picker ? accent : '#D5D9DF',
+      togglePicker: () => this.setState((s) => ({ picker: !s.picker })),
+      advOpen: this.state.adv, advRot: this.state.adv ? '180deg' : '0deg',
+      toggleAdv: () => this.setState((s) => ({ adv: !s.adv })),
+      mat: isLaser
+        ? { name: 'Printed acrylic · 3 mm', sub: 'Trotec Speedy 360 presets', short: 'Printed acrylic 3 mm', sw: '#DCE3EC' }
+        : { name: 'Foam board · 5 mm', sub: 'Flatbed 1 presets', short: 'Foam board 5 mm', sw: '#F1EDE4' },
+      coloursUsed: list.length + ' processes',
+      colours, sel, toggleDash, saveJob, saveGlobal, resetEdit, revertJob,
+      est: isLaser ? 'Est. 6 min 20 s' : 'Est. 24 min 10 s',
+      jobSummary: isLaser ? '5 processes · 1 sheet · 6 parts' : '5 processes · 3 beds · 18 parts',
+      checks: isLaser
+        ? ['Lid closed', 'Exhaust on']
+        : ['Vacuum on', 'Heads T1–T4 loaded', 'Conveyor ready']
+    };
+  }
+}
+</script>
+</body>
+</html>

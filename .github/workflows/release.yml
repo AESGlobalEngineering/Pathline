@@ -1,0 +1,26 @@
+# Builds Pathline on GitHub and publishes the installer as a GitHub release
+# when a version tag is pushed (git tag v1.1.0 && git push --tags). The release
+# includes latest.yml, which installed copies read to find updates.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npx electron-builder --win --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

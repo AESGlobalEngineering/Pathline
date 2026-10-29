@@ -1,0 +1,562 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Machine setup</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#2457D6}a:hover{color:#1A43AB}
+button,select,input{font:inherit;color:inherit}
+.ib{display:inline-flex;align-items:center;justify-content:center;width:36px;height:36px;border:0;border-radius:8px;background:transparent;cursor:pointer;color:#3A414C;padding:0}
+.ib:hover{background:#EEF0F3}
+.tb{display:inline-flex;align-items:center;gap:8px;height:36px;padding:0 12px;border:1px solid #D5D9DF;border-radius:8px;background:#FFFFFF;cursor:pointer;font-size:13px;color:#15181E;white-space:nowrap;text-decoration:none;box-sizing:border-box}
+.tb:hover{border-color:#AEB5C0;color:#15181E}
+.mono{font-family:'IBM Plex Mono',ui-monospace,monospace}
+.lbl{font-size:12px;color:#5B6370}
+.fld{display:flex;align-items:center;height:34px;border:1px solid #D5D9DF;border-radius:8px;background:#FFFFFF;padding:0 10px;gap:6px;box-sizing:border-box}
+.fld input{border:0;outline:0;width:100%;min-width:0;font-size:13px;background:transparent;color:#15181E;padding:0}
+.fld:focus-within{border-color:#2457D6;box-shadow:0 0 0 3px #DCE6FB}
+.cell{width:100%;min-width:0;height:32px;border:1px solid #D5D9DF;border-radius:6px;padding:0 8px;box-sizing:border-box;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:13px;background:#FFFFFF;color:#15181E}
+.cell:focus{outline:none;border-color:#2457D6;box-shadow:0 0 0 3px #DCE6FB}
+svg.i{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round;flex:none}
+</style>
+</helmet>
+<div style="min-height: 100vh; display: flex; flex-direction: column; background: #F3F4F6; color: #15181E; font-family: 'IBM Plex Sans', system-ui, sans-serif; font-size: 13px">
+
+  <!-- ===== Header ===== -->
+  <header style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; padding: 10px 16px; background: #FFFFFF; border-bottom: 1px solid #E1E4E8">
+    <nav aria-label="Sections" style="display: flex; padding: 3px; gap: 2px; background: #F0F1F4; border-radius: 8px">
+      <a href="MainDetailed.dc.html" style="display: inline-flex; align-items: center; height: 30px; padding: 0 12px; border-radius: 6px; text-decoration: none; font-weight: 500; color: #5B6370">Job</a>
+      <a href="MaterialsDetailed.dc.html" style="display: inline-flex; align-items: center; height: 30px; padding: 0 12px; border-radius: 6px; text-decoration: none; font-weight: 500; color: #5B6370">Materials</a>
+      <a href="MachineSetupDetailed.dc.html" aria-current="page" style="display: inline-flex; align-items: center; height: 30px; padding: 0 12px; border-radius: 6px; text-decoration: none; font-weight: 500; background: #FFFFFF; box-shadow: 0 1px 2px rgba(21, 24, 30, 0.14); color: #15181E">Machines</a>
+      <a href="SimulationDetailed.dc.html" style="display: inline-flex; align-items: center; height: 30px; padding: 0 12px; border-radius: 6px; text-decoration: none; font-weight: 500; color: #5B6370">Simulation</a>
+    </nav>
+    <div style="display: flex; flex-direction: column; line-height: 1.25">
+      <h1 style="margin: 0; font-size: 15px; font-weight: 600">Machine setup</h1>
+      <span class="lbl">{{machineCount}}</span>
+    </div>
+    <span style="flex: 1"></span>
+    <sc-if value="{{dirty}}" hint-placeholder-val="{{false}}">
+      <span style="height: 24px; padding: 0 8px; border-radius: 5px; font-size: 12px; font-weight: 600; display: inline-flex; align-items: center; background: #FFF1DB; color: #8A4B00">Unsaved changes</span>
+      <button class="tb" onClick="{{discard}}">Discard</button>
+    </sc-if>
+    <button class="tb" onClick="{{runTest}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.sync}}"></path></svg>Refresh from machine</button>
+    <button onClick="{{save}}" disabled="{{clean}}" style="height: 36px; padding: 0 20px; border: 0; border-radius: 8px; background: {{accent}}; color: #FFFFFF; font-weight: 600; opacity: {{saveOpacity}}; cursor: {{saveCursor}}">Save</button>
+  </header>
+
+  <div style="flex: 1; display: flex; flex-wrap: wrap; min-height: 0">
+
+    <!-- ===== Machine list ===== -->
+    <nav aria-label="Machines" style="flex: 1 1 300px; min-width: 0; background: #FFFFFF; border-right: 1px solid #E1E4E8; display: flex; flex-direction: column; gap: 8px; padding: 14px">
+      <span style="font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: #3A414C; padding: 2px 8px 4px">Machines</span>
+      <sc-for list="{{machineList}}" as="mc" hint-placeholder-count="3">
+        <button onClick="{{mc.pick}}" aria-current="{{mc.cur}}" style="display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px; border: 0; border-radius: 10px; background: {{mc.bg}}; box-shadow: inset 0 0 0 1px {{mc.bd}}; cursor: pointer; text-align: left">
+          <span style="height: 22px; min-width: 62px; justify-content: center; border-radius: 5px; display: inline-flex; align-items: center; font-size: 10px; font-weight: 600; letter-spacing: 0.04em; background: {{mc.tbg}}; color: #FFFFFF">{{mc.type}}</span>
+          <span style="flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.3">
+            <span style="font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{mc.name}}</span>
+            <span class="lbl">{{mc.sub}}</span>
+          </span>
+          <span role="img" aria-label="{{mc.status}}" title="{{mc.status}}" style="width: 8px; height: 8px; flex: none; border-radius: 50%; background: {{mc.dot}}"></span>
+        </button>
+      </sc-for>
+      <span style="flex: 1"></span>
+      <button class="tb" style="justify-content: center"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.plus}}"></path></svg>Add machine</button>
+    </nav>
+
+    <!-- ===== Machine detail ===== -->
+    <main style="flex: 999 1 760px; min-width: 0; padding: 20px; display: flex; flex-direction: column; gap: 16px">
+
+      <section aria-label="Machine" style="background: #FFFFFF; border: 1px solid #E1E4E8; border-radius: 12px; padding: 16px; display: flex; flex-wrap: wrap; align-items: center; gap: 14px">
+        <span style="height: 28px; padding: 0 9px; border-radius: 6px; display: inline-flex; align-items: center; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; background: {{m.tbg}}; color: #FFFFFF">{{m.type}}</span>
+        <div style="flex: 1 1 280px; min-width: 0; display: flex; flex-direction: column; gap: 4px">
+          <label class="fld" style="height: 38px; max-width: 420px; background: #F3F4F6">
+            <input value="{{m.name}}" onChange="{{setName}}" disabled="{{true}}" aria-label="Machine name" style="font-size: 16px; font-weight: 600; color: #3A414C">
+          </label>
+          <span class="lbl">{{m.kind}} · {{m.ctrl}}</span>
+        </div>
+        <span style="display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: 14px; font-size: 12px; font-weight: 500; background: {{m.statusBg}}; color: {{m.statusFg}}"><span aria-hidden="true" style="width: 8px; height: 8px; border-radius: 50%; background: {{m.dot}}"></span>{{m.status}}</span>
+        <sc-if value="{{testShown}}" hint-placeholder-val="{{false}}"><span class="mono" style="font-size: 12px; color: {{testFg}}">{{testText}}</span></sc-if>
+        <button class="tb" onClick="{{runTest}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.plug}}"></path></svg>Test connection</button>
+        <div style="display: flex; gap: 2px">
+          <button class="ib" aria-label="Duplicate machine" title="Duplicate"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.copy}}"></path></svg></button>
+          <button class="ib" aria-label="Delete machine" title="Delete"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.trash}}"></path></svg></button>
+        </div>
+      </section>
+
+      <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; padding: 10px 14px; border: 1px solid #E1E4E8; border-radius: 10px; background: #FFFFFF">
+        <svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="color: #5B6370"><path d="{{icons.sync}}"></path></svg>
+        <span style="font-weight: 500">Synced from machine</span>
+        <span class="mono lbl">{{syncText}}</span>
+        <span style="flex: 1"></span>
+        <a class="tb" href="HMI.dc.html" style="height: 32px">Open HMI</a>
+      </div>
+
+      <div role="tablist" aria-label="Settings" style="display: flex; flex-wrap: wrap; gap: 2px; border-bottom: 1px solid #DDE0E5">
+        <sc-for list="{{tabs}}" as="t" hint-placeholder-count="5">
+          <button role="tab" aria-selected="{{t.on}}" onClick="{{t.pick}}" style="height: 40px; padding: 0 14px; border: 0; background: transparent; border-bottom: 2px solid {{t.bd}}; color: {{t.fg}}; font-weight: {{t.w}}; cursor: pointer">{{t.l}}</button>
+        </sc-for>
+      </div>
+
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 16px; align-items: start">
+        <sc-for list="{{cards}}" as="cd" hint-placeholder-count="2">
+          <section aria-label="{{cd.title}}" style="background: #FFFFFF; border: 1px solid #E1E4E8; border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 12px; grid-column: {{cd.span}}">
+            <h2 style="margin: 0; font-size: 14px; font-weight: 600">{{cd.title}}</h2>
+
+            <sc-if value="{{cd.isFields}}" hint-placeholder-val="{{true}}">
+              <div style="display: flex; flex-direction: column; gap: 10px">
+                <sc-for list="{{cd.fields}}" as="f" hint-placeholder-count="4">
+                  <sc-if value="{{f.isText}}" hint-placeholder-val="{{true}}">
+                    <label style="display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 220px); align-items: center; gap: 12px; min-height: 34px">
+                      <span style="color: #3A414C">{{f.l}}</span>
+                      <span class="fld" style="background: {{f.fbg}}"><input class="mono" value="{{f.v}}" onChange="{{f.set}}" disabled="{{f.ro}}" style="color: {{f.ffg}}"><span class="lbl">{{f.u}}</span></span>
+                    </label>
+                  </sc-if>
+                  <sc-if value="{{f.isSeg}}" hint-placeholder-val="{{false}}">
+                    <div style="display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px; min-height: 34px">
+                      <span style="color: #3A414C">{{f.l}}</span>
+                      <div role="radiogroup" aria-label="{{f.l}}" style="display: flex; padding: 3px; gap: 2px; background: #F0F1F4; border-radius: 8px; opacity: {{f.op}}">
+                        <sc-for list="{{f.opts}}" as="o" hint-placeholder-count="2">
+                          <button role="radio" aria-checked="{{o.on}}" onClick="{{o.pick}}" disabled="{{o.ro}}" style="height: 28px; padding: 0 12px; border: 0; border-radius: 6px; background: {{o.bg}}; box-shadow: {{o.sh}}; color: {{o.fg}}; cursor: pointer; font-weight: 500">{{o.l}}</button>
+                        </sc-for>
+                      </div>
+                    </div>
+                  </sc-if>
+                  <sc-if value="{{f.isToggle}}" hint-placeholder-val="{{false}}">
+                    <div style="display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px; min-height: 34px">
+                      <span style="color: #3A414C">{{f.l}}</span>
+                      <button role="switch" aria-checked="{{f.on}}" aria-label="{{f.l}}" onClick="{{f.toggle}}" disabled="{{f.ro}}" style="opacity: {{f.op}}; width: 44px; height: 26px; border: 0; border-radius: 13px; padding: 3px; box-sizing: border-box; background: {{f.swBg}}; display: flex; justify-content: {{f.swJ}}; cursor: pointer">
+                        <span style="width: 20px; height: 20px; border-radius: 50%; background: #FFFFFF; box-shadow: 0 1px 2px rgba(21, 24, 30, 0.3)"></span>
+                      </button>
+                    </div>
+                  </sc-if>
+                  <sc-if value="{{f.isPick}}" hint-placeholder-val="{{false}}">
+                    <div style="display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 220px); align-items: start; gap: 12px; min-height: 34px">
+                      <span style="color: #3A414C; line-height: 34px">{{f.l}}</span>
+                      <div style="display: flex; flex-direction: column; gap: 4px; min-width: 0">
+                        <button class="tb" onClick="{{f.toggle}}" disabled="{{f.ro}}" aria-haspopup="listbox" aria-expanded="{{f.open}}" aria-label="{{f.l}}: {{f.v}}" style="width: 100%; height: 34px; justify-content: space-between; background: {{f.fbg}}; color: {{f.ffg}}">{{f.v}}<svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="color: #5B6370"><path d="{{icons.chev}}"></path></svg></button>
+                        <sc-if value="{{f.open}}" hint-placeholder-val="{{false}}">
+                          <div role="listbox" aria-label="{{f.l}}" style="display: flex; flex-direction: column; padding: 4px; border: 1px solid #E1E4E8; border-radius: 8px; background: #FFFFFF; box-shadow: 0 8px 20px rgba(21, 24, 30, 0.10)">
+                            <sc-for list="{{f.opts}}" as="o" hint-placeholder-count="3">
+                              <button role="option" aria-selected="{{o.on}}" onClick="{{o.pick}}" style="display: flex; align-items: center; justify-content: space-between; min-height: 30px; padding: 0 8px; border: 0; border-radius: 6px; background: {{o.bg}}; cursor: pointer; text-align: left">{{o.l}}<sc-if value="{{o.on}}" hint-placeholder-val="{{false}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width: 15px; height: 15px; color: {{accent}}"><path d="{{icons.check}}"></path></svg></sc-if></button>
+                            </sc-for>
+                          </div>
+                        </sc-if>
+                      </div>
+                    </div>
+                  </sc-if>
+                  <sc-if value="{{f.isCorner}}" hint-placeholder-val="{{false}}">
+                    <div style="display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px; min-height: 34px">
+                      <span style="color: #3A414C">{{f.l}}</span>
+                      <div role="radiogroup" aria-label="{{f.l}}" style="display: grid; grid-template-columns: repeat(2, 26px); gap: 4px; padding: 4px; border: 1px solid #D5D9DF; border-radius: 6px">
+                        <sc-for list="{{f.corners}}" as="c" hint-placeholder-count="4">
+                          <button role="radio" aria-checked="{{c.on}}" aria-label="{{c.label}}" onClick="{{c.pick}}" disabled="{{c.ro}}" style="opacity: {{f.op}}; width: 26px; height: 20px; border: 0; border-radius: 3px; background: {{c.bg}}; cursor: pointer"></button>
+                        </sc-for>
+                      </div>
+                    </div>
+                  </sc-if>
+                  <sc-if value="{{f.isAction}}" hint-placeholder-val="{{false}}">
+                    <div style="display: flex; align-items: center; justify-content: flex-end; gap: 12px; min-height: 34px; padding-top: 4px; border-top: 1px solid #EEF0F3">
+                      <span class="mono lbl" style="flex: 1; padding-top: 6px">{{f.result}}</span>
+                      <button class="tb" onClick="{{f.run}}" disabled="{{f.ro}}" style="margin-top: 6px; opacity: {{f.op}}">{{f.btn}}</button>
+                    </div>
+                  </sc-if>
+                </sc-for>
+              </div>
+            </sc-if>
+
+            <sc-if value="{{cd.isBed}}" hint-placeholder-val="{{false}}">
+              <div style="display: flex; justify-content: center; padding: 18px 8px 8px">
+                <div role="img" aria-label="{{cd.label}}" style="position: relative; width: min(100%, {{cd.maxW}}px); aspect-ratio: {{cd.ar}}; border-radius: 4px; background-color: #FFFFFF; box-shadow: 0 0 0 1px #CDD2D9; background-image: linear-gradient(#F1F2F4 1px, transparent 1px), linear-gradient(90deg, #F1F2F4 1px, transparent 1px); background-size: 10% 10%">
+                  <span style="position: absolute; left: {{cd.ox}}; top: {{cd.oy}}; width: 12px; height: 12px; border-radius: 50%; background: #FFFFFF; box-shadow: 0 0 0 2px {{accent}}"></span>
+                  <sc-if value="{{cd.conveyor}}" hint-placeholder-val="{{false}}">
+                    <span style="position: absolute; left: 100%; top: 0; bottom: 0; width: 40%; border: 1px dashed #CDD2D9; border-left: 0; border-radius: 0 4px 4px 0"></span>
+                  </sc-if>
+                </div>
+              </div>
+            </sc-if>
+
+            <sc-if value="{{cd.isHeads}}" hint-placeholder-val="{{false}}">
+              <div role="table" aria-label="Tool heads" style="display: flex; flex-direction: column">
+                <div role="row" style="display: grid; grid-template-columns: 52px minmax(160px, 1fr) 110px 110px 90px; gap: 10px; align-items: center; padding: 0 0 8px; border-bottom: 1px solid #E1E4E8">
+                  <span role="columnheader" class="lbl" style="font-weight: 500">Slot</span>
+                  <span role="columnheader" class="lbl" style="font-weight: 500">Tool</span>
+                  <span role="columnheader" class="lbl" style="font-weight: 500">Offset X mm</span>
+                  <span role="columnheader" class="lbl" style="font-weight: 500">Offset Y mm</span>
+                  <span role="columnheader" class="lbl" style="font-weight: 500">Status</span>
+                </div>
+                <sc-for list="{{heads}}" as="h" hint-placeholder-count="4">
+                  <div role="row" style="display: grid; grid-template-columns: 52px minmax(160px, 1fr) 110px 110px 90px; gap: 10px; align-items: center; padding: 8px 0; border-bottom: 1px solid #EEF0F3">
+                    <span role="cell" class="mono" style="width: 34px; height: 30px; border-radius: 6px; background: #F0F1F4; display: inline-flex; align-items: center; justify-content: center; font-weight: 500">{{h.slot}}</span>
+                    <span role="cell" style="display: flex; flex-direction: column; gap: 4px">
+                      <button class="tb" onClick="{{h.toggle}}" disabled="{{true}}" aria-haspopup="listbox" aria-expanded="{{h.open}}" aria-label="{{h.slot}} tool: {{h.tool}}" style="width: 100%; height: 32px; justify-content: space-between; background: #F3F4F6; color: #5B6370">{{h.tool}}<svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="color: #5B6370"><path d="{{icons.chev}}"></path></svg></button>
+                      <sc-if value="{{h.open}}" hint-placeholder-val="{{false}}">
+                        <div role="listbox" aria-label="{{h.slot}} tool" style="display: flex; flex-direction: column; padding: 4px; border: 1px solid #E1E4E8; border-radius: 8px; background: #FFFFFF; box-shadow: 0 8px 20px rgba(21, 24, 30, 0.10)">
+                          <sc-for list="{{h.opts}}" as="o" hint-placeholder-count="4">
+                            <button role="option" aria-selected="{{o.on}}" onClick="{{o.pick}}" style="display: flex; align-items: center; justify-content: space-between; min-height: 30px; padding: 0 8px; border: 0; border-radius: 6px; background: {{o.bg}}; cursor: pointer; text-align: left">{{o.l}}<sc-if value="{{o.on}}" hint-placeholder-val="{{false}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width: 15px; height: 15px; color: {{accent}}"><path d="{{icons.check}}"></path></svg></sc-if></button>
+                          </sc-for>
+                        </div>
+                      </sc-if>
+                    </span>
+                    <span role="cell"><input class="cell" value="{{h.x}}" onChange="{{h.setX}}" disabled="{{true}}" aria-label="{{h.slot}} offset X" style="background: #F3F4F6; color: #5B6370"></span>
+                    <span role="cell"><input class="cell" value="{{h.y}}" onChange="{{h.setY}}" disabled="{{true}}" aria-label="{{h.slot}} offset Y" style="background: #F3F4F6; color: #5B6370"></span>
+                    <span role="cell"><span style="height: 24px; padding: 0 8px; border-radius: 12px; display: inline-flex; align-items: center; font-size: 12px; font-weight: 500; background: {{h.sbg}}; color: {{h.sfg}}">{{h.status}}</span></span>
+                  </div>
+                </sc-for>
+              </div>
+            </sc-if>
+          </section>
+        </sc-for>
+      </div>
+    </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#2457D6","options":["#2457D6","#0B7F75","#C2410C","#15181E"]},"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  state = {
+    mid: 'trotec',
+    tab: null,
+    edits: {},
+    saved: {},
+    dirty: false,
+    test: {},
+    openPick: null
+  };
+
+  renderVals() {
+    const accent = this.props.accent ?? '#2457D6';
+    const soft = (h, t) => {
+      const n = parseInt(String(h).slice(1, 7), 16);
+      if (Number.isNaN(n)) return '#EEF2FC';
+      const mix = (c) => Math.round(c + (255 - c) * t);
+      return 'rgb(' + mix(n >> 16) + ', ' + mix((n >> 8) & 255) + ', ' + mix(n & 255) + ')';
+    };
+    const accentSoft = soft(accent, 0.9);
+
+    const icons = {
+      back: 'M15 6l-6 6 6 6',
+      import: 'M12 3v12 M7 10l5 5 5-5 M4 20h16',
+      export: 'M12 15V3 M7 8l5-5 5 5 M4 20h16',
+      plus: 'M12 5v14 M5 12h14',
+      copy: 'M8 8h12v12H8z M4 16V4h12',
+      trash: 'M4 7h16 M9 7V4h6v3 M6 7l1 13h10l1-13',
+      chev: 'M6 9l6 6 6-6',
+      check: 'M5 12.5l4.5 4.5L19 7',
+      sync: 'M20 11a8 8 0 0 0-14.3-4.9L4 8 M4 4v4h4 M4 13a8 8 0 0 0 14.3 4.9L20 16 M20 20v-4h-4',
+      plug: 'M9 3v5 M15 3v5 M6 8h12v3a6 6 0 0 1-12 0z M12 17v4'
+    };
+
+    const MACHINES = [
+      {
+        id: 'trotec', name: 'Trotec Speedy 360', type: 'laser', kind: 'Laser · CO2', ctrl: 'Trotec', online: true,
+        conn: 'Ethernet', ip: '192.168.1.40', port: 'COM3', bed: [813, 508], speed: 3550, acc: 50000,
+        source: 'CO2', power: 80, lens: '2.0"', pwm: 5000, minPower: 8,
+        f: { camera: true, autofocus: true, rotary: false, air: true, pass: false, interlock: true }
+      },
+      {
+        id: 'flatbed', name: 'Flatbed 1', type: 'plotter', kind: 'Plotter · 4 heads', ctrl: 'Ruida', online: true,
+        conn: 'Ethernet', ip: '192.168.1.52', port: 'COM5', bed: [1600, 1000], speed: 1000, acc: 8000,
+        f: { conveyor: true, vacuum: true, pointer: true, camera: false, detect: true }
+      },
+      {
+        id: 'laser2', name: 'Laser 2', type: 'laser', kind: 'Laser · CO2', ctrl: 'Ruida', online: false,
+        conn: 'Ethernet', ip: '192.168.1.61', port: 'COM4', bed: [1300, 900], speed: 600, acc: 8000,
+        source: 'CO2', power: 100, lens: '2.5"', pwm: 20000, minPower: 10,
+        f: { camera: false, autofocus: false, rotary: true, air: true, pass: false, interlock: false }
+      }
+    ];
+    const TYPE = { laser: { type: 'LASER', tbg: '#15181E' }, plotter: { type: 'PLOTTER', tbg: '#0B7F75' } };
+
+    const edits = this.state.edits;
+    const mid = this.state.mid;
+    const g = (id, k, d) => (edits[id + '|' + k] !== undefined ? edits[id + '|' + k] : d);
+    const raw = MACHINES.find((x) => x.id === mid) || MACHINES[0];
+    const get = (k, d) => g(raw.id, k, d);
+    const setTo = (k, v) => () => this.setState((s) => ({ edits: { ...s.edits, [raw.id + '|' + k]: v }, dirty: true }));
+    const setText = (k) => (e) => {
+      const v = e.target.value;
+      this.setState((s) => ({ edits: { ...s.edits, [raw.id + '|' + k]: v }, dirty: true }));
+    };
+    const feat = (k) => get('f_' + k, raw.f[k]);
+    const isLaser = raw.type === 'laser';
+
+    const OPTS = {
+      'Driver': ['Trotec', 'Ruida'],
+      'Type': ['CO2', 'Fiber', 'Diode'],
+      'Lens': ['1.5"', '2.0"', '2.5"', '4.0"', 'Fixed'],
+      'Default reg marks': ['Off', 'Position & rotation · 2 dots', 'Full linear · 3 dots', 'Non-linear · 3 dots']
+    };
+
+    // field builders
+    const F = {
+      text: (l, k, d, u) => ({ isText: true, l, v: get(k, d), u: u || '', set: setText(k) }),
+      seg: (l, k, d, opts) => {
+        const cur = get(k, d);
+        return {
+          isSeg: true, l,
+          opts: opts.map((o) => ({
+            l: o, on: cur === o,
+            bg: cur === o ? '#FFFFFF' : 'transparent',
+            sh: cur === o ? '0 1px 2px rgba(21, 24, 30, 0.14)' : 'none',
+            fg: cur === o ? '#15181E' : '#5B6370',
+            pick: setTo(k, o)
+          }))
+        };
+      },
+      toggle: (l, k, d) => {
+        const on = !!get(k, d);
+        return { isToggle: true, l, on, swBg: on ? accent : '#C9CED6', swJ: on ? 'flex-end' : 'flex-start', toggle: setTo(k, !on) };
+      },
+      feature: (l, k) => {
+        const on = !!feat(k);
+        return { isToggle: true, l, on, swBg: on ? accent : '#C9CED6', swJ: on ? 'flex-end' : 'flex-start', toggle: setTo('f_' + k, !on) };
+      },
+      pick: (l, d) => {
+        const pk = 'p_' + l;
+        const v = get(pk, d);
+        const ok = raw.id + '|' + l;
+        const open = this.state.openPick === ok;
+        return {
+          isPick: true, l, v, open,
+          toggle: () => this.setState({ openPick: open ? null : ok }),
+          opts: open ? (OPTS[l] || [d]).map((o) => ({
+            l: o, on: o === v, bg: o === v ? accentSoft : 'transparent',
+            pick: () => this.setState((s) => ({ edits: { ...s.edits, [raw.id + '|' + pk]: o }, dirty: true, openPick: null }))
+          })) : []
+        };
+      },
+      corner: (l, k, d) => {
+        const cur = get(k, d);
+        const names = { tl: 'Origin top left', tr: 'Origin top right', bl: 'Origin bottom left', br: 'Origin bottom right' };
+        return {
+          isCorner: true, l,
+          corners: ['tl', 'tr', 'bl', 'br'].map((c) => ({ c, on: cur === c, label: names[c], bg: cur === c ? accent : '#E1E4E8', pick: setTo(k, c) }))
+        };
+      },
+      action: (l, btn, result, run) => ({ isAction: true, l, btn, result: result || '', run: run || (() => {}) })
+    };
+    const card = (title, fields, span) => ({ title, fields, isFields: true, span: span || 'auto' });
+
+    const conn = get('conn', raw.conn);
+    const connCard = card('Connection', [
+      F.seg('Connection', 'conn', raw.conn, ['Ethernet', 'USB']),
+      conn === 'Ethernet' ? F.text('IP address', 'ip', raw.ip || '192.168.1.60') : F.text('Serial port', 'port', raw.port),
+      F.pick('Driver', raw.ctrl),
+      F.text('Timeout', 'timeout', '3000', 'ms')
+    ]);
+    const jobCard = card('Job defaults', [
+      F.corner('Origin', 'origin', 'tl'),
+      F.seg('Units', 'units', 'mm', ['mm', 'inch']),
+      F.toggle('Home on start', 'home', true),
+      F.text('Job name prefix', 'prefix', isLaser ? 'TRO-' : 'FLT-')
+    ]);
+
+    const w = Number(get('bedW', raw.bed[0])) || raw.bed[0];
+    const h = Number(get('bedH', raw.bed[1])) || raw.bed[1];
+    const origin = get('origin', 'tl');
+    const bedCard = card('Bed', [
+      F.text('Width', 'bedW', String(raw.bed[0]), 'mm'),
+      F.text('Height', 'bedH', String(raw.bed[1]), 'mm'),
+      F.text('Max speed', 'speed', String(raw.speed), 'mm/s'),
+      F.text('Acceleration', 'acc', String(raw.acc), 'mm/s²')
+    ]);
+    const ar = w / h;
+    const bedPreview = {
+      title: 'Work area', isBed: true, span: 'auto',
+      ar: String(ar), maxW: String(Math.round(240 * ar)),
+      label: 'Work area ' + w + ' by ' + h + ' millimetres',
+      ox: origin.includes('l') ? '-6px' : 'calc(100% - 6px)',
+      oy: origin.includes('t') ? '-6px' : 'calc(100% - 6px)',
+      conveyor: !isLaser && !!feat('conveyor')
+    };
+
+    const test = this.state.test[raw.id];
+    const testShown = !!test;
+    const testText = test ? (raw.online ? 'Connected · ' + (raw.id === 'trotec' ? '3' : '5') + ' ms' : 'No response') : '';
+
+    let tabsDef;
+    let cardsByTab;
+    if (isLaser) {
+      tabsDef = ['General', 'Work area', 'Laser source'].concat(feat('camera') ? ['Camera'] : []).concat(['Features']);
+      cardsByTab = {
+        'General': [connCard, jobCard],
+        'Work area': [bedCard, bedPreview],
+        'Laser source': [
+          card('Source', [
+            F.pick('Type', raw.source),
+            F.text('Rated power', 'power', String(raw.power), 'W'),
+            F.pick('Lens', raw.lens),
+            F.text('PWM frequency', 'pwm', String(raw.pwm), 'Hz'),
+            F.text('Minimum power', 'minPower', String(raw.minPower), '%')
+          ]),
+          card('Focus & air', [
+            F.feature('Auto-focus', 'autofocus'),
+            F.text('Focus offset', 'focus', '0.0', 'mm'),
+            F.feature('Air assist control', 'air'),
+            F.seg('Air assist default', 'airDefault', 'High', ['Low', 'High'])
+          ])
+        ],
+        'Camera': [
+          card('Print & cut camera', [
+            F.seg('Mark type', 'markType', 'Dot', ['Dot', 'Cross']),
+            F.text('Mark diameter', 'markD', '5.0', 'mm'),
+            F.pick('Default reg marks', 'Full linear · 3 dots'),
+            F.toggle('Ask before each job', 'askReg', false)
+          ]),
+          card('Calibration', [
+            F.text('Camera offset X', 'camX', '-42.15', 'mm'),
+            F.text('Camera offset Y', 'camY', '18.60', 'mm'),
+            F.action('Calibrate', 'Calibrate offset', 'Calibrated 12 Oct 2026')
+          ])
+        ],
+        'Features': [
+          card('Features', [
+            F.feature('Print & cut camera', 'camera'),
+            F.feature('Auto-focus', 'autofocus'),
+            F.feature('Rotary', 'rotary'),
+            F.feature('Air assist control', 'air'),
+            F.feature('Pass-through', 'pass')
+          ]),
+          card('Safety', [
+            F.feature('Exhaust interlock', 'interlock'),
+            F.toggle('Lid interlock', 'lid', true),
+            F.text('Exhaust run-on', 'exhaust', '10', 's')
+          ])
+        ]
+      };
+    } else {
+      const HEADS = [['T1', 'Knife', '0.00', '0.00', true], ['T2', 'V-cut 45°', '24.50', '0.00', true], ['T3', 'Crease wheel', '49.00', '0.00', true], ['T4', 'Pen', '73.50', '0.00', true]];
+      tabsDef = ['General', 'Work area', 'Tool heads'].concat(feat('conveyor') ? ['Conveyor'] : []).concat(['Features']);
+      cardsByTab = {
+        'General': [connCard, jobCard],
+        'Work area': [
+          bedCard,
+          bedPreview,
+          card('Vacuum', [
+            F.toggle('On at job start', 'vacStart', true),
+            F.toggle('Off at job end', 'vacEnd', true),
+            F.text('Release delay', 'vacDelay', '3', 's')
+          ])
+        ],
+        'Tool heads': [
+          { title: 'Tool heads', isHeads: true, span: '1 / -1' },
+          card('Laser pointer', [
+            F.text('Offset X', 'ptrX', '-31.20', 'mm'),
+            F.text('Offset Y', 'ptrY', '12.75', 'mm'),
+            F.action('Measure', 'Measure offset', 'Measured 21 Oct 2026')
+          ]),
+          card('Head detection', [
+            F.feature('Detect loaded heads', 'detect'),
+            F.toggle('Stop if head missing', 'headStop', true)
+          ])
+        ],
+        'Conveyor': [
+          card('Conveyor', [
+            F.text('Feed length', 'feedLen', String(raw.bed[1]), 'mm'),
+            F.text('Feed overlap', 'feedOver', '5.0', 'mm'),
+            F.toggle('Auto-feed between beds', 'autoFeed', true),
+            F.toggle('Vacuum off while feeding', 'feedVac', true),
+            F.action('Test', 'Feed one bed', '')
+          ]),
+          bedPreview
+        ],
+        'Features': [
+          card('Features', [
+            F.feature('Conveyor', 'conveyor'),
+            F.feature('Vacuum', 'vacuum'),
+            F.feature('Laser pointer', 'pointer'),
+            F.feature('Print & cut camera', 'camera')
+          ])
+        ]
+      };
+      const TOOLS = ['Knife', 'V-cut 45°', 'Crease wheel', 'Pen', 'Drag knife'];
+      var heads = HEADS.map(([slot, tool0, x, y, ok]) => {
+        const tk = 'h' + slot + 'tool';
+        const tool = get(tk, tool0);
+        const hk = raw.id + '|head|' + slot;
+        const open = this.state.openPick === hk;
+        return {
+        slot, tool, open,
+        toggle: () => this.setState({ openPick: open ? null : hk }),
+        opts: open ? TOOLS.map((o) => ({ l: o, on: o === tool, bg: o === tool ? accentSoft : 'transparent', pick: () => this.setState((s) => ({ edits: { ...s.edits, [raw.id + '|' + tk]: o }, dirty: true, openPick: null })) })) : [],
+        x: get('h' + slot + 'x', x), y: get('h' + slot + 'y', y),
+        setX: setText('h' + slot + 'x'), setY: setText('h' + slot + 'y'),
+        status: ok ? 'Loaded' : 'Empty', sbg: ok ? '#EDF7F1' : '#F0F1F4', sfg: ok ? '#1B6B43' : '#3A414C'
+        };
+      });
+    }
+    // Only the connection is set here; everything else is read from the machine (set on its HMI)
+    const EDITABLE = ['Connection', 'IP address', 'Serial port', 'Timeout'];
+    const lockField = (f) => {
+      const ok = EDITABLE.includes(f.l);
+      return {
+        ...f, ro: !ok, op: ok ? 1 : 0.55,
+        fbg: ok ? '#FFFFFF' : '#F3F4F6', ffg: ok ? '#15181E' : '#5B6370',
+        opts: f.opts ? f.opts.map((o) => ({ ...o, ro: !ok })) : f.opts,
+        corners: f.corners ? f.corners.map((c) => ({ ...c, ro: true })) : f.corners,
+        open: ok ? f.open : false
+      };
+    };
+    const lockCard = (cd) => (cd.isFields ? { ...cd, fields: cd.fields.map(lockField) } : cd);
+    const tab = tabsDef.includes(this.state.tab) ? this.state.tab : 'General';
+    const tabs = tabsDef.map((l) => ({
+      l, on: l === tab,
+      bd: l === tab ? accent : 'transparent',
+      fg: l === tab ? '#15181E' : '#5B6370',
+      w: l === tab ? 600 : 400,
+      pick: () => this.setState({ tab: l })
+    }));
+
+    const machineList = MACHINES.map((x) => {
+      const on = x.id === raw.id;
+      const c = g(x.id, 'conn', x.conn);
+      return {
+        ...TYPE[x.type],
+        name: g(x.id, 'name', x.name),
+        sub: x.ctrl + ' · ' + (c === 'Ethernet' ? g(x.id, 'ip', x.ip || '192.168.1.60') : g(x.id, 'port', x.port)),
+        status: x.online ? 'Connected' : 'Offline',
+        dot: x.online ? '#30A46C' : '#AEB5C0',
+        cur: on ? 'page' : 'false',
+        bg: on ? accentSoft : 'transparent',
+        bd: on ? accent : 'transparent',
+        pick: () => this.setState({ mid: x.id, tab: null })
+      };
+    });
+
+    return {
+      accent, icons,
+      machineCount: MACHINES.length + ' machines',
+      dirty: this.state.dirty,
+      clean: !this.state.dirty,
+      saveOpacity: this.state.dirty ? 1 : 0.45,
+      saveCursor: this.state.dirty ? 'pointer' : 'default',
+      save: () => this.setState((s) => ({ saved: { ...s.edits }, dirty: false })),
+      discard: () => this.setState((s) => ({ edits: { ...s.saved }, dirty: false })),
+      machineList,
+      m: {
+        ...TYPE[raw.type],
+        name: get('name', raw.name), kind: raw.kind, ctrl: get('p_Driver', raw.ctrl),
+        status: raw.online ? 'Connected' : 'Offline',
+        dot: raw.online ? '#30A46C' : '#AEB5C0',
+        statusBg: raw.online ? '#EDF7F1' : '#F0F1F4',
+        statusFg: raw.online ? '#1B6B43' : '#3A414C'
+      },
+      setName: setText('name'),
+      testShown, testText, testFg: raw.online ? '#1B6B43' : '#B42318',
+      runTest: () => this.setState((s) => ({ test: { ...s.test, [raw.id]: true } })),
+      tabs,
+      cards: (cardsByTab[tab] || []).map(lockCard),
+      syncText: raw.online ? (test ? 'Just now' : '28/10/2026 09:14') : 'Machine offline · last synced 26/10/2026 17:02',
+      heads: isLaser ? [] : heads
+    };
+  }
+}
+</script>
+</body>
+</html>

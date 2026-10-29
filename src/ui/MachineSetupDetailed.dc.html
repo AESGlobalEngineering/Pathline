@@ -1,0 +1,515 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Machine setup · Pathline</title>
+<link rel="stylesheet" href="fonts.css">
+<link rel="stylesheet" href="theme.css">
+<script src="../shared/core.js"></script>
+<script src="./support.js"></script>
+<script src="./app.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+/* page-specific layout only; tokens and components come from theme.css */
+.ms-page{height:100vh;display:flex;flex-direction:column;overflow:hidden;background:var(--bg);color:var(--text);font:13px var(--font)}
+.ms-side{width:300px;flex:none;min-width:0;background:var(--surface);border-right:1px solid var(--line);display:flex;flex-direction:column;gap:4px;padding:14px;overflow-y:auto;box-sizing:border-box}
+.ms-side .eyebrow{padding:2px 10px 6px}
+.ms-main{flex:1;min-width:0;padding:20px;display:flex;flex-direction:column;gap:16px;overflow-y:auto;box-sizing:border-box}
+.ms-card{padding:16px;display:flex;flex-direction:column;gap:12px}
+.ms-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,220px);align-items:center;gap:12px;min-height:var(--ctl-h)}
+.ms-row.auto{grid-template-columns:minmax(0,1fr) auto}
+.ms-row > .ms-l{color:var(--text-2)}
+/* read-only (set on the HMI) groups fade once, as a whole: not per button */
+.ms-ro > button:disabled{opacity:1}
+/* origin-corner picker: a 2 x 2 .seg */
+.seg.ms-corner{display:grid;grid-template-columns:repeat(2,26px);gap:3px}
+.seg.ms-corner > button{width:26px;height:20px;padding:0;border-radius:4px;box-shadow:none}
+.ms-note{padding:8px 10px;border-radius:var(--ctl-r);background:var(--sunken);color:var(--text-2);font-size:12px;line-height:1.45}
+.ms-heads{display:grid;grid-template-columns:52px minmax(160px,1fr) 110px 110px 90px;gap:10px;align-items:center}
+.ms-slot{width:36px;height:var(--ctl-h);border-radius:var(--ctl-r);background:var(--sunken);display:inline-flex;align-items:center;justify-content:center;font-weight:500;color:var(--text-2)}
+.ms-dot{width:7px;height:7px;border-radius:50%;flex:none}
+</style>
+</helmet>
+<div class="ms-page">
+
+  <!-- ===== App bar ===== -->
+  <header class="appbar">
+    <div class="brand"><svg viewBox="0 0 64 64" width="28" height="28" role="img" aria-label="Pathline" style="flex: none; display: block"><rect width="64" height="64" rx="15" fill="#D62828"></rect><g transform="translate(14 14) scale(0.5625)" stroke-width="6" stroke-linejoin="round"><polygon points="6,6 50,6 6,50" fill="#FFFFFF" stroke="#FFFFFF"></polygon><polygon points="58,14 58,58 14,58" fill="#111214" stroke="#111214"></polygon></g></svg><span class="word">Pathline</span></div>
+    <nav aria-label="Sections" class="seg">
+      <a href="MainDetailed.dc.html">Job</a>
+      <a href="SimulationDetailed.dc.html">Simulation</a>
+    </nav>
+    <span class="divider"></span>
+    <div class="ctx">
+      <div role="tablist" aria-label="Setup" class="seg">
+        <a href="MachineSetupDetailed.dc.html" role="tab" aria-selected="true" aria-current="page" class="on">Machines</a>
+        <a href="MaterialsDetailed.dc.html" role="tab" aria-selected="false">Materials</a>
+      </div>
+      <div style="display: flex; flex-direction: column; line-height: 1.25; min-width: 0">
+        <h1 class="h-page">Machine setup</h1>
+        <span class="lbl">{{machineCount}}</span>
+      </div>
+    </div>
+    <span class="spacer"></span>
+    <sc-if value="{{dirty}}" hint-placeholder-val="{{false}}">
+      <span class="tag warn">Unsaved changes</span>
+      <button class="tb" onClick="{{discard}}">Discard</button>
+    </sc-if>
+    <button class="btn-primary" onClick="{{save}}" disabled="{{clean}}" style="opacity: {{saveOpacity}}; cursor: {{saveCursor}}">Save</button>
+  </header>
+
+  <div style="flex: 1; display: flex; min-height: 0">
+
+    <!-- ===== Machine list ===== -->
+    <nav aria-label="Machines" class="ms-side">
+      <span class="eyebrow">Machines</span>
+      <sc-for list="{{machineList}}" as="mc" hint-placeholder-count="3">
+        <button class="list-item" onClick="{{mc.pick}}" aria-current="{{mc.cur}}" style="background: {{mc.bg}}; box-shadow: inset 0 0 0 1px {{mc.bd}}">
+          <span class="badge" style="min-width: 62px; align-self: flex-start; margin-top: 1px; background: {{mc.tbg}}">{{mc.type}}</span>
+          <span style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; line-height: 1.3">
+            <span style="display: flex; align-items: center; gap: 8px; min-width: 0">
+              <span style="flex: 1; min-width: 0; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{mc.name}}</span>
+              <span class="pill nodot" role="img" aria-label="{{mc.status}}" title="{{mc.status}}" style="height: 22px; padding: 0 8px; background: {{mc.pbg}}; color: {{mc.pfg}}"><span class="ms-dot" aria-hidden="true" style="background: {{mc.dot}}"></span>{{mc.short}}</span>
+            </span>
+            <span class="lbl" style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{mc.sub}}</span>
+          </span>
+        </button>
+      </sc-for>
+      <span style="flex: 1; min-height: 8px"></span>
+      <button class="tb block" onClick="{{addMachine}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.plus}}"></path></svg>Add machine</button>
+    </nav>
+
+    <!-- ===== Machine detail ===== -->
+    <main class="ms-main">
+
+      <sc-if value="{{noMachine}}" hint-placeholder-val="{{false}}">
+        <section aria-label="No machines" class="card" style="margin: auto; max-width: 460px">
+          <div class="empty">
+            <span class="em-icon"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.machine}}"></path></svg></span>
+            <h2 class="em-title" style="margin: 0">No machines yet</h2>
+            <span class="em-text">Add the lasers and plotters this computer prepares jobs for. Set the connection here, then use Refresh from machine to read the bed size, speeds and features.</span>
+            <div class="em-actions">
+              <button class="btn-primary" onClick="{{addMachine}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.plus}}"></path></svg>Add machine</button>
+            </div>
+          </div>
+        </section>
+      </sc-if>
+      <sc-if value="{{hasMachine}}" hint-placeholder-val="{{true}}">
+      <section aria-label="Machine" class="card" style="padding: 16px; display: flex; flex-wrap: wrap; align-items: center; gap: 14px">
+        <span class="badge" style="height: 28px; padding: 0 9px; background: {{m.tbg}}">{{m.type}}</span>
+        <div style="flex: 1 1 280px; min-width: 0; display: flex; flex-direction: column; gap: 4px">
+          <label class="fld sans" style="max-width: 420px">
+            <input value="{{m.name}}" onChange="{{setName}}" aria-label="Machine name" style="font-size: 15px; font-weight: 600">
+          </label>
+          <span class="lbl">{{m.sub}}</span>
+        </div>
+        <span class="pill nodot" style="background: {{m.statusBg}}; color: {{m.statusFg}}"><span class="ms-dot" aria-hidden="true" style="background: {{m.dot}}"></span>{{m.status}}</span>
+        <sc-if value="{{testShown}}" hint-placeholder-val="{{false}}"><span style="font-size: 12px; color: {{testFg}}">{{testText}}</span></sc-if>
+        <button class="tb" onClick="{{runTest}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.plug}}"></path></svg>{{testLabel}}</button>
+        <div style="display: flex; gap: 2px">
+          <button class="ib" onClick="{{duplicate}}" aria-label="Duplicate machine" title="Duplicate"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.copy}}"></path></svg></button>
+          <button class="ib" onClick="{{remove}}" aria-label="Delete machine" title="Delete"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.trash}}"></path></svg></button>
+        </div>
+      </section>
+
+      <div class="card" style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; padding: 10px 14px">
+        <svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="color: var(--text-3)"><path d="{{icons.sync}}"></path></svg>
+        <span style="font-weight: 500">Synced from machine</span>
+        <span class="{{syncCls}}">{{syncText}}</span>
+        <span style="flex: 1"></span>
+        <span class="lbl">Greyed settings are set on the machine's HMI</span>
+        <button class="tb" onClick="{{openHmi}}" disabled="{{noSync}}">Open HMI</button>
+        <button class="tb" onClick="{{refresh}}" disabled="{{noSync}}" title="{{syncTip}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.sync}}"></path></svg>{{refreshLabel}}</button>
+      </div>
+
+      <div role="tablist" aria-label="Settings" class="tabs">
+        <sc-for list="{{tabs}}" as="t" hint-placeholder-count="5">
+          <button role="tab" aria-selected="{{t.on}}" onClick="{{t.pick}}" style="border-bottom-color: {{t.bd}}; color: {{t.fg}}; font-weight: {{t.w}}">{{t.l}}</button>
+        </sc-for>
+      </div>
+
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 16px; align-items: start">
+        <sc-for list="{{cards}}" as="cd" hint-placeholder-count="2">
+          <section aria-label="{{cd.title}}" class="card ms-card" style="grid-column: {{cd.span}}">
+            <h2 class="h-sec">{{cd.title}}</h2>
+
+            <sc-if value="{{cd.isFields}}" hint-placeholder-val="{{true}}">
+              <div style="display: flex; flex-direction: column; gap: 10px">
+                <sc-for list="{{cd.fields}}" as="f" hint-placeholder-count="4">
+                  <sc-if value="{{f.isText}}" hint-placeholder-val="{{true}}">
+                    <label class="ms-row">
+                      <span class="ms-l">{{f.l}}</span>
+                      <span class="fld" style="background: {{f.fbg}}"><input class="{{f.fc}}" value="{{f.v}}" onChange="{{f.set}}" disabled="{{f.ro}}" placeholder="{{f.ph}}" style="color: {{f.ffg}}"><span class="lbl">{{f.u}}</span></span>
+                    </label>
+                  </sc-if>
+                  <sc-if value="{{f.isSeg}}" hint-placeholder-val="{{false}}">
+                    <div class="ms-row auto">
+                      <span class="ms-l">{{f.l}}</span>
+                      <div role="radiogroup" aria-label="{{f.l}}" class="seg ms-ro" style="opacity: {{f.op}}">
+                        <sc-for list="{{f.opts}}" as="o" hint-placeholder-count="2">
+                          <button role="radio" aria-checked="{{o.on}}" onClick="{{o.pick}}" disabled="{{o.ro}}" style="background: {{o.bg}}; box-shadow: {{o.sh}}; color: {{o.fg}}">{{o.l}}</button>
+                        </sc-for>
+                      </div>
+                    </div>
+                  </sc-if>
+                  <sc-if value="{{f.isToggle}}" hint-placeholder-val="{{false}}">
+                    <div class="ms-row auto">
+                      <span class="ms-l">{{f.l}}</span>
+                      <button role="switch" class="sw" aria-checked="{{f.on}}" aria-label="{{f.l}}" onClick="{{f.toggle}}" disabled="{{f.ro}}" style="opacity: {{f.op}}; background: {{f.swBg}}; justify-content: {{f.swJ}}"></button>
+                    </div>
+                  </sc-if>
+                  <sc-if value="{{f.isPick}}" hint-placeholder-val="{{false}}">
+                    <div class="ms-row" style="align-items: start">
+                      <span class="ms-l" style="line-height: var(--ctl-h)">{{f.l}}</span>
+                      <div style="display: flex; flex-direction: column; gap: 4px; min-width: 0">
+                        <button class="dd" onClick="{{f.toggle}}" disabled="{{f.ro}}" aria-haspopup="listbox" aria-expanded="{{f.open}}" aria-label="{{f.l}}: {{f.v}}" style="background: {{f.fbg}}; color: {{f.ffg}}">{{f.v}}<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.chev}}"></path></svg></button>
+                        <sc-if value="{{f.open}}" hint-placeholder-val="{{false}}">
+                          <div role="listbox" aria-label="{{f.l}}" class="pop">
+                            <sc-for list="{{f.opts}}" as="o" hint-placeholder-count="3">
+                              <button role="option" class="opt" aria-selected="{{o.on}}" onClick="{{o.pick}}" style="background: {{o.bg}}">{{o.l}}<sc-if value="{{o.on}}" hint-placeholder-val="{{false}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.check}}"></path></svg></sc-if></button>
+                            </sc-for>
+                          </div>
+                        </sc-if>
+                      </div>
+                    </div>
+                  </sc-if>
+                  <sc-if value="{{f.isCorner}}" hint-placeholder-val="{{false}}">
+                    <div class="ms-row auto">
+                      <span class="ms-l">{{f.l}}</span>
+                      <div role="radiogroup" aria-label="{{f.l}}" class="seg ms-corner ms-ro" style="opacity: {{f.op}}">
+                        <sc-for list="{{f.corners}}" as="c" hint-placeholder-count="4">
+                          <button role="radio" aria-checked="{{c.on}}" aria-label="{{c.label}}" onClick="{{c.pick}}" disabled="{{c.ro}}" style="background: {{c.bg}}"></button>
+                        </sc-for>
+                      </div>
+                    </div>
+                  </sc-if>
+                  <sc-if value="{{f.isAction}}" hint-placeholder-val="{{false}}">
+                    <div style="display: flex; align-items: center; justify-content: flex-end; gap: 12px; min-height: var(--ctl-h); padding-top: 10px; border-top: 1px solid var(--line-soft)">
+                      <span class="lbl" style="flex: 1">{{f.result}}</span>
+                      <button class="tb" onClick="{{f.run}}" disabled="{{f.ro}}" title="{{f.tip}}" style="opacity: {{f.op}}">{{f.btn}}</button>
+                    </div>
+                  </sc-if>
+                  <sc-if value="{{f.isNote}}" hint-placeholder-val="{{false}}">
+                    <div class="ms-note">{{f.l}}</div>
+                  </sc-if>
+                </sc-for>
+              </div>
+            </sc-if>
+
+            <sc-if value="{{cd.isBed}}" hint-placeholder-val="{{false}}">
+              <div class="viewport" style="display: flex; justify-content: center; padding: 24px; border-radius: var(--ctl-r); overflow: hidden">
+                <div role="img" aria-label="{{cd.label}}" style="position: relative; width: min(70%, {{cd.maxW}}px); aspect-ratio: {{cd.ar}}; border-radius: 4px; background-color: var(--bed); box-shadow: 0 0 0 1px var(--bed-line); background-image: linear-gradient(var(--bed-grid) 1px, transparent 1px), linear-gradient(90deg, var(--bed-grid) 1px, transparent 1px); background-size: 10% 10%">
+                  <span style="position: absolute; left: {{cd.ox}}; top: {{cd.oy}}; width: 12px; height: 12px; border-radius: 50%; background: var(--bed); box-shadow: 0 0 0 2px {{accent}}"></span>
+                  <sc-if value="{{cd.conveyor}}" hint-placeholder-val="{{false}}">
+                    <span style="position: absolute; left: 100%; top: 0; bottom: 0; width: 40%; border: 1px dashed var(--line-hover); border-left: 0; border-radius: 0 4px 4px 0"></span>
+                  </sc-if>
+                </div>
+              </div>
+              <span class="lbl" style="text-align: center">{{cd.label}}</span>
+            </sc-if>
+
+            <sc-if value="{{cd.isHeads}}" hint-placeholder-val="{{false}}">
+              <div role="table" aria-label="Tool heads" style="display: flex; flex-direction: column">
+                <div role="row" class="ms-heads" style="padding: 0 0 8px; border-bottom: 1px solid var(--line)">
+                  <span role="columnheader" class="lbl" style="font-weight: 500">Slot</span>
+                  <span role="columnheader" class="lbl" style="font-weight: 500">Tool</span>
+                  <span role="columnheader" class="lbl" style="font-weight: 500">Offset X mm</span>
+                  <span role="columnheader" class="lbl" style="font-weight: 500">Offset Y mm</span>
+                  <span role="columnheader" class="lbl" style="font-weight: 500">Status</span>
+                </div>
+                <sc-for list="{{heads}}" as="h" hint-placeholder-count="4">
+                  <div role="row" class="ms-heads" style="padding: 8px 0; border-bottom: 1px solid var(--line-soft)">
+                    <span role="cell" class="mono ms-slot">{{h.slot}}</span>
+                    <span role="cell"><span class="fld ro" style="color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{h.tool}}</span></span>
+                    <span role="cell"><input class="cell" value="{{h.x}}" disabled="{{true}}" aria-label="{{h.slot}} offset X"></span>
+                    <span role="cell"><input class="cell" value="{{h.y}}" disabled="{{true}}" aria-label="{{h.slot}} offset Y"></span>
+                    <span role="cell"><span class="pill nodot" style="background: {{h.sbg}}; color: {{h.sfg}}">{{h.status}}</span></span>
+                  </div>
+                </sc-for>
+              </div>
+            </sc-if>
+          </section>
+        </sc-for>
+      </div>
+      </sc-if>
+    </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  state = { ready: false, list: [], saved: [], mid: null, tab: null, test: {}, online: {}, openPick: null, syncing: false };
+
+  componentDidMount() {
+    window.__page = this;
+    Promise.all([window.api.machines.list(), window.api.job.current()])
+      .then(([list, job]) => {
+        this.setState({ ready: true, list: JSON.parse(JSON.stringify(list)), saved: list, mid: (job && list.some((m) => m.id === job.machineId)) ? job.machineId : (list[0] ? list[0].id : null) });
+        this.pingAll();
+      })
+      .catch(LRC.fail);
+    this.pinger = setInterval(() => this.pingAll(), 8000);
+    this.offNav = LRC.guardNav(() => this.dirty(), () => this.save());
+    this.offKeys = LRC.keys({ 'Ctrl+S': () => this.run(() => this.save())() });
+  }
+  componentWillUnmount() { clearInterval(this.pinger); this.offNav && this.offNav(); this.offKeys && this.offKeys(); }
+  run(fn) { return (...a) => { try { const r = fn(...a); if (r && r.catch) r.catch(LRC.fail); } catch (e) { LRC.fail(e); } }; }
+  dirty() { return JSON.stringify(this.state.list) !== JSON.stringify(this.state.saved); }
+  cur() { return this.state.list.find((m) => m.id === this.state.mid) || this.state.list[0]; }
+  // status dots for every Ethernet machine (uses the saved connection)
+  pingAll() {
+    if (document.hidden) return;
+    for (const m of this.state.saved) {
+      if (m.conn !== 'Ethernet' || !m.ip) { this.setState((s) => ({ online: { ...s.online, [m.id]: null } })); continue; }
+      window.api.device.status(m.id)
+        .then((st) => this.setState((s) => ({ online: { ...s.online, [m.id]: { ok: true, state: st.state } } })))
+        .catch((err) => this.setState((s) => ({ online: { ...s.online, [m.id]: { ok: false, msg: err.message } } })));
+    }
+  }
+  patch(fn) {
+    const id = this.state.mid;
+    this.setState((s) => ({ list: s.list.map((m) => (m.id === id ? fn(m) : m)) }));
+  }
+  async save() {
+    const bad = this.state.list.find((m) => m.conn === 'Ethernet' && m.ip && !/^[\w.-]+$/.test(String(m.ip).trim()));
+    if (bad) throw new Error(bad.name + ': "' + bad.ip + '" is not a valid IP address or host name');
+    const list = this.state.list.map((m) => ({ ...m, ip: String(m.ip || '').trim(), port: Number(m.port) || 8470, timeout: Number(m.timeout) || 3000 }));
+    const saved = await window.api.machines.saveAll(list);
+    this.setState({ saved: JSON.parse(JSON.stringify(saved)), list: JSON.parse(JSON.stringify(saved)) });
+    LRC.toast('Machines saved', { kind: 'ok' });
+    this.pingAll();
+  }
+  async test() {
+    const m = this.cur();
+    this.setState((s) => ({ test: { ...s.test, [m.id]: { busy: true } } }));
+    try {
+      if (m.conn !== 'Ethernet') {
+        this.setState((s) => ({ test: { ...s.test, [m.id]: { ok: true, text: 'Jobs are saved where you choose when you send' } } }));
+        return;
+      }
+      const r = await window.api.device.test(m);
+      this.setState((s) => ({ test: { ...s.test, [m.id]: { ok: true, text: 'Connected · ' + r.ms + ' ms · ' + ((r.info && (r.info.model || r.info.name)) || 'controller') } } }));
+    } catch (err) {
+      this.setState((s) => ({ test: { ...s.test, [m.id]: { ok: false, text: err.message } } }));
+    }
+  }
+  async refresh() {
+    const m = this.cur();
+    if (this.dirty()) await this.save();
+    this.setState({ syncing: true });
+    try {
+      const updated = await window.api.device.sync(m.id);
+      const list = await window.api.machines.list();
+      this.setState({ list: JSON.parse(JSON.stringify(list)), saved: list });
+      LRC.toast('Read settings from ' + updated.name, { kind: 'ok' });
+    } finally {
+      this.setState({ syncing: false });
+    }
+  }
+  async addMachine() {
+    const r = await LRC.dialog({
+      title: 'Add machine',
+      message: 'Only the connection is set here — bed size, speeds and features are read from the machine once it is connected.',
+      fields: [
+        { key: 'type', label: 'Type', type: 'seg', value: 'laser', options: [{ value: 'laser', label: 'Laser' }, { value: 'plotter', label: 'Plotter / router' }] },
+        { key: 'name', label: 'Name', value: '', full: true },
+        { key: 'ip', label: 'IP address', value: '', full: false },
+        { key: 'ctrl', label: 'Controller', type: 'select', value: 'Ruida', options: ['Trotec', 'Ruida', 'Other'], full: false }
+      ],
+      buttons: [{ label: 'Cancel', value: null }, { label: 'Add', value: 'ok', primary: true }]
+    });
+    if (!r) return;
+    const base = await window.api.machines.create(r.values.type);
+    const m = { ...base, name: r.values.name || base.name, ip: r.values.ip || '', ctrl: r.values.ctrl };
+    // created on disk already; keep the working copy in step
+    this.setState((s) => ({ list: s.list.concat(m), saved: s.saved.concat(base), mid: m.id, tab: null }));
+  }
+  async duplicate() {
+    const src = this.cur();
+    const copy = { ...JSON.parse(JSON.stringify(src)), id: CC.uid('m'), name: src.name + ' copy', syncedAt: null };
+    this.setState((s) => ({ list: s.list.concat(copy), mid: copy.id }));
+  }
+  async remove() {
+    const m = this.cur();
+    if (!(await LRC.confirm('Remove ' + m.name + '?', 'Jobs set up for it will switch to another machine of the same type when opened. Takes effect when you save.', 'Remove', true))) return;
+    const list = this.state.list.filter((x) => x.id !== m.id);
+    this.setState({ list, mid: list[0] ? list[0].id : null });
+  }
+
+  renderVals() {
+    // styling values are theme tokens (src/ui/theme.css); '' leaves the class style in place
+    const accent = 'var(--accent)';
+    const accentSoft = 'var(--accent-soft)';
+    const icons = {
+      plus: 'M12 5v14 M5 12h14',
+      copy: 'M8 8h12v12H8z M4 16V4h12',
+      trash: 'M4 7h16 M9 7V4h6v3 M6 7l1 13h10l1-13',
+      chev: 'M6 9l6 6 6-6',
+      check: 'M5 12.5l4.5 4.5L19 7',
+      sync: 'M20 11a8 8 0 0 0-14.3-4.9L4 8 M4 4v4h4 M4 13a8 8 0 0 0 14.3 4.9L20 16 M20 20v-4h-4',
+      plug: 'M9 3v5 M15 3v5 M6 8h12v3a6 6 0 0 1-12 0z M12 17v4',
+      machine: 'M3 6h18v9H3z M7 15v4 M17 15v4 M5 19h14 M12 6v4 M10.5 10h3'
+    };
+    const S = this.state;
+    if (!S.ready) return { accent, icons, machineList: [], tabs: [], cards: [], heads: [], m: {} };
+    const R = (fn) => this.run(fn);
+    const TYPE = { laser: { type: 'LASER', tbg: 'var(--badge-laser)' }, plotter: { type: 'PLOTTER', tbg: 'var(--badge-plotter)' } };
+    const dirty = this.dirty();
+    const common = {
+      accent, icons,
+      machineCount: S.list.length ? S.list.length + ' machine' + (S.list.length === 1 ? '' : 's') : 'No machines',
+      dirty, clean: !dirty, saveOpacity: dirty ? 1 : 0.45, saveCursor: dirty ? 'pointer' : 'default',
+      save: R(() => this.save()),
+      discard: () => this.setState((s) => ({ list: JSON.parse(JSON.stringify(s.saved)), mid: s.saved.some((m) => m.id === s.mid) ? s.mid : (s.saved[0] && s.saved[0].id) })),
+      addMachine: R(() => this.addMachine())
+    };
+    const raw = this.cur();
+    // nothing set up yet (the app ships without machines)
+    if (!raw) return { ...common, hasMachine: false, noMachine: true, machineList: [], tabs: [], cards: [], heads: [], m: {}, noSync: true, syncTip: 'Add a machine first', refreshLabel: 'Refresh from machine', refresh: () => {} };
+    const info = raw.info || {};
+    const feat = info.f || {};
+    const isLaser = raw.type === 'laser';
+    const set = (k) => (e) => { const v = e.target.value; this.patch((m) => ({ ...m, [k]: v })); };
+    // numbers (and the — placeholder) in mono, words in sans
+    const fc = (v) => (/^[\d\s.,:+\-—–]*$/.test(String(v)) ? 'mono' : 'sans');
+    const segOn = { bg: 'var(--seg-on)', sh: 'var(--shadow-1)', fg: 'var(--text)' };
+    const segOff = { bg: '', sh: '', fg: '' };
+
+    // editable (connection) fields
+    const seg = (l, k, opts) => {
+      const cur = raw[k];
+      return { isSeg: true, l, op: 1, opts: opts.map(([v, lbl]) => ({ l: lbl, on: cur === v, ro: false, ...(cur === v ? segOn : segOff), pick: () => this.patch((m) => ({ ...m, [k]: v })) })) };
+    };
+    const text = (l, k, u, ph) => ({ isText: true, l, v: String(raw[k] ?? ''), fc: k === 'ip' ? 'mono' : fc(raw[k] ?? ''), u: u || '', ph: ph || '', set: set(k), ro: false, fbg: 'var(--surface)', ffg: 'var(--text)' });
+    // read-only fields (set on the HMI): fields get the sunken background, other controls fade once (0.45)
+    const RO = { ro: true, op: 0.45, fbg: 'var(--sunken)', ffg: 'var(--text-3)' };
+    const roText = (l, v, u) => { const s = v === undefined || v === null || v === '' ? '—' : String(v); return { isText: true, l, v: s, fc: fc(s), u: u || '', set: () => {}, ...RO }; };
+    const roToggle = (l, v) => ({ isToggle: true, l, on: !!v, swBg: v ? accent : 'var(--track)', swJ: v ? 'flex-end' : 'flex-start', toggle: () => {}, ...RO });
+    const roSeg = (l, v, opts) => ({ isSeg: true, l, op: 0.45, opts: opts.map((o) => ({ l: o, on: v === o, ro: true, ...(v === o ? segOn : segOff), pick: () => {} })) });
+    const roPick = (l, v) => ({ isPick: true, l, v: v || '—', open: false, opts: [], toggle: () => {}, ...RO });
+    // features the machine doesn't have are left out (falsy fields are dropped)
+    const card = (title, fields, span) => ({ title, fields: fields.filter(Boolean), isFields: true, span: span || 'auto' });
+    const featCard = (list) => {
+      const on = list.filter(([, k]) => feat[k]).map(([l]) => roToggle(l, true));
+      return card('Features', on.length ? on : [{ isNote: true, l: 'No optional features reported by this machine.' }]);
+    };
+
+    const connFields = [seg('Connection', 'conn', [['Ethernet', 'Ethernet'], ['Local', 'Save locally']])];
+    if (raw.conn === 'Ethernet') connFields.push(text('IP address', 'ip', '', '192.168.1.60'), text('Port', 'port', '', '8470'), text('Timeout', 'timeout', 'ms', '3000'));
+    else connFields.push({ isNote: true, l: 'Send to machine opens a save window so you can put the job (settings, DXF, preview and time estimate) wherever you like, then load it on the controller.' });
+    connFields.push(roPick('Driver', raw.ctrl));
+    const connCard = card('Connection', connFields);
+    const jobCard = card('Job defaults', [
+      { isCorner: true, l: 'Origin', op: 0.45, corners: ['tl', 'tr', 'bl', 'br'].map((c) => ({ c, on: (info.origin || 'tl') === c, ro: true, label: { tl: 'Origin top left', tr: 'Origin top right', bl: 'Origin bottom left', br: 'Origin bottom right' }[c], bg: (info.origin || 'tl') === c ? accent : 'var(--line-hover)', pick: () => {} })) },
+      roSeg('Units', info.units || 'mm', ['mm', 'inch']),
+      roToggle('Home on start', info.home !== false),
+      roText('Job name prefix', info.prefix || '')
+    ]);
+    const bed = info.bed || (isLaser ? [813, 508] : [1600, 1000]);
+    const origin = info.origin || 'tl';
+    const bedCard = card('Bed', [roText('Width', bed[0], 'mm'), roText('Height', bed[1], 'mm'), roText('Max speed', info.speed, 'mm/s'), roText('Acceleration', info.acc, 'mm/s²')]);
+    const ar = bed[0] / bed[1];
+    const bedPreview = {
+      title: 'Work area', isBed: true, span: 'auto', ar: String(ar), maxW: String(Math.round(240 * ar)),
+      label: 'Work area ' + bed[0] + ' × ' + bed[1] + ' mm',
+      ox: origin.includes('l') ? '-6px' : 'calc(100% - 6px)', oy: origin.includes('t') ? '-6px' : 'calc(100% - 6px)',
+      conveyor: !isLaser && !!feat.conveyor
+    };
+    const devCmd = (cmd, args, msg) => R(async () => { await window.api.device.command(raw.id, cmd, args); LRC.toast(msg); });
+    const online = S.online[raw.id];
+    const canTalk = raw.conn === 'Ethernet' && online && online.ok;
+    let tabsDef, cardsByTab;
+    if (isLaser) {
+      tabsDef = ['General', 'Work area', 'Laser source'].concat(feat.camera ? ['Camera'] : []).concat(['Features']);
+      cardsByTab = {
+        'General': [connCard, jobCard],
+        'Work area': [bedCard, bedPreview],
+        'Laser source': [
+          card('Source', [roPick('Type', info.source), roText('Rated power', info.power, 'W'), roPick('Lens', info.lens), roText('PWM frequency', info.pwm, 'Hz'), roText('Minimum power', info.minPower, '%')]),
+          card('Focus & air', [feat.autofocus && roToggle('Auto-focus', true), roText('Focus offset', info.focus, 'mm'), feat.air && roToggle('Air assist control', true), feat.air && roSeg('Air assist default', info.airDefault || 'High', ['Low', 'High'])])
+        ],
+        'Camera': [
+          card('Print & cut camera', [roSeg('Mark type', info.markType || 'Dot', ['Dot', 'Cross']), roText('Mark diameter', info.markD, 'mm'), roPick('Default reg marks', info.defaultReg), roToggle('Ask before each job', info.askReg)]),
+          card('Calibration', [roText('Camera offset X', info.camX, 'mm'), roText('Camera offset Y', info.camY, 'mm'), { isAction: true, l: 'Calibrate', btn: 'Calibrate offset', result: info.calibrated ? 'Calibrated ' + info.calibrated : '', run: () => {}, tip: 'Run calibration on the machine\'s HMI', ...RO }])
+        ],
+        'Features': [
+          featCard([['Print & cut camera', 'camera'], ['Auto-focus', 'autofocus'], ['Rotary', 'rotary'], ['Air assist control', 'air'], ['Pass-through', 'pass']]),
+          card('Safety', [feat.interlock && roToggle('Exhaust interlock', true), info.lid !== false && roToggle('Lid interlock', true), roText('Exhaust run-on', info.exhaust, 's')])
+        ]
+      };
+    } else {
+      tabsDef = ['General', 'Work area', 'Tool heads'].concat(feat.conveyor ? ['Conveyor'] : []).concat(['Features', 'Timing']);
+      cardsByTab = {
+        'General': [connCard, jobCard],
+        'Work area': [bedCard, bedPreview, feat.vacuum && card('Vacuum', [roToggle('On at job start', info.vacStart), roToggle('Off at job end', info.vacEnd), roText('Release delay', info.vacDelay, 's')])].filter(Boolean),
+        'Tool heads': [
+          { title: 'Tool heads', isHeads: true, span: '1 / -1' },
+          feat.pointer && card('Laser pointer', [roText('Offset X', info.ptrX, 'mm'), roText('Offset Y', info.ptrY, 'mm'), { isAction: true, l: 'Measure', btn: 'Measure offset', result: info.measured ? 'Measured ' + info.measured : '', run: () => {}, tip: 'Measure on the machine\'s HMI', ...RO }]),
+          feat.detect && card('Head detection', [roToggle('Detect loaded heads', true), roToggle('Stop if head missing', info.headStop)])
+        ].filter(Boolean),
+        'Conveyor': [
+          card('Conveyor', [roText('Feed length', info.feedLen || bed[1], 'mm'), roText('Feed overlap', info.feedOver, 'mm'), roToggle('Auto-feed between beds', info.autoFeed), roToggle('Vacuum off while feeding', info.feedVac),
+            { isAction: true, l: 'Test', btn: 'Feed one bed', result: canTalk ? '' : 'Needs an Ethernet connection', run: devCmd('feed', {}, 'Feeding one bed'), ro: !canTalk, op: canTalk ? 1 : 0.45 }]),
+          bedPreview
+        ],
+        'Features': [featCard([['Conveyor', 'conveyor'], ['Vacuum', 'vacuum'], ['Laser pointer', 'pointer'], ['Print & cut camera', 'camera']])],
+        'Timing': [card('Time estimate', [
+          roText('Tool down', (info.timing && info.timing.toolDown) ?? CC.DEFAULTS.plotter.toolDown, 's'), roText('Tool up', (info.timing && info.timing.toolUp) ?? CC.DEFAULTS.plotter.toolUp, 's'),
+          roText('Tool change', (info.timing && info.timing.toolChange) ?? CC.DEFAULTS.plotter.toolChange, 's'), roText('Conveyor speed', (info.timing && info.timing.feedSpeed) ?? CC.DEFAULTS.plotter.feedSpeed, 'mm/s'),
+          { isNote: true, l: 'Used by the simulation to estimate job time. Read from the machine when it reports them.' }
+        ])]
+      };
+    }
+    const tab = tabsDef.includes(S.tab) ? S.tab : 'General';
+    const tabs = tabsDef.map((l) => ({ l, on: l === tab, bd: l === tab ? accent : '', fg: l === tab ? 'var(--text)' : '', w: l === tab ? 600 : '', pick: () => this.setState({ tab: l }) }));
+    const heads = (info.heads || []).map((hd) => ({ slot: hd.slot, tool: hd.tool, x: hd.x, y: hd.y, status: hd.loaded ? 'Loaded' : 'Empty', sbg: hd.loaded ? 'var(--ok-soft)' : 'var(--sunken)', sfg: hd.loaded ? 'var(--ok)' : 'var(--text-2)' }));
+
+    // status pill colours: plain .pill (idle), .pill.ok (Connected), .pill.err (Offline)
+    const IDLE = { bg: 'var(--sunken)', fg: 'var(--text-2)', dot: 'var(--idle-dot)' };
+    const statusOf = (m) => {
+      if (m.conn !== 'Ethernet') return { status: 'Save locally', short: 'Local', ...IDLE };
+      const o = S.online[m.id];
+      if (o === undefined) return { status: 'Checking…', short: 'Checking…', ...IDLE };
+      if (o && o.ok) return { status: 'Connected' + (o.state && o.state !== 'idle' ? ' · ' + o.state : ''), short: 'Connected', dot: 'var(--ok-dot)', bg: 'var(--ok-soft)', fg: 'var(--ok)' };
+      return { status: 'Offline', short: 'Offline', dot: 'var(--err-dot)', bg: 'var(--err-soft)', fg: 'var(--err)' };
+    };
+    const machineList = S.list.map((x) => {
+      const on = x.id === raw.id;
+      const st = statusOf(x);
+      return {
+        ...TYPE[x.type], name: x.name,
+        sub: (x.ctrl ? x.ctrl + ' · ' : '') + (x.conn === 'Ethernet' ? (x.ip || 'no IP') : 'save locally'),
+        status: st.status, short: st.short, dot: st.dot, pbg: st.bg, pfg: st.fg, cur: on ? 'page' : 'false',
+        bg: on ? accentSoft : '', bd: on ? accent : 'transparent',
+        pick: () => this.setState({ mid: x.id, tab: null })
+      };
+    });
+    const st = statusOf(raw);
+    const test = S.test[raw.id];
+    const savedRaw = S.saved.find((x) => x.id === raw.id);
+    const connChanged = !savedRaw || ['conn', 'ip', 'port'].some((k) => String(savedRaw[k]) !== String(raw[k]));
+    return {
+      ...common, hasMachine: true, noMachine: false,
+      machineList, duplicate: R(() => this.duplicate()), remove: R(() => this.remove()),
+      m: { ...TYPE[raw.type], name: raw.name, kind: raw.kind || (isLaser ? 'Laser' : 'Plotter'), ctrl: raw.ctrl, sub: [raw.kind || (isLaser ? 'Laser' : 'Plotter'), raw.ctrl].filter(Boolean).join(' · '), status: st.status, dot: st.dot, statusBg: st.bg, statusFg: st.fg },
+      setName: set('name'),
+      testShown: !!test, testText: test ? (test.busy ? 'Testing…' : test.text) : '', testFg: test && test.ok ? 'var(--ok)' : test && test.busy ? 'var(--text-3)' : 'var(--err)',
+      testLabel: raw.conn === 'Ethernet' ? 'Test connection' : 'Check',
+      runTest: R(() => this.test()),
+      noSync: raw.conn !== 'Ethernet' || !raw.ip || S.syncing,
+      syncTip: raw.conn !== 'Ethernet' ? 'Settings can only be read over Ethernet' : connChanged ? 'Saves the connection, then reads settings from the machine' : 'Read bed size, speeds and features from the machine',
+      refreshLabel: S.syncing ? 'Reading…' : 'Refresh from machine',
+      refresh: R(() => this.refresh()),
+      openHmi: R(() => window.api.app.openExternal('http://' + raw.ip + ':' + (raw.port || 8470) + '/')),
+      tabs, cards: cardsByTab[tab] || [], heads,
+      syncCls: raw.syncedAt ? 'mono lbl' : 'lbl',
+      syncText: raw.syncedAt ? new Date(raw.syncedAt).toLocaleString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Not read yet — showing defaults'
+    };
+  }
+}
+</script>
+</body>
+</html>

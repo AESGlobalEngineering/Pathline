@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pathline design preview</title>
+<link rel="stylesheet" href="src/ui/fonts.css">
+<style>
+  html, body { overflow: auto; }
+  body { margin: 0; font: 14px 'IBM Plex Sans', system-ui, sans-serif; color: #15181E; background: #F3F4F6; }
+  main { max-width: 1080px; margin: 0 auto; padding: 32px 16px 48px; }
+  header { display: flex; align-items: center; gap: 14px; margin-bottom: 8px; }
+  header img { width: 40px; height: 40px; }
+  h1 { margin: 0; font-size: 22px; font-weight: 600; }
+  p { color: #3A414C; line-height: 1.5; max-width: 760px; }
+  h2 { font-size: 15px; font-weight: 600; margin: 28px 0 10px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; }
+  a.card { display: flex; flex-direction: column; background: #FFFFFF; border: 1px solid #E1E4E8; border-radius: 12px; overflow: hidden; text-decoration: none; color: inherit; }
+  a.card:hover { border-color: #AEB5C0; }
+  a.card img { width: 100%; aspect-ratio: 16 / 10; object-fit: cover; object-position: top left; background: #E9EBEE; border-bottom: 1px solid #E1E4E8; }
+  a.card span { padding: 10px 12px 2px; font-weight: 600; }
+  a.card small { padding: 0 12px 12px; color: #5B6370; }
+  code { font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 13px; background: #E9EBEE; padding: 1px 5px; border-radius: 4px; }
+</style>
+</head>
+<body>
+<main>
+  <header><img src="src/ui/brand/pathline-256.png" alt=""><h1>Pathline: design preview</h1></header>
+  <p>Every screen of the Pathline desktop app, running on its own with sample data. Nothing is saved, and machine actions are pretend. Read <code>DESIGN-BRIEF.md</code> first. The pages are best viewed at 1440 × 900, the app's window size. Opening a page from here resets the sample data. After that, moving between pages keeps your edits for that browser tab.</p>
+
+  <h2>With sample data</h2>
+  <div class="grid">
+    <a class="card" href="src/ui/MainDetailed.dc.html?scenario=sample"><img src="screenshots/job.png" alt=""><span>Job</span><small>Import, arrange, processes, objects, move, queue</small></a>
+    <a class="card" href="src/ui/SimulationDetailed.dc.html?scenario=sample"><img src="screenshots/simulation.png" alt=""><span>Simulation</span><small>Toolpath playback, time estimate, thermal map</small></a>
+    <a class="card" href="src/ui/MachineSetupDetailed.dc.html?scenario=sample"><img src="screenshots/machines.png" alt=""><span>Setup → Machines</span><small>Connection and machine settings</small></a>
+    <a class="card" href="src/ui/MaterialsDetailed.dc.html?scenario=sample"><img src="screenshots/materials.png" alt=""><span>Setup → Materials</span><small>Material library, presets per machine, test grid</small></a>
+  </div>
+
+  <h2>First run (no machines or materials)</h2>
+  <div class="grid">
+    <a class="card" href="src/ui/MainDetailed.dc.html?scenario=empty"><img src="screenshots/job-empty.png" alt=""><span>Job</span><small>Stand-in bed until a machine is added</small></a>
+    <a class="card" href="src/ui/SimulationDetailed.dc.html?scenario=empty"><img src="screenshots/simulation-empty.png" alt=""><span>Simulation</span><small>Nothing to run yet</small></a>
+    <a class="card" href="src/ui/MachineSetupDetailed.dc.html?scenario=empty"><img src="screenshots/machines-empty.png" alt=""><span>Setup → Machines</span><small>Empty state</small></a>
+    <a class="card" href="src/ui/MaterialsDetailed.dc.html?scenario=empty"><img src="screenshots/materials-empty.png" alt=""><span>Setup → Materials</span><small>Empty state</small></a>
+  </div>
+
+  <h2>Dialogs, menus and other states</h2>
+  <p>These are drawn by <code>src/ui/app.js</code> and the page code, not by the page templates. The screenshots show how they look today. <code>DESIGN-BRIEF.md</code> says how to open each one.</p>
+  <div class="grid">
+    <a class="card" href="screenshots/job-menu.png"><img src="screenshots/job-menu.png" alt=""><span>Menu bar</span><small>File · Edit · Arrange · Setup · Help</small></a>
+    <a class="card" href="screenshots/job-context-menu.png"><img src="screenshots/job-context-menu.png" alt=""><span>Right-click menu</span><small>Colour swatches and object actions</small></a>
+    <a class="card" href="screenshots/send-dialog.png"><img src="screenshots/send-dialog.png" alt=""><span>Send to machine</span><small>Checks, then progress</small></a>
+    <a class="card" href="screenshots/override-dialog.png"><img src="screenshots/override-dialog.png" alt=""><span>Job overrides prompt</span><small>Go back · Revert · Continue</small></a>
+    <a class="card" href="screenshots/new-material-dialog.png"><img src="screenshots/new-material-dialog.png" alt=""><span>New material</span><small>Standard form dialog</small></a>
+    <a class="card" href="screenshots/simulation-thermal.png"><img src="screenshots/simulation-thermal.png" alt=""><span>Thermal map</span><small>Simulation, lasers only</small></a>
+    <a class="card" href="screenshots/job-move.png"><img src="screenshots/job-move.png" alt=""><span>Move tab</span><small>Jog, home, origin, frame</small></a>
+    <a class="card" href="screenshots/job-queue.png"><img src="screenshots/job-queue.png" alt=""><span>Queue tab</span><small>The machine's own job queue</small></a>
+  </div>
+</main>
+</body>
+</html>

@@ -1,0 +1,875 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Material library · Pathline</title>
+<link rel="stylesheet" href="fonts.css">
+<link rel="stylesheet" href="theme.css">
+<script src="../shared/core.js"></script>
+<script src="../../node_modules/opentype.js/dist/opentype.min.js"></script>
+<script src="./support.js"></script>
+<script src="./app.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+/* page-specific only; shared components come from theme.css */
+.th{font-size:12px;font-weight:500;color:var(--text-3);white-space:nowrap}
+.swatch input{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%}
+.aci-pick{display:inline-flex;align-items:center;gap:3px;min-width:48px;height:var(--ctl-h);padding:0 6px;box-sizing:border-box;border:1px solid var(--line-strong);border-radius:var(--ctl-r);background:var(--surface);cursor:pointer}
+.aci-pick:hover{border-color:var(--line-hover)}
+.aci-opt{display:inline-flex;align-items:center;gap:6px;height:var(--ctl-h);padding:0 10px 0 7px;border:0;border-radius:var(--ctl-r);cursor:pointer;color:var(--text)}
+.tg-cell{flex:1;height:var(--ctl-h);border:0;border-radius:6px;cursor:pointer}
+.tg-range{display:grid;grid-template-columns:64px repeat(3,minmax(0,1fr));gap:6px 10px;align-items:center;max-width:520px}
+.fld-col{display:flex;flex-direction:column;gap:6px;min-width:0}
+/* theme.css .dd:disabled / .cell:disabled use the background shorthand, which drops the
+   native-select chevron in light and tiles it in dark; restore it for disabled selects */
+select.dd:disabled{background-color:var(--sunken);background-repeat:no-repeat;background-position:right 9px center;background-size:14px 14px;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%235B6370' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E")}
+</style>
+</helmet>
+<div style="height: 100vh; display: flex; flex-direction: column; background: var(--bg); color: var(--text); font-family: var(--font); font-size: 13px; overflow: hidden">
+
+  <!-- ===== App bar ===== -->
+  <header class="appbar">
+    <div class="brand"><svg viewBox="0 0 64 64" width="28" height="28" role="img" aria-label="Pathline" style="flex: none; display: block"><rect width="64" height="64" rx="15" fill="#D62828"></rect><g transform="translate(14 14) scale(0.5625)" stroke-width="6" stroke-linejoin="round"><polygon points="6,6 50,6 6,50" fill="#FFFFFF" stroke="#FFFFFF"></polygon><polygon points="58,14 58,58 14,58" fill="#111214" stroke="#111214"></polygon></g></svg><span class="word">Pathline</span></div>
+    <nav aria-label="Sections" class="seg">
+      <a href="MainDetailed.dc.html">Job</a>
+      <a href="SimulationDetailed.dc.html">Simulation</a>
+    </nav>
+    <span class="divider"></span>
+    <div class="ctx">
+      <div role="tablist" aria-label="Setup" class="seg">
+        <a href="MachineSetupDetailed.dc.html" role="tab" aria-selected="false">Machines</a>
+        <a href="MaterialsDetailed.dc.html" role="tab" aria-selected="true" aria-current="page">Materials</a>
+      </div>
+      <div style="display: flex; flex-direction: column; line-height: 1.25">
+        <h1 class="h-page">Material library</h1>
+        <span class="lbl">{{libCount}}</span>
+      </div>
+    </div>
+    <span class="spacer"></span>
+    <sc-if value="{{dirty}}" hint-placeholder-val="{{false}}">
+      <span class="tag warn" style="height: 24px; padding: 0 8px; font-size: 12px">Unsaved changes</span>
+      <button class="tb" onClick="{{discard}}">Discard</button>
+    </sc-if>
+    <button class="tb" onClick="{{importLib}}" title="Add materials from a library file"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.import}}"></path></svg>Import</button>
+    <button class="tb" onClick="{{exportLib}}" title="Save the whole library to a file"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.export}}"></path></svg>Export</button>
+    <button class="btn-primary" onClick="{{save}}" disabled="{{clean}}" style="padding: 0 20px">Save</button>
+  </header>
+
+  <div style="flex: 1; display: flex; min-height: 0">
+
+    <!-- ===== Material list ===== -->
+    <nav aria-label="Materials" style="width: 300px; flex: none; min-width: 0; background: var(--surface); border-right: 1px solid var(--line); display: flex; flex-direction: column; gap: 12px; padding: 14px; min-height: 0; box-sizing: border-box">
+      <label class="fld sans">
+        <svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width: 16px; height: 16px; color: var(--text-3)"><path d="{{icons.search}}"></path></svg>
+        <input type="search" aria-label="Search materials" placeholder="Search" value="{{q}}" onChange="{{setQ}}">
+      </label>
+      <div role="radiogroup" aria-label="Machine filter" class="seg fill">
+        <sc-for list="{{filters}}" as="f" hint-placeholder-count="3">
+          <button role="radio" aria-checked="{{f.on}}" onClick="{{f.pick}}">{{f.l}}</button>
+        </sc-for>
+      </div>
+      <div style="flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 14px">
+        <sc-for list="{{groups}}" as="g" hint-placeholder-count="4">
+          <div style="display: flex; flex-direction: column; gap: 2px">
+            <div style="display: flex; justify-content: space-between; align-items: baseline; padding: 2px 10px 4px">
+              <span class="eyebrow">{{g.name}}</span>
+              <span class="lbl mono">{{g.count}}</span>
+            </div>
+            <sc-for list="{{g.items}}" as="it" hint-placeholder-count="3">
+              <button class="list-item" onClick="{{it.pick}}" aria-current="{{it.cur}}">
+                <span aria-hidden="true" style="width: 26px; height: 26px; flex: none; border-radius: 6px; background: {{it.sw}}; box-shadow: var(--chip-ring)"></span>
+                <span style="flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.3">
+                  <span style="font-weight: 500">{{it.name}}</span>
+                  <span class="lbl">{{it.sub}}</span>
+                </span>
+                <sc-if value="{{it.locked}}" hint-placeholder-val="{{false}}">
+                  <svg class="i" viewBox="0 0 24 24" role="img" aria-label="Locked" style="width: 15px; height: 15px; color: var(--text-3)"><path d="{{icons.lock}}"></path></svg>
+                </sc-if>
+              </button>
+            </sc-for>
+          </div>
+        </sc-for>
+        <sc-if value="{{noMatch}}" hint-placeholder-val="{{false}}"><span class="lbl" style="padding: 0 10px">No materials match.</span></sc-if>
+      </div>
+      <button class="tb block" onClick="{{newMaterial}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.plus}}"></path></svg>New material</button>
+    </nav>
+
+    <!-- ===== Material detail ===== -->
+    <sc-if value="{{emptyLib}}" hint-placeholder-val="{{false}}">
+      <main style="flex: 1; min-width: 0; padding: 20px; display: flex">
+        <section aria-label="No materials" class="card empty" style="margin: auto; max-width: 460px">
+          <span class="em-icon" aria-hidden="true"><svg class="i" viewBox="0 0 24 24"><path d="{{icons.layers}}"></path></svg></span>
+          <h2 class="em-title" style="margin: 0">No materials yet</h2>
+          <span class="em-text">Add the materials you cut, with their power and speed settings for each machine, or import a library exported from another computer.</span>
+          <div class="em-actions">
+            <button class="tb" onClick="{{importLib}}">Import library</button>
+            <button class="btn-primary" onClick="{{newMaterial}}">New material</button>
+          </div>
+        </section>
+      </main>
+    </sc-if>
+    <sc-if value="{{hasMat}}" hint-placeholder-val="{{true}}">
+    <main style="flex: 1; min-width: 0; padding: 20px; display: flex; flex-direction: column; gap: 16px; overflow-y: auto">
+
+      <section aria-label="Material details" class="card" style="padding: 16px; display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start">
+        <label class="swatch" title="Swatch colour" style="position: relative; width: 64px; height: 64px; flex: none; border-radius: 10px; background: {{mat.sw}}; box-shadow: var(--chip-ring)">
+          <input type="color" value="{{mat.sw}}" onChange="{{mat.setSw}}" disabled="{{locked}}" aria-label="Swatch colour">
+        </label>
+        <div style="flex: 1 1 520px; min-width: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px">
+          <label class="fld-col" style="grid-column: span 2">
+            <span class="lbl">Name</span>
+            <span class="fld sans"><input type="text" value="{{mat.name}}" onChange="{{mat.setName}}" disabled="{{locked}}"></span>
+          </label>
+          <label class="fld-col">
+            <span class="lbl">Thickness</span>
+            <span class="fld"><input type="text" class="mono" value="{{mat.t}}" onChange="{{mat.setT}}" disabled="{{locked}}"><span class="lbl">mm</span></span>
+          </label>
+          <label class="fld-col">
+            <span class="lbl">Group</span>
+            {{groupSelect}}
+          </label>
+          <label class="fld-col" style="grid-column: 1 / -1">
+            <span class="lbl">Notes</span>
+            <span class="fld sans"><input type="text" value="{{mat.notes}}" onChange="{{mat.setNotes}}" disabled="{{locked}}"></span>
+          </label>
+        </div>
+        <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 8px">
+          <div style="display: flex; gap: 2px">
+            <button class="ib" onClick="{{duplicate}}" aria-label="Duplicate material" title="Duplicate"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.copy}}"></path></svg></button>
+            <button class="ib" onClick="{{remove}}" aria-label="Delete material" title="Delete"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.trash}}"></path></svg></button>
+          </div>
+          <span class="lbl">{{mat.edited}}</span>
+        </div>
+      </section>
+
+      <section aria-label="Colour presets" class="card" style="display: flex; flex-direction: column; min-width: 0">
+        <div role="tablist" aria-label="Machines" class="tabs" style="padding: 4px 12px 0">
+          <sc-for list="{{machTabs}}" as="t" hint-placeholder-count="2">
+            <button role="tab" aria-selected="{{t.on}}" onClick="{{t.pick}}" style="height: 46px; gap: 8px">
+              <span class="badge" style="background: {{t.tbg}}">{{t.type}}</span>{{t.name}}
+            </button>
+          </sc-for>
+          <sc-if value="{{canAddType}}" hint-placeholder-val="{{false}}">
+            <span style="display: flex; align-items: center; margin-left: 6px">
+              <button class="tb dashed" onClick="{{addType}}" disabled="{{locked}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width: 15px; height: 15px"><path d="{{icons.plus}}"></path></svg>{{addTypeLabel}}</button>
+            </span>
+          </sc-if>
+          <span style="flex: 1"></span>
+          <span class="lbl" style="align-self: center; padding-right: 4px">{{rowCount}}</span>
+        </div>
+
+        <!-- laser presets -->
+        <sc-if value="{{isLaser}}" hint-placeholder-val="{{true}}">
+          <div style="overflow-x: auto">
+            <div role="table" aria-label="Laser processes" style="min-width: 1070px">
+              <div role="row" style="display: grid; grid-template-columns: 24px minmax(150px, 1.2fr) 112px 112px 80px 92px 112px 118px 108px 36px; gap: 10px; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--line)">
+                <span role="columnheader" class="th" title="Output">Out</span>
+                <span role="columnheader" class="th">Name</span>
+                <span role="columnheader" class="th">Process</span>
+                <span role="columnheader" class="th">Colours (ACI)</span>
+                <span role="columnheader" class="th">Power %</span>
+                <span role="columnheader" class="th">Speed mm/s</span>
+                <span role="columnheader" class="th">Source</span>
+                <span role="columnheader" class="th">Freq / DPI</span>
+                <span></span>
+                <span></span>
+              </div>
+              <sc-for list="{{laserRows}}" as="r" hint-placeholder-count="6">
+                <div style="border-bottom: 1px solid var(--line-soft); background: {{r.bg}}">
+                  <div role="row" style="display: grid; grid-template-columns: 24px minmax(150px, 1.2fr) 112px 112px 80px 92px 112px 118px 108px 36px; gap: 10px; align-items: center; padding: 8px 16px">
+                    <span role="cell"><input type="checkbox" checked="{{r.out}}" onChange="{{r.toggleOut}}" disabled="{{locked}}" aria-label="{{r.name}} output" style="width: 18px; height: 18px; margin: 0"></span>
+                    <span role="cell" style="display: flex; align-items: center; gap: 6px; min-width: 0">
+                      <input class="cell sans" value="{{r.name}}" onChange="{{r.setName}}" disabled="{{locked}}" aria-label="Process name" style="font-weight: 500">
+                      <sc-if value="{{r.edited}}" hint-placeholder-val="{{false}}"><span role="img" aria-label="Edited" style="width: 7px; height: 7px; flex: none; border-radius: 50%; background: {{accent}}"></span></sc-if>
+                    </span>
+                    <span role="cell">
+                      <select class="cell dd" value="{{r.proc}}" onChange="{{r.setProc}}" disabled="{{locked}}" aria-label="{{r.name}} process">
+                        <option value="Cut">Cut</option>
+                        <option value="Engrave">Engrave</option>
+                      </select>
+                    </span>
+                    <span role="cell">
+                      <button class="aci-pick" onClick="{{r.pick}}" aria-expanded="{{r.picking}}" aria-label="Colours for {{r.name}}" style="border-color: {{r.pickBd}}">
+                        <sc-for list="{{r.chips}}" as="k" hint-placeholder-count="1"><span class="chip" title="{{k.title}}" style="width: 20px; height: 20px; background: {{k.hex}}; color: {{k.fg}}">{{k.n}}</span></sc-for>
+                        <sc-if value="{{r.none}}" hint-placeholder-val="{{false}}"><span class="lbl">None</span></sc-if>
+                        <svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width: 14px; height: 14px; color: var(--text-3)"><path d="{{icons.plus}}"></path></svg>
+                      </button>
+                    </span>
+                    <span role="cell"><input class="cell" value="{{r.power}}" onChange="{{r.setPower}}" disabled="{{locked}}" aria-label="{{r.name}} power"></span>
+                    <span role="cell"><input class="cell" value="{{r.speed}}" onChange="{{r.setSpeed}}" disabled="{{locked}}" aria-label="{{r.name}} speed"></span>
+                    <span role="cell">
+                      <select class="cell dd" value="{{r.source}}" onChange="{{r.setSource}}" disabled="{{locked}}" aria-label="{{r.name}} source">
+                        <option value="CO2 DC">CO2 DC</option>
+                        <option value="CO2 RF">CO2 RF</option>
+                        <option value="Fiber">Fiber</option>
+                      </select>
+                    </span>
+                    <span role="cell" style="display: flex; align-items: center; gap: 6px">
+                      <input class="cell" value="{{r.f}}" onChange="{{r.setF}}" disabled="{{locked}}" aria-label="{{r.name}} {{r.fu}}">
+                      <span class="lbl" style="width: 28px">{{r.fu}}</span>
+                    </span>
+                    <span role="cell">
+                      <button class="btn-link" onClick="{{r.toggleAdv}}" aria-expanded="{{r.advOpen}}" style="height: var(--ctl-h); padding: 0 6px">
+                        <svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="transform: rotate({{r.advRot}})"><path d="{{icons.chev}}"></path></svg>Advanced
+                      </button>
+                    </span>
+                    <span role="cell"><button class="ib" onClick="{{r.more}}" aria-label="{{r.name}} more actions" title="Move, duplicate or delete"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="stroke-width: 2.6"><path d="{{icons.more}}"></path></svg></button></span>
+                  </div>
+                  <sc-if value="{{r.picking}}" hint-placeholder-val="{{false}}">
+                    <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 16px 10px 50px; background: var(--surface-2); border-top: 1px solid var(--line-soft)">
+                      <span class="lbl" style="margin-right: 4px">Colours for {{r.name}}</span>
+                      <sc-for list="{{r.aci}}" as="a" hint-placeholder-count="9">
+                        <button class="aci-opt" aria-pressed="{{a.on}}" onClick="{{a.toggle}}" title="{{a.title}}" aria-label="{{a.title}}" disabled="{{a.dis}}" style="background: {{a.bg}}; box-shadow: {{a.ring}}; opacity: {{a.op}}">
+                          <span class="chip" aria-hidden="true" style="width: 20px; height: 20px; background: {{a.hex}}"></span>
+                          <span class="mono" style="font-size: 12px">{{a.n}}</span>
+                          <sc-if value="{{a.taken}}" hint-placeholder-val="{{false}}"><span class="lbl">{{a.ownerShort}}</span></sc-if>
+                        </button>
+                      </sc-for>
+                      <button class="tb" onClick="{{r.aciOther}}" disabled="{{locked}}">ACI #</button>
+                      <span style="flex: 1"></span>
+                      <button class="tb" onClick="{{r.pick}}">Done</button>
+                    </div>
+                  </sc-if>
+                  <sc-if value="{{r.advOpen}}" hint-placeholder-val="{{false}}">
+                    <div style="padding: 6px 16px 18px 50px; display: flex; flex-direction: column; gap: 16px">
+                      <div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px 24px">
+                        <sc-for list="{{r.adv}}" as="f" hint-placeholder-count="5">
+                          <sc-if value="{{f.isText}}" hint-placeholder-val="{{true}}">
+                            <label class="fld-col">
+                              <span class="lbl">{{f.l}}</span>
+                              <span class="fld"><input class="mono" value="{{f.v}}" onChange="{{f.set}}" disabled="{{locked}}"><span class="lbl">{{f.u}}</span></span>
+                            </label>
+                          </sc-if>
+                          <sc-if value="{{f.isPick}}" hint-placeholder-val="{{false}}">
+                            <div class="fld-col">
+                              <span class="lbl">{{f.l}}</span>
+                              <button class="dd" onClick="{{f.toggle}}" aria-haspopup="listbox" aria-expanded="{{f.open}}" aria-label="{{f.l}}: {{f.v}}" disabled="{{locked}}">{{f.v}}<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.chev}}"></path></svg></button>
+                              <sc-if value="{{f.open}}" hint-placeholder-val="{{false}}">
+                                <div role="listbox" aria-label="{{f.l}}" class="pop">
+                                  <sc-for list="{{f.opts}}" as="o" hint-placeholder-count="3">
+                                    <button role="option" class="opt" aria-selected="{{o.on}}" onClick="{{o.pick}}">{{o.l}}<sc-if value="{{o.on}}" hint-placeholder-val="{{false}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.check}}"></path></svg></sc-if></button>
+                                  </sc-for>
+                                </div>
+                              </sc-if>
+                            </div>
+                          </sc-if>
+                          <sc-if value="{{f.isCheck}}" hint-placeholder-val="{{false}}">
+                            <label style="display: flex; align-items: center; gap: 8px; align-self: end; height: var(--ctl-h)">
+                              <input type="checkbox" checked="{{f.on}}" onChange="{{f.toggle}}" disabled="{{locked}}" style="width: 18px; height: 18px; margin: 0">
+                              <span>{{f.l}}</span>
+                            </label>
+                          </sc-if>
+                        </sc-for>
+                      </div>
+                      <sc-if value="{{r.isCut}}" hint-placeholder-val="{{false}}">
+                        <div style="display: flex; flex-direction: column; gap: 10px; padding-top: 14px; border-top: 1px solid var(--line-soft)">
+                          <h3 class="h-sec">Links</h3>
+                          <div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px 24px">
+                            <label style="display: flex; align-items: center; gap: 8px; align-self: end; height: var(--ctl-h)">
+                              <input type="checkbox" checked="{{r.dash}}" onChange="{{r.toggleDash}}" disabled="{{locked}}" style="width: 18px; height: 18px; margin: 0">
+                              <span>Generate links</span>
+                            </label>
+                            <label class="fld-col">
+                              <span class="lbl">Link length</span>
+                              <span class="fld"><input class="mono" value="{{r.dl}}" onChange="{{r.setDl}}" disabled="{{r.dashOff}}"><span class="lbl">mm</span></span>
+                            </label>
+                            <label class="fld-col">
+                              <span class="lbl">Gap length</span>
+                              <span class="fld"><input class="mono" value="{{r.gl}}" onChange="{{r.setGl}}" disabled="{{r.dashOff}}"><span class="lbl">mm</span></span>
+                            </label>                          </div>
+                        </div>
+                      </sc-if>
+                    </div>
+                  </sc-if>
+                </div>
+              </sc-for>
+              <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 16px">
+                <button class="tb" onClick="{{addProcess}}" disabled="{{locked}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width: 15px; height: 15px"><path d="{{icons.plus}}"></path></svg>Add process</button>
+                <span style="flex: 1"></span>
+                <sc-if value="{{hasUnassigned}}" hint-placeholder-val="{{false}}">
+                  <span class="lbl">Unassigned</span>
+                  <sc-for list="{{unassigned}}" as="k" hint-placeholder-count="2"><span class="chip" title="{{k.title}}" style="width: 20px; height: 20px; background: {{k.hex}}; color: {{k.fg}}">{{k.n}}</span></sc-for>
+                </sc-if>
+              </div>
+            </div>
+          </div>
+        </sc-if>
+
+        <!-- plotter presets -->
+        <sc-if value="{{isPlotter}}" hint-placeholder-val="{{false}}">
+          <div style="overflow-x: auto">
+            <div role="table" aria-label="Plotter process presets" style="min-width: 950px">
+              <div role="row" style="display: grid; grid-template-columns: minmax(260px, 1.6fr) 190px 100px 76px 64px 84px 84px 60px 36px; gap: 8px; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--line)">
+                <span role="columnheader" class="th">Colours (ACI) · Process</span>
+                <span role="columnheader" class="th">Tool head</span>
+                <span role="columnheader" class="th">Speed mm/s</span>
+                <span role="columnheader" class="th">Passes</span>
+                <span role="columnheader" class="th">Dashed</span>
+                <span role="columnheader" class="th">Dash mm</span>
+                <span role="columnheader" class="th">Gap mm</span>
+                <span role="columnheader" class="th">Output</span>
+                <span></span>
+              </div>
+              <sc-for list="{{plotRows}}" as="r" hint-placeholder-count="5">
+                <div role="row" style="display: grid; grid-template-columns: minmax(260px, 1.6fr) 190px 100px 76px 64px 84px 84px 60px 36px; gap: 8px; align-items: center; padding: 6px 16px; border-bottom: 1px solid var(--line-soft); background: {{r.bg}}">
+                  <span role="cell" style="display: flex; align-items: center; gap: 8px; min-width: 0">
+                    <button class="aci-pick" onClick="{{r.pick}}" aria-expanded="{{r.picking}}" aria-label="Colours for {{r.name}}" style="flex: none; border-color: {{r.pickBd}}">
+                      <sc-for list="{{r.chips}}" as="k" hint-placeholder-count="1"><span class="chip" title="{{k.title}}" style="width: 20px; height: 20px; background: {{k.hex}}; color: {{k.fg}}">{{k.n}}</span></sc-for>
+                      <sc-if value="{{r.none}}" hint-placeholder-val="{{false}}"><span class="lbl">None</span></sc-if>
+                    </button>
+                    <input class="cell sans" value="{{r.name}}" onChange="{{r.setName}}" disabled="{{locked}}" aria-label="Process name" style="font-weight: 500">
+                    <sc-if value="{{r.edited}}" hint-placeholder-val="{{false}}"><span role="img" aria-label="Edited" style="width: 7px; height: 7px; flex: none; border-radius: 50%; background: {{accent}}"></span></sc-if>
+                  </span>
+                  <span role="cell">
+                    <select class="cell dd" value="{{r.tool}}" onChange="{{r.setTool}}" disabled="{{locked}}" aria-label="{{r.name}} tool head">
+                      <option value="T1 · Knife">T1 · Knife</option>
+                      <option value="T2 · V-cut 45°">T2 · V-cut 45°</option>
+                      <option value="T3 · Crease wheel">T3 · Crease wheel</option>
+                      <option value="T4 · Pen">T4 · Pen</option>
+                    </select>
+                  </span>
+                  <span role="cell"><input class="cell" value="{{r.speed}}" onChange="{{r.setSpeed}}" disabled="{{locked}}" aria-label="{{r.name}} speed"></span>
+                  <span role="cell"><input class="cell" value="{{r.passes}}" onChange="{{r.setPasses}}" disabled="{{locked}}" aria-label="{{r.name}} passes"></span>
+                  <span role="cell"><input type="checkbox" checked="{{r.dash}}" onChange="{{r.toggleDash}}" disabled="{{locked}}" aria-label="{{r.name}} dashed" style="width: 18px; height: 18px; margin: 0"></span>
+                  <span role="cell"><input class="cell" value="{{r.dl}}" onChange="{{r.setDl}}" disabled="{{r.dashOff}}" aria-label="{{r.name}} dash length"></span>
+                  <span role="cell"><input class="cell" value="{{r.gl}}" onChange="{{r.setGl}}" disabled="{{r.dashOff}}" aria-label="{{r.name}} gap length"></span>
+                  <span role="cell">
+                    <button role="switch" class="sw" aria-checked="{{r.out}}" aria-label="{{r.name}} output" onClick="{{r.toggleOut}}" disabled="{{locked}}"></button>
+                  </span>
+                  <span role="cell"><button class="ib" onClick="{{r.more}}" aria-label="{{r.name}} more actions" title="Move, duplicate or delete"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="stroke-width: 2.6"><path d="{{icons.more}}"></path></svg></button></span>
+                </div>
+                <sc-if value="{{r.picking}}" hint-placeholder-val="{{false}}">
+                  <div role="row" style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 16px; background: var(--surface-2); border-bottom: 1px solid var(--line-soft)">
+                    <span class="lbl" style="margin-right: 4px">Colours for {{r.name}}</span>
+                    <sc-for list="{{r.aci}}" as="a" hint-placeholder-count="9">
+                      <button class="aci-opt" aria-pressed="{{a.on}}" onClick="{{a.toggle}}" title="{{a.title}}" aria-label="{{a.title}}" disabled="{{a.dis}}" style="background: {{a.bg}}; box-shadow: {{a.ring}}; opacity: {{a.op}}">
+                        <span class="chip" aria-hidden="true" style="width: 20px; height: 20px; background: {{a.hex}}"></span>
+                        <span class="mono" style="font-size: 12px">{{a.n}}</span>
+                        <sc-if value="{{a.taken}}" hint-placeholder-val="{{false}}"><span class="lbl">{{a.ownerShort}}</span></sc-if>
+                      </button>
+                    </sc-for>
+                    <button class="tb" onClick="{{r.aciOther}}" disabled="{{locked}}">ACI #</button>
+                    <span style="flex: 1"></span>
+                    <button class="tb" onClick="{{r.pick}}">Done</button>
+                  </div>
+                </sc-if>
+              </sc-for>
+              <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 16px">
+                <button class="tb" onClick="{{addProcess}}" disabled="{{locked}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width: 15px; height: 15px"><path d="{{icons.plus}}"></path></svg>Add process</button>
+                <span style="flex: 1"></span>
+                <sc-if value="{{hasUnassigned}}" hint-placeholder-val="{{false}}">
+                  <span class="lbl">Unassigned</span>
+                  <sc-for list="{{unassigned}}" as="k" hint-placeholder-count="2"><span class="chip" title="{{k.title}}" style="width: 20px; height: 20px; background: {{k.hex}}; color: {{k.fg}}">{{k.n}}</span></sc-for>
+                </sc-if>
+              </div>
+            </div>
+          </div>
+        </sc-if>
+      </section>
+
+      <div style="display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start">
+        <!-- laser: test grid -->
+        <sc-if value="{{isLaser}}" hint-placeholder-val="{{true}}">
+          <section aria-label="Test grid" class="card" style="flex: 2 1 480px; min-width: 0; padding: 16px; display: flex; flex-direction: column; gap: 12px">
+            <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px">
+              <h2 class="h-sec">Test grid</h2>
+              <span class="lbl">Burn a power × speed grid, then pick the best square</span>
+              <span style="flex: 1"></span>
+              <label style="display: flex; align-items: center; gap: 8px">
+                <span class="lbl">Process</span>
+                {{tg.select}}
+              </label>
+            </div>
+            <!-- the range to test: lowest and highest value, and the number of equal steps between them -->
+            <div class="tg-range">
+              <span></span><span class="lbl">Low</span><span class="lbl">High</span><span class="lbl">Divisions</span>
+              <span class="lbl">Power</span>
+              <span class="fld"><input class="mono" value="{{tg.pLo}}" onChange="{{tg.setPLo}}" aria-label="Lowest power"><span class="lbl">%</span></span>
+              <span class="fld"><input class="mono" value="{{tg.pHi}}" onChange="{{tg.setPHi}}" aria-label="Highest power"><span class="lbl">%</span></span>
+              <span class="fld"><input class="mono" value="{{tg.pN}}" onChange="{{tg.setPN}}" aria-label="Power divisions"></span>
+              <span class="lbl">Speed</span>
+              <span class="fld"><input class="mono" value="{{tg.sLo}}" onChange="{{tg.setSLo}}" aria-label="Lowest speed"><span class="lbl">mm/s</span></span>
+              <span class="fld"><input class="mono" value="{{tg.sHi}}" onChange="{{tg.setSHi}}" aria-label="Highest speed"><span class="lbl">mm/s</span></span>
+              <span class="fld"><input class="mono" value="{{tg.sN}}" onChange="{{tg.setSN}}" aria-label="Speed divisions"></span>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 6px">
+              <div style="display: flex; gap: 6px; align-items: center">
+                <span class="lbl" style="width: 64px; flex: none">Power ↓</span>
+                <sc-for list="{{tg.speeds}}" as="s" hint-placeholder-count="5"><span class="mono lbl" style="flex: 1; text-align: center">{{s}}</span></sc-for>
+              </div>
+              <sc-for list="{{tg.rows}}" as="row" hint-placeholder-count="5">
+                <div style="display: flex; gap: 6px; align-items: center">
+                  <span class="mono lbl" style="width: 64px; flex: none">{{row.p}} %</span>
+                  <sc-for list="{{row.cells}}" as="c" hint-placeholder-count="5">
+                    <button class="tg-cell" onClick="{{c.pick}}" aria-pressed="{{c.on}}" aria-label="{{c.label}}" title="{{c.label}}" style="background: {{c.bg}}; box-shadow: {{c.ring}}"></button>
+                  </sc-for>
+                </div>
+              </sc-for>
+              <div style="display: flex; gap: 6px">
+                <span style="width: 64px; flex: none"></span>
+                <span class="lbl" style="flex: 1; text-align: right">Speed mm/s →</span>
+              </div>
+            </div>
+            <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding-top: 12px; border-top: 1px solid var(--line-soft)">
+              <span class="mono" style="font-weight: 500">{{tg.pickLabel}}</span>
+              <span style="flex: 1"></span>
+              <button class="tb" onClick="{{tg.make}}" title="Create a job with this grid on the Job page">Engrave grid</button>
+              <button class="btn-primary" onClick="{{tg.apply}}" disabled="{{locked}}">Apply to {{tg.targetName}}</button>
+            </div>
+          </section>
+        </sc-if>
+
+        <!-- plotter: tool heads -->
+        <sc-if value="{{isPlotter}}" hint-placeholder-val="{{false}}">
+          <section aria-label="Tool heads" class="card" style="flex: 2 1 480px; min-width: 0; padding: 16px; display: flex; flex-direction: column; gap: 10px">
+            <h2 class="h-sec">Tool heads</h2>
+            <sc-for list="{{heads}}" as="h" hint-placeholder-count="4">
+              <div style="display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--ctl-r)">
+                <span class="mono" style="width: 30px; height: 30px; flex: none; border-radius: 6px; background: var(--sunken); color: var(--text-2); display: inline-flex; align-items: center; justify-content: center; font-weight: 500">{{h.slot}}</span>
+                <span style="flex: 1; min-width: 0; font-weight: 500">{{h.name}}</span>
+                <span style="display: flex; gap: 6px; flex-wrap: wrap">
+                  <sc-for list="{{h.colours}}" as="c" hint-placeholder-count="1">
+                    <span class="pill nodot"><span aria-hidden="true" style="width: 10px; height: 10px; border-radius: 3px; background: {{c.c}}; box-shadow: var(--chip-ring)"></span>{{c.name}}</span>
+                  </sc-for>
+                </span>
+              </div>
+            </sc-for>
+          </section>
+        </sc-if>
+
+        <!-- info -->
+        <section aria-label="Material info" class="card" style="flex: 1 1 280px; min-width: 0; padding: 16px; display: flex; flex-direction: column; gap: 10px">
+          <h2 class="h-sec">Usage</h2>
+          <sc-for list="{{usage}}" as="u" hint-placeholder-count="3">
+            <div style="display: flex; justify-content: space-between; gap: 8px"><span style="color: var(--text-2)">{{u.k}}</span><span class="mono">{{u.v}}</span></div>
+          </sc-for>
+          <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px">
+            <span style="color: var(--text-2)">Machines</span>
+            <span style="display: flex; gap: 4px">
+              <sc-for list="{{mat.machineTags}}" as="t" hint-placeholder-count="1"><span class="badge" style="background: {{t.tbg}}">{{t.type}}</span></sc-for>
+            </span>
+          </div>
+          <div class="hr" style="margin: 4px 0"></div>
+          <div style="display: flex; justify-content: space-between; align-items: center">
+            <span id="lock-label" style="font-weight: 500">Lock presets</span>
+            <button role="switch" class="sw" aria-checked="{{locked}}" aria-labelledby="lock-label" onClick="{{toggleLock}}"></button>
+          </div>
+          <button class="tb block" onClick="{{useForJob}}">Use for current job</button>
+          <button class="tb block" onClick="{{exportOne}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.export}}"></path></svg>Export material</button>
+        </section>
+      </div>
+    </main>
+    </sc-if>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  state = {
+    ready: false, lib: [], saved: [], machines: [],
+    matId: null, filter: 'all', q: '', tab: null,
+    picking: null, adv: {}, openPick: null, tgTarget: 'Cut', tgCell: null
+  };
+
+  componentDidMount() {
+    window.__page = this;
+    Promise.all([window.api.materials.list(), window.api.machines.list(), window.api.job.current()])
+      .then(([lib, machines, job]) => {
+        const want = new URLSearchParams(location.search).get('m') || (job && job.materialId);
+        this.setState({ ready: true, lib: JSON.parse(JSON.stringify(lib)), saved: lib, machines, matId: lib.some((m) => m.id === want) ? want : (lib[0] && lib[0].id), tab: job ? job.machineId : null });
+      })
+      .catch(LRC.fail);
+    this.offNav = LRC.guardNav(() => this.dirty(), () => this.save());
+    this.offKeys = LRC.keys({ 'Ctrl+S': () => this.run(() => this.save())() });
+  }
+  componentWillUnmount() { this.offNav && this.offNav(); this.offKeys && this.offKeys(); }
+  run(fn) { return (...a) => { try { const r = fn(...a); if (r && r.catch) r.catch(LRC.fail); } catch (e) { LRC.fail(e); } }; }
+  dirty() { return JSON.stringify(this.state.lib) !== JSON.stringify(this.state.saved); }
+  async save() {
+    const saved = await window.api.materials.saveAll(this.state.lib);
+    this.setState({ saved: JSON.parse(JSON.stringify(saved)), lib: JSON.parse(JSON.stringify(saved)) });
+    LRC.toast('Material library saved', { kind: 'ok' });
+  }
+  mat() { return this.state.lib.find((m) => m.id === this.state.matId) || null; }
+  // edit the selected material in the working copy
+  patchMat(fn) {
+    const id = this.state.matId;
+    this.setState((s) => ({ lib: s.lib.map((m) => (m.id === id ? { ...fn(m), edited: 'Edited ' + new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) } : m)) }));
+  }
+  // Each machine has its own tab: the machines that can run this material.
+  tabMachines(mat) {
+    return mat ? this.state.machines.filter((x) => mat.m.includes(x.type)) : [];
+  }
+  tabMachine() {
+    const list = this.tabMachines(this.mat());
+    return list.find((x) => x.id === this.state.tab) || list[0] || null;
+  }
+  // edit the open machine's presets (a machine still on the shared list gets its own copy)
+  patchRows(fn) {
+    const mm = this.tabMachine();
+    if (!mm) return;
+    this.patchMat((m) => ({ ...m, presets: { ...m.presets, [mm.id]: fn(CC.presetsFor(m, mm).slice()) } }));
+  }
+  async newMaterial() {
+    // the standard groups (the thermal reference data is matched by them), then any of the library's own
+    const groups = [...new Set(['Acrylic', 'Wood', 'Board & card', 'Film & sheet', 'Metal'].concat(this.state.lib.map((m) => m.g)))];
+    const r = await LRC.dialog({
+      title: 'New material',
+      fields: [
+        { key: 'name', label: 'Name', value: '', full: true },
+        { key: 't', label: 'Thickness', value: '3', unit: 'mm', type: 'number' },
+        { key: 'g', label: 'Group', type: 'select', value: groups[0] || 'Other', options: groups.concat(groups.includes('Other') ? [] : ['Other']), full: false },
+        { key: 'm', label: 'Used on', type: 'seg', value: 'laser', options: [{ value: 'laser', label: 'Laser' }, { value: 'plotter', label: 'Plotter' }, { value: 'both', label: 'Both' }] }
+      ],
+      buttons: [{ label: 'Cancel', value: null }, { label: 'Create', value: 'ok', primary: true }]
+    });
+    if (!r || !r.values.name) return;
+    const t = r.values.t > 0 ? r.values.t : 3;
+    const m = r.values.m === 'both' ? ['laser', 'plotter'] : [r.values.m];
+    const mat = {
+      id: CC.uid('mat'), g: r.values.g, name: r.values.name, t, sw: '#E1E4E8', m, notes: '', locked: false, edited: null, jobs: 0, last: null,
+      presets: { laser: m.includes('laser') ? CC.defaultPresets('laser', t) : [], plotter: m.includes('plotter') ? CC.defaultPresets('plotter', t) : [] }
+    };
+    this.setState((s) => ({ lib: s.lib.concat(mat), matId: mat.id, filter: 'all', q: '' }));
+  }
+  duplicate() {
+    const src = this.mat();
+    const copy = { ...JSON.parse(JSON.stringify(src)), id: CC.uid('mat'), name: src.name + ' copy', locked: false, jobs: 0, last: null };
+    this.setState((s) => ({ lib: s.lib.concat(copy), matId: copy.id }));
+  }
+  async remove() {
+    const m = this.mat();
+    if (!(await LRC.confirm('Delete ' + m.name + ' · ' + m.t + ' mm?', 'Jobs that used it keep their own copy of the settings. This takes effect when you save the library.', 'Delete', true))) return;
+    const lib = this.state.lib.filter((x) => x.id !== m.id);
+    this.setState({ lib, matId: lib[0] ? lib[0].id : null });
+  }
+  async rowMore(i) {
+    const rows = CC.presetsFor(this.mat(), this.tabMachine());
+    const r = await LRC.dialog({
+      title: rows[i].name,
+      buttons: [{ label: 'Cancel', value: null }, { label: 'Move up', value: 'up' }, { label: 'Move down', value: 'down' }, { label: 'Duplicate', value: 'dup' }, { label: 'Delete', value: 'del', danger: true }]
+    });
+    if (!r) return;
+    this.patchRows((list) => {
+      if (r.button === 'up' && i > 0) [list[i - 1], list[i]] = [list[i], list[i - 1]];
+      if (r.button === 'down' && i < list.length - 1) [list[i + 1], list[i]] = [list[i], list[i + 1]];
+      if (r.button === 'dup') list.splice(i + 1, 0, { ...JSON.parse(JSON.stringify(list[i])), name: list[i].name + ' copy', aci: [] });
+      if (r.button === 'del') list.splice(i, 1);
+      return list;
+    });
+    this.setState({ picking: null });
+  }
+  addProcess() {
+    const isLaser = this.tabMachine().type === 'laser';
+    this.patchRows((list) => list.concat(isLaser
+      ? { name: 'New process', proc: 'Cut', power: 80, speed: 20, f: 5000, passes: 1, air: 'On', dash: false, dl: 5, gl: 2, out: true, aci: [], adv: {} }
+      : { name: 'New process', tool: 'T1 · Knife', speed: 300, passes: 1, dash: false, dl: 5, gl: 2, out: true, aci: [], adv: {} }));
+  }
+  // Build a job with one square per power/speed pair, each with its own colour.
+  async makeGrid(base, powers, speeds) {
+    const mat = this.mat();
+    const machine = this.tabMachine();
+    if (!(await LRC.confirm('Create a test grid job?', 'This replaces the job on the Job page with a ' + powers.length + ' × ' + speeds.length + ' grid of 10 mm squares for ' + base.proc.toLowerCase() + ' on ' + mat.name + ' (' + machine.name + '). Save your current job first if you need it.', 'Create grid'))) return;
+    const job = await window.api.job.create(machine.id);
+    const processes = [], entities = [];
+    const cell = 10, gap = 4, x0 = 30, y0 = 20;
+    let aci = 10;
+    powers.forEach((p, r) => speeds.forEach((s, c) => {
+      processes.push({ ...JSON.parse(JSON.stringify(base)), name: p + ' % · ' + s + ' mm/s', power: p, speed: s, aci: [aci], out: true, src: 'job' });
+      const shape = base.proc === 'Engrave' ? CC.shapes.rect(x0 + c * (cell + gap), y0 + r * (cell + gap), cell, cell, 0) : CC.shapes.rect(x0 + c * (cell + gap) + 1, y0 + r * (cell + gap) + 1, cell - 2, cell - 2, 0);
+      entities.push({ id: CC.uid('e'), name: p + '% / ' + s, type: 'Rectangle', aci, paths: [{ p: shape, c: true }] });
+      aci++;
+    }));
+    // labels: power down the side, speed along the top, marked at low power
+    const labelProc = { name: 'Grid labels', proc: 'Engrave', power: 15, speed: 300, f: 300, passes: 1, air: 'Off', dash: false, dl: 5, gl: 2, out: true, aci: [8], adv: {}, src: 'job' };
+    try {
+      for (let r = 0; r < powers.length; r++) entities.push(await LRC.textEntity(powers[r] + '%', 4, 6, y0 + r * (cell + gap) + 3, 8));
+      for (let c = 0; c < speeds.length; c++) entities.push(await LRC.textEntity(String(speeds[c]), 4, x0 + c * (cell + gap), 10, 8));
+    } catch (e) { /* labels are optional */ }
+    await window.api.job.replace({ ...job, name: 'Test grid · ' + mat.name + ' ' + mat.t + ' mm · ' + base.proc, materialId: mat.id, processes: processes.concat(labelProc), entities, regMode: 'off', sheet: { ...job.sheet, on: false } });
+    location.href = 'MainDetailed.dc.html';
+  }
+
+  renderVals() {
+    const accent = 'var(--accent)';
+    const accentSoft = 'var(--accent-soft)';
+    const noop = () => {};
+    const icons = {
+      import: 'M12 3v12 M7 10l5 5 5-5 M4 20h16',
+      export: 'M12 15V3 M7 8l5-5 5 5 M4 20h16',
+      search: 'M11 4a7 7 0 1 0 0 14a7 7 0 1 0 0-14z M20 20l-4-4',
+      plus: 'M12 5v14 M5 12h14',
+      copy: 'M8 8h12v12H8z M4 16V4h12',
+      trash: 'M4 7h16 M9 7V4h6v3 M6 7l1 13h10l1-13',
+      lock: 'M6 11h12v9H6z M8 11V8a4 4 0 0 1 8 0v3',
+      chev: 'M6 9l6 6 6-6',
+      check: 'M5 12.5l4.5 4.5L19 7',
+      more: 'M12 5h.01 M12 12h.01 M12 19h.01',
+      layers: 'M12 3l9 5-9 5-9-5z M3 13l9 5 9-5'
+    };
+    const S = this.state;
+    if (!S.ready) return { accent, icons, noop, groups: [], filters: [], hasMat: false, libCount: '' };
+    const R = (fn) => this.run(fn);
+    const dirty = this.dirty();
+    const MACH = { laser: { name: 'Laser', type: 'LASER', tbg: 'var(--badge-laser)' }, plotter: { name: 'Plotter', type: 'PLOTTER', tbg: 'var(--badge-plotter)' } };
+    const nameOfType = (k) => {
+      const ms = S.machines.filter((m) => m.type === k).map((m) => m.name);
+      return ms.length ? ms.join(', ') : MACH[k].name;
+    };
+
+    const filter = S.filter;
+    const q = S.q.trim().toLowerCase();
+    const visible = S.lib.filter((x) => (filter === 'all' || x.m.includes(filter)) && (!q || x.name.toLowerCase().includes(q) || x.g.toLowerCase().includes(q) || String(x.t).includes(q)));
+    const mat = this.mat();
+    const groupNames = [...new Set(['Acrylic', 'Wood', 'Board & card', 'Film & sheet'].concat(S.lib.map((x) => x.g)))];
+    const groups = groupNames.map((g) => {
+      const items = visible.filter((x) => x.g === g).map((x) => {
+        const on = mat && x.id === mat.id;
+        return {
+          name: x.name, sub: x.t + ' mm · ' + x.m.map((k) => MACH[k].name).join(', '), sw: x.sw, locked: !!x.locked,
+          cur: on ? 'page' : 'false', bg: on ? accentSoft : 'transparent', bd: on ? accent : 'transparent',
+          pick: () => this.setState({ matId: x.id, tab: null, tgCell: null, picking: null })
+        };
+      });
+      return { name: g, count: items.length, items };
+    }).filter((g) => g.items.length > 0);
+    const filt = (id, l) => ({ l, on: filter === id, bg: filter === id ? 'var(--seg-on)' : 'transparent', sh: filter === id ? 'var(--shadow-1)' : 'none', fg: filter === id ? 'var(--text)' : 'var(--text-3)', pick: () => this.setState({ filter: id }) });
+    const base = {
+      accent, icons, noop, groups, noMatch: !groups.length && S.lib.length > 0, groupNames, emptyLib: !S.lib.length,
+      libCount: S.lib.length + ' material' + (S.lib.length === 1 ? '' : 's'),
+      dirty, clean: !dirty, saveOpacity: dirty ? 1 : 0.45, saveCursor: dirty ? 'pointer' : 'default',
+      save: R(() => this.save()),
+      discard: () => this.setState((s) => ({ lib: JSON.parse(JSON.stringify(s.saved)), picking: null, matId: s.saved.some((m) => m.id === s.matId) ? s.matId : s.saved[0] && s.saved[0].id })),
+      importLib: R(async () => {
+        if (dirty && !(await LRC.confirm('Discard unsaved changes?', 'Importing reloads the library from disk.', 'Import'))) return;
+        const res = await window.api.materials.importLib();
+        if (!res) return;
+        const lib = await window.api.materials.list();
+        this.setState({ lib: JSON.parse(JSON.stringify(lib)), saved: lib });
+        LRC.toast('Imported ' + res.added + ' new, ' + res.updated + ' updated', { kind: 'ok' });
+      }),
+      exportLib: R(async () => {
+        if (dirty) await this.save();
+        const p = await window.api.materials.exportLib();
+        if (p) LRC.toast('Exported library', { kind: 'ok', action: 'Show', onAction: () => window.api.app.showItem(p) });
+      }),
+      q: S.q, setQ: (e) => this.setState({ q: e.target.value }),
+      filters: [filt('all', 'All'), filt('laser', 'Laser'), filt('plotter', 'Plotter')],
+      newMaterial: R(() => this.newMaterial()),
+      hasMat: !!mat
+    };
+    if (!mat) return { ...base, laserRows: [], plotRows: [], machTabs: [], usage: [], heads: [], tg: { rows: [], speeds: [], targets: [] }, mat: { machineTags: [] } };
+
+    const locked = !!mat.locked;
+    // one tab per machine that can run this material, each with its own presets
+    const machine = this.tabMachine();
+    const tab = machine ? machine.type : mat.m[0];
+    const isLaser = tab === 'laser';
+    const rows = machine ? CC.presetsFor(mat, machine) : [];
+    const savedMat = S.saved.find((x) => x.id === mat.id);
+    const savedRows = machine ? CC.presetsFor(savedMat, machine) : [];
+    const machTabs = this.tabMachines(mat).map((x) => {
+      const on = machine && x.id === machine.id;
+      return { ...MACH[x.type], name: x.name, on, bd: on ? accent : 'transparent', fg: on ? 'var(--text)' : 'var(--text-3)', w: on ? 600 : 500, pick: () => this.setState({ tab: x.id, picking: null, tgCell: null }) };
+    });
+    const otherType = ['laser', 'plotter'].find((k) => !mat.m.includes(k) && S.machines.some((x) => x.type === k));
+
+    // field setters write straight into the working copy
+    const setF = (i, f, numeric) => (e) => {
+      const raw = e.target.value;
+      const v = numeric && raw.trim() !== '' && Number.isFinite(Number(raw)) ? Number(raw) : raw;
+      this.patchRows((list) => { list[i] = { ...list[i], [f]: v }; return list; });
+    };
+    const flip = (i, f) => () => this.patchRows((list) => { list[i] = { ...list[i], [f]: !list[i][f] }; return list; });
+    const setAdv = (i, k, v) => this.patchRows((list) => { list[i] = { ...list[i], adv: { ...(list[i].adv || {}), [k]: v } }; return list; });
+
+    const ACI = [1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => ({ n, hex: LRC.aci.hex(n), fg: LRC.aci.fg(n), title: 'ACI ' + n + ' · ' + CC.aciName(n) }));
+    const chip = (n) => ({ n, hex: LRC.aci.hex(n), fg: LRC.aci.fg(n), title: 'ACI ' + n + ' · ' + CC.aciName(n) });
+    // A colour belongs to one process only: a colour another process uses can't be added.
+    const toggleAci = (i, n) => {
+      const owner = rows.findIndex((p, k) => k !== i && (p.aci || []).includes(n));
+      if (owner >= 0) return LRC.toast('ACI ' + n + ' is already used by ' + rows[owner].name + ' — remove it there first');
+      this.patchRows((list) => list.map((p, k) => {
+        if (k !== i) return p;
+        const had = (p.aci || []).includes(n);
+        const l = (p.aci || []).filter((x) => x !== n);
+        if (!had) l.push(n);
+        return { ...p, aci: l.sort((a, b) => a - b) };
+      }));
+    };
+    const aciFor = (i) => ACI.map((a) => {
+      const on = (rows[i].aci || []).includes(a.n);
+      const owner = rows.findIndex((p) => (p.aci || []).includes(a.n));
+      const taken = owner >= 0 && owner !== i;
+      return { ...a, on, taken, dis: locked || taken, op: locked || taken ? 0.45 : 1, ownerShort: taken ? rows[owner].name : '', title: a.title + (taken ? ' · used by ' + rows[owner].name : ''), bg: on ? accentSoft : 'var(--surface)', ring: on ? '0 0 0 2px ' + accent : '0 0 0 1px var(--line-strong)', toggle: () => toggleAci(i, a.n) };
+    });
+    const aciOther = (i) => R(async () => {
+      const r = await LRC.dialog({ title: 'Colour index', message: 'AutoCAD Color Index 1–255.', fields: [{ key: 'n', label: 'ACI number', value: '', type: 'number' }], buttons: [{ label: 'Cancel', value: null }, { label: 'Toggle', value: 'ok', primary: true }] });
+      const n = r && Math.round(r.values.n);
+      if (n >= 1 && n <= 255) toggleAci(i, n);
+    });
+    const used = new Set(rows.flatMap((p) => p.aci || []));
+    const unassigned = ACI.filter((a) => !used.has(a.n));
+    const common = (b, i) => {
+      const chips = (b.aci || []).map(chip);
+      const out = b.out !== false;
+      return {
+        chips, none: chips.length === 0, name: b.name, setName: setF(i, 'name'),
+        picking: S.picking === i, pickBd: S.picking === i ? accent : 'var(--line-strong)',
+        pick: () => this.setState((s) => ({ picking: s.picking === i ? null : i })),
+        aci: S.picking === i ? aciFor(i) : [], aciOther: aciOther(i),
+        edited: JSON.stringify(b) !== JSON.stringify(savedRows[i]),
+        speed: String(b.speed), passes: String(b.passes),
+        dash: !!b.dash, dashOff: !b.dash || locked, dl: String(b.dl), gl: String(b.gl),
+        out, swBg: out ? accent : 'var(--track)', swJ: out ? 'flex-end' : 'flex-start', bg: out ? 'transparent' : 'var(--surface-2)',
+        setSpeed: setF(i, 'speed', true), setPasses: setF(i, 'passes', true), setDl: setF(i, 'dl', true), setGl: setF(i, 'gl', true),
+        toggleDash: flip(i, 'dash'), toggleOut: () => this.patchRows((list) => { list[i] = { ...list[i], out: !out }; return list; }),
+        more: R(() => this.rowMore(i))
+      };
+    };
+    const OPTS = {
+      'Path planning': ['Standard', 'Inner geometries first', 'Optimised'], 'Process gas': ['Air assist', 'Off', 'Nitrogen'], 'Direction': ['Top down', 'Bottom up', 'Fastest'], 'Scan': ['Both ways', 'One way'],
+      'Engrave mode': ['Standard', 'Stamp', 'Relief'], 'High quality': ['Off', 'On'], 'Dithering': ['Floyd–Steinberg', 'Ordered', 'Jarvis', 'Stucki', 'None'], 'Process splitting': ['None', 'By colour', 'By object']
+    };
+    const laserRows = isLaser ? rows.map((b, i) => {
+      const isCut = b.proc === 'Cut';
+      const advKey = mat.id + '|' + i;
+      const advOpen = S.adv[advKey] ?? false;
+      const adv = b.adv || {};
+      const T = (l, d, u) => ({ isText: true, l, v: String(adv[l] ?? d), u: u || '', set: (e) => setAdv(i, l, e.target.value) });
+      const P = (l, d) => {
+        const v = adv[l] ?? d;
+        const ok = mat.id + '|' + i + '|' + l;
+        const open = S.openPick === ok;
+        return { isPick: true, l, v, open, toggle: () => this.setState({ openPick: open ? null : ok }), opts: open ? (OPTS[l] || [d]).map((o) => ({ l: o, on: o === v, bg: o === v ? accentSoft : 'transparent', pick: () => { setAdv(i, l, o); this.setState({ openPick: null }); } })) : [] };
+      };
+      const C = (l) => ({ isCheck: true, l, on: !!adv[l], toggle: () => setAdv(i, l, !adv[l]) });
+      // Direction and Scan are the process's own dir/uni fields (the estimator uses them)
+      const scan = CC.engraveScan(b);
+      const F = (l, v, set) => {
+        const ok = mat.id + '|' + i + '|' + l;
+        const open = S.openPick === ok;
+        return { isPick: true, l, v, open, toggle: () => this.setState({ openPick: open ? null : ok }), opts: open ? OPTS[l].map((o) => ({ l: o, on: o === v, bg: o === v ? accentSoft : 'transparent', pick: () => { set(o); this.setState({ openPick: null }); } })) : [] };
+      };
+      const setRow = (k, v) => this.patchRows((list) => { list[i] = { ...list[i], [k]: v }; return list; });
+      const advList = isCut
+        ? [T('Passes', b.passes, '×'), T('Dwell between passes', 0, 's'), T('Power correction', '7'), P('Path planning', 'Standard'), T('Z-offset', '0', 'mm'), P('Process gas', 'Air assist')]
+        : [F('Direction', { down: 'Top down', up: 'Bottom up', fastest: 'Fastest' }[scan.dir], (o) => setRow('dir', { 'Top down': 'down', 'Bottom up': 'up', 'Fastest': 'fastest' }[o])),
+          F('Scan', scan.uni ? 'One way' : 'Both ways', (o) => setRow('uni', o === 'One way')),
+          T('Frequency', '0', 'Hz'), T('Passes', b.passes, '×'), T('Dwell between passes', 0, 's'), T('Power correction', '20'), P('Engrave mode', 'Standard'), P('High quality', 'Off'), C('Relief'), T('Extended overshoot', '0', 'mm'), T('Z-offset', '0', 'mm'), P('Process gas', 'Air assist'), P('Dithering', 'Floyd–Steinberg'), C('Engrave covered layers'), P('Process splitting', 'None')];
+      // "Passes" and "Dwell" in the advanced grid edit the row's own fields
+      advList.forEach((f) => {
+        if (f.l === 'Passes') { f.v = String(b.passes); f.set = setF(i, 'passes', true); }
+        if (f.l === 'Dwell between passes') { f.v = String(b.dwell || 0); f.set = setF(i, 'dwell', true); }
+      });
+      return {
+        ...common(b, i), proc: b.proc, isCut, power: String(b.power), f: String(b.f), source: b.source || adv.Source || 'CO2 DC', fu: isCut ? 'Hz' : 'DPI',
+        advOpen, advRot: advOpen ? '180deg' : '0deg', adv: advList,
+        toggleAdv: () => this.setState((s) => ({ adv: { ...s.adv, [advKey]: !advOpen } })),
+        setProc: setF(i, 'proc'), setPower: setF(i, 'power', true), setF: setF(i, 'f', true), setSource: setF(i, 'source')
+      };
+    }) : [];
+    const plotRows = !isLaser ? rows.map((b, i) => ({ ...common(b, i), tool: b.tool, setTool: setF(i, 'tool') })) : [];
+
+    // test grid (laser): cut or engrave, centred on this machine's first
+    // preset of that kind (or the standard starting values)
+    const tgProc = S.tgTarget === 'Engrave' ? 'Engrave' : 'Cut';
+    const ti = isLaser ? rows.findIndex((r) => r.proc === tgProc) : -1;
+    const tBase = ti >= 0 ? rows[ti] : CC.defaultPresets('laser', mat.t).find((r) => r.proc === tgProc);
+    const tr = isLaser ? { ...tBase, name: ti >= 0 ? rows[ti].name : tgProc } : null;
+    let tg = { rows: [], speeds: [], targets: [] };
+    if (tr) {
+      // the range is the user's: low, high and divisions (equal steps between them) for power and speed;
+      // until changed it is centred on the preset (±10 % power, 60–140 % speed, 4 divisions)
+      const p0 = Number(tr.power) || 50, s0 = Number(tr.speed) || 20;
+      const rangeKey = mat.id + '|' + (machine ? machine.id : '') + '|' + tgProc;
+      const def = { pLo: String(Math.max(5, p0 - 10)), pHi: String(Math.min(100, p0 + 10)), pN: '4', sLo: String(Math.max(1, Math.round(s0 * 0.6))), sHi: String(Math.max(1, Math.round(s0 * 1.4))), sN: '4' };
+      const rg = { ...def, ...((S.tgRange || {})[rangeKey] || {}) };
+      const num = (v, d) => { const n = parseFloat(v); return Number.isFinite(n) ? n : parseFloat(d); };
+      const steps = (lo, hi, n, round) => {
+        const a = Math.min(lo, hi), b = Math.max(lo, hi), k = Math.max(1, Math.min(9, Math.round(n)));
+        return [...new Set(Array.from({ length: k + 1 }, (_, i) => round(a + ((b - a) * i) / k)))];
+      };
+      const powers = steps(Math.max(0, Math.min(100, num(rg.pLo, def.pLo))), Math.max(0, Math.min(100, num(rg.pHi, def.pHi))), num(rg.pN, def.pN), (v) => Math.round(v * 10) / 10);
+      const speeds = steps(Math.max(0.1, num(rg.sLo, def.sLo)), Math.max(0.1, num(rg.sHi, def.sHi)), num(rg.sN, def.sN), (v) => (v < 10 ? Math.round(v * 10) / 10 : Math.round(v)));
+      const setRange = (k) => (e) => { const v = e.target.value; this.setState((s) => ({ tgRange: { ...(s.tgRange || {}), [rangeKey]: { ...((s.tgRange || {})[rangeKey] || {}), [k]: v } }, tgCell: null })); };
+      const mid = (n) => Math.floor((n - 1) / 2);
+      const cellKey = S.tgCell || mid(powers.length) + '-' + mid(speeds.length);
+      const lerp = (a, b, k) => Math.round(a + (b - a) * k);
+      const burn = (k) => 'rgb(' + lerp(240, 74, k) + ', ' + lerp(230, 52, k) + ', ' + lerp(212, 34, k) + ')';
+      const [cr, cc] = cellKey.split('-').map(Number);
+      const pk = (i, n) => (n > 1 ? i / (n - 1) : 0.5);
+      tg = {
+        ...rg, setPLo: setRange('pLo'), setPHi: setRange('pHi'), setPN: setRange('pN'), setSLo: setRange('sLo'), setSHi: setRange('sHi'), setSN: setRange('sN'),
+        target: tgProc, targetName: tr.name,
+        targets: [{ v: 'Cut', l: 'Cut' }, { v: 'Engrave', l: 'Engrave' }],
+        setTarget: (e) => this.setState({ tgTarget: e.target.value, tgCell: null }),
+        speeds,
+        rows: powers.map((p, ri) => ({ p, cells: speeds.map((sp, ci) => { const id = ri + '-' + ci; const on = id === cellKey; return { on, label: p + '% power, ' + sp + ' mm/s', bg: burn(pk(ri, powers.length) * 0.55 + (1 - pk(ci, speeds.length)) * 0.45), ring: on ? '0 0 0 2px var(--surface), 0 0 0 4px ' + accent : 'none', pick: () => this.setState({ tgCell: id }) }; }) })),
+        pickLabel: powers[cr] + ' % · ' + speeds[cc] + ' mm/s',
+        apply: () => {
+          if (ti < 0) return LRC.toast('No ' + tgProc.toLowerCase() + ' process for ' + machine.name + ' yet — add one first');
+          this.patchRows((list) => { list[ti] = { ...list[ti], power: powers[cr], speed: speeds[cc] }; return list; });
+          this.setState({ tgCell: null });
+          LRC.toast(tr.name + ' on ' + machine.name + ' set to ' + powers[cr] + ' % · ' + speeds[cc] + ' mm/s — save to keep it');
+        },
+        make: R(() => this.makeGrid(tBase, powers, speeds))
+      };
+      tg.select = React.createElement('select', { className: 'dd', style: { width: 170 }, value: tg.target, onChange: tg.setTarget, 'aria-label': 'Test grid process' },
+        tg.targets.map((o) => React.createElement('option', { key: o.v, value: o.v }, o.l)));
+    }
+    const groupSelect = React.createElement('select', { className: 'dd', value: mat.g, disabled: locked, 'aria-label': 'Group', onChange: (e) => { const v = e.target.value; this.patchMat((m) => ({ ...m, g: v })); } },
+      groupNames.map((g) => React.createElement('option', { key: g, value: g }, g)));
+    // tool heads (plotter) from the first plotter machine
+    const plotter = S.machines.find((m) => m.type === 'plotter');
+    const HEADS = (plotter && plotter.info && plotter.info.heads) || [];
+    const heads = HEADS.map((hd) => ({ slot: hd.slot, name: hd.tool + (hd.loaded ? '' : ' · empty'), colours: plotRows.filter((r) => CC.toolSlot(r.tool) === hd.slot).map((r) => ({ c: r.chips.length ? r.chips[0].hex : 'var(--track)', name: r.name })) }));
+
+    return {
+      ...base,
+      unassigned, hasUnassigned: unassigned.length > 0, groupSelect,
+      mat: {
+        ...mat, t: String(mat.t), edited: mat.edited || '', machineTags: mat.m.map((k) => MACH[k]),
+        setName: (e) => { const v = e.target.value; this.patchMat((m) => ({ ...m, name: v })); },
+        setT: (e) => { const v = e.target.value; this.patchMat((m) => ({ ...m, t: Number.isFinite(Number(v)) && v.trim() !== '' ? Number(v) : v })); },
+        setG: (e) => { const v = e.target.value; this.patchMat((m) => ({ ...m, g: v })); },
+        setNotes: (e) => { const v = e.target.value; this.patchMat((m) => ({ ...m, notes: v })); },
+        setSw: (e) => { const v = e.target.value.toUpperCase(); this.patchMat((m) => ({ ...m, sw: v })); }
+      },
+      locked, lockOp: locked ? 0.45 : 1,
+      lockBg: locked ? accent : 'var(--track)', lockJ: locked ? 'flex-end' : 'flex-start',
+      toggleLock: () => this.patchMat((m) => ({ ...m, locked: !m.locked })),
+      duplicate: () => this.duplicate(), remove: R(() => this.remove()),
+      machTabs, canAddType: !!otherType, addTypeLabel: otherType ? MACH[otherType].name : '',
+      addType: () => { this.patchMat((m) => ({ ...m, m: m.m.concat(otherType), presets: { ...m.presets, [otherType]: CC.defaultPresets(otherType, m.t) } })); const first = S.machines.find((x) => x.type === otherType); this.setState({ tab: first ? first.id : null }); },
+      isLaser, isPlotter: !isLaser,
+      rowCount: rows.length + ' processes' + (machine && !Array.isArray(mat.presets[machine.id]) ? ' · starting values, saved for ' + machine.name + ' once changed' : ''),
+      laserRows, plotRows, tg, heads,
+      addProcess: () => this.addProcess(),
+      usage: [{ k: 'Jobs sent', v: String(mat.jobs || 0) }, { k: 'Presets', v: String(this.tabMachines(mat).reduce((s, x) => s + CC.presetsFor(mat, x).length, 0)) }, { k: 'Last used', v: mat.last || '—' }],
+      useForJob: R(async () => {
+        if (dirty) await this.save();
+        const job = await window.api.job.current();
+        const type = job.machineType;
+        const jm = S.machines.find((x) => x.id === job.machineId);
+        if (!mat.m.includes(type) || !jm) return LRC.toast(mat.name + ' has no ' + type + ' presets — add the ' + type + ' tab first');
+        await window.api.job.update({ ...job, materialId: mat.id, processes: CC.presetsFor(mat, jm).map((p) => ({ ...JSON.parse(JSON.stringify(p)), src: 'preset' })) }, { record: true });
+        const settings = await window.api.settings.get();
+        await window.api.settings.set({ currentMaterial: { ...(settings.currentMaterial || {}), [type]: mat.id } });
+        location.href = 'MainDetailed.dc.html';
+      }),
+      exportOne: R(async () => {
+        if (dirty) await this.save();
+        const p = await window.api.materials.exportLib([mat.id]);
+        if (p) LRC.toast('Exported ' + mat.name, { kind: 'ok', action: 'Show', onAction: () => window.api.app.showItem(p) });
+      })
+    };
+  }
+}
+</script>
+</body>
+</html>

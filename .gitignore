@@ -1,0 +1,15 @@
+node_modules/
+dist/
+received-jobs/
+tools/scratch/
+
+# generated packages and scratch output (rebuilt by the tools/ scripts)
+design-handoff/
+hmi-handoff/
+*.zip
+.shots/
+src/ui/__preview*
+
+# large or local-only material
+handoff/transcript.jsonl
+_backup-before-rebrand-*/

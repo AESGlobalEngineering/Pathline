@@ -1,0 +1,722 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Simulation · Pathline</title>
+<link rel="stylesheet" href="fonts.css">
+<link rel="stylesheet" href="theme.css">
+<script src="../shared/core.js"></script>
+<script src="./support.js"></script>
+<script src="./app.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+/* Simulation page only; shared components are in theme.css */
+.sim-side { flex: none; min-width: 0; background: var(--surface); padding: 16px; display: flex; flex-direction: column; gap: 14px; overflow-y: auto; box-sizing: border-box; }
+.sim-row { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.sim-row > :first-child { color: var(--text-2); }
+.sim-swatch { width: 10px; height: 10px; flex: none; border-radius: 3px; box-shadow: var(--chip-ring); }
+.sim-proc { display: flex; align-items: center; gap: 10px; min-height: var(--ctl-h); padding: 0 8px; border-radius: var(--ctl-r); cursor: pointer; box-sizing: border-box; }
+.sim-proc:hover { box-shadow: inset 0 0 0 1px var(--line); }
+.sim-proc input { width: 16px; height: 16px; margin: 0; }
+.sim-play { width: 44px; height: 44px; flex: none; border: 0; border-radius: 22px; color: var(--on-accent); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
+.sim-play:hover { filter: brightness(0.93); }
+.sim-play svg.i { width: 20px; height: 20px; }
+.sim-chips .badge { height: 18px; padding: 0 5px; border-radius: 4px; font-size: 10px; }
+.sim-viewport { position: relative; flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; padding: 24px; }
+.sim-empty { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 420px; max-width: calc(100% - 48px); box-shadow: var(--shadow-pop); }
+.sim-checks { display: flex; flex-wrap: wrap; gap: 6px; }
+.sim-checks .pill svg.i { width: 14px; height: 14px; stroke-width: 2.2; }
+.sim-bar { display: flex; height: 14px; border-radius: 4px; overflow: hidden; box-shadow: inset 0 0 0 1px var(--line); }
+/* each run gets the chip ring so dark ACI colours (7 = black) still show in dark mode */
+.sim-bar > span { border-right: 1px solid var(--surface); box-shadow: var(--chip-ring); }
+.sim-xy { display: inline-flex; gap: 4px; }
+.sim-xy .mono { color: var(--text-2); }
+.sim-warn { padding: 6px 8px; border-radius: 6px; background: var(--warn-soft); color: var(--warn); font-size: 12px; font-weight: 500; }
+</style>
+</helmet>
+<div style="height: 100vh; display: flex; flex-direction: column; background: var(--bg); color: var(--text); font-family: var(--font); font-size: 13px; overflow: hidden">
+
+  <!-- ===== App bar ===== -->
+  <header class="appbar">
+    <div class="brand"><svg viewBox="0 0 64 64" width="28" height="28" role="img" aria-label="Pathline" style="flex: none; display: block"><rect width="64" height="64" rx="15" fill="#D62828"></rect><g transform="translate(14 14) scale(0.5625)" stroke-width="6" stroke-linejoin="round"><polygon points="6,6 50,6 6,50" fill="#FFFFFF" stroke="#FFFFFF"></polygon><polygon points="58,14 58,58 14,58" fill="#111214" stroke="#111214"></polygon></g></svg><span class="word">Pathline</span></div>
+    <nav aria-label="Sections" class="seg">
+      <a href="MainDetailed.dc.html">Job</a>
+      <a href="SimulationDetailed.dc.html" aria-current="page">Simulation</a>
+    </nav>
+    <span class="divider"></span>
+    <div class="ctx">
+      <div style="display: flex; flex-direction: column; line-height: 1.25; min-width: 0">
+        <h1 class="h-page">Simulation</h1>
+        <span class="lbl" style="overflow: hidden; text-overflow: ellipsis">{{jobName}}</span>
+      </div>
+      <div role="radiogroup" aria-label="Machine" class="seg sim-chips">
+        <sc-for list="{{modes}}" as="o" hint-placeholder-count="2">
+          <button role="radio" aria-checked="{{o.on}}" onClick="{{o.pick}}" title="{{o.tip}}" style="background: {{o.bg}}; box-shadow: {{o.sh}}; color: {{o.fg}}; opacity: {{o.op}}">
+            <span class="badge" style="background: {{o.tbg}}">{{o.type}}</span>{{o.l}}
+          </button>
+        </sc-for>
+      </div>
+    </div>
+    <span class="spacer"></span>
+    <button class="btn-primary" onClick="{{send}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.send}}"></path></svg>Send to machine</button>
+  </header>
+
+  <div style="flex: 1; display: flex; min-height: 0">
+
+    <!-- ===== Left: display + processes ===== -->
+    <aside aria-label="Display options" class="sim-side" style="width: 270px; border-right: 1px solid var(--line)">
+      <h2 class="h-sec">Display</h2>
+      <div style="display: flex; flex-direction: column; gap: 4px">
+        <sc-for list="{{toggles}}" as="t" hint-placeholder-count="5">
+          <div style="display: flex; align-items: center; justify-content: space-between; min-height: 34px">
+            <span style="color: var(--text-2)">{{t.l}}</span>
+            <button role="switch" class="sw" aria-checked="{{t.on}}" aria-label="{{t.l}}" onClick="{{t.toggle}}" style="background: {{t.swBg}}; justify-content: {{t.swJ}}"></button>
+          </div>
+        </sc-for>
+      </div>
+      <sc-if value="{{thermal.on}}" hint-placeholder-val="{{false}}">
+        <div class="card" style="display: flex; flex-direction: column; gap: 8px; padding: 12px; background: var(--surface-2)">
+          <h3 class="h-sec">Thermal map</h3>
+          <sc-if value="{{thermal.none}}" hint-placeholder-val="{{false}}"><span class="lbl">{{thermal.msg}}</span></sc-if>
+          <sc-if value="{{thermal.has}}" hint-placeholder-val="{{false}}">
+          <span class="lbl">{{thermal.mat}}</span>
+          <div style="display: flex; align-items: center; gap: 6px">
+            <span aria-hidden="true" style="flex: 1; height: 10px; border-radius: 3px; background: {{thermal.legend}}; box-shadow: var(--chip-ring)"></span>
+            <span aria-hidden="true" title="Past the limit" style="width: 14px; height: 10px; border-radius: 3px; background: {{thermal.overCol}}"></span>
+          </div>
+          <div class="mono lbl" style="display: flex; justify-content: space-between; font-size: 11px; margin-top: -4px; padding-right: 20px"><span>{{thermal.lo}}</span><span>{{thermal.mid}}</span><span>{{thermal.hi}}</span></div>
+          <span class="lbl">Limit {{thermal.limit}}</span>
+          <sc-for list="{{thermal.rows}}" as="r" hint-placeholder-count="4">
+            <div class="sim-row"><span>{{r.l}}</span><span class="mono">{{r.v}}</span></div>
+          </sc-for>
+          <sc-if value="{{thermal.hasWarn}}" hint-placeholder-val="{{false}}">
+            <span class="sim-warn">{{thermal.warn}}</span>
+          </sc-if>
+          <span class="lbl" style="font-size: 11px; line-height: 1.45">{{thermal.note}}</span>
+          <span class="lbl" style="font-size: 11px; line-height: 1.45">{{thermal.src}}</span>
+          </sc-if>
+        </div>
+      </sc-if>
+      <div class="hr"></div>
+      <h2 class="h-sec">Processes</h2>
+      <sc-if value="{{noProcs}}" hint-placeholder-val="{{false}}"><span class="lbl">No output yet.</span></sc-if>
+      <div style="display: flex; flex-direction: column; gap: 2px">
+        <sc-for list="{{procs}}" as="p" hint-placeholder-count="3">
+          <label class="sim-proc" style="background: {{p.bg}}">
+            <input type="checkbox" checked="{{p.shown}}" onChange="{{p.toggle}}" style="accent-color: {{accent}}">
+            <span style="display: flex; gap: 3px">
+              <sc-for list="{{p.chips}}" as="k" hint-placeholder-count="1"><span class="chip" title="ACI {{k.n}}" style="background: {{k.hex}}; color: {{k.fg}}">{{k.n}}</span></sc-for>
+            </span>
+            <span style="flex: 1; min-width: 0; font-weight: {{p.w}}">{{p.name}}</span>
+            <span class="mono lbl">{{p.time}}</span>
+          </label>
+        </sc-for>
+      </div>
+    </aside>
+
+    <!-- ===== Centre: preview + timeline ===== -->
+    <main style="flex: 1; min-width: 0; display: flex; flex-direction: column">
+      <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; padding: 8px 16px; min-height: 52px; box-sizing: border-box; background: var(--surface); border-bottom: 1px solid var(--line)">
+        <span style="display: inline-flex; align-items: center; gap: 8px">
+          <span aria-hidden="true" class="sim-swatch" style="border-radius: 50%; background: {{now.col}}"></span>
+          <span style="font-weight: 600">{{now.name}}</span>
+          <span class="lbl">{{now.step}}</span>
+        </span>
+        <span class="lbl sim-xy"><span>X</span><span class="mono">{{now.x}}</span><span style="margin-left: 8px">Y</span><span class="mono">{{now.y}}</span><span class="mono">mm</span></span>
+        <span style="flex: 1"></span>
+        <sc-if value="{{multiBed}}" hint-placeholder-val="{{false}}">
+          <div role="radiogroup" aria-label="Bed" class="seg">
+            <sc-for list="{{beds}}" as="b" hint-placeholder-count="3">
+              <button role="radio" aria-checked="{{b.on}}" onClick="{{b.pick}}" style="background: {{b.bg}}; box-shadow: {{b.sh}}; color: {{b.fg}}">{{b.l}}</button>
+            </sc-for>
+          </div>
+        </sc-if>
+        <!-- same zoom controls as the Job page canvas -->
+        <div class="ctl-group">
+          <button class="ib" onClick="{{zoomOut}}" aria-label="Zoom out"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.minus}}"></path></svg></button>
+          <button class="val" onClick="{{zoomActual}}" title="Actual size">{{zoom}}</button>
+          <button class="ib" onClick="{{zoomIn}}" aria-label="Zoom in"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.plus}}"></path></svg></button>
+        </div>
+        <button class="tb" onClick="{{zoomFit}}">Fit</button>
+      </div>
+
+      <div class="viewport sim-viewport">
+        {{scene}}
+        <sc-if value="{{noProcs}}" hint-placeholder-val="{{false}}">
+          <div class="card sim-empty">
+            <div class="empty">
+              <span class="em-icon"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.play}}"></path></svg></span>
+              <span class="em-title">Nothing to simulate yet</span>
+              <span class="em-text">Add objects on the Job page and give their colours a process. The toolpath and time estimate show here.</span>
+              <div class="em-actions"><a class="btn-primary" href="MainDetailed.dc.html">Go to Job</a></div>
+            </div>
+          </div>
+        </sc-if>
+      </div>
+
+      <!-- timeline -->
+      <div style="display: flex; flex-direction: column; gap: 10px; padding: 12px 16px 14px; background: var(--surface); border-top: 1px solid var(--line)">
+        <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px">
+          <button class="ib" onClick="{{prevOp}}" aria-label="Previous operation"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.prev}}"></path></svg></button>
+          <button class="sim-play" onClick="{{togglePlay}}" aria-label="{{playLabel}}" style="background: {{accent}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{playIcon}}"></path></svg></button>
+          <button class="ib" onClick="{{nextOp}}" aria-label="Next operation"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.next}}"></path></svg></button>
+          <span class="mono" style="font-weight: 500; min-width: 140px">{{clock}}</span>
+          <span style="flex: 1"></span>
+          <span class="lbl">Speed</span>
+          <div role="radiogroup" aria-label="Playback speed" class="seg">
+            <sc-for list="{{speeds}}" as="s" hint-placeholder-count="4">
+              <button role="radio" aria-checked="{{s.on}}" onClick="{{s.pick}}" class="mono" style="background: {{s.bg}}; box-shadow: {{s.sh}}; color: {{s.fg}}; padding: 0 10px; font-size: 12px">{{s.l}}</button>
+            </sc-for>
+          </div>
+        </div>
+        <div style="position: relative">
+          <div aria-hidden="true" class="sim-bar">
+            <sc-for list="{{bar}}" as="g" hint-placeholder-count="12"><span title="{{g.tip}}" style="flex: {{g.f}} 1 0; background: {{g.bg}}; opacity: {{g.op}}"></span></sc-for>
+          </div>
+          <span aria-hidden="true" style="position: absolute; left: {{marker}}; top: -4px; bottom: -4px; width: 2px; margin-left: -1px; background: var(--text)"></span>
+        </div>
+        <input type="range" min="0" max="{{T}}" step="{{tStep}}" value="{{t}}" onChange="{{scrub}}" aria-label="Job position" style="accent-color: {{accent}}">
+      </div>
+    </main>
+
+    <!-- ===== Right: breakdown ===== -->
+    <aside aria-label="Job breakdown" class="sim-side" style="width: 310px; border-left: 1px solid var(--line)">
+      <div style="display: flex; flex-direction: column; gap: 2px">
+        <span class="lbl">Total job time (estimate)</span>
+        <span class="mono" style="font-size: 26px; font-weight: 500">{{total}}</span>
+        <span class="lbl">{{machLine}}</span>
+      </div>
+      <div style="height: 6px; border-radius: 3px; background: var(--sunken); overflow: hidden"><div style="height: 100%; width: {{marker}}; background: {{accent}}"></div></div>
+      <div style="display: flex; flex-direction: column; gap: 8px">
+        <sc-for list="{{breakdown}}" as="b" hint-placeholder-count="4">
+          <div style="display: flex; align-items: center; gap: 10px">
+            <span aria-hidden="true" class="sim-swatch" style="background: {{b.col}}"></span>
+            <span style="flex: 1; min-width: 0; color: var(--text-2)">{{b.l}}</span>
+            <span class="mono">{{b.v}}</span>
+          </div>
+        </sc-for>
+      </div>
+      <div class="hr"></div>
+      <div style="display: flex; flex-direction: column; gap: 8px">
+        <sc-for list="{{stats}}" as="s" hint-placeholder-count="3">
+          <div class="sim-row"><span>{{s.l}}</span><span class="mono">{{s.v}}</span></div>
+        </sc-for>
+      </div>
+      <div class="hr"></div>
+      <h2 class="h-sec">Cut order</h2>
+      <sc-for list="{{orderGroups}}" as="og" hint-placeholder-count="2">
+        <div style="display: flex; flex-direction: column; gap: 6px">
+          <span class="lbl">{{og.l}}</span>
+          <div role="radiogroup" aria-label="{{og.l}}" class="seg fill">
+            <sc-for list="{{og.opts}}" as="o" hint-placeholder-count="3">
+              <button role="radio" aria-checked="{{o.on}}" onClick="{{o.pick}}" title="{{o.tip}}" style="background: {{o.bg}}; box-shadow: {{o.sh}}; color: {{o.fg}}; padding: 0 6px; font-size: 12px">{{o.l}}</button>
+            </sc-for>
+          </div>
+        </div>
+      </sc-for>
+      <span class="lbl" style="line-height: 1.45">{{optNote}}</span>
+      <div class="hr"></div>
+      <h2 class="h-sec">Checks</h2>
+      <div class="sim-checks">
+        <sc-for list="{{checks}}" as="k" hint-placeholder-count="3">
+          <span class="pill check {{k.cls}}" style="background: {{k.bg}}; color: {{k.fg}}">
+            <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{k.icon}}"></path></svg>{{k.l}}
+          </span>
+        </sc-for>
+      </div>
+    </aside>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  state = {
+    ready: false, job: null, machines: [], t: 0, playing: false, speed: 10,
+    hidden: {}, vis: { travel: true, arrows: true, starts: false, order: false, heat: false, lifts: true }, fitJob: true
+  };
+
+  componentDidMount() {
+    window.__page = this;
+    Promise.all([window.api.job.current(), window.api.machines.list(), window.api.materials.list(), window.api.machines.placeholder()])
+      .then(([job, machines, materials, none]) => this.setState({ ready: true, job, machines: machines.length ? machines : [none], materials }))
+      .catch(LRC.fail);
+    let last = performance.now();
+    this.timer = setInterval(() => {
+      const now = performance.now();
+      const dt = (now - last) / 1000;
+      last = now;
+      if (!this.state.playing || !this.sim) return;
+      const T = this.sim.total;
+      const nt = this.state.t + dt * this.state.speed;
+      if (nt >= T) this.setState({ t: T, playing: false });
+      else this.setState({ t: nt });
+    }, 100);
+    this.offKeys = LRC.keys({
+      ' ': () => this.togglePlay(), ArrowRight: () => this.step(1), ArrowLeft: () => this.step(-1),
+      Home: () => this.setState({ t: 0, playing: false }), End: () => this.sim && this.setState({ t: this.sim.total, playing: false }),
+      // zoom keys as on the Job page
+      '0': () => this.fit(), '+': () => this.zoomAt(0.8), '=': () => this.zoomAt(0.8), '-': () => this.zoomAt(1.25)
+    });
+  }
+  componentWillUnmount() {
+    clearInterval(this.timer);
+    this.offKeys && this.offKeys();
+    if (this.sizeObs) this.sizeObs.disconnect();
+  }
+  machine() {
+    const s = this.state;
+    return s.machines.find((m) => m.id === s.job.machineId) || s.machines[0];
+  }
+  // Timeline of the job, recomputed only when the job or machine changes.
+  simulate() {
+    const job = this.state.job, m = this.machine();
+    if (this.sim && this.sim.job === job && this.sim.m === m) return this.sim;
+    const r = CC.estimate(job, m, { timeline: true });
+    const tl = r.timeline;
+    const opStarts = tl.filter((o) => o.kind !== 'travel').map((o) => o.start);
+    // what each entity is drawn as at time t: its last vector op, or its raster op
+    const entOps = new Map();
+    tl.forEach((o, i) => {
+      if (o.kind !== 'op') return;
+      const ids = o.mode === 'raster' ? o.ents : [o.ent];
+      ids.forEach((id) => {
+        const cur = entOps.get(id) || { first: i, last: i };
+        cur.first = Math.min(cur.first, i);
+        cur.last = Math.max(cur.last, i);
+        entOps.set(id, cur);
+      });
+    });
+    this.sim = { job, m, r, tl, total: r.total, opStarts, entOps };
+    return this.sim;
+  }
+  // Keep the preview's on-screen size, so markers and labels stay a fixed
+  // number of pixels whatever the zoom.
+  watchSize(el) {
+    if (!el || el === this.svgEl) return;
+    this.svgEl = el;
+    if (this.sizeObs) this.sizeObs.disconnect();
+    this.sizeObs = new ResizeObserver(() => {
+      const r = el.getBoundingClientRect();
+      if (r.width > 0 && r.height > 0 && (!this.svgSize || Math.abs(this.svgSize.w - r.width) > 1 || Math.abs(this.svgSize.h - r.height) > 1)) {
+        this.svgSize = { w: r.width, h: r.height };
+        this.forceUpdate();
+      }
+    });
+    this.sizeObs.observe(el);
+  }
+  // ---- zoom and pan of the preview (scene units are mm)
+  toScene(svg, cx, cy) {
+    const m = svg.getScreenCTM();
+    if (!m) return null;
+    const p = svg.createSVGPoint();
+    p.x = cx; p.y = cy;
+    const q = p.matrixTransform(m.inverse());
+    return { x: q.x, y: q.y };
+  }
+  zoomAt(f, p) {
+    const v = this.state.view || this.baseVb;
+    if (!v) return;
+    const w = Math.max(2, Math.min(v.w * f, 5000)), k = w / v.w;
+    const c = p || { x: v.x + v.w / 2, y: v.y + v.h / 2 };
+    this.setState({ view: { x: c.x - (c.x - v.x) * k, y: c.y - (c.y - v.y) * k, w, h: v.h * k } });
+  }
+  fit() { this.setState({ view: null }); }
+  // 100 % = real size on a 96 dpi screen, as on the Job page
+  zoomActual() {
+    const v = this.state.view || this.baseVb, scr = this.svgSize;
+    if (!v || !scr) return;
+    this.zoomAt(25.4 / (96 * Math.max(v.w / scr.w, v.h / scr.h)));
+  }
+  // left, middle or right drag pans (there is nothing to select here)
+  startPan(e) {
+    const svg = e.currentTarget;
+    const a = this.toScene(svg, e.clientX, e.clientY);
+    const v0 = this.state.view || this.baseVb;
+    if (!a || !v0) return;
+    e.preventDefault();
+    const m = svg.getScreenCTM();
+    const move = (ev) => {
+      // mm per screen pixel stays fixed while panning
+      const dx = (ev.clientX - e.clientX) / m.a, dy = (ev.clientY - e.clientY) / m.d;
+      this.setState({ view: { ...v0, x: v0.x - dx, y: v0.y - dy }, dragging: true });
+    };
+    const up = () => { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); this.setState({ dragging: false }); };
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', up);
+  }
+  // Heat model for the current timeline and material (rebuilt when either changes).
+  thermal(mat) {
+    const sim = this.simulate();
+    if (!this.th || this.th.sim !== sim || this.th.mat !== mat) this.th = { sim, mat, model: CC.thermalSim(sim.job, sim.m, mat, sim.tl), img: null };
+    return this.th.model;
+  }
+  // Colour for a temperature as a fraction of the way from ambient to the
+  // material's limit: clear → yellow → orange → red, purple past the limit.
+  heatCol(f) {
+    if (f > 1) return [92, 18, 128, 235];
+    const S = [[0, 255, 214, 10, 0], [0.1, 255, 214, 10, 90], [0.35, 250, 140, 20, 160], [0.65, 230, 60, 30, 195], [1, 160, 10, 30, 220]];
+    if (f <= 0) return S[0].slice(1);
+    let k = 1;
+    while (k < S.length - 1 && S[k][0] < f) k++;
+    const a = S[k - 1], b = S[k], u = (f - a[0]) / (b[0] - a[0]);
+    return [1, 2, 3, 4].map((n) => Math.round(a[n] + (b[n] - a[n]) * u));
+  }
+  heatImage(model, top) {
+    const th = this.th;
+    if (th.img && th.img.time === model.time && th.img.top === top) return th.img.url;
+    const { nx, ny, T, T0 } = model;
+    const cv = this.cv || (this.cv = document.createElement('canvas'));
+    cv.width = nx; cv.height = ny;
+    const ctx = cv.getContext('2d');
+    const img = ctx.createImageData(nx, ny);
+    for (let k = 0; k < nx * ny; k++) img.data.set(this.heatCol((T[k] - T0) / (top - T0)), k * 4);
+    ctx.putImageData(img, 0, 0);
+    th.img = { time: model.time, top, url: cv.toDataURL() };
+    return th.img.url;
+  }
+  togglePlay() {
+    if (!this.sim) return;
+    this.setState((s) => ({ playing: !s.playing, t: s.t >= this.sim.total ? 0 : s.t }));
+  }
+  step(dir) {
+    if (!this.sim) return;
+    const t = this.state.t;
+    const st = this.sim.opStarts;
+    if (dir < 0) {
+      const p = st.filter((x) => x < t - 0.05);
+      this.setState({ t: p.length ? p[p.length - 1] : 0, playing: false });
+    } else {
+      const n = st.find((x) => x > t + 0.05);
+      this.setState({ t: n !== undefined ? n : this.sim.total, playing: false });
+    }
+  }
+  commit(job) {
+    this.setState({ job });
+    return window.api.job.update(job, { record: true }).catch(LRC.fail);
+  }
+
+  renderVals() {
+    const accent = 'var(--accent)';
+    const accentSoft = 'var(--accent-soft)';
+    const icons = {
+      send: 'M4 12l16-8-6 16-3-7z',
+      prev: 'M6 5v14 M18 6l-9 6 9 6z',
+      next: 'M18 5v14 M6 6l9 6-9 6z',
+      minus: 'M5 12h14',
+      plus: 'M12 5v14 M5 12h14',
+      play: 'M7 4.5v15l12.5-7.5z',
+      pause: 'M8 5v14 M16 5v14',
+      check: 'M5 12.5l4.5 4.5L19 7',
+      warn: 'M12 4 2.5 20h19z M12 10v4 M12 17h.01'    };
+    const S = this.state;
+    if (!S.ready) return { accent, icons, thermal: { on: false, rows: [] }, modes: [], toggles: [], procs: [], bar: [], breakdown: [], stats: [], checks: [], speeds: [], beds: [], now: {}, scene: null, zoom: '', jobName: '', total: '', clock: '', marker: '0%', T: 1, t: 0 };
+
+    const h = React.createElement;
+    const job = S.job;
+    const machine = this.machine();
+    const isLaser = machine.type !== 'plotter';
+    const sim = this.simulate();
+    const { tl, r: est } = sim;
+    const T = Math.max(sim.total, 0.001);
+    const t = Math.min(S.t, T);
+    const finished = t >= T - 1e-6 && sim.total > 0;
+    const head = CC.headAt(tl, t);
+    const cur = head.op;
+    const procCol = (i) => {
+      const p = job.processes[i];
+      return p && p.aci && p.aci.length ? LRC.aci.stroke(p.aci[0]) : 'var(--idle-dot)';
+    };
+    const isHidden = (i) => !!S.hidden[job.id + '|' + i];
+    const fmt = (s) => CC.fmtDuration(s);
+
+    // ---- thermal (laser): run the heat model up to time t
+    let thermal = { on: false, rows: [] };
+    if (S.vis.heat && isLaser) {
+      const mat = (S.materials || []).find((x) => x.id === job.materialId) || null;
+      const model = this.thermal(mat);
+      const ref = CC.thermalOf(mat);
+      if (!model) {
+        thermal = {
+          on: true, none: true, rows: [],
+          msg: !mat ? 'Pick a material on the Job page to see the thermal map.'
+            : !ref ? 'No reference thermal data for ' + mat.name + '. The map covers acrylic, wood, MDF, card, foam board, PET film, magnetic sheet, stainless 304/316, mild steel, aluminium and brass.'
+              : 'Nothing to simulate yet.'
+        };
+      } else {
+        model.to(t);
+        const pr = model.props;
+        const top = Math.max(model.T0 + 20, pr.limit);
+        const deg = (v) => Math.round(v) + ' °C';
+        let over = 0;
+        for (let k = 0; k < model.T.length; k++) if (model.T[k] >= pr.limit) over++;
+        const overArea = over * model.dx * model.dx;
+        thermal = {
+          on: true, has: true, model, top,
+          mat: mat.name + ' · ' + mat.t + ' mm · ' + (Number(machine.info && machine.info.power) || 80) + ' W ' + (model.fibre ? 'fibre' : 'CO2'),
+          src: 'Data: ' + pr.name + ' — ' + pr.src + '.',
+          rows: [
+            { l: 'Under the head', v: deg(model.at(head.x, head.y)) },
+            { l: 'Hottest now', v: deg(model.max()) },
+            { l: 'Peak', v: deg(model.peak) + (model.peak > model.T0 + 0.5 ? ' at ' + fmt(model.peakAt) : '') },
+            { l: 'Beam absorbed', v: Math.round(model.absorb * 100) + ' %' }
+          ],
+          legend: 'linear-gradient(90deg, ' + [0, 0.1, 0.35, 0.65, 1].map((f) => { const c = this.heatCol(f); return 'rgba(' + c[0] + ', ' + c[1] + ', ' + c[2] + ', ' + Math.max(0.15, c[3] / 255).toFixed(2) + ') ' + f * 100 + '%'; }).join(', ') + ')',
+          lo: deg(model.T0), mid: deg((model.T0 + top) / 2), hi: deg(top),
+          overCol: 'rgb(' + this.heatCol(1.2).slice(0, 3).join(', ') + ')',
+          limit: deg(pr.limit) + ' · ' + pr.limitLabel,
+          warn: over > 0 ? 'Over ' + deg(pr.limit) + ' now across ' + CC.fmtArea(overArea) + ' — ' + pr.limitLabel : model.peak >= pr.limit ? 'Went over ' + deg(pr.limit) + ' at ' + fmt(model.peakAt) + ' — ' + pr.limitLabel : '',
+          note: 'Approximate: averages over ' + model.dx.toFixed(1) + ' mm cells from the material, its thickness and the laser power, with forced airflow from the extraction. The spot under the beam is far hotter.'
+        };
+        thermal.hasWarn = !!thermal.warn;
+      }
+    }
+
+    // ---- machines of the same type (the job's processes belong to that type)
+    const TYPE = { laser: { type: 'LASER', tbg: 'var(--badge-laser)' }, plotter: { type: 'PLOTTER', tbg: 'var(--badge-plotter)' } };
+    const seg = (on) => ({ bg: on ? 'var(--seg-on)' : 'transparent', sh: on ? 'var(--shadow-1)' : 'none', fg: on ? 'var(--text)' : 'var(--text-3)' });
+    // only machines of the job's type: the processes are laser or plotter settings
+    const modes = S.machines.filter((m) => m.type === machine.type).map((m) => ({
+      ...TYPE[m.type], l: m.name, ...seg(m.id === machine.id), on: m.id === machine.id, op: 1,
+      tip: 'Estimate on ' + m.name,
+      pick: () => { if (m.id !== machine.id) { this.commit({ ...job, machineId: m.id }); this.setState({ t: 0, playing: false }); } }
+    }));
+
+    // ---- scene
+    const bed = CC.bedOf(machine);
+    const nBeds = est.beds;
+    const viewBed = isLaser ? 0 : (cur && cur.bed) || 0;
+    const ents = job.entities.filter((e) => !e.hidden && !e.isRegMark && (isLaser || (e.bed || 0) === viewBed));
+    let vb = { x: 0, y: 0, w: bed[0], h: bed[1] };
+    if (S.fitJob) {
+      const b = CC.boxOf(ents);
+      // keep the machine origin in view so the travel from it shows
+      if (CC.boxValid(b) && est.home) CC.growBox(b, est.home[0], est.home[1]);
+      if (CC.boxValid(b)) {
+        const pad = Math.max(10, Math.max(CC.boxW(b), CC.boxH(b)) * 0.06);
+        vb = { x: b.x0 - pad, y: b.y0 - pad, w: CC.boxW(b) + 2 * pad, h: CC.boxH(b) + 2 * pad };
+      }
+    }
+    // zoomed in (mouse wheel / buttons) and panned (drag): the user's view wins
+    this.baseVb = vb;
+    if (S.view) vb = S.view;
+    // one screen pixel in mm (the view is fitted inside the measured preview)
+    const scr = this.svgSize || { w: 900, h: 600 };
+    const px = Math.max(vb.w / scr.w, vb.h / scr.h);
+    const procByAci = new Map();
+    job.processes.forEach((p, i) => (p.aci || []).forEach((a) => { if (!procByAci.has(a)) procByAci.set(a, i); }));
+    const curIdx = head.i;
+    const stateOfIdx = (i) => (finished || i < curIdx ? 'done' : i === curIdx ? 'cur' : 'todo');
+    const kids = [];
+    kids.push(h('rect', { key: 'bed', x: 0, y: 0, width: bed[0], height: bed[1], strokeWidth: px, style: { fill: 'var(--bed)', stroke: 'var(--bed-line)' } }));
+    if (job.sheet && job.sheet.on && isLaser) kids.push(h('rect', { key: 'sheet', x: job.sheet.x, y: job.sheet.y, width: job.sheet.w, height: job.sheet.h, strokeWidth: px, style: { fill: 'var(--sheet)', stroke: 'var(--sheet-line)' } }));
+    // engraving: filled shapes revealed row by row as the head passes
+    const rasterOps = tl.filter((o) => o.kind === 'op' && o.mode === 'raster' && (isLaser || o.bed === viewBed));
+    rasterOps.forEach((o, k) => {
+      if (isHidden(o.proc)) return;
+      const idx = tl.indexOf(o);
+      const st = stateOfIdx(idx);
+      const d = o.ents.map((id) => { const e = job.entities.find((x) => x.id === id); return e ? LRC.entityD(e) : ''; }).join('');
+      kids.push(h('path', { key: 'rg' + k, d, fillOpacity: 0.12, fillRule: 'evenodd', style: { fill: 'var(--ink)' } }));
+      if (st !== 'todo') {
+        // top down: revealed from the top to the head; bottom up: from the bottom
+        const up = o.dir === 'up';
+        const yCut = st === 'done' ? (up ? o.box.y0 - 1 : o.box.y1 + 1) : head.y;
+        const y0 = up ? yCut : o.box.y0 - 5, y1 = up ? o.box.y1 + 5 : yCut;
+        kids.push(h('clipPath', { key: 'rc' + k, id: 'sim-clip-' + k }, h('rect', { x: o.box.x0 - 5, y: y0, width: o.box.x1 - o.box.x0 + 10, height: Math.max(0, y1 - y0) })));
+        kids.push(h('path', { key: 'rf' + k, d, fill: 'url(#sim-hatch)', fillRule: 'evenodd', clipPath: 'url(#sim-clip-' + k + ')' }));
+      }
+    });
+    // vector paths
+    for (const e of ents) {
+      const pi = procByAci.get(e.aci);
+      if (pi === undefined || job.processes[pi].out === false || isHidden(pi)) continue;
+      const p = job.processes[pi];
+      if ((isLaser && p.proc === 'Engrave') || CC.isRegProc(p)) continue;
+      const ops = sim.entOps.get(e.id);
+      let st = 'todo';
+      if (ops) st = finished || curIdx > ops.last ? 'done' : curIdx >= ops.first ? 'cur' : 'todo';
+      const col = procCol(pi);
+      kids.push(h('path', {
+        key: e.id, d: LRC.entityD(e), fill: 'none', style: { stroke: col }, strokeLinejoin: 'round',
+        strokeWidth: (st === 'cur' ? 3 : 1.6) * px, opacity: st === 'todo' ? 0.2 : 1,
+        strokeDasharray: p.dash ? (Number(p.dl) || 5) + ' ' + (Number(p.gl) || 2) : undefined
+      }));
+    }
+    // thermal map: heat in the sheet at time t, drawn over the artwork
+    const heatTop = thermal.on ? thermal.top : 0;
+    if (thermal.on) {
+      const md = thermal.model;
+      kids.push(h('image', { key: 'heat', href: this.heatImage(md, heatTop), x: md.x0, y: md.y0, width: md.nx * md.dx, height: md.ny * md.dx, preserveAspectRatio: 'none', style: { pointerEvents: 'none' } }));
+    }
+    // overlays from the timeline
+    const vops =tl.filter((o) => (isLaser || o.bed === viewBed) && !(o.proc >= 0 && isHidden(o.proc)));
+    if (S.vis.travel) {
+      const segs = vops.filter((o) => o.kind === 'travel').map((o) => 'M' + o.from[0].toFixed(2) + ' ' + o.from[1].toFixed(2) + 'L' + o.to[0].toFixed(2) + ' ' + o.to[1].toFixed(2)).join('');
+      if (segs) kids.push(h('path', { key: 'travel', d: segs, fill: 'none', strokeWidth: px, strokeDasharray: 4 * px + ' ' + 4 * px, style: { stroke: 'var(--text-3)' } }));
+    }
+    // machine origin: where the head starts and finishes
+    if (est.home) kids.push(h('circle', { key: 'home', cx: est.home[0], cy: est.home[1], r: 6 * px, strokeWidth: 2 * px, style: { fill: 'var(--bed)', stroke: 'var(--accent)' } }));
+    const vec = vops.filter((o) => o.kind === 'op' && o.mode === 'vector');
+    const MAX_MARKS = 1500;
+    if (S.vis.starts) {
+      const d = vec.slice(0, MAX_MARKS).map((o) => { const [x, y] = o.path.p[0]; return 'M' + (x - 5 * px) + ' ' + y + 'a' + 5 * px + ' ' + 5 * px + ' 0 1 0 ' + 10 * px + ' 0a' + 5 * px + ' ' + 5 * px + ' 0 1 0 ' + -10 * px + ' 0'; }).join('');
+      kids.push(h('path', { key: 'starts', d, strokeWidth: 1.5 * px, style: { fill: 'var(--ink)', stroke: 'var(--ink-halo)' } }));
+    }
+    if (!isLaser && S.vis.lifts) {
+      const d = vec.slice(0, MAX_MARKS).map((o) => {
+        const p = o.path.p, e = o.path.c ? p[0] : p[p.length - 1];
+        return 'M' + (e[0] - 3 * px) + ' ' + e[1] + 'a' + 3 * px + ' ' + 3 * px + ' 0 1 0 ' + 6 * px + ' 0a' + 3 * px + ' ' + 3 * px + ' 0 1 0 ' + -6 * px + ' 0';
+      }).join('');
+      kids.push(h('path', { key: 'lifts', d, strokeWidth: 1.2 * px, style: { fill: 'var(--ink-halo)', stroke: 'var(--ink)' } }));
+    }
+    if (S.vis.arrows) {
+      const d = vec.slice(0, MAX_MARKS).map((o) => {
+        const p = o.path.p;
+        if (p.length < 2) return '';
+        const a = p[0], b = p[1];
+        const L = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1;
+        const ux = (b[0] - a[0]) / L, uy = (b[1] - a[1]) / L;
+        const s = 12 * px, mx = a[0] + ux * Math.min(L / 2, 20 * px), my = a[1] + uy * Math.min(L / 2, 20 * px);
+        return 'M' + (mx - ux * s - uy * s * 0.6) + ' ' + (my - uy * s + ux * s * 0.6) + 'L' + mx + ' ' + my + 'L' + (mx - ux * s + uy * s * 0.6) + ' ' + (my - uy * s - ux * s * 0.6);
+      }).join('');
+      kids.push(h('path', { key: 'arrows', d, fill: 'none', strokeWidth: 2.5 * px, strokeLinecap: 'round', strokeLinejoin: 'round', style: { stroke: 'var(--ink)' } }));
+    }
+    if (S.vis.order) {
+      vec.slice(0, 400).forEach((o, k) => {
+        const [x, y] = o.path.p[0];
+        kids.push(h('text', { key: 'ord' + k, x: x + 6 * px, y: y - 6 * px, fontSize: 17 * px, fontWeight: 600, strokeWidth: 3 * px, paintOrder: 'stroke', fontFamily: 'IBM Plex Mono, monospace', style: { fill: 'var(--ink)', stroke: 'var(--ink-halo)' } }, String(k + 1)));
+      });
+    }
+    CC.regMarks(job, machine).forEach((mk, k) => kids.push(h('circle', { key: 'rm' + k, cx: mk.x, cy: mk.y, r: mk.d / 2, style: { fill: 'var(--ink)' } })));
+    if (sim.total > 0) {
+      kids.push(h('g', { key: 'head', transform: 'translate(' + head.x + ' ' + head.y + ')' },
+        // light halo under the cursor so it reads on the bed and on the dark viewport
+        h('circle', { r: 9 * px, fill: 'none', strokeWidth: 5 * px, style: { stroke: 'var(--bed)', opacity: 0.85 } }),
+        h('path', { d: 'M' + -15 * px + ' 0h' + 30 * px + 'M0 ' + -15 * px + 'v' + 30 * px, strokeWidth: 4 * px, strokeLinecap: 'round', style: { stroke: 'var(--bed)', opacity: 0.85 } }),
+        h('circle', { r: 9 * px, fill: 'none', strokeWidth: 2 * px, style: { stroke: 'var(--accent)' } }),
+        h('path', { d: 'M' + -15 * px + ' 0h' + 30 * px + 'M0 ' + -15 * px + 'v' + 30 * px, strokeWidth: 1.5 * px, style: { stroke: 'var(--accent)' } })));
+    }
+    const scene = h('svg', {
+      viewBox: vb.x + ' ' + vb.y + ' ' + vb.w + ' ' + vb.h, role: 'img', 'aria-label': (isLaser ? 'Laser' : 'Plotter') + ' toolpath preview',
+      preserveAspectRatio: 'xMidYMid meet',
+      style: { width: '100%', height: '100%', display: 'block', filter: 'drop-shadow(0 2px 6px rgba(17, 18, 20, 0.08))', cursor: S.dragging ? 'grabbing' : 'grab' },
+      // same wheel feel as the Job page canvas
+      onWheel: (e) => { const p = this.toScene(e.currentTarget, e.clientX, e.clientY); this.zoomAt(Math.exp(e.deltaY * 0.0015), p); },
+      onMouseDown: (e) => this.startPan(e),
+      onContextMenu: (e) => e.preventDefault(),
+      onDoubleClick: () => this.fit(),
+      ref: (el) => this.watchSize(el)
+    }, h('defs', null, h('pattern', { id: 'sim-hatch', width: Math.max(1, 4 * px), height: Math.max(1, 4 * px), patternUnits: 'userSpaceOnUse' }, h('path', { d: 'M0 ' + 2 * px + 'h' + 4 * px, strokeWidth: 1.2 * px, style: { stroke: 'var(--ink)' } }))), kids);
+
+    // ---- now readout
+    let nowName = 'Nothing to run', nowStep = '', nowCol = 'var(--idle-dot)';
+    if (finished) { nowName = 'Complete'; nowCol = 'var(--ok-dot)'; }
+    else if (cur) {
+      if (cur.kind === 'inspect') { nowName = 'Reading registration marks'; nowStep = 'mark ' + cur.mark + ' of ' + cur.of; nowCol = '#6E56CF'; }
+      else if (cur.kind === 'dwell') { nowName = 'Dwell · ' + job.processes[cur.proc].name; nowStep = 'waiting ' + (cur.dur < 60 ? cur.dur.toFixed(1) + ' s' : fmt(cur.dur)) + ' before pass ' + cur.pass; nowCol = 'var(--idle-dot)'; }
+      else if (cur.kind === 'change') { nowName = 'Tool change'; nowStep = (cur.tool || '') + (isLaser ? '' : ' · bed ' + (cur.bed + 1)); }
+      else if (cur.kind === 'feed') { nowName = 'Conveyor feed'; nowStep = 'Bed ' + (cur.bed + 1) + ' → ' + (cur.bed + 2); }
+      else if (cur.kind === 'travel') {
+        nowName = cur.leg === 'fromOrigin' ? 'Travel from origin' : cur.leg === 'toOrigin' ? 'Return to origin' : 'Travel → ' + (cur.proc >= 0 ? job.processes[cur.proc].name : 'next cut');
+        nowCol = 'var(--idle-dot)';
+      }
+      else {
+        const same = tl.filter((o) => o.kind === 'op' && o.proc === cur.proc && o.bed === cur.bed && (o.pass || null) === (cur.pass || null));
+        nowName = job.processes[cur.proc].name;
+        nowStep = (isLaser ? '' : 'Bed ' + (cur.bed + 1) + ' · ') + (cur.mode === 'raster' ? cur.rows + ' scan lines' + (cur.shared ? ' across ' + cur.shared + ' items' : '') : (same.indexOf(cur) + 1) + ' of ' + same.length)
+          + (cur.pass ? ' · pass ' + cur.pass + ' of ' + job.processes[cur.proc].passes : '');
+        nowCol = procCol(cur.proc);
+      }
+    }
+
+    // ---- timeline bar: merge runs of the same process
+    const runs = [];
+    for (const o of tl) {
+      const key = o.kind === 'inspect' ? 'insp' : o.kind === 'change' ? 'chg' : o.kind === 'feed' ? 'feed' : o.kind === 'dwell' ? 'dwell' : 'p' + o.proc;
+      const last = runs[runs.length - 1];
+      if (last && last.key === key) last.dur += o.dur;
+      else runs.push({ key, dur: o.dur, proc: o.proc, kind: o.kind });
+    }
+    const bar = runs.filter((r) => r.dur > 0).map((r) => ({
+      f: r.dur,
+      tip: (r.kind === 'inspect' ? 'Reading registration marks' : r.kind === 'dwell' ? 'Dwell between passes' : r.kind === 'change' ? 'Tool change' : r.kind === 'feed' ? 'Conveyor feed' : r.proc >= 0 ? job.processes[r.proc].name : 'Travel') + ' · ' + fmt(r.dur),
+      bg: r.kind === 'inspect' ? '#6E56CF' : r.kind === 'dwell' ? 'repeating-linear-gradient(90deg, var(--track) 0 2px, var(--surface) 2px 4px)' : r.kind === 'change' ? 'var(--line)' : r.kind === 'feed' ? 'repeating-linear-gradient(45deg, var(--line-hover) 0 3px, var(--line) 3px 6px)' : r.proc >= 0 ? procCol(r.proc) : 'var(--track)',
+      op: r.proc >= 0 && isHidden(r.proc) ? 0.25 : 1
+    }));
+
+    const beds = Array.from({ length: nBeds }, (_, b) => {
+      const start = (tl.find((o) => o.bed === b) || { start: 0 }).start;
+      return { l: 'Bed ' + (b + 1), on: viewBed === b, ...seg(viewBed === b), pick: () => this.setState({ t: start, playing: false }) };
+    });
+    const speeds = [1, 10, 60, 300].map((v) => ({ l: v + '×', on: S.speed === v, ...seg(S.speed === v), pick: () => this.setState({ speed: v }) }));
+    const toggleDefs = isLaser
+      ? [['travel', 'Travel moves'], ['arrows', 'Direction'], ['starts', 'Start points'], ['order', 'Cut order'], ['heat', 'Thermal map']]
+      : [['travel', 'Travel moves'], ['arrows', 'Direction'], ['starts', 'Start points'], ['lifts', 'Knife lift points']];
+    const toggles = toggleDefs.map(([k, l]) => {
+      const on = !!S.vis[k];
+      return { l, on, swBg: on ? accent : 'var(--track)', swJ: on ? 'flex-end' : 'flex-start', toggle: () => this.setState((s) => ({ vis: { ...s.vis, [k]: !on } })) };
+    });
+    const per = new Map(est.perProcess.map((p) => [p.idx, p]));
+    const procs = CC.processOrder(job, isLaser).filter((i) => per.has(i)).map((i) => {
+      const p = job.processes[i];
+      const hidden = isHidden(i);
+      const active = !finished && cur && cur.proc === i;
+      return {
+        name: p.name, time: fmt(per.get(i).time), shown: !hidden,
+        chips: (p.aci || []).map((n) => ({ n, hex: LRC.aci.hex(n), fg: LRC.aci.fg(n) })),
+        bg: active ? accentSoft : 'transparent', w: active ? 600 : 400,
+        toggle: () => this.setState((s) => ({ hidden: { ...s.hidden, [job.id + '|' + i]: !hidden } }))
+      };
+    });
+    const sumKind = (k) => tl.filter((o) => o.kind === k).reduce((a, o) => a + o.dur, 0);
+    // travel on a fast machine is often under a second: show tenths rather than 0:00
+    const fmtShort = (s) => (s < 60 ? (s || 0).toFixed(1) + ' s' : fmt(s));
+    const breakdown = procs.map((p, k) => ({ l: p.name, v: p.time, col: procCol(CC.processOrder(job, isLaser).filter((i) => per.has(i))[k]) }))
+      .concat(isLaser ? [] : [{ l: 'Tool changes', v: fmt(sumKind('change')), col: 'var(--line)' }, { l: 'Conveyor feeds', v: fmt(sumKind('feed')), col: 'var(--line-hover)' }])
+      .concat(est.dwellTime ? [{ l: 'Dwell between passes', v: fmtShort(est.dwellTime), col: 'var(--surface)' }] : [])
+      .concat([{ l: 'Travel', v: fmtShort(est.travelTime), col: 'var(--track)' }]);
+    if (est.marks) breakdown.unshift({ l: 'Registration marks (' + est.marks + ')', v: fmtShort(est.inspectTime), col: '#6E56CF' });
+    const co = CC.cutOrderOf(job);
+    const setOrder = (patch) => { const next = { ...job, cutOrder: { ...co, ...patch } }; delete next.optimise; this.commit(next); this.setState({ t: 0, playing: false }); };
+    const orderGroups = [
+      { l: 'Order', opts: [['file', 'As drawn', 'Run paths in the order they were drawn or imported'], ['speed', 'Fastest', 'Shortest travel: always go to the nearest next cut'], ['heat', 'Spread heat', 'Move away from the last few cuts so nearby material can cool']].map(([v, l, tip]) => ({ l, tip, on: co.order === v, ...seg(co.order === v), pick: () => setOrder({ order: v }) })) },
+      { l: 'Cut inside shapes first', opts: [['part', 'Per part', 'Each part’s holes, then its outline, before moving to the next part'], ['all', 'All insides', 'Every hole in the job before any outline'], ['off', 'Off', 'No inside-first rule']].map(([v, l, tip]) => ({ l, tip, on: co.inside === v, ...seg(co.inside === v), pick: () => setOrder({ inside: v }) })) }
+    ];
+    const stats = isLaser
+      ? [{ l: 'Travel distance', v: CC.fmtLen(est.travel) }, { l: 'Cut length', v: CC.fmtLen(est.cutLen) }, { l: 'Engraved area', v: CC.fmtArea(est.engArea) }]
+      : [{ l: 'Travel distance', v: CC.fmtLen(est.travel) }, { l: 'Cut length', v: CC.fmtLen(est.cutLen) }, { l: 'Tool changes', v: String(est.toolChanges) }, { l: 'Beds', v: String(est.beds) }];
+    const checks = CC.checkJob(job, machine).map((c) => ({ l: c.l, icon: c.ok ? icons.check : icons.warn, cls: c.ok ? 'ok' : c.warn ? 'warn' : 'err', bg: c.ok ? 'var(--ok-soft)' : c.warn ? 'var(--warn-soft)' : 'var(--err-soft)', fg: c.ok ? 'var(--ok)' : c.warn ? 'var(--warn)' : 'var(--err)' }));
+    const marker = ((sim.total ? t / T : 0) * 100).toFixed(2) + '%';
+
+    return {
+      accent, icons, isLaser, isPlotter: !isLaser, modes, beds, thermal, multiBed: nBeds > 1, speeds, toggles, procs, noProcs: !procs.length,
+      jobName: job.name + (job.dirty ? ' · unsaved' : ''),
+      machLine: machine.name + ' · max ' + est.machine.speed + ' mm/s · accel ' + est.machine.acc + ' mm/s²',
+      scene,
+      now: { name: nowName, step: nowStep, col: nowCol, x: head.x.toFixed(1), y: head.y.toFixed(1) },
+      bar, marker,
+      T: Math.round(T * 10) / 10, t: Math.round(t * 10) / 10, tStep: T > 600 ? 1 : 0.1,
+      clock: fmt(t) + ' / ' + fmt(sim.total),
+      total: CC.fmtDuration(sim.total, true),
+      scrub: (e) => this.setState({ t: Number(e.target.value), playing: false }),
+      togglePlay: () => this.togglePlay(),
+      playIcon: S.playing ? icons.pause : icons.play,
+      playLabel: S.playing ? 'Pause' : 'Play',
+      prevOp: () => this.step(-1), nextOp: () => this.step(1),
+      zoom: Math.round((100 * 25.4) / (96 * px)) + '%',
+      zoomFit: () => this.fit(), zoomActual: () => this.zoomActual(),
+      zoomIn: () => this.zoomAt(0.8), zoomOut: () => this.zoomAt(1.25),
+      breakdown, stats,
+      orderGroups,
+      optNote: 'Travel ' + fmtShort(est.travelTime) + ' · ' + CC.fmtLen(est.travel) + ' at ' + Math.round(est.machine.speed) + ' mm/s. Inside-first applies to cut processes.',
+      checks,
+      send: () => { location.href = 'MainDetailed.dc.html#send'; }
+    };
+  }
+}
+</script>
+</body>
+</html>
