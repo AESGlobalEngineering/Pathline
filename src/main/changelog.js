@@ -5,6 +5,14 @@
 
 module.exports = [
   {
+    version: '1.2.6', date: '29 Oct 2026',
+    added: [
+      'Machine settings refresh by themselves: on first contact with a machine, every time Pathline opens, and every 5 minutes. Refresh from machine still works any time.',
+      'A machine\'s name comes from its HMI as well (the name box shows it and is set on the HMI).'
+    ],
+    fixed: ['Turning on the thermal map in Simulation broke the page when the job had no material. It now asks you to pick a material.']
+  },
+  {
     version: '1.2.5', date: '29 Oct 2026',
     added: [
       'Pathline also checks for updates every 5 minutes while it\'s open, not only when it starts. An update you\'ve said Later to isn\'t offered again until the next start.',

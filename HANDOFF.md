@@ -15,6 +15,16 @@ Latest round (28 Oct, final):
 - **Dark mode bed is grey** (`--bed`, `--sheet`, `--bed-grid*` in theme.css). **ACI 7 shows as white in dark mode** (black in light), as in CAD, and so do the marks drawn on the bed (registration marks, engrave hatching, arrows, start points): see the `--aci7*` and `--ink` tokens, and `LRC.aci.hex/fg/stroke` in app.js. Exports (DXF/SVG/PDF) still use real black.
 - **Sample machines and materials from earlier builds are removed on first start** (main.js, tracked by `settings.samplesRemoved`). This is by exact id (trotec, flatbed, laser2, acr-print-3 … brass-1); anything the operator created stays.
 
+Version 1.2.6 (29 Oct):
+- **Machine settings refresh automatically** (`syncMachine` / `autoSync` in main.js). GET /machine is read:
+  - on first contact (a successful Test connection of a saved machine, or the first status answer after starting or being offline);
+  - for every Ethernet machine when the app opens;
+  - every 5 minutes (`SYNC_EVERY_MS`; `LRC_SYNC_EVERY_MS` for tests).
+
+  Automatic reads are quiet and at most every 30 s per machine. Pages hear `machines:updated` and update live; the Machines page keeps connection edits in progress.
+- **The machine name comes from the HMI:** `name` from GET /machine, else from GET /info. Once reported (`hmiName`), the name box is read-only for that Ethernet machine.
+- **Fixed (from a bug report):** the thermal map crashed Simulation when the job had no material. The scene now draws the heat image only when there's a model.
+
 Version 1.2.5 (29 Oct):
 - **Periodic update checks:** every 5 minutes while Pathline runs (`UPDATE_EVERY_MS` in main.js; each check reads only latest.yml), as well as at start. A version the operator said Later to isn't offered again that session (`check({ periodic: true })` in updates.js).
 - **What's new after an update:**

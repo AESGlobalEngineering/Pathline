@@ -244,6 +244,8 @@ class Component extends DCLogic {
       .then(([job, machines, materials, none]) => this.setState({ ready: true, job, machines: machines.length ? machines : [none], materials }))
       .catch(LRC.fail);
     let last = performance.now();
+    // settings read from a controller in the background (the estimate uses its speeds)
+    window.api.machines.onUpdated((m) => this.setState((s) => ({ machines: s.machines.map((x) => (x.id === m.id ? m : x)) })));
     this.timer = setInterval(() => {
       const now = performance.now();
       const dt = (now - last) / 1000;
@@ -546,8 +548,9 @@ class Component extends DCLogic {
       }));
     }
     // thermal map: heat in the sheet at time t, drawn over the artwork
-    const heatTop = thermal.on ? thermal.top : 0;
-    if (thermal.on) {
+    // only when there is a model: with no material (or no reference data) the panel explains instead
+    const heatTop = thermal.has ? thermal.top : 0;
+    if (thermal.has) {
       const md = thermal.model;
       kids.push(h('image', { key: 'heat', href: this.heatImage(md, heatTop), x: md.x0, y: md.y0, width: md.nx * md.dx, height: md.ny * md.dx, preserveAspectRatio: 'none', style: { pointerEvents: 'none' } }));
     }

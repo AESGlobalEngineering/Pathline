@@ -192,10 +192,11 @@ The operator prints artwork with marks, puts the sheet on the bed, and the camer
 
 ## 5. Machine settings (`GET /machine`)
 
-Return any subset. Missing keys keep Pathline's current value. Pathline uses them as follows:
+Return any subset. Missing keys keep Pathline's current value. Pathline reads this on Refresh from machine, on first contact (Test connection, or the first status answer after it was offline), each time Pathline opens, and every 5 minutes. Answer quickly, and keep it cheap. Pathline uses the keys as follows:
 
 | Key | Used for |
 |---|---|
+| `name` | **The machine's name in Pathline** (from Pathline 1.2.6; if `/machine` has no `name`, the one in `/info` is used). Pathline shows it read-only, so the name is set on the HMI. |
 | `bed: [w, h]` | Canvas size, "job inside bed" check, frame limits |
 | `speed`, `acc` | **Time estimate** (max travel speed mm/s, acceleration mm/s²) |
 | `origin` (`tl`/`tr`/`bl`/`br`) | Start/return corner in the estimate |

@@ -16,7 +16,9 @@ const call = (channel) => async (...args) => {
 contextBridge.exposeInMainWorld('api', {
   app: { whatsNew: call('app:whatsNew'), changelog: call('app:changelog'), info: call('app:info'), openExternal: call('app:openExternal'), showItem: call('app:showItem'), confirm: call('app:confirm'), pickFolder: call('app:pickFolder') },
   settings: { get: call('settings:get'), set: call('settings:set') },
-  machines: { list: call('machines:list'), save: call('machines:save'), saveAll: call('machines:saveAll'), remove: call('machines:remove'), create: call('machines:create'), duplicate: call('machines:duplicate'), placeholder: call('machines:placeholder') },
+  machines: { list: call('machines:list'), save: call('machines:save'), saveAll: call('machines:saveAll'), remove: call('machines:remove'), create: call('machines:create'), duplicate: call('machines:duplicate'), placeholder: call('machines:placeholder'),
+    // fn(machine) when a machine's settings were read from its controller
+    onUpdated: (fn) => ipcRenderer.on('machines:updated', (_e, m) => fn(m)) },
   materials: {
     list: call('materials:list'), save: call('materials:save'), saveAll: call('materials:saveAll'), remove: call('materials:remove'),
     create: call('materials:create'), duplicate: call('materials:duplicate'), exportLib: call('materials:export'), importLib: call('materials:import')

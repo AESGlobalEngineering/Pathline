@@ -102,7 +102,7 @@
         <span class="badge" style="height: 28px; padding: 0 9px; background: {{m.tbg}}">{{m.type}}</span>
         <div style="flex: 1 1 280px; min-width: 0; display: flex; flex-direction: column; gap: 4px">
           <label class="fld sans" style="max-width: 420px">
-            <input value="{{m.name}}" onChange="{{setName}}" aria-label="Machine name" style="font-size: 15px; font-weight: 600">
+            <input value="{{m.name}}" onChange="{{setName}}" disabled="{{m.nameRo}}" title="{{m.nameTip}}" aria-label="Machine name" style="font-size: 15px; font-weight: 600">
           </label>
           <span class="lbl">{{m.sub}}</span>
         </div>
@@ -254,6 +254,12 @@ class Component extends DCLogic {
       })
       .catch(LRC.fail);
     this.pinger = setInterval(() => this.pingAll(), 8000);
+    // settings read from a controller in the background: the saved copy takes them, and so does
+    // the working copy (connection details being edited are kept)
+    window.api.machines.onUpdated((m) => this.setState((s) => ({
+      saved: s.saved.map((x) => (x.id === m.id ? m : x)),
+      list: s.list.map((x) => (x.id === m.id ? { ...x, name: m.name, hmiName: m.hmiName, ctrl: m.ctrl, type: m.type, info: m.info, syncedAt: m.syncedAt } : x))
+    })));
     this.offNav = LRC.guardNav(() => this.dirty(), () => this.save());
     this.offKeys = LRC.keys({ 'Ctrl+S': () => this.run(() => this.save())() });
   }
@@ -536,7 +542,8 @@ class Component extends DCLogic {
     return {
       ...common, hasMachine: true, noMachine: false,
       machineList, duplicate: R(() => this.duplicate()), remove: R(() => this.remove()),
-      m: { ...TYPE[raw.type], name: raw.name, kind: raw.kind || (isLaser ? 'Laser' : 'Plotter'), ctrl: raw.ctrl, sub: [raw.kind || (isLaser ? 'Laser' : 'Plotter'), raw.ctrl].filter(Boolean).join(' · '), status: st.status, dot: st.dot, statusBg: st.bg, statusFg: st.fg },
+      // the name comes from the HMI once the machine has reported one (an edit here would be replaced)
+      m: { ...TYPE[raw.type], name: raw.name, nameRo: !!(raw.hmiName && raw.conn === 'Ethernet' && !sim), nameTip: raw.hmiName && raw.conn === 'Ethernet' && !sim ? 'Set on the machine\'s HMI' : 'Machine name', kind: raw.kind || (isLaser ? 'Laser' : 'Plotter'), ctrl: raw.ctrl, sub: [raw.kind || (isLaser ? 'Laser' : 'Plotter'), raw.ctrl].filter(Boolean).join(' · '), status: st.status, dot: st.dot, statusBg: st.bg, statusFg: st.fg },
       setName: set('name'),
       testShown: !!test, testText: test ? (test.busy ? 'Testing…' : test.text) : '', testFg: test && test.ok ? 'var(--ok)' : test && test.busy ? 'var(--text-3)' : 'var(--err)',
       testLabel: raw.conn === 'Ethernet' ? 'Test connection' : 'Check',

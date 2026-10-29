@@ -739,6 +739,8 @@ class Component extends DCLogic {
       .catch(LRC.fail);
     this.offKeys = LRC.keys(this.shortcuts());
     this.poll = setInterval(() => this.pollDevice(), 1500);
+    // settings read from a controller in the background (bed, speeds, features, name)
+    window.api.machines.onUpdated((m) => this.setState((s) => ({ machines: s.machines.map((x) => (x.id === m.id ? m : x)) })));
     this.onDragOver = (e) => { e.preventDefault(); };
     this.onDrop = (e) => {
       e.preventDefault();

@@ -236,6 +236,53 @@ async function deliver(job, via) {
   return { ok: true, where, conn, total };
 }
 
+// ------------------------------------------------------------------ machine settings from the controller
+// The bed, speeds, features and name are set on the machine's HMI and read with
+// GET /machine (the name from GET /info if /machine has none). They're read on
+// Refresh from machine, on the first contact with a machine (a successful Test
+// connection, or the first status answer after starting or being offline), when
+// the app opens and every few minutes. Open pages hear about it ('machines:updated').
+const SYNC_EVERY_MS = 5 * 60 * 1000;
+const syncing = new Map(); // machine id → in progress
+const lastSync = new Map(); // machine id → time of the last automatic read
+const online = new Map(); // machine id → answered the last status request
+async function syncMachine(id) {
+  const m = machineById(id);
+  if (m.sim) throw new Error(m.name + ' is simulated — set its settings on the Machines page');
+  if (m.conn !== 'Ethernet') throw new Error(m.name + ' uses ' + m.conn + ' transfer — settings can only be read over Ethernet');
+  const info = await device.machineSettings(m);
+  let { name, type, ctrl, ...settings } = info || {};
+  if (!name) { try { name = ((await device.test(m)).info || {}).name; } catch (e) { /* keep the current name */ } }
+  name = name && String(name).trim();
+  // build on the stored copy: it may have been saved while the machine answered
+  const cur = store.find('machines', m.id) || m;
+  const merged = {
+    ...cur, name: name || cur.name, hmiName: !!name, ctrl: ctrl || cur.ctrl, type: type === 'laser' || type === 'plotter' ? type : cur.type,
+    info: { ...(cur.info || {}), ...settings, f: { ...((cur.info && cur.info.f) || {}), ...(settings.f || {}) } },
+    syncedAt: new Date().toISOString()
+  };
+  store.upsert('machines', merged);
+  lastSync.set(m.id, Date.now());
+  if (win && !win.isDestroyed()) win.webContents.send('machines:updated', merged);
+  return merged;
+}
+// quietly, in the background (an offline machine is normal); not more than every 30 s unless forced
+function autoSync(id, force) {
+  const m = store.find('machines', id);
+  if (!m || m.sim || m.conn !== 'Ethernet' || !String(m.ip || '').trim() || syncing.has(id)) return;
+  if (!force && Date.now() - (lastSync.get(id) || 0) < 30000) return;
+  syncing.set(id, syncMachine(id)
+    .catch((e) => reports && reports.log('sync', m.name + ': ' + e.message))
+    .finally(() => syncing.delete(id)));
+}
+const autoSyncAll = () => store.get('machines').forEach((m) => autoSync(m.id));
+function noteOnline(id, ok) {
+  if (!id) return;
+  const was = online.get(id);
+  online.set(id, ok);
+  if (ok && !was) autoSync(id);
+}
+
 // ------------------------------------------------------------------ IPC
 function handle(name, fn) {
   ipcMain.handle(name, async (_e, ...args) => {
@@ -456,21 +503,23 @@ function registerIpc() {
   handle('device:jobs', (id) => device.jobs(machineById(id)));
   handle('device:removeJob', (id, jobId) => device.removeJob(machineById(id), jobId));
   handle('device:orderJobs', (id, ids) => device.orderJobs(machineById(id), ids));
-  handle('device:test', (m) => device.test(m));
-  handle('device:sync', async (id) => {
-    const m = machineById(id);
-    if (m.sim) throw new Error(m.name + ' is simulated — set its settings on the Machines page');
-    if (m.conn !== 'Ethernet') throw new Error(m.name + ' uses ' + m.conn + ' transfer — settings can only be read over Ethernet');
-    const info = await device.machineSettings(m);
-    const { name: _n, type, ctrl, ...settings } = info || {};
-    const merged = {
-      ...m, ctrl: ctrl || m.ctrl, type: type === 'laser' || type === 'plotter' ? type : m.type,
-      info: { ...(m.info || {}), ...settings, f: { ...((m.info && m.info.f) || {}), ...(settings.f || {}) } },
-      syncedAt: new Date().toISOString()
-    };
-    return store.upsert('machines', merged);
+  // a successful Test connection of a saved machine is a handshake: read its settings
+  handle('device:test', async (m) => {
+    const r = await device.test(m);
+    const saved = store.find('machines', m.id);
+    if (saved && saved.conn === 'Ethernet' && String(saved.ip).trim() === String(m.ip).trim() && Number(saved.port || 8470) === Number(m.port || 8470)) autoSync(m.id, true);
+    return r;
   });
-  handle('device:status', (id) => device.status(machineById(id)));
+  handle('device:sync', (id) => syncMachine(id));
+  // the first answer from a machine (after starting, or after it was offline) reads its settings
+  handle('device:status', async (id) => {
+    const m = machineById(id);
+    try {
+      const s = await device.status(m);
+      noteOnline(m.id, true);
+      return s;
+    } catch (e) { noteOnline(m.id, false); throw e; }
+  });
   handle('device:command', (id, cmd, args) => device.command(machineById(id), cmd, args));
   handle('device:send', (job, via) => deliver(job, via));
 }
@@ -534,7 +583,13 @@ function createWindow() {
     win.loadFile(path.join(UI, 'MainDetailed.dc.html'));
   });
   win.webContents.on('unresponsive', () => reports && reports.log('page', 'window not responding'));
-  // check for updates when the app opens and every few hours while it runs;
+  // read every connected machine's settings when the app opens, and every few minutes
+  win.webContents.once('did-finish-load', () => {
+    autoSyncAll();
+    // (LRC_SYNC_EVERY_MS overrides, for testing; the 30 s gate still applies)
+    setInterval(autoSyncAll, Number(process.env.LRC_SYNC_EVERY_MS) || SYNC_EVERY_MS);
+  });
+  // check for updates when the app opens and every few minutes while it runs;
   // the page asks before anything downloads
   win.webContents.once('did-finish-load', () => {
     // test runs skip update checks unless LRC_UPDATES=1
