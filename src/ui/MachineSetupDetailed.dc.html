@@ -240,6 +240,8 @@
 </div>
 </x-dc>
 <script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+// controller types offered when adding a machine (and for a simulated machine)
+const CONTROLLERS = ['Trotec', 'Ruida', 'Other'];
 class Component extends DCLogic {
   state = { ready: false, list: [], saved: [], mid: null, tab: null, test: {}, online: {}, openPick: null, syncing: false };
 
@@ -327,7 +329,7 @@ class Component extends DCLogic {
         { key: 'type', label: 'Type', type: 'seg', value: 'laser', options: [{ value: 'laser', label: 'Laser' }, { value: 'plotter', label: 'Plotter / router' }] },
         { key: 'name', label: 'Name', value: '', full: true },
         { key: 'ip', label: 'IP address', value: '', full: false, real: true },
-        { key: 'ctrl', label: 'Controller', type: 'select', value: 'Ruida', options: ['Trotec', 'Ruida', 'Other'], full: false, real: true }
+        { key: 'ctrl', label: 'Controller', type: 'select', value: 'Ruida', options: CONTROLLERS, full: false }
       ],
       buttons: [{ label: 'Cancel', value: null }, { label: 'Add', value: 'ok', primary: true }]
     });
@@ -335,7 +337,7 @@ class Component extends DCLogic {
     const base = await window.api.machines.create(r.values.type);
     const isPlot = r.values.type === 'plotter';
     const m = r.values.kind === 'sim'
-      ? { ...base, sim: true, conn: 'Local', ip: '', ctrl: 'Simulated', kind: isPlot ? 'Plotter' : 'Laser · CO2', name: r.values.name || (isPlot ? 'Simulated plotter' : 'Simulated laser') }
+      ? { ...base, sim: true, conn: 'Local', ip: '', ctrl: r.values.ctrl, kind: isPlot ? 'Plotter' : 'Laser · CO2', name: r.values.name || (isPlot ? 'Simulated plotter' : 'Simulated laser') }
       : { ...base, name: r.values.name || base.name, ip: r.values.ip || '', ctrl: r.values.ctrl };
     // created on disk already; keep the working copy in step
     this.setState((s) => ({ list: s.list.concat(m), saved: s.saved.concat(base), mid: m.id, tab: null }));
@@ -432,7 +434,12 @@ class Component extends DCLogic {
       connFields.push({ isNote: true, l: 'Simulated machine, for testing: there is no real machine to connect to. Send to machine saves the job file where you choose, and the settings on these tabs are set here.' });
     } else if (raw.conn === 'Ethernet') connFields.push(text('IP address', 'ip', '', '192.168.1.60'), text('Port', 'port', '', '8470'), text('Timeout', 'timeout', 'ms', '3000'));
     else connFields.push({ isNote: true, l: 'Send to machine opens a save window so you can put the job (settings, DXF, preview and time estimate) wherever you like, then load it on the controller.' });
-    connFields.push(roPick('Driver', raw.ctrl));
+    if (sim) {
+      // a simulated machine still has a controller type: the operator picks it
+      const key = raw.id + '|ctrl', open = S.openPick === key;
+      connFields.push({ isPick: true, l: 'Controller', v: raw.ctrl || 'Choose…', open, toggle: () => this.setState({ openPick: open ? null : key }), ...ED,
+        opts: open ? CONTROLLERS.map((c) => ({ l: c, on: c === raw.ctrl, bg: c === raw.ctrl ? accentSoft : '', pick: () => { this.patch((m) => ({ ...m, ctrl: c })); this.setState({ openPick: null }); } })) : [] });
+    } else connFields.push(roPick('Driver', raw.ctrl));
     const connCard = card('Connection', connFields);
     const jobCard = card('Job defaults', [
       { isCorner: true, l: 'Origin', op: sim ? 1 : 0.45, corners: ['tl', 'tr', 'bl', 'br'].map((c) => ({ c, on: (info.origin || 'tl') === c, ro: !sim, label: { tl: 'Origin top left', tr: 'Origin top right', bl: 'Origin bottom left', br: 'Origin bottom right' }[c], bg: (info.origin || 'tl') === c ? accent : 'var(--line-hover)', pick: () => { if (sim) setInfo('origin')(c); } })) },
@@ -516,7 +523,7 @@ class Component extends DCLogic {
       const st = statusOf(x);
       return {
         ...TYPE[x.type], name: x.name,
-        sub: x.sim ? 'Simulated · for testing' : (x.ctrl ? x.ctrl + ' · ' : '') + (x.conn === 'Ethernet' ? (x.ip || 'no IP') : 'save locally'),
+        sub: x.sim ? 'Simulated' + (x.ctrl ? ' · ' + x.ctrl : '') : (x.ctrl ? x.ctrl + ' · ' : '') + (x.conn === 'Ethernet' ? (x.ip || 'no IP') : 'save locally'),
         status: st.status, short: st.short, dot: st.dot, pbg: st.bg, pfg: st.fg, cur: on ? 'page' : 'false',
         bg: on ? accentSoft : '', bd: on ? accent : 'transparent',
         pick: () => this.setState({ mid: x.id, tab: null })

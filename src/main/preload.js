@@ -35,9 +35,10 @@ contextBridge.exposeInMainWorld('api', {
     bug: call('report:bug'), error: call('report:error'), pending: call('report:pending'), openFolder: call('report:openFolder'),
     crashed: (fn) => ipcRenderer.on('report:crashed', (_e, d) => fn(d))
   },
-  // updates: check() on demand; onState(fn) hears { state, version } when one is found or ready
+  // updates: check() asks GitHub; download() and install() only when the operator chooses;
+  // onState(fn) hears { state, version, percent, … } (available, downloading with progress, ready, error)
   update: {
-    check: call('update:check'), status: call('update:status'), install: call('update:install'),
+    check: call('update:check'), status: call('update:status'), download: call('update:download'), install: call('update:install'),
     onState: (fn) => ipcRenderer.on('update:state', (_e, s) => fn(s))
   },
   // path of a file dropped onto the window

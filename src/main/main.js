@@ -235,6 +235,7 @@ function registerIpc() {
   // updates (GitHub releases)
   handle('update:check', () => updates.check());
   handle('update:status', () => updates.status());
+  handle('update:download', () => updates.download());
   handle('update:install', () => updates.install());
   handle('app:openExternal', (url) => {
     if (!/^https?:\/\//i.test(url)) throw new Error('Only web links can be opened');
@@ -477,11 +478,13 @@ function createWindow() {
     win.loadFile(path.join(UI, 'MainDetailed.dc.html'));
   });
   win.webContents.on('unresponsive', () => reports && reports.log('page', 'window not responding'));
-  // check for updates each time the app opens (quietly; the page shows a note when one is ready)
+  // check for updates each time the app opens; the page asks before anything downloads
   win.webContents.once('did-finish-load', () => {
-    if (process.env.LRC_SHOT) return;
+    // test runs skip update checks unless LRC_UPDATES=1
+    if (process.env.LRC_SHOT && process.env.LRC_UPDATES !== '1') return;
     updates.setup((k, m) => reports.log(k, m), (s) => { if (win && !win.isDestroyed()) win.webContents.send('update:state', s); });
-    setTimeout(() => updates.check().then((s) => { if (win && !win.isDestroyed() && s.state === 'downloading') win.webContents.send('update:state', s); }), 3000);
+    // a found update is sent to the window as 'available', which asks the operator
+    setTimeout(() => updates.check(), 3000);
   });
   if (process.env.LRC_SHOT) attachTestHarness(win);
   win.loadFile(path.join(UI, process.env.LRC_PAGE || 'MainDetailed.dc.html'));

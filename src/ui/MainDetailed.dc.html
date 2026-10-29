@@ -1447,7 +1447,7 @@ class Component extends DCLogic {
 
     // ---- header: machine + device status
     const TYPE = { laser: { type: 'LASER', tbg: 'var(--badge-laser)' }, plotter: { type: 'PLOTTER', tbg: 'var(--badge-plotter)' } };
-    const subOf = (x) => (x.sim ? 'Simulated · jobs saved as files' : (x.ctrl ? x.ctrl + ' · ' : '') + (x.placeholder ? 'not set up' : x.conn === 'Ethernet' ? (x.ip || 'no IP') : 'save locally'));
+    const subOf = (x) => (x.sim ? 'Simulated' + (x.ctrl ? ' · ' + x.ctrl : '') + ' · jobs saved as files' : (x.ctrl ? x.ctrl + ' · ' : '') + (x.placeholder ? 'not set up' : x.conn === 'Ethernet' ? (x.ip || 'no IP') : 'save locally'));
     const mach = { ...TYPE[m], name: machine.name, sub: (machine.kind || '') + (machine.kind ? ' · ' : '') + subOf(machine), toolsLabel: machine.ctrl };
     const machines = S.machines.map((x) => ({ ...TYPE[x.type], name: x.name, sub: subOf(x), on: x.id === machine.id, bg: x.id === machine.id ? accentSoft : 'transparent', pick: R(() => this.pickMachine(x.id)) }));
     const online = S.dev && S.dev.mid === machine.id;

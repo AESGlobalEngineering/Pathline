@@ -15,6 +15,12 @@ Latest round (28 Oct, final):
 - **Dark mode bed is grey** (`--bed`, `--sheet`, `--bed-grid*` in theme.css). **ACI 7 shows as white in dark mode** (black in light), as in CAD, and so do the marks drawn on the bed (registration marks, engrave hatching, arrows, start points): see the `--aci7*` and `--ink` tokens, and `LRC.aci.hex/fg/stroke` in app.js. Exports (DXF/SVG/PDF) still use real black.
 - **Sample machines and materials from earlier builds are removed on first start** (main.js, tracked by `settings.samplesRemoved`). This is by exact id (trotec, flatbed, laser2, acr-print-3 … brass-1); anything the operator created stays.
 
+Version 1.2.1 (29 Oct):
+- **Updates ask first.** When Pathline opens (and from Help → Check for updates), a found update opens the update window: "Update available — Later / Download and install". Nothing downloads until the operator clicks. The download shows a progress bar (percent, MB, speed) and can be hidden. When it's done: "Restart and install" or Later. `autoDownload` and `autoInstallOnAppQuit` are off (`src/main/updates.js`; the window is `updateWindow()` in app.js). Tested end to end against the real v1.2.0 release with a copy built as version 0.9.0. `LRC_UPDATES=1` lets the screenshot harness run update checks.
+- **New jobs start with no processes** when they have no material (before, they got five built-in starting processes).
+- **Simulated machines keep a controller type** (Trotec / Ruida / Other), chosen in Add machine and changeable on the Machines page.
+- **Releases are automatic:** pushing to main with a package.json version that has no release builds and publishes it. Actions → Release → Run workflow redoes a release. (Re-running an old run rebuilds that run's old commit.)
+
 Version 1.2.0 (29 Oct):
 - **Simulated machines, for testing.** Setup → Machines → Add machine → "Simulated, for testing".
   - Stored as `{ sim: true, conn: 'Local', ctrl: 'Simulated' }`. Ethernet is greyed out on the Machines page and in the Send dialog (`localOnly`), and main.js `deliver()` always saves simulated machines' jobs as files.

@@ -1402,14 +1402,14 @@
       toast('Bug report saved', { kind: 'ok', action: 'Show', onAction: () => window.api.report.openFolder(folder), ms: 8000 });
     },
     openReports: () => window.api.report.openFolder(),
-    // manual: Help → Check for updates (says what it found); otherwise quiet
-    async checkUpdates(manual) {
+    // the update window for a given state (used by the test harness)
+    showUpdate: (s) => updateWindow(s),
+    // Help → Check for updates: an update opens the update window; otherwise says what it found
+    async checkUpdates() {
       const s = await window.api.update.check();
-      if (s.state === 'ready') return updateReady(s);
-      if (!manual) return;
+      if (['available', 'downloading', 'ready'].includes(s.state)) return updateWindow(s);
       const msg = {
         current: 'Pathline ' + s.version + ' is up to date.',
-        downloading: 'Version ' + s.version + ' is available and is downloading now. You can carry on working; you\'ll be asked to restart when it\'s ready.',
         none: 'No Pathline releases have been published yet. You have version ' + s.version + '.',
         off: 'Update checks aren\'t set up in this copy of Pathline (version ' + s.version + ').',
         portable: 'This is the portable copy (version ' + s.version + '). It can\'t update itself: download the latest version from the releases page.',
@@ -1418,8 +1418,57 @@
       dialog({ title: 'Check for updates', message: msg, buttons: [{ label: 'Close', value: 'ok', primary: true }] });
     }
   };
-  function updateReady(s) {
-    toast('Pathline ' + s.version + ' is ready to install', { action: 'Restart now', onAction: () => window.api.update.install(), ms: 20000 });
+
+  // The update window: asks first, then shows the download with a progress
+  // bar, then offers Restart and install. Nothing downloads or installs
+  // without a click. One window at a time; it follows the states sent by the
+  // main process (available → downloading → ready, or error).
+  let upd = null;
+  const mb = (b) => (b / 1048576).toFixed(1) + ' MB';
+  function updateWindow(s) {
+    if (!upd) {
+      const scrim = document.createElement('div');
+      scrim.className = 'lrc-scrim';
+      const box = document.createElement('div');
+      box.className = 'lrc-dlg';
+      box.setAttribute('role', 'dialog');
+      box.setAttribute('aria-label', 'Pathline update');
+      scrim.appendChild(box);
+      document.body.appendChild(scrim);
+      upd = { box, close: () => { scrim.remove(); upd = null; } };
+    }
+    const { box } = upd;
+    const add = (parent, tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; parent.appendChild(e); return e; };
+    const buttons = (list) => {
+      const row = add(box, 'div', 'btns');
+      list.forEach(([label, run, kind]) => { const b = add(row, 'button', kind || '', label); b.type = 'button'; b.onclick = run; });
+    };
+    box.textContent = '';
+    const v = s.version || '';
+    if (s.state === 'available') {
+      add(box, 'h2', '', 'Update available');
+      add(box, 'p', '', 'Pathline ' + v + ' is available. You have version ' + (s.current || '') + '.\nDownload it now, then restart Pathline to install it.');
+      buttons([['Later', () => upd.close()], ['Download and install', () => window.api.update.download().then((n) => updateWindow(n)).catch(fail), 'primary']]);
+    } else if (s.state === 'downloading') {
+      add(box, 'h2', '', 'Downloading Pathline ' + v);
+      const bar = add(box, 'div', 'lrc-progress');
+      const fill = add(bar, 'div');
+      fill.style.transition = 'width 0.3s ease-out';
+      fill.style.width = Math.max(1, Math.min(100, s.percent || 0)) + '%';
+      bar.setAttribute('role', 'progressbar');
+      bar.setAttribute('aria-valuenow', String(Math.round(s.percent || 0)));
+      add(box, 'p', 'num', Math.round(s.percent || 0) + ' %' + (s.total ? ' · ' + mb(s.transferred || 0) + ' of ' + mb(s.total) : '') + (s.bytesPerSecond ? ' · ' + mb(s.bytesPerSecond) + '/s' : ''));
+      add(box, 'p', 'lbl', 'You can keep working. Hide this window and you\'ll be told when the download has finished.');
+      buttons([['Hide', () => upd.close()]]);
+    } else if (s.state === 'ready') {
+      add(box, 'h2', '', 'Update ready to install');
+      add(box, 'p', '', 'Pathline ' + v + ' has downloaded. Restart to install it: Pathline closes, installs the update and opens again. You\'ll be asked to save a job with unsaved changes first.');
+      buttons([['Later', () => upd.close()], ['Restart and install', () => window.api.update.install(), 'primary']]);
+    } else if (s.state === 'error') {
+      add(box, 'h2', '', 'Update didn\'t download');
+      add(box, 'div', 'note err', s.message || 'The download failed.');
+      buttons([['Close', () => upd.close()], ['Try again', () => window.api.update.download().then((n) => updateWindow(n)).catch(fail), 'primary']]);
+    } else upd.close();
   }
   if (window.api && window.api.report) {
     // uncaught page errors go to the reports folder's errors.log
@@ -1430,9 +1479,16 @@
     window.api.report.pending().then((folder) => {
       if (folder) setTimeout(() => toast('Pathline didn\'t close normally last time. A crash report was saved.', { action: 'Show', onAction: () => window.api.report.openFolder(folder), ms: 12000 }), 1200);
     }).catch(() => {});
-    window.api.update.onState((s) => { if (s.state === 'ready') updateReady(s); else if (s.state === 'downloading') toast('Downloading Pathline ' + s.version + ' in the background', { ms: 5000 }); });
-    // an update that finished downloading earlier in this session is offered again on each page
-    window.api.update.status().then((s) => { if (s.state === 'ready') updateReady(s); }).catch(() => {});
+    // an update found when Pathline opens asks first; the window follows the download.
+    // With the window hidden, a finished download is mentioned once in a toast.
+    const readyToast = (s) => toast('Pathline ' + s.version + ' is ready to install', { action: 'Restart and install', onAction: () => window.api.update.install(), ms: 20000 });
+    window.api.update.onState((s) => {
+      if (upd || s.state === 'available') updateWindow(s);
+      else if (s.state === 'ready') readyToast(s);
+      else if (s.state === 'error') toast('The update didn\'t download: ' + (s.message || 'no connection'), { kind: 'err', action: 'Try again', onAction: () => window.api.update.download().then((n) => updateWindow(n)).catch(fail) });
+    });
+    // after moving to another page: a download in progress shows its window again
+    window.api.update.status().then((s) => { if (s.state === 'downloading') updateWindow(s); }).catch(() => {});
   }
 
   window.LRC = { toast, fail, dialog, sendDialog, confirm, keys, guardNav, clip, ops, textEntity, JobCanvas, entityD, PX_PER_MM, contextMenu, closeMenu, theme, aci, support };
