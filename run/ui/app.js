@@ -112,14 +112,19 @@ function bedSvg(pkg, opts = {}) {
   if (opts.head && ui.trail.pts.length > 1) {
     body += '<polyline points="' + ui.trail.pts.map((p) => p[0].toFixed(1) + ',' + p[1].toFixed(1)).join(' ') + '" fill="none" stroke="var(--accent)" stroke-opacity="0.45" vector-effect="non-scaling-stroke" style="stroke-width:1.5px" stroke-linejoin="round"/>';
   }
-  // the toolhead: crosshair across the bed and a ring at its position
-  if (opts.head && Number.isFinite(S.status.pos.x)) {
+  // the toolhead: crosshair across the bed and a ring at its position (only when it's known)
+  if (opts.head && Number.isFinite(S.status.pos.x) && S.status.link === 'online') {
     const { x, y } = S.status.pos;
     body += '<line x1="' + x + '" y1="0" x2="' + x + '" y2="' + H + '" stroke="var(--accent)" stroke-opacity="0.35" vector-effect="non-scaling-stroke" stroke-dasharray="4 4" style="stroke-width:1px"/>' +
       '<line x1="0" y1="' + y + '" x2="' + W + '" y2="' + y + '" stroke="var(--accent)" stroke-opacity="0.35" vector-effect="non-scaling-stroke" stroke-dasharray="4 4" style="stroke-width:1px"/>' +
       '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="var(--accent-ring)" stroke="var(--accent)" stroke-width="' + r / 4 + '"/><circle cx="' + x + '" cy="' + y + '" r="' + r / 4 + '" fill="var(--accent)"/>';
   }
-  return '<svg class="bedsvg" viewBox="0 0 ' + W + ' ' + H + '" style="aspect-ratio:' + W + '/' + H + '" preserveAspectRatio="xMidYMid meet" aria-hidden="true">' + body + '</svg>';
+  if (!opts.head) return '<svg class="bedsvg" viewBox="0 0 ' + W + ' ' + H + '" style="aspect-ratio:' + W + '/' + H + '" preserveAspectRatio="xMidYMid meet" aria-hidden="true">' + body + '</svg>';
+  // with the head shown: a margin around the bed, so the whole circle shows at the edges and corners
+  const m = r * 1.25 + r / 8;
+  const vb = [-m, -m, W + 2 * m, H + 2 * m].map((v) => +v.toFixed(2));
+  return '<svg viewBox="' + vb.join(' ') + '" style="display:block;width:100%;aspect-ratio:' + vb[2] + '/' + vb[3] + '" preserveAspectRatio="xMidYMid meet" aria-hidden="true">' +
+    '<rect x="0" y="0" width="' + W + '" height="' + H + '" rx="' + (W / 200).toFixed(2) + '" fill="var(--bed)" stroke="var(--bed-line)" vector-effect="non-scaling-stroke" style="stroke-width:1px"/>' + body + '</svg>';
 }
 
 function jobBox(pkg) {

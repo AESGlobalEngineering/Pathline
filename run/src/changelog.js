@@ -7,7 +7,10 @@ module.exports = [
   {
     version: '0.3.3', date: '29 Oct 2026',
     added: ['Anchor to toolhead is a switch, like "Remove completed job from queue". On: the job starts at the head\'s position when you switched it on. Off: back where Pathline placed it.'],
-    fixed: ['With the laser unplugged, the Diagnostics log filled with the same connection error every 10 seconds. It\'s now logged once.']
+    fixed: [
+      'With the laser unplugged, the Diagnostics log filled with the same connection error every 10 seconds. It\'s now logged once.',
+      'The toolhead circle on the Queue preview always shows in full, also at the edges and corners of the bed. When the position isn\'t known (laser not connected), no circle is drawn.'
+    ]
   },
   {
     version: '0.3.2', date: '29 Oct 2026',
