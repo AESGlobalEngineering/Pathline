@@ -4,10 +4,20 @@ Windows desktop app for preparing laser and plotter/router jobs: import drawings
 
 ## Install
 
-- `dist\Pathline Setup 1.0.0.exe`: installer (Start menu and desktop shortcut, opens `.cjob` files)
-- `dist\Pathline-1.0.0-portable.exe`: single file, no install
+Download the latest release from [github.com/AESGlobalEngineering/Pathline/releases](https://github.com/AESGlobalEngineering/Pathline/releases):
+
+- `Pathline-Setup-<version>.exe`: installer (Start menu and desktop shortcut, opens `.cjob` files). **It updates itself:** each time Pathline opens it checks for a newer release, downloads it in the background, and installs it when you close the app or click **Restart now**. **Help → Check for updates…** checks on demand.
+- `Pathline-<version>-portable.exe`: single file, no install. It can't update itself.
 
 The builds are not code-signed, so Windows SmartScreen will warn the first time ("More info" → "Run anyway").
+
+Problems: **Help → Report a bug…** saves a report (with a screenshot and, if you like, the job) in Pathline's reports folder, `%APPDATA%\Pathline\reports`. Crash reports are saved there automatically. Nothing is sent anywhere, so attach the report folder to a [GitHub issue](https://github.com/AESGlobalEngineering/Pathline/issues).
+
+## Releasing a new version
+
+1. Set the new `version` in `package.json` (e.g. 1.2.0), commit, and push.
+2. Tag the commit `v1.2.0` and push the tag (in GitHub Desktop: History → right-click the commit → Create Tag…, then Push).
+3. GitHub Actions ([.github/workflows/release.yml](.github/workflows/release.yml)) runs the self-test, builds the installer and publishes the release with `latest.yml`. Installed copies pick it up the next time they open.
 
 Pathline comes with no machines or materials. Add your machines under **Setup → Machines** (connection, then **Refresh from machine**), and your materials under **Setup → Materials** (or import a library). Until a machine is added, the Job page lays jobs out on a stand-in bed and can't send.
 
