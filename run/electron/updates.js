@@ -20,6 +20,12 @@ let seq = 0;        // counts state changes, so the screen (which polls) notices
 let now = { state: 'idle' };
 const set = (s) => { now = { ...s, current: app.getVersion(), seq: ++seq }; return now; };
 
+// where this copy looks for updates (from resources\app-update.yml)
+function feedUrl() {
+  if (process.env.PATHLINE_RUN_UPDATE_URL) return process.env.PATHLINE_RUN_UPDATE_URL;
+  try { return (fs.readFileSync(path.join(process.resourcesPath, 'app-update.yml'), 'utf8').match(/^url:\s*(.+)$/m) || [])[1].trim() + '/latest.yml'; } catch (e) { return '(not set)'; }
+}
+
 function configured() {
   return app.isPackaged && fs.existsSync(path.join(process.resourcesPath, 'app-update.yml'));
 }
@@ -60,8 +66,12 @@ async function check(opts) {
     }
     return { state: 'current', version: app.getVersion() };
   } catch (e) {
-    // nothing published yet is not an error for the operator
-    if (/unable to find latest version|no published versions|\b404\b/i.test(e.message)) return { state: 'none', version: app.getVersion() };
+    // no update information where this copy looks: say where, so a moved release is easy to spot
+    if (/unable to find latest version|no published versions|\b404\b/i.test(e.message)) {
+      log('update: no update information at ' + feedUrl());
+      return { state: 'none', version: app.getVersion(), message: feedUrl() };
+    }
+    log('update: check failed: ' + e.message.split('\n')[0]);
     return { state: 'error', version: app.getVersion(), message: e.message.split('\n')[0] };
   }
 }

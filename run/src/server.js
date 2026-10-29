@@ -269,6 +269,7 @@ function start(opts = {}) {
       resolve({
         port: PORT,
         machine,
+        log,
         // stops the machine safely, then closes the server
         close: async () => { try { await machine.stop(); } catch (e) { /* closing anyway */ } server.close(); }
       });

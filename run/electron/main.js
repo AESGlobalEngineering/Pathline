@@ -66,7 +66,8 @@ if (!app.requestSingleInstanceLock()) {
     Menu.setApplicationMenu(null);
     const dataDir = process.env.PATHLINE_RUN_DATA || path.join(app.getPath('userData'), 'data');
     migrate(dataDir);
-    updates.setup((m) => console.log(m));
+    // update messages go to ☰ → Diagnostics log once the server is up
+    updates.setup((m) => (srv ? srv.log(m) : console.log(m)));
     try {
       srv = await server.start({ dataDir, sim, updates });
     } catch (e) {

@@ -607,7 +607,7 @@ const H = {
     if (['available', 'downloading', 'ready'].includes(s.state)) { await refresh(); seenSeq = S.update.seq; ui.dlg = { kind: 'update' }; return; }
     const msg = {
       current: 'Pathline Run ' + s.version + ' is up to date.',
-      none: 'No Pathline Run releases have been published yet. You have version ' + s.version + '.',
+      none: 'No update information was found where this copy looks (' + (s.message || 'unknown address') + '). You have version ' + s.version + '. If the downloads have moved, install the latest version once from the download page.',
       off: 'Update checks aren\'t set up in this copy of Pathline Run (version ' + s.version + '). Copies run from the source folder update with git pull.',
       portable: 'This is the portable copy (version ' + s.version + '). It can\'t update itself: download the latest version from the releases page.',
       error: 'Couldn\'t check for updates: ' + (s.message || 'no connection') + '.'
