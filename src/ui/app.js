@@ -511,7 +511,11 @@
     for (const e of entities) { const [b, k] = split(e.name); top.set(b, Math.max(top.get(b) || 1, k)); }
     return (name) => { const [b] = split(name); const k = (top.get(b) || 1) + 1; top.set(b, k); return b + ' ' + k; };
   };
-  const freshCopy = (e, gmap, nm) => ({ ...e, id: CC.uid('e'), name: nm ? nm(e.name) : e.name, group: e.group ? (gmap[e.group] = gmap[e.group] || CC.uid('g')) : null, locked: false });
+  // a copy is a new, independent object (it doesn't belong to the original's array)
+  const freshCopy = (e, gmap, nm) => {
+    const { array, arrayOf, ...rest } = e;
+    return { ...rest, id: CC.uid('e'), name: nm ? nm(e.name) : e.name, group: e.group ? (gmap[e.group] = gmap[e.group] || CC.uid('g')) : null, locked: false };
+  };
   ops.duplicate = (job, ids, dx, dy) => {
     const gmap = {}, nm = ops.copyNamer(job.entities);
     const copies = ops.selected(job, ids).map((e) => CC.translate(freshCopy(e, gmap, nm), dx === undefined ? 5 : dx, dy === undefined ? 5 : dy));
@@ -645,17 +649,42 @@
     const ent = { id: CC.uid('e'), name: 'Offset ' + (delta > 0 ? '+' : '') + delta + ' mm', type: 'Offset path', aci: sel[0] ? sel[0].aci : 7, paths };
     return { job: { ...job, entities: job.entities.concat(ent) }, sel: [ent.id] };
   };
+  // Arrays stay editable. The original objects carry the settings
+  // (array: { id, cols, rows, gx, gy }) and every copy carries arrayOf: id, so
+  // running Array again on any part of it replaces the copies instead of adding
+  // more. 1 × 1 removes them.
+  // The array the selection belongs to (with its original objects), or null.
+  ops.arrayOf = (job, ids) => {
+    const set = new Set(ids);
+    const hit = job.entities.find((e) => set.has(e.id) && (e.array || e.arrayOf));
+    if (!hit) return null;
+    const id = hit.array ? hit.array.id : hit.arrayOf;
+    const src = job.entities.filter((e) => e.array && e.array.id === id);
+    if (!src.length) return null;
+    return { id, src: src.map((e) => e.id), cols: src[0].array.cols, rows: src[0].array.rows, gx: src[0].array.gx, gy: src[0].array.gy, copies: job.entities.filter((e) => e.arrayOf === id).length };
+  };
   ops.array = (job, ids, cols, rows, gx, gy) => {
-    const sel = ops.selected(job, ids);
+    const existing = ops.arrayOf(job, ids);
+    const id = existing ? existing.id : CC.uid('a');
+    const srcIds = existing ? existing.src : ids;
+    // editing: the old copies go, the originals get the new settings
+    let base = existing ? job.entities.filter((e) => e.arrayOf !== id) : job.entities;
+    const single = cols * rows <= 1;
+    base = base.map((e) => {
+      if (!srcIds.includes(e.id)) return e;
+      if (single) { const { array, ...rest } = e; return rest; }
+      return { ...e, array: { id, cols, rows, gx, gy } };
+    });
+    const sel = base.filter((e) => srcIds.includes(e.id));
     const b = CC.boxOf(sel);
     const w = b.x1 - b.x0, hh = b.y1 - b.y0;
-    const add = [], nm = ops.copyNamer(job.entities);
+    const add = [], nm = ops.copyNamer(base);
     for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
       if (!r && !c) continue;
       const gmap = {};
-      sel.forEach((e) => add.push(CC.translate(freshCopy(e, gmap, nm), c * (w + gx), r * (hh + gy))));
+      sel.forEach((e) => add.push({ ...CC.translate(freshCopy(e, gmap, nm), c * (w + gx), r * (hh + gy)), arrayOf: id }));
     }
-    return { job: { ...job, entities: job.entities.concat(add) }, sel: ids.concat(add.map((e) => e.id)) };
+    return { job: { ...job, entities: base.concat(add) }, sel: srcIds.concat(add.map((e) => e.id)), removed: existing ? existing.copies : 0, added: add.length };
   };
   // How many copies of the selection fit an area (and where they go).
   ops.fillPlan = (job, ids, area, spacing, margin) => {

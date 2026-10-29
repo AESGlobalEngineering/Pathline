@@ -959,12 +959,24 @@ class Component extends DCLogic {
     const r = await LRC.dialog({ title: 'Offset path', message: 'Adds an outline around the selection. Use a negative distance to go inwards.', fields: [{ key: 'd', label: 'Distance', value: '2', unit: 'mm', type: 'number' }], buttons: [{ label: 'Cancel', value: null }, { label: 'Offset', value: 'ok', primary: true }] });
     if (r && Number.isFinite(r.values.d) && r.values.d) this.op((j, s) => LRC.ops.offset(j, s, r.values.d));
   }
+  // Array: on any part of an existing array it opens with that array's
+  // settings and replaces its copies; otherwise it makes a new one.
   async arrayDlg() {
     if (!this.needSel()) return;
-    const r = await LRC.dialog({ title: 'Array', fields: [{ key: 'c', label: 'Columns', value: '3', type: 'number' }, { key: 'r', label: 'Rows', value: '2', type: 'number' }, { key: 'gx', label: 'Gap X', value: '5', unit: 'mm', type: 'number' }, { key: 'gy', label: 'Gap Y', value: '5', unit: 'mm', type: 'number' }], buttons: [{ label: 'Cancel', value: null }, { label: 'Create', value: 'ok', primary: true }] });
+    const cur = LRC.ops.arrayOf(this.state.job, this.state.sel);
+    const v = cur || { cols: 3, rows: 2, gx: 5, gy: 5 };
+    const r = await LRC.dialog({
+      title: cur ? 'Edit array' : 'Array',
+      message: cur ? 'This array has ' + cur.cols + ' × ' + cur.rows + ' (' + cur.copies + ' copies of the original). New values replace the copies; 1 × 1 removes them. Copies you moved or changed are replaced too.' : undefined,
+      fields: [{ key: 'c', label: 'Columns', value: String(v.cols), type: 'number' }, { key: 'r', label: 'Rows', value: String(v.rows), type: 'number' }, { key: 'gx', label: 'Gap X', value: String(v.gx), unit: 'mm', type: 'number' }, { key: 'gy', label: 'Gap Y', value: String(v.gy), unit: 'mm', type: 'number' }],
+      buttons: [{ label: 'Cancel', value: null }, { label: cur ? 'Update' : 'Create', value: 'ok', primary: true }]
+    });
     if (!r) return;
-    const c = Math.max(1, Math.min(100, Math.round(r.values.c) || 1)), rows = Math.max(1, Math.min(100, Math.round(r.values.r) || 1));
-    this.op((j, s) => LRC.ops.array(j, s, c, rows, r.values.gx || 0, r.values.gy || 0));
+    const num = (x, d) => { const n = parseFloat(x); return Number.isFinite(n) ? n : d; };
+    const c = Math.max(1, Math.min(100, Math.round(num(r.values.c, 1)))), rows = Math.max(1, Math.min(100, Math.round(num(r.values.r, 1))));
+    const res = LRC.ops.array(this.state.job, this.state.sel, c, rows, num(r.values.gx, 0), num(r.values.gy, 0));
+    this.commit(res.job, { record: true }, res.sel);
+    if (cur) LRC.toast(c * rows <= 1 ? 'Array removed (' + res.removed + ' copies)' : 'Array updated to ' + c + ' × ' + rows + ' (' + res.added + ' copies)');
   }
   async rotateDlg() {
     if (!this.needSel()) return;
