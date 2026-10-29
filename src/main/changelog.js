@@ -5,6 +5,17 @@
 
 module.exports = [
   {
+    version: '1.2.8', date: '29 Oct 2026',
+    added: [
+      'Cut order is now By process, Fastest or Ordered. By process runs the processes in the order they are listed; Fastest runs them in whichever order is quickest; Ordered reads registration marks, then engraves, then cuts, one whole pass at a time.',
+      'Reorder a material\'s processes by pressing and holding the ⋮ button, then dragging the row up or down.',
+      'A machine whose HMI answers but whose controller is off shows Connected · machine offline.',
+      'Adding a machine: Real or Simulated, Laser or Plotter. Only a simulated machine is named here.',
+      'Removed hints from the machine header, the Add machine window and the Simulation page.'
+    ],
+    fixed: []
+  },
+  {
     version: '1.2.7', date: '29 Oct 2026',
     added: [
       'A simulated machine\'s controller is picked from the real types (Trotec, Ruida, Other).',

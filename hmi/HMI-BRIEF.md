@@ -212,6 +212,7 @@ See `examples/responses/GET-machine-laser.json` and `GET-machine-plotter.json`. 
 ## 6. Status, queue and state
 
 - `state`: `idle` (ready) → `running` (a job is executing) ⇄ `paused` → back to `idle` when it finishes or stops. `framing` while tracing a frame. `alarm` for faults (lid open, mark not found, limit hit…), with an operator-readable `message`. (There is no "clear alarm" endpoint in v1; clear it on the HMI.)
+- `link`: `online` while the HMI is talking to its controller; anything else (e.g. `connecting`, `offline`) when it isn't. Pathline then shows **Connected · machine offline** (the HMI answers, the machine doesn't). Leave it out only if the HMI can't tell.
 - `pos: { x, y, z }`: the live head position in bed mm. Pathline shows it, so update it while moving.
 - `progress`: 0–1 for the current job. Suggested: the sum of the completed steps' `seconds` ÷ `estimate.totalSeconds`.
 - `job`: the id of the running job, or `null`. `io: { air, pointer, vacuum, exhaust }`: current outputs.

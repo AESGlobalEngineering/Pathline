@@ -54,7 +54,7 @@
       </div>
       <div role="radiogroup" aria-label="Machine" class="seg sim-chips">
         <sc-for list="{{modes}}" as="o" hint-placeholder-count="2">
-          <button role="radio" aria-checked="{{o.on}}" onClick="{{o.pick}}" title="{{o.tip}}" style="background: {{o.bg}}; box-shadow: {{o.sh}}; color: {{o.fg}}; opacity: {{o.op}}">
+          <button role="radio" aria-checked="{{o.on}}" onClick="{{o.pick}}" style="background: {{o.bg}}; box-shadow: {{o.sh}}; color: {{o.fg}}; opacity: {{o.op}}">
             <span class="badge" style="background: {{o.tbg}}">{{o.type}}</span>{{o.l}}
           </button>
         </sc-for>
@@ -212,12 +212,11 @@
           <span class="lbl">{{og.l}}</span>
           <div role="radiogroup" aria-label="{{og.l}}" class="seg fill">
             <sc-for list="{{og.opts}}" as="o" hint-placeholder-count="3">
-              <button role="radio" aria-checked="{{o.on}}" onClick="{{o.pick}}" title="{{o.tip}}" style="background: {{o.bg}}; box-shadow: {{o.sh}}; color: {{o.fg}}; padding: 0 6px; font-size: 12px">{{o.l}}</button>
+              <button role="radio" aria-checked="{{o.on}}" onClick="{{o.pick}}" style="background: {{o.bg}}; box-shadow: {{o.sh}}; color: {{o.fg}}; padding: 0 6px; font-size: 12px">{{o.l}}</button>
             </sc-for>
           </div>
         </div>
       </sc-for>
-      <span class="lbl" style="line-height: 1.45">{{optNote}}</span>
       <div class="hr"></div>
       <h2 class="h-sec">Checks</h2>
       <div class="sim-checks">
@@ -663,7 +662,8 @@ class Component extends DCLogic {
       return { l, on, swBg: on ? accent : 'var(--track)', swJ: on ? 'flex-end' : 'flex-start', toggle: () => this.setState((s) => ({ vis: { ...s.vis, [k]: !on } })) };
     });
     const per = new Map(est.perProcess.map((p) => [p.idx, p]));
-    const procs = CC.processOrder(job, isLaser).filter((i) => per.has(i)).map((i) => {
+    const runOrder = (est.procOrder || CC.processOrder(job, isLaser)).filter((i) => per.has(i));
+    const procs = runOrder.map((i) => {
       const p = job.processes[i];
       const hidden = isHidden(i);
       const active = !finished && cur && cur.proc === i;
@@ -677,7 +677,7 @@ class Component extends DCLogic {
     const sumKind = (k) => tl.filter((o) => o.kind === k).reduce((a, o) => a + o.dur, 0);
     // travel on a fast machine is often under a second: show tenths rather than 0:00
     const fmtShort = (s) => (s < 60 ? (s || 0).toFixed(1) + ' s' : fmt(s));
-    const breakdown = procs.map((p, k) => ({ l: p.name, v: p.time, col: procCol(CC.processOrder(job, isLaser).filter((i) => per.has(i))[k]) }))
+    const breakdown = procs.map((p, k) => ({ l: p.name, v: p.time, col: procCol(runOrder[k]) }))
       .concat(isLaser ? [] : [{ l: 'Tool changes', v: fmt(sumKind('change')), col: 'var(--line)' }, { l: 'Conveyor feeds', v: fmt(sumKind('feed')), col: 'var(--line-hover)' }])
       .concat(est.dwellTime ? [{ l: 'Dwell between passes', v: fmtShort(est.dwellTime), col: 'var(--surface)' }] : [])
       .concat([{ l: 'Travel', v: fmtShort(est.travelTime), col: 'var(--track)' }]);
@@ -685,8 +685,8 @@ class Component extends DCLogic {
     const co = CC.cutOrderOf(job);
     const setOrder = (patch) => { const next = { ...job, cutOrder: { ...co, ...patch } }; delete next.optimise; this.commit(next); this.setState({ t: 0, playing: false }); };
     const orderGroups = [
-      { l: 'Order', opts: [['file', 'As drawn', 'Run paths in the order they were drawn or imported'], ['speed', 'Fastest', 'Shortest travel: always go to the nearest next cut'], ['heat', 'Spread heat', 'Move away from the last few cuts so nearby material can cool']].map(([v, l, tip]) => ({ l, tip, on: co.order === v, ...seg(co.order === v), pick: () => setOrder({ order: v }) })) },
-      { l: 'Cut inside shapes first', opts: [['part', 'Per part', 'Each part’s holes, then its outline, before moving to the next part'], ['all', 'All insides', 'Every hole in the job before any outline'], ['off', 'Off', 'No inside-first rule']].map(([v, l, tip]) => ({ l, tip, on: co.inside === v, ...seg(co.inside === v), pick: () => setOrder({ inside: v }) })) }
+      { l: 'Order', opts: [['process', 'By process'], ['speed', 'Fastest'], ['ordered', 'Ordered']].map(([v, l]) => ({ l, on: co.order === v, ...seg(co.order === v), pick: () => setOrder({ order: v }) })) },
+      { l: 'Cut inside shapes first', opts: [['part', 'Per part'], ['all', 'All insides'], ['off', 'Off']].map(([v, l]) => ({ l, on: co.inside === v, ...seg(co.inside === v), pick: () => setOrder({ inside: v }) })) }
     ];
     const stats = isLaser
       ? [{ l: 'Travel distance', v: CC.fmtLen(est.travel) }, { l: 'Cut length', v: CC.fmtLen(est.cutLen) }, { l: 'Engraved area', v: CC.fmtArea(est.engArea) }]
@@ -714,7 +714,6 @@ class Component extends DCLogic {
       zoomIn: () => this.zoomAt(0.8), zoomOut: () => this.zoomAt(1.25),
       breakdown, stats,
       orderGroups,
-      optNote: 'Travel ' + fmtShort(est.travelTime) + ' · ' + CC.fmtLen(est.travel) + ' at ' + Math.round(est.machine.speed) + ' mm/s. Inside-first applies to cut processes.',
       checks,
       send: () => { location.href = 'MainDetailed.dc.html#send'; }
     };

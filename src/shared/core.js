@@ -220,8 +220,11 @@
   const toolSlot = (tool) => (String(tool || '').match(/T\d+/) || ['T?'])[0];
   // Laser jobs engrave first, then mark, then cut (so parts don't move before
   // they're engraved); plotter jobs run marking tools first and through-cuts last.
+  // With the "By process" cut order they run in the job's own process order.
+  // (Fastest may pick another order: the estimate returns it as procOrder.)
   function processOrder(job, isLaser) {
     const idx = job.processes.map((_, i) => i).filter((i) => job.processes[i].out !== false && !isRegProc(job.processes[i]));
+    if (cutOrderOf(job).order === 'process') return idx;
     const rank = (p) => (isLaser ? ({ Engrave: 0, Mark: 1, Cut: 2 }[p.proc] ?? 3) : toolRank(p.tool));
     return idx.sort((a, b) => rank(job.processes[a]) - rank(job.processes[b]) || a - b);
   }
@@ -567,13 +570,19 @@
     return d;
   }
   // Job-level cut order settings.
-  //   order:  'file' (as drawn/imported) · 'speed' (shortest travel) · 'heat' (spread heat)
+  //   order:  'process' (processes in the job's list order) · 'speed' (fastest:
+  //           any process order, passes back to back when quicker) · 'ordered'
+  //           (marks, then engraving, then cutting; each pass a whole round)
   //   inside: 'part' (each part's holes, then its outline) · 'all' (every hole before any outline) · 'off'
+  // Paths within a process always go to the nearest next one.
   const CUT_ORDER_DEFAULT = { order: 'speed', inside: 'part' };
+  const CUT_ORDERS = ['process', 'speed', 'ordered'];
   function cutOrderOf(job) {
     const c = job.cutOrder || {};
-    const legacy = job.optimise === undefined ? null : job.optimise ? 'speed' : 'file';
-    return { order: c.order || legacy || CUT_ORDER_DEFAULT.order, inside: c.inside || CUT_ORDER_DEFAULT.inside };
+    const legacy = job.optimise === undefined ? null : job.optimise ? 'speed' : 'ordered';
+    // older jobs: 'file' (as drawn) and 'heat' (spread heat) both ran whole rounds
+    const order = { file: 'ordered', heat: 'ordered' }[c.order] || c.order;
+    return { order: CUT_ORDERS.includes(order) ? order : legacy || CUT_ORDER_DEFAULT.order, inside: c.inside || CUT_ORDER_DEFAULT.inside };
   }
 
   // Best place to start a path from point `at`: any vertex of a closed path,
@@ -787,17 +796,35 @@
   /**
    * Estimate a job on a machine. Returns the total time, a per-process
    * breakdown, motion statistics and (with opts.timeline) the ordered list of
-   * operations the Simulation page animates.
+   * operations the Simulation page animates. procOrder is the order the
+   * processes run in: with the Fastest cut order, whichever order is quickest.
    */
   function estimate(job, machine, opts) {
     opts = opts || {};
+    const isLaser = (machine && machine.type ? machine.type : job.machineType) !== 'plotter';
+    const base = processOrder(job, isLaser);
+    if (opts.procOrder || cutOrderOf(job).order !== 'speed' || base.length < 2 || base.length > 5) return estimateIn(job, machine, opts, opts.procOrder || base);
+    // Fastest: time every order of the processes (at most 5! = 120) and keep the quickest
+    const perms = [];
+    const perm = (done, left) => {
+      if (!left.length) return perms.push(done);
+      left.forEach((p, i) => perm(done.concat(p), left.filter((_, k) => k !== i)));
+    };
+    perm([], base);
+    let best = base, bt = Infinity;
+    for (const p of perms) {
+      const t = estimateIn(job, machine, { ...opts, timeline: false }, p).total;
+      if (t < bt - 1e-6) { bt = t; best = p; }
+    }
+    return estimateIn(job, machine, opts, best);
+  }
+  function estimateIn(job, machine, opts, order) {
     const isLaser = (machine && machine.type ? machine.type : job.machineType) !== 'plotter';
     const info = (machine && machine.info) || {};
     const D = isLaser ? DEFAULTS.laser : DEFAULTS.plotter;
     const vMax = Number(info.speed) || D.speed;
     const acc = Number(info.acc) || D.acc;
     const plot = { ...DEFAULTS.plotter, ...(info.timing || {}) };
-    const order = processOrder(job, isLaser);
     const ents = (job.entities || []).filter((e) => !e.hidden && !e.isRegMark);
     const nBeds = isLaser ? 1 : bedCount(job);
     const feedLen = Number(info.feedLen) || (info.bed ? info.bed[1] : 1000);
@@ -851,7 +878,7 @@
         const mine = ents.filter((e) => (job.processes[pi].aci || []).includes(e.aci) && (isLaser || !(e.bed || 0)));
         if (!mine.length) continue;
         let best = null, bd = Infinity;
-        for (const e of cut.order === 'file' ? mine.slice(0, 1) : mine) {
+        for (const e of mine) {
           const b = entityBox(e);
           const q = [Math.max(b.x0, Math.min(home[0], b.x1)), Math.max(b.y0, Math.min(home[1], b.y1))];
           const d = Math.hypot(q[0] - home[0], q[1] - home[1]);
@@ -956,8 +983,8 @@
         if (!isl) {
           isl = rasterBands(rasterIslands(mine, dpi, speed, acc, opts.timeline, undefined, scan.uni, vTravel), mine, dpi, speed, acc, vTravel, opts.timeline, scan.uni);
           isl.forEach((r) => { per[pi].area += r.area; engArea += r.area; });
-          // order the islands like cuts: as drawn, or nearest next
-          if (cut.order !== 'file') {
+          // order the islands like cuts: nearest next
+          {
             const left = isl.slice(), out = [];
             let p0 = at;
             while (left.length) {
@@ -996,7 +1023,7 @@
         mine.forEach((e) => e.paths.forEach((path, k) => items.push({ ent: e.id, k, path })));
         ordered = orderPaths(items, {
           nest: isLaser ? proc.proc === 'Cut' : /Knife/.test(proc.tool || ''),
-          inside: cut.inside, order: cut.order, start: at
+          inside: cut.inside, order: 'speed', start: at
         });
         cache.set(pi, ordered);
       }
@@ -1039,7 +1066,7 @@
       total: t,
       perProcess: per.filter((p) => p.ops > 0),
       travel, travelTime: travelT, travelLegs: trav, home, cutOrder: cut, inspectTime, dwellTime, marks: marks.length,
-      cutLen, engArea, toolChanges, feeds, beds: nBeds,
+      cutLen, engArea, toolChanges, feeds, beds: nBeds, procOrder: order,
       machine: { speed: vMax, acc },
       timeline: opts.timeline ? timeline : undefined
     };

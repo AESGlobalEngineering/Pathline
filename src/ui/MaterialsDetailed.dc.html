@@ -179,7 +179,7 @@ select.dd:disabled{background-color:var(--sunken);background-repeat:no-repeat;ba
                 <span></span>
               </div>
               <sc-for list="{{laserRows}}" as="r" hint-placeholder-count="6">
-                <div style="border-bottom: 1px solid var(--line-soft); background: {{r.bg}}">
+                <div data-prow="1" style="border-bottom: 1px solid var(--line-soft); background: {{r.bg}}; transform: {{r.dragT}}; position: relative; z-index: {{r.dragZ}}; box-shadow: {{r.dragSh}}">
                   <div role="row" style="display: grid; grid-template-columns: 24px minmax(150px, 1.2fr) 112px 112px 80px 92px 112px 118px 108px 36px; gap: 10px; align-items: center; padding: 8px 16px">
                     <span role="cell"><input type="checkbox" checked="{{r.out}}" onChange="{{r.toggleOut}}" disabled="{{locked}}" aria-label="{{r.name}} output" style="width: 18px; height: 18px; margin: 0"></span>
                     <span role="cell" style="display: flex; align-items: center; gap: 6px; min-width: 0">
@@ -220,7 +220,7 @@ select.dd:disabled{background-color:var(--sunken);background-repeat:no-repeat;ba
                         <svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="transform: rotate({{r.advRot}})"><path d="{{icons.chev}}"></path></svg>Advanced
                       </button>
                     </span>
-                    <span role="cell"><button class="ib" onClick="{{r.more}}" aria-label="{{r.name}} more actions" title="Move, duplicate or delete"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="stroke-width: 2.6"><path d="{{icons.more}}"></path></svg></button></span>
+                    <span role="cell"><button class="ib" onClick="{{r.more}}" onPointerDown="{{r.hold}}" aria-label="{{r.name}} more actions" title="Hold and drag to reorder; click to move, duplicate or delete" style="cursor: {{r.grab}}; touch-action: none"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="stroke-width: 2.6"><path d="{{icons.more}}"></path></svg></button></span>
                   </div>
                   <sc-if value="{{r.picking}}" hint-placeholder-val="{{false}}">
                     <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 16px 10px 50px; background: var(--surface-2); border-top: 1px solid var(--line-soft)">
@@ -318,7 +318,7 @@ select.dd:disabled{background-color:var(--sunken);background-repeat:no-repeat;ba
                 <span></span>
               </div>
               <sc-for list="{{plotRows}}" as="r" hint-placeholder-count="5">
-                <div role="row" style="display: grid; grid-template-columns: minmax(260px, 1.6fr) 190px 100px 76px 64px 84px 84px 60px 36px; gap: 8px; align-items: center; padding: 6px 16px; border-bottom: 1px solid var(--line-soft); background: {{r.bg}}">
+                <div role="row" data-prow="1" style="display: grid; grid-template-columns: minmax(260px, 1.6fr) 190px 100px 76px 64px 84px 84px 60px 36px; gap: 8px; align-items: center; padding: 6px 16px; border-bottom: 1px solid var(--line-soft); background: {{r.bg}}; transform: {{r.dragT}}; position: relative; z-index: {{r.dragZ}}; box-shadow: {{r.dragSh}}">
                   <span role="cell" style="display: flex; align-items: center; gap: 8px; min-width: 0">
                     <button class="aci-pick" onClick="{{r.pick}}" aria-expanded="{{r.picking}}" aria-label="Colours for {{r.name}}" style="flex: none; border-color: {{r.pickBd}}">
                       <sc-for list="{{r.chips}}" as="k" hint-placeholder-count="1"><span class="chip" title="{{k.title}}" style="width: 20px; height: 20px; background: {{k.hex}}; color: {{k.fg}}">{{k.n}}</span></sc-for>
@@ -343,7 +343,7 @@ select.dd:disabled{background-color:var(--sunken);background-repeat:no-repeat;ba
                   <span role="cell">
                     <button role="switch" class="sw" aria-checked="{{r.out}}" aria-label="{{r.name}} output" onClick="{{r.toggleOut}}" disabled="{{locked}}"></button>
                   </span>
-                  <span role="cell"><button class="ib" onClick="{{r.more}}" aria-label="{{r.name}} more actions" title="Move, duplicate or delete"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="stroke-width: 2.6"><path d="{{icons.more}}"></path></svg></button></span>
+                  <span role="cell"><button class="ib" onClick="{{r.more}}" onPointerDown="{{r.hold}}" aria-label="{{r.name}} more actions" title="Hold and drag to reorder; click to move, duplicate or delete" style="cursor: {{r.grab}}; touch-action: none"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="stroke-width: 2.6"><path d="{{icons.more}}"></path></svg></button></span>
                 </div>
                 <sc-if value="{{r.picking}}" hint-placeholder-val="{{false}}">
                   <div role="row" style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 16px; background: var(--surface-2); border-bottom: 1px solid var(--line-soft)">
@@ -550,6 +550,39 @@ class Component extends DCLogic {
     const lib = this.state.lib.filter((x) => x.id !== m.id);
     this.setState({ lib, matId: lib[0] ? lib[0].id : null });
   }
+  // Press and hold a process's ⋮ button, then drag it up or down the list.
+  // A plain click still opens the menu.
+  holdDrag(e, i) {
+    if (e.button !== 0 || this.mat().locked) return;
+    const me = e.currentTarget.closest('[data-prow]');
+    const els = [...me.parentElement.querySelectorAll('[data-prow]')];
+    const rects = els.map((el) => el.getBoundingClientRect());
+    const y0 = e.clientY;
+    let dragging = false, to = i;
+    const timer = setTimeout(() => { dragging = true; this.setState({ drag: { i, to: i, dy: 0, h: rects[i].height } }); }, 300);
+    const move = (ev) => {
+      if (!dragging) { if (Math.abs(ev.clientY - y0) > 6) clearTimeout(timer); return; }
+      const dy = Math.max(rects[0].top - rects[i].top, Math.min(rects[rects.length - 1].bottom - rects[i].bottom, ev.clientY - y0));
+      const mid = (rects[i].top + rects[i].bottom) / 2 + dy;
+      to = rects.findIndex((r) => mid < r.bottom);
+      if (to < 0) to = rects.length - 1;
+      this.setState({ drag: { i, to, dy, h: rects[i].height } });
+    };
+    const up = () => {
+      clearTimeout(timer);
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      if (!dragging) return;
+      // the release would also click the button: swallow that click
+      const stop = (ev) => { ev.stopPropagation(); ev.preventDefault(); };
+      window.addEventListener('click', stop, true);
+      setTimeout(() => window.removeEventListener('click', stop, true), 300);
+      this.setState({ drag: null, picking: null });
+      if (to !== i) this.patchRows((list) => { const [x] = list.splice(i, 1); list.splice(to, 0, x); return list; });
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  }
   async rowMore(i) {
     const rows = CC.presetsFor(this.mat(), this.tabMachine());
     const r = await LRC.dialog({
@@ -720,6 +753,8 @@ class Component extends DCLogic {
     const common = (b, i) => {
       const chips = (b.aci || []).map(chip);
       const out = b.out !== false;
+      const D = S.drag, lifted = !!D && D.i === i;
+      const shift = !D ? 0 : lifted ? D.dy : D.i < i && i <= D.to ? -D.h : D.to <= i && i < D.i ? D.h : 0;
       return {
         chips, none: chips.length === 0, name: b.name, setName: setF(i, 'name'),
         picking: S.picking === i, pickBd: S.picking === i ? accent : 'var(--line-strong)',
@@ -728,7 +763,10 @@ class Component extends DCLogic {
         edited: JSON.stringify(b) !== JSON.stringify(savedRows[i]),
         speed: String(b.speed), passes: String(b.passes),
         dash: !!b.dash, dashOff: !b.dash || locked, dl: String(b.dl), gl: String(b.gl),
-        out, swBg: out ? accent : 'var(--track)', swJ: out ? 'flex-end' : 'flex-start', bg: out ? 'transparent' : 'var(--surface-2)',
+        out, swBg: out ? accent : 'var(--track)', swJ: out ? 'flex-end' : 'flex-start', bg: lifted ? 'var(--surface)' : out ? 'transparent' : 'var(--surface-2)',
+        // hold-and-drag on the ⋮ button: the held row follows the pointer, the rows it passes make room
+        hold: (e) => this.holdDrag(e, i), grab: locked ? '' : D ? 'grabbing' : 'grab',
+        dragT: shift ? 'translateY(' + shift + 'px)' : 'none', dragZ: lifted ? 2 : 'auto', dragSh: lifted ? 'var(--shadow-pop)' : 'none',
         setSpeed: setF(i, 'speed', true), setPasses: setF(i, 'passes', true), setDl: setF(i, 'dl', true), setGl: setF(i, 'gl', true),
         toggleDash: flip(i, 'dash'), toggleOut: () => this.patchRows((list) => { list[i] = { ...list[i], out: !out }; return list; }),
         more: R(() => this.rowMore(i))

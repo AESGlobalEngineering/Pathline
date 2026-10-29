@@ -33,7 +33,9 @@ const machine = TYPE === 'plotter'
 const st = {
   state: 'idle', pos: { x: 0, y: 0, z: 0 },
   io: { air: false, pointer: false, vacuum: false, exhaust: true }, interlocks: { lid: true, exhaust: true },
-  job: null, progress: 0, message: 'Ready'
+  job: null, progress: 0, message: 'Ready',
+  // the HMI's link to its controller ('online'); --link offline acts out a machine that is switched off
+  link: arg('link', 'online')
 };
 const jobs = [];
 let runTimer = null;

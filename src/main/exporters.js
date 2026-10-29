@@ -130,13 +130,13 @@ function jobSheet(job, machine, material, est) {
   if (job.sheet && job.sheet.on) line('Sheet:     ' + job.sheet.w + ' × ' + job.sheet.h + ' mm at X ' + job.sheet.x + ' Y ' + job.sheet.y);
   if (isLaser) line('Reg marks: ' + ({ off: 'Off', pos: 'Position & rotation (2 marks)', linear: 'Full linear (3 marks)', nonlinear: 'Non-linear (3 marks)' }[job.regMode || 'off']) + (job.regMode && job.regMode !== 'off' ? ' · ' + regMarks(job, machine).length + ' in job' : ''));
   const co = CC.cutOrderOf(job);
-  line('Cut order: ' + { file: 'as drawn', speed: 'fastest (shortest travel)', heat: 'spread heat' }[co.order] + ' · inside shapes ' + { part: 'first, part by part', all: 'all first', off: 'not prioritised' }[co.inside]);
+  line('Cut order: ' + { process: 'by process (list order)', speed: 'fastest', ordered: 'ordered (marks, engraving, cutting)' }[co.order] + ' · inside shapes ' + { part: 'first, part by part', all: 'all first', off: 'not prioritised' }[co.inside]);
   if (!isLaser) line('Beds:      ' + est.beds);
   line('');
   line('ESTIMATED TIME: ' + CC.fmtDuration(est.total, true));
   line('');
   line('PROCESSES (run order)');
-  const order = CC.processOrder(job, isLaser);
+  const order = (est && est.procOrder) || CC.processOrder(job, isLaser);
   order.forEach((i, n) => {
     const p = job.processes[i];
     const pp = est.perProcess.find((x) => x.idx === i);
@@ -203,7 +203,7 @@ function packageProcess(p, index, isLaser) {
 // CC.estimate(..., { timeline: true }) so the run order can be included.
 function buildPackage(job, machine, material, est) {
   const isLaser = machine.type !== 'plotter';
-  const order = CC.processOrder(job, isLaser);
+  const order = (est && est.procOrder) || CC.processOrder(job, isLaser);
   return {
     format: 'lrc-job-package',
     version: 1,

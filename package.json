@@ -1,8 +1,8 @@
 {
   "name": "pathline",
   "productName": "Pathline",
-  "version": "1.2.7",
-  "description": "Pathline: prepare laser and plotter jobs â€” import, set speeds and feeds, simulate, and send to the machine controller.",
+  "version": "1.2.8",
+  "description": "Pathline: prepare laser and plotter jobs Ã¢â‚¬â€ import, set speeds and feeds, simulate, and send to the machine controller.",
   "main": "src/main/main.js",
   "private": true,
   "scripts": {

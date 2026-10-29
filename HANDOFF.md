@@ -15,6 +15,18 @@ Latest round (28 Oct, final):
 - **Dark mode bed is grey** (`--bed`, `--sheet`, `--bed-grid*` in theme.css). **ACI 7 shows as white in dark mode** (black in light), as in CAD, and so do the marks drawn on the bed (registration marks, engrave hatching, arrows, start points): see the `--aci7*` and `--ink` tokens, and `LRC.aci.hex/fg/stroke` in app.js. Exports (DXF/SVG/PDF) still use real black.
 - **Sample machines and materials from earlier builds are removed on first start** (main.js, tracked by `settings.samplesRemoved`). This is by exact id (trotec, flatbed, laser2, acr-print-3 … brass-1); anything the operator created stays.
 
+Version 1.2.8 (29 Oct):
+- **Cut order modes are `process` (By process), `speed` (Fastest) and `ordered` (Ordered)** (`cutOrderOf` in core.js). Old `file` and `heat` jobs read as `ordered`. Paths within a process always go to the nearest next one; "As drawn" and "Spread heat" are gone.
+  - By process: processes run in the job's list order (`processOrder`).
+  - Ordered: marks, then engraving, then cutting; every pass is a whole round.
+  - Fastest: `estimate()` times every order of the processes (up to 5) and keeps the quickest. Passes run back to back when that is quicker.
+
+  The order used is returned as `est.procOrder`. The Simulation page, the job sheet and the job package all use it.
+- **Materials: press and hold ⋮ for 300 ms, then drag** to reorder processes (`holdDrag`). A plain click still opens the menu.
+- **Machine offline:** when `/status` has `link` other than `online`, Machines shows "Connected · machine offline" and the Job page shows "Machine offline" (warn colours). The emulator takes `--link offline`, and HMI-BRIEF §6 documents `link`.
+- **Add machine:** Real / Simulated and Laser / Plotter. The Name field shows only for Simulated (dialog fields take `sim` and `hidden`).
+- **Hints removed:** the dialog message, the header subtitle hints, and the Simulation order tooltips and travel note.
+
 Version 1.2.7 (29 Oct):
 - **Engrave DPI is a choice of `CC.DPI_STEPS` (100, 300, 500, 1000)**, built by `LRC.dpiSelect` (app.js) and used in the Materials process table and the Job page process editor. A stored value outside the list still shows, as an extra option.
 - **New materials start with `CC.starterPresets(type)`**: laser gets Cut contour (ACI 1) and Engrave fill (ACI 7); plotter gets one Knife through (ACI 1). This applies to New material, Add type, and `materials:create`.
@@ -138,12 +150,12 @@ These are rules the owner set over many rounds. Keep them unless the owner chang
 
 ### Run order, passes, cut order (estimator: `src/shared/core.js`)
 - Order: **registration-mark inspection → engraving → cutting**.
-- Cut order setting: **As drawn / Fastest / Spread heat**. Inside-first: **Per part / All insides / Off**.
+- Cut order setting: **By process / Fastest / Ordered**. Inside-first: **Per part / All insides / Off**.
 - Each closed cut starts at the most convenient point on the travel path (`refineStarts`).
 - Travel from the machine origin corner and back is included in the time.
 - **Passes**
   - **Fastest**: each item's passes run back to back, **unless whole rounds are quicker**. With a dwell, back to back costs one dwell per item, while rounds cost one per round. The estimator compares both and picks the quicker (`backToBack()`).
-  - **As drawn / Spread heat**: whole rounds. Every item in the group once, then all of them again (with a dwell between rounds).
+  - **By process / Ordered**: whole rounds. Every item in the group once, then all of them again (with a dwell between rounds).
 - **Engrave direction and scan** (28 Oct). These are process fields `dir` (`down` top down, the default; `up` bottom up; `fastest`, which starts each island from the end nearer the head) and `uni` (one way: every line left to right, with a return stroke timed at travel speed; otherwise both ways). They appear on the Job page (process → Advanced → Direction, Scan) and in Materials → Advanced. Old `adv.Direction` values are still read (`engraveScan()` in core.js). Each engrave step in the package carries the resolved `direction` and `bidirectional`.
 - **Power ratio was removed** (28 Oct). Links are just `dl` cut, then `gl` uncut. Old `ratio` values in stored presets are ignored and left out of the package.
 - **Engraving islands**: artwork more than 2 mm apart is engraved separately, so the head doesn't scan across empty space. **Exception:** where islands share the same height, the estimator also times one side-to-side scan across them (engrave speed over the art, travel speed across the gaps) and **uses whichever is faster** (`rasterBands()`). The job package marks each engrave step `scan: "across"` or `"island"`.

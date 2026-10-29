@@ -82,9 +82,9 @@ async function main() {
     });
     const pj = { ...job, entities: parts, regMode: 'off' };
     const seq = (inside, order) => CC.estimate({ ...pj, cutOrder: { inside, order } }, laser, { timeline: true }).timeline.filter((o) => o.kind === 'op').map((o) => o.ent).join(',');
-    ok(seq('part', 'file') === 'h0,o0,h1,o1', 'inside first, part by part: ' + seq('part', 'file'));
-    ok(seq('all', 'file') === 'h0,h1,o0,o1', 'all insides first: ' + seq('all', 'file'));
-    ok(seq('off', 'file') === 'o0,h0,o1,h1', 'inside-first off keeps file order: ' + seq('off', 'file'));
+    ok(/^h(\d),o\1,h(\d),o\2$/.test(seq('part', 'ordered')), 'inside first, part by part: ' + seq('part', 'ordered'));
+    ok(/^h\d,h\d,o\d,o\d$/.test(seq('all', 'ordered')), 'all insides first: ' + seq('all', 'ordered'));
+    ok(seq('off', 'file') === 'o0,h0,o1,h1', 'inside-first off: ' + seq('off', 'file'));
     // heat: a 6 × 6 grid of small squares — consecutive cuts should be further apart than with fastest order
     const grid = [];
     for (let r = 0; r < 6; r++) for (let c = 0; c < 6; c++) grid.push({ id: 'g' + r + c, aci: 1, paths: [{ p: CC.shapes.rect(20 + c * 30, 20 + r * 30, 20, 20, 0), c: true }] });
@@ -94,7 +94,17 @@ async function main() {
       for (let i = 1; i < ops.length; i++) s += Math.hypot(ops[i].path.p[0][0] - ops[i - 1].path.p[0][0], ops[i].path.p[0][1] - ops[i - 1].path.p[0][1]);
       return s / (ops.length - 1);
     };
-    ok(gap('heat') > gap('speed') * 2, 'spread heat keeps consecutive cuts apart (' + gap('heat').toFixed(0) + ' mm vs ' + gap('speed').toFixed(0) + ' mm)');
+    ok(gap('ordered') <= gap('speed') + 1e-6, 'ordered also goes to the nearest next cut (' + gap('ordered').toFixed(0) + ' mm vs ' + gap('speed').toFixed(0) + ' mm)');
+    // cut order modes: old 'file'/'heat' jobs read as Ordered; By process keeps the list order; Fastest picks the quickest order
+    ok(CC.cutOrderOf({ cutOrder: { order: 'file' } }).order === 'ordered' && CC.cutOrderOf({ cutOrder: { order: 'heat' } }).order === 'ordered', 'old cut orders read as Ordered');
+    {
+      const mix = { ...pj, entities: [{ id: 'c', aci: 1, paths: [{ p: CC.shapes.rect(10, 10, 40, 40, 0), c: true }] }, { id: 'g', aci: 7, paths: [{ p: CC.shapes.rect(15, 15, 20, 20, 0), c: true }] }],
+        processes: [{ name: 'Cut', proc: 'Cut', power: 80, speed: 20, f: 5000, passes: 1, out: true, aci: [1] }, { name: 'Engrave', proc: 'Engrave', power: 60, speed: 400, f: 500, passes: 1, out: true, aci: [7] }] };
+      const by = (order) => CC.estimate({ ...mix, cutOrder: { inside: 'part', order } }, laser);
+      ok(by('process').procOrder.join() === '0,1', 'by process runs the processes in list order (' + by('process').procOrder + ')');
+      ok(by('ordered').procOrder.join() === '1,0', 'ordered engraves before cutting (' + by('ordered').procOrder + ')');
+      ok(by('speed').total <= Math.min(by('process').total, by('ordered').total) + 1e-6, 'fastest is never slower than the other orders');
+    }
     // 2 passes, any order: item 1, 2, 3, 4 once, then 1, 2, 3, 4 again
     const twoPass = { ...pj, entities: grid.slice(0, 4), processes: pj.processes.map((p, i) => (i === 0 ? { ...p, passes: 2 } : p)) };
     const fast = CC.estimate({ ...twoPass, cutOrder: { inside: 'off', order: 'speed' } }, laser, { timeline: true }).timeline.filter((o) => o.kind === 'op');
@@ -140,15 +150,15 @@ async function main() {
     ok(uni.uni && !bi.uni && uni.dur > bi.dur * 1.2, 'one-way scanning takes longer (' + uni.dur.toFixed(1) + ' s vs ' + bi.dur.toFixed(1) + ' s both ways)');
     const hUp = CC.headAt([{ ...engJob({ dir: 'up' }), start: 0, end: 1 }], 0.01);
     ok(hUp.y > 140, 'bottom-up engraving starts at the bottom in the simulation (y ' + hUp.y.toFixed(1) + ')');
-    for (const order of ['file', 'heat']) {
+    for (const order of ['ordered', 'process']) {
       const ops = CC.estimate({ ...twoPass, cutOrder: { inside: 'off', order } }, laser, { timeline: true }).timeline.filter((o) => o.kind === 'op');
       const first = ops.slice(0, 4).map((o) => o.ent).join(), second = ops.slice(4).map((o) => o.ent).join();
       ok(ops.length === 8 && first === second && ops.slice(0, 4).every((o) => o.pass === 1) && ops.slice(4).every((o) => o.pass === 2), order + ': all items once, then all again (' + first + ' | ' + second + ')');
     }
     // two parts each with a hole, 2 passes, all insides first: holes, holes again, outlines, outlines again
     const twoParts = { ...pj, entities: parts, processes: pj.processes.map((p, i) => (i === 0 ? { ...p, passes: 2 } : p)) };
-    const seqAll = CC.estimate({ ...twoParts, cutOrder: { inside: 'all', order: 'file' } }, laser, { timeline: true }).timeline.filter((o) => o.kind === 'op').map((o) => o.ent + '/' + o.pass).join(' ');
-    ok(seqAll === 'h0/1 h1/1 h0/2 h1/2 o0/1 o1/1 o0/2 o1/2', 'all insides first, 2 passes: ' + seqAll);
+    const seqAll = CC.estimate({ ...twoParts, cutOrder: { inside: 'all', order: 'ordered' } }, laser, { timeline: true }).timeline.filter((o) => o.kind === 'op').map((o) => o.ent.charAt(0) + '/' + o.pass).join(' ');
+    ok(seqAll === 'h/1 h/1 h/2 h/2 o/1 o/1 o/2 o/2', 'all insides first, 2 passes: ' + seqAll);
     const seqPart = CC.estimate({ ...twoParts, cutOrder: { inside: 'part', order: 'file' } }, laser, { timeline: true }).timeline.filter((o) => o.kind === 'op').map((o) => o.ent + '/' + o.pass).join(' ');
     ok(seqPart === 'h0/1 h0/2 o0/1 o0/2 h1/1 h1/2 o1/1 o1/2', 'per part, 2 passes: ' + seqPart);
     // engraving and cutting with 2 passes: registration marks, then engraving twice, then cutting

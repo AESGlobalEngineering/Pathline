@@ -1495,6 +1495,8 @@ class Component extends DCLogic {
       dev = stt === 'running' ? { label: 'Running ' + Math.round((S.dev.progress || 0) * 100) + '%', dot: accent, fg: accentFg, cls: 'accent' }
         : stt === 'paused' ? { label: 'Paused', dot: 'var(--warn-dot)', fg: 'var(--warn)', cls: 'warn' }
           : stt === 'alarm' ? { label: 'Alarm', dot: 'var(--err-dot)', fg: 'var(--err)', cls: 'err' }
+            // the HMI answers, but its link to the controller is down
+            : S.dev.link && S.dev.link !== 'online' ? { label: 'Machine offline', dot: 'var(--warn-dot)', fg: 'var(--warn)', cls: 'warn' }
             : { label: 'Ready', dot: 'var(--ok-dot)', fg: 'var(--ok)', cls: 'ok' };
     } else dev = S.devErr ? { label: 'Offline', dot: 'var(--err-dot)', fg: 'var(--err)', cls: 'err' } : { label: 'Checking…', dot: 'var(--idle-dot)', fg: 'var(--text-2)', cls: '' };
 
@@ -2131,7 +2133,7 @@ class Component extends DCLogic {
       fields: [
         { key: 'name', label: 'Job name', value: j.name, full: true },
         { key: 'notes', label: 'Notes for the operator', value: j.notes || '', full: true },
-        { key: 'order', label: 'Cut order', type: 'seg', value: co.order, options: [{ value: 'file', label: 'As drawn' }, { value: 'speed', label: 'Fastest' }, { value: 'heat', label: 'Spread heat' }] },
+        { key: 'order', label: 'Cut order', type: 'seg', value: co.order, options: [{ value: 'process', label: 'By process' }, { value: 'speed', label: 'Fastest' }, { value: 'ordered', label: 'Ordered' }] },
         { key: 'inside', label: 'Cut inside shapes first', type: 'seg', value: co.inside, options: [{ value: 'part', label: 'Per part' }, { value: 'all', label: 'All insides first' }, { value: 'off', label: 'Off' }] }
       ],
       buttons: [{ label: 'Cancel', value: null }, { label: 'Save', value: 'ok', primary: true }]

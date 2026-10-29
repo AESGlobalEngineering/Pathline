@@ -142,6 +142,8 @@
         const wrap = add('label', f.full || f.type === 'seg' || f.type === 'select' && f.full !== false ? 'full' : '');
         // fields a page may switch on and off (e.g. Add machine: only for a real machine)
         if (f.real) wrap.dataset.real = '1';
+        if (f.sim) wrap.dataset.sim = '1';
+        if (f.hidden) wrap.style.display = 'none';
         if (f.type === 'check') {
           wrap.className = 'chk full';
           const c = add('input');

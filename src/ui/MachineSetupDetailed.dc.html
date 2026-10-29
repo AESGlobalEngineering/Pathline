@@ -282,7 +282,7 @@ class Component extends DCLogic {
       if (m.conn !== 'Ethernet' || !m.ip) { this.setState((s) => ({ online: { ...s.online, [m.id]: null } })); continue; }
       const t0 = performance.now();
       window.api.device.status(m.id)
-        .then((st) => this.setState((s) => ({ online: { ...s.online, [m.id]: { ok: true, state: st.state, ms: Math.round(performance.now() - t0) } } })))
+        .then((st) => this.setState((s) => ({ online: { ...s.online, [m.id]: { ok: true, state: st.state, link: st.link, ms: Math.round(performance.now() - t0) } } })))
         .catch((err) => this.setState((s) => ({ online: { ...s.online, [m.id]: { ok: false, msg: err.message } } })));
     }
   }
@@ -334,15 +334,18 @@ class Component extends DCLogic {
     }
   }
   async addMachine() {
-    // the IP and controller fields only apply to a real machine
-    const realOnly = (box, on) => box.querySelectorAll('[data-real]').forEach((el) => { el.style.opacity = on ? '' : '0.45'; el.querySelectorAll('input, select').forEach((i) => { i.disabled = !on; }); });
+    // the IP field only applies to a real machine; only a simulated one is
+    // named here (a real machine takes its name from its HMI)
+    const realOnly = (box, on) => {
+      box.querySelectorAll('[data-real]').forEach((el) => { el.style.opacity = on ? '' : '0.45'; el.querySelectorAll('input, select').forEach((i) => { i.disabled = !on; }); });
+      box.querySelectorAll('[data-sim]').forEach((el) => { el.style.display = on ? 'none' : ''; });
+    };
     const r = await LRC.dialog({
       title: 'Add machine',
-      message: 'For a real machine only the connection is set here — bed size, speeds and features are read from the machine once it is connected. A simulated machine has no machine behind it: use it to try Pathline out, and set its bed, speeds and features yourself.',
       fields: [
-        { key: 'kind', label: 'Machine', type: 'seg', value: 'real', options: [{ value: 'real', label: 'Real machine' }, { value: 'sim', label: 'Simulated' }], onChange: (v, _vals, box) => realOnly(box, v === 'real') },
-        { key: 'type', label: 'Type', type: 'seg', value: 'laser', options: [{ value: 'laser', label: 'Laser' }, { value: 'plotter', label: 'Plotter / router' }] },
-        { key: 'name', label: 'Name', value: '', full: true },
+        { key: 'kind', label: 'Machine', type: 'seg', value: 'real', options: [{ value: 'real', label: 'Real' }, { value: 'sim', label: 'Simulated' }], onChange: (v, _vals, box) => realOnly(box, v === 'real') },
+        { key: 'type', label: 'Type', type: 'seg', value: 'laser', options: [{ value: 'laser', label: 'Laser' }, { value: 'plotter', label: 'Plotter' }] },
+        { key: 'name', label: 'Name', value: '', full: true, sim: true, hidden: true },
         { key: 'ip', label: 'IP address', value: '', full: false, real: true },
         { key: 'ctrl', label: 'Controller', type: 'select', value: 'Ruida', options: CONTROLLERS, full: false }
       ],
@@ -353,7 +356,7 @@ class Component extends DCLogic {
     const isPlot = r.values.type === 'plotter';
     const m = r.values.kind === 'sim'
       ? { ...base, sim: true, conn: 'Local', ip: '', ctrl: r.values.ctrl, kind: isPlot ? 'Plotter' : 'Laser · CO2', name: r.values.name || (isPlot ? 'Simulated plotter' : 'Simulated laser') }
-      : { ...base, name: r.values.name || base.name, ip: r.values.ip || '', ctrl: r.values.ctrl };
+      : { ...base, ip: r.values.ip || '', ctrl: r.values.ctrl };
     // created on disk already; keep the working copy in step
     this.setState((s) => ({ list: s.list.concat(m), saved: s.saved.concat(base), mid: m.id, tab: null }));
   }
@@ -530,6 +533,8 @@ class Component extends DCLogic {
       if (m.conn !== 'Ethernet') return { status: 'Save locally', short: 'Local', ...IDLE };
       const o = S.online[m.id];
       if (o === undefined) return { status: 'Checking…', short: 'Checking…', ...IDLE };
+      // the HMI answers but its own link to the controller is down
+      if (o && o.ok && o.link && o.link !== 'online') return { status: 'Connected · machine offline', short: 'Machine offline', dot: 'var(--warn-dot)', bg: 'var(--warn-soft)', fg: 'var(--warn)' };
       if (o && o.ok) return { status: 'Connected' + (o.state && o.state !== 'idle' ? ' · ' + o.state : ''), short: 'Connected', dot: 'var(--ok-dot)', bg: 'var(--ok-soft)', fg: 'var(--ok)' };
       return { status: 'Offline', short: 'Offline', dot: 'var(--err-dot)', bg: 'var(--err-soft)', fg: 'var(--err)' };
     };
@@ -555,7 +560,7 @@ class Component extends DCLogic {
       m: {
         ...TYPE[raw.type], name: raw.name, nameEdit: sim, nameText: !sim, nameTip: 'Set on the machine\'s HMI',
         kind: raw.kind || (isLaser ? 'Laser' : 'Plotter'), ctrl: raw.ctrl,
-        sub: [raw.kind || (isLaser ? 'Laser' : 'Plotter'), raw.ctrl].filter(Boolean).join(' · ') + (sim ? ' · bed, speeds and features are set on these tabs' : raw.conn === 'Ethernet' ? ' · greyed settings are set on the machine\'s HMI' : ''),
+        sub: [raw.kind || (isLaser ? 'Laser' : 'Plotter'), raw.ctrl].filter(Boolean).join(' · '),
         status: st.status, dot: st.dot, statusBg: st.bg, statusFg: st.fg
       },
       setName: set('name'),
