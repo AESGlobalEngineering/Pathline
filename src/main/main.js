@@ -178,7 +178,8 @@ async function deliver(job, via) {
   if (m.placeholder) throw new Error('Add a machine under Setup → Machines first');
   assertSendable(job, m);
   const mat = materialFor(m.type, job.materialId);
-  const conn = (via || m.conn) === 'Ethernet' ? 'Ethernet' : 'Local';
+  // a simulated machine has nothing to connect to: its jobs are always saved as files
+  const conn = !m.sim && (via || m.conn) === 'Ethernet' ? 'Ethernet' : 'Local';
   let where, total;
   if (conn === 'Ethernet') {
     const est = CC.estimate(job, m, { timeline: true });
@@ -402,6 +403,7 @@ function registerIpc() {
   handle('device:test', (m) => device.test(m));
   handle('device:sync', async (id) => {
     const m = machineById(id);
+    if (m.sim) throw new Error(m.name + ' is simulated — set its settings on the Machines page');
     if (m.conn !== 'Ethernet') throw new Error(m.name + ' uses ' + m.conn + ' transfer — settings can only be read over Ethernet');
     const info = await device.machineSettings(m);
     const { name: _n, type, ctrl, ...settings } = info || {};

@@ -117,10 +117,10 @@
 
       <div class="card" style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; padding: 10px 14px">
         <svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="color: var(--text-3)"><path d="{{icons.sync}}"></path></svg>
-        <span style="font-weight: 500">Synced from machine</span>
+        <span style="font-weight: 500">{{syncTitle}}</span>
         <span class="{{syncCls}}">{{syncText}}</span>
         <span style="flex: 1"></span>
-        <span class="lbl">Greyed settings are set on the machine's HMI</span>
+        <span class="lbl">{{syncHint}}</span>
         <button class="tb" onClick="{{openHmi}}" disabled="{{noSync}}">Open HMI</button>
         <button class="tb" onClick="{{refresh}}" disabled="{{noSync}}" title="{{syncTip}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.sync}}"></path></svg>{{refreshLabel}}</button>
       </div>
@@ -276,7 +276,14 @@ class Component extends DCLogic {
   async save() {
     const bad = this.state.list.find((m) => m.conn === 'Ethernet' && m.ip && !/^[\w.-]+$/.test(String(m.ip).trim()));
     if (bad) throw new Error(bad.name + ': "' + bad.ip + '" is not a valid IP address or host name');
-    const list = this.state.list.map((m) => ({ ...m, ip: String(m.ip || '').trim(), port: Number(m.port) || 8470, timeout: Number(m.timeout) || 3000 }));
+    // a simulated machine's settings are typed here: keep the ones the estimate uses numeric
+    const num = (v, d) => (Number(v) > 0 ? Number(v) : d);
+    const simFix = (m) => {
+      if (!m.sim) return m;
+      const i = m.info || {}, d = m.type === 'plotter' ? [1600, 1000] : [800, 500];
+      return { ...m, conn: 'Local', info: { ...i, bed: [num((i.bed || [])[0], d[0]), num((i.bed || [])[1], d[1])], speed: num(i.speed, 1000), acc: num(i.acc, 10000) } };
+    };
+    const list = this.state.list.map((m) => simFix({ ...m, ip: String(m.ip || '').trim(), port: Number(m.port) || 8470, timeout: Number(m.timeout) || 3000 }));
     const saved = await window.api.machines.saveAll(list);
     this.setState({ saved: JSON.parse(JSON.stringify(saved)), list: JSON.parse(JSON.stringify(saved)) });
     LRC.toast('Machines saved', { kind: 'ok' });
@@ -310,20 +317,26 @@ class Component extends DCLogic {
     }
   }
   async addMachine() {
+    // the IP and controller fields only apply to a real machine
+    const realOnly = (box, on) => box.querySelectorAll('[data-real]').forEach((el) => { el.style.opacity = on ? '' : '0.45'; el.querySelectorAll('input, select').forEach((i) => { i.disabled = !on; }); });
     const r = await LRC.dialog({
       title: 'Add machine',
-      message: 'Only the connection is set here — bed size, speeds and features are read from the machine once it is connected.',
+      message: 'For a real machine only the connection is set here — bed size, speeds and features are read from the machine once it is connected. A simulated machine has no machine behind it: use it to try Pathline out, and set its bed, speeds and features yourself.',
       fields: [
+        { key: 'kind', label: 'Machine', type: 'seg', value: 'real', options: [{ value: 'real', label: 'Real machine' }, { value: 'sim', label: 'Simulated, for testing' }], onChange: (v, _vals, box) => realOnly(box, v === 'real') },
         { key: 'type', label: 'Type', type: 'seg', value: 'laser', options: [{ value: 'laser', label: 'Laser' }, { value: 'plotter', label: 'Plotter / router' }] },
         { key: 'name', label: 'Name', value: '', full: true },
-        { key: 'ip', label: 'IP address', value: '', full: false },
-        { key: 'ctrl', label: 'Controller', type: 'select', value: 'Ruida', options: ['Trotec', 'Ruida', 'Other'], full: false }
+        { key: 'ip', label: 'IP address', value: '', full: false, real: true },
+        { key: 'ctrl', label: 'Controller', type: 'select', value: 'Ruida', options: ['Trotec', 'Ruida', 'Other'], full: false, real: true }
       ],
       buttons: [{ label: 'Cancel', value: null }, { label: 'Add', value: 'ok', primary: true }]
     });
     if (!r) return;
     const base = await window.api.machines.create(r.values.type);
-    const m = { ...base, name: r.values.name || base.name, ip: r.values.ip || '', ctrl: r.values.ctrl };
+    const isPlot = r.values.type === 'plotter';
+    const m = r.values.kind === 'sim'
+      ? { ...base, sim: true, conn: 'Local', ip: '', ctrl: 'Simulated', kind: isPlot ? 'Plotter' : 'Laser · CO2', name: r.values.name || (isPlot ? 'Simulated plotter' : 'Simulated laser') }
+      : { ...base, name: r.values.name || base.name, ip: r.values.ip || '', ctrl: r.values.ctrl };
     // created on disk already; keep the working copy in step
     this.setState((s) => ({ list: s.list.concat(m), saved: s.saved.concat(base), mid: m.id, tab: null }));
   }
@@ -384,37 +397,58 @@ class Component extends DCLogic {
       return { isSeg: true, l, op: 1, opts: opts.map(([v, lbl]) => ({ l: lbl, on: cur === v, ro: false, ...(cur === v ? segOn : segOff), pick: () => this.patch((m) => ({ ...m, [k]: v })) })) };
     };
     const text = (l, k, u, ph) => ({ isText: true, l, v: String(raw[k] ?? ''), fc: k === 'ip' ? 'mono' : fc(raw[k] ?? ''), u: u || '', ph: ph || '', set: set(k), ro: false, fbg: 'var(--surface)', ffg: 'var(--text)' });
+    // A simulated machine (for testing) has no real machine behind it: no
+    // connection, and the settings that are normally read from the machine are
+    // set here instead (every "ro" control below takes a setter for that case).
+    const sim = !!raw.sim;
+    const setInfo = (k) => (v) => this.patch((m) => ({ ...m, info: { ...(m.info || {}), [k]: v } }));
+    const setFeat = (k) => (v) => this.patch((m) => ({ ...m, info: { ...(m.info || {}), f: { ...((m.info || {}).f || {}), [k]: v } } }));
+    const setTiming = (k) => (v) => this.patch((m) => ({ ...m, info: { ...(m.info || {}), timing: { ...((m.info || {}).timing || {}), [k]: v } } }));
+    // numbers stay numbers (the estimate uses them); anything else is kept as typed
+    const numOr = (s) => { const t = String(s).trim(); return t !== '' && Number.isFinite(Number(t)) ? Number(t) : s; };
     // read-only fields (set on the HMI): fields get the sunken background, other controls fade once (0.45)
     const RO = { ro: true, op: 0.45, fbg: 'var(--sunken)', ffg: 'var(--text-3)' };
-    const roText = (l, v, u) => { const s = v === undefined || v === null || v === '' ? '—' : String(v); return { isText: true, l, v: s, fc: fc(s), u: u || '', set: () => {}, ...RO }; };
-    const roToggle = (l, v) => ({ isToggle: true, l, on: !!v, swBg: v ? accent : 'var(--track)', swJ: v ? 'flex-end' : 'flex-start', toggle: () => {}, ...RO });
-    const roSeg = (l, v, opts) => ({ isSeg: true, l, op: 0.45, opts: opts.map((o) => ({ l: o, on: v === o, ro: true, ...(v === o ? segOn : segOff), pick: () => {} })) });
+    const ED = { ro: false, op: 1, fbg: 'var(--surface)', ffg: 'var(--text)' };
+    const roText = (l, v, u, setv) => {
+      if (sim && setv) return { isText: true, l, v: v === undefined || v === null ? '' : String(v), fc: fc(v ?? ''), u: u || '', ph: '', set: (e) => setv(numOr(e.target.value)), ...ED };
+      const s = v === undefined || v === null || v === '' ? '—' : String(v); return { isText: true, l, v: s, fc: fc(s), u: u || '', set: () => {}, ...RO };
+    };
+    const roToggle = (l, v, setv) => ({ isToggle: true, l, on: !!v, swBg: v ? accent : 'var(--track)', swJ: v ? 'flex-end' : 'flex-start', toggle: sim && setv ? () => setv(!v) : () => {}, ...(sim && setv ? ED : RO) });
+    const roSeg = (l, v, opts, setv) => ({ isSeg: true, l, op: sim && setv ? 1 : 0.45, opts: opts.map((o) => ({ l: o, on: v === o, ro: !(sim && setv), ...(v === o ? segOn : segOff), pick: () => { if (sim && setv) setv(o); } })) });
     const roPick = (l, v) => ({ isPick: true, l, v: v || '—', open: false, opts: [], toggle: () => {}, ...RO });
-    // features the machine doesn't have are left out (falsy fields are dropped)
+    // features the machine doesn't have are left out (falsy fields are dropped);
+    // a simulated machine lists every feature so it can be switched on or off
     const card = (title, fields, span) => ({ title, fields: fields.filter(Boolean), isFields: true, span: span || 'auto' });
     const featCard = (list) => {
+      if (sim) return card('Features', list.map(([l, k]) => roToggle(l, !!feat[k], setFeat(k))));
       const on = list.filter(([, k]) => feat[k]).map(([l]) => roToggle(l, true));
       return card('Features', on.length ? on : [{ isNote: true, l: 'No optional features reported by this machine.' }]);
     };
 
     const connFields = [seg('Connection', 'conn', [['Ethernet', 'Ethernet'], ['Local', 'Save locally']])];
-    if (raw.conn === 'Ethernet') connFields.push(text('IP address', 'ip', '', '192.168.1.60'), text('Port', 'port', '', '8470'), text('Timeout', 'timeout', 'ms', '3000'));
+    if (sim) {
+      // nothing to connect to: Ethernet is greyed out and jobs are saved as files
+      connFields[0].opts.forEach((o) => { if (o.l === 'Ethernet') { o.ro = true; o.pick = () => {}; } });
+      connFields.push({ isNote: true, l: 'Simulated machine, for testing: there is no real machine to connect to. Send to machine saves the job file where you choose, and the settings on these tabs are set here.' });
+    } else if (raw.conn === 'Ethernet') connFields.push(text('IP address', 'ip', '', '192.168.1.60'), text('Port', 'port', '', '8470'), text('Timeout', 'timeout', 'ms', '3000'));
     else connFields.push({ isNote: true, l: 'Send to machine opens a save window so you can put the job (settings, DXF, preview and time estimate) wherever you like, then load it on the controller.' });
     connFields.push(roPick('Driver', raw.ctrl));
     const connCard = card('Connection', connFields);
     const jobCard = card('Job defaults', [
-      { isCorner: true, l: 'Origin', op: 0.45, corners: ['tl', 'tr', 'bl', 'br'].map((c) => ({ c, on: (info.origin || 'tl') === c, ro: true, label: { tl: 'Origin top left', tr: 'Origin top right', bl: 'Origin bottom left', br: 'Origin bottom right' }[c], bg: (info.origin || 'tl') === c ? accent : 'var(--line-hover)', pick: () => {} })) },
-      roSeg('Units', info.units || 'mm', ['mm', 'inch']),
-      roToggle('Home on start', info.home !== false),
-      roText('Job name prefix', info.prefix || '')
+      { isCorner: true, l: 'Origin', op: sim ? 1 : 0.45, corners: ['tl', 'tr', 'bl', 'br'].map((c) => ({ c, on: (info.origin || 'tl') === c, ro: !sim, label: { tl: 'Origin top left', tr: 'Origin top right', bl: 'Origin bottom left', br: 'Origin bottom right' }[c], bg: (info.origin || 'tl') === c ? accent : 'var(--line-hover)', pick: () => { if (sim) setInfo('origin')(c); } })) },
+      roSeg('Units', info.units || 'mm', ['mm', 'inch'], setInfo('units')),
+      roToggle('Home on start', info.home !== false, setInfo('home')),
+      roText('Job name prefix', info.prefix || '', '', setInfo('prefix'))
     ]);
     const bed = info.bed || (isLaser ? [813, 508] : [1600, 1000]);
     const origin = info.origin || 'tl';
-    const bedCard = card('Bed', [roText('Width', bed[0], 'mm'), roText('Height', bed[1], 'mm'), roText('Max speed', info.speed, 'mm/s'), roText('Acceleration', info.acc, 'mm/s²')]);
-    const ar = bed[0] / bed[1];
+    const bedCard = card('Bed', [roText('Width', bed[0], 'mm', (v) => setInfo('bed')([v, bed[1]])), roText('Height', bed[1], 'mm', (v) => setInfo('bed')([bed[0], v])), roText('Max speed', info.speed, 'mm/s', setInfo('speed')), roText('Acceleration', info.acc, 'mm/s²', setInfo('acc'))]);
+    // the preview uses the last sensible size while a number is being typed
+    const bedN = bed.map((v, i) => (Number(v) > 0 ? Number(v) : (isLaser ? [813, 508] : [1600, 1000])[i]));
+    const ar = bedN[0] / bedN[1];
     const bedPreview = {
       title: 'Work area', isBed: true, span: 'auto', ar: String(ar), maxW: String(Math.round(240 * ar)),
-      label: 'Work area ' + bed[0] + ' × ' + bed[1] + ' mm',
+      label: 'Work area ' + bedN[0] + ' × ' + bedN[1] + ' mm',
       ox: origin.includes('l') ? '-6px' : 'calc(100% - 6px)', oy: origin.includes('t') ? '-6px' : 'calc(100% - 6px)',
       conveyor: !isLaser && !!feat.conveyor
     };
@@ -428,38 +462,38 @@ class Component extends DCLogic {
         'General': [connCard, jobCard],
         'Work area': [bedCard, bedPreview],
         'Laser source': [
-          card('Source', [roPick('Type', info.source), roText('Rated power', info.power, 'W'), roPick('Lens', info.lens), roText('PWM frequency', info.pwm, 'Hz'), roText('Minimum power', info.minPower, '%')]),
-          card('Focus & air', [feat.autofocus && roToggle('Auto-focus', true), roText('Focus offset', info.focus, 'mm'), feat.air && roToggle('Air assist control', true), feat.air && roSeg('Air assist default', info.airDefault || 'High', ['Low', 'High'])])
+          card('Source', [sim ? roSeg('Type', info.source || 'CO2', ['CO2', 'Fiber', 'Diode'], setInfo('source')) : roPick('Type', info.source), roText('Rated power', info.power, 'W', setInfo('power')), sim ? roText('Lens', info.lens, '', setInfo('lens')) : roPick('Lens', info.lens), roText('PWM frequency', info.pwm, 'Hz', setInfo('pwm')), roText('Minimum power', info.minPower, '%', setInfo('minPower'))]),
+          card('Focus & air', [feat.autofocus && roToggle('Auto-focus', true), roText('Focus offset', info.focus, 'mm', setInfo('focus')), feat.air && roToggle('Air assist control', true), feat.air && roSeg('Air assist default', info.airDefault || 'High', ['Low', 'High'], setInfo('airDefault'))])
         ],
         'Camera': [
-          card('Print & cut camera', [roSeg('Mark type', info.markType || 'Dot', ['Dot', 'Cross']), roText('Mark diameter', info.markD, 'mm'), roPick('Default reg marks', info.defaultReg), roToggle('Ask before each job', info.askReg)]),
-          card('Calibration', [roText('Camera offset X', info.camX, 'mm'), roText('Camera offset Y', info.camY, 'mm'), { isAction: true, l: 'Calibrate', btn: 'Calibrate offset', result: info.calibrated ? 'Calibrated ' + info.calibrated : '', run: () => {}, tip: 'Run calibration on the machine\'s HMI', ...RO }])
+          card('Print & cut camera', [roSeg('Mark type', info.markType || 'Dot', ['Dot', 'Cross'], setInfo('markType')), roText('Mark diameter', info.markD, 'mm', setInfo('markD')), roText('Time to read a mark', info.markTime ?? 1.5, 's', setInfo('markTime')), roPick('Default reg marks', info.defaultReg), roToggle('Ask before each job', info.askReg, setInfo('askReg'))]),
+          card('Calibration', [roText('Camera offset X', info.camX, 'mm', setInfo('camX')), roText('Camera offset Y', info.camY, 'mm', setInfo('camY')), !sim && { isAction: true, l: 'Calibrate', btn: 'Calibrate offset', result: info.calibrated ? 'Calibrated ' + info.calibrated : '', run: () => {}, tip: 'Run calibration on the machine\'s HMI', ...RO }])
         ],
         'Features': [
           featCard([['Print & cut camera', 'camera'], ['Auto-focus', 'autofocus'], ['Rotary', 'rotary'], ['Air assist control', 'air'], ['Pass-through', 'pass']]),
-          card('Safety', [feat.interlock && roToggle('Exhaust interlock', true), info.lid !== false && roToggle('Lid interlock', true), roText('Exhaust run-on', info.exhaust, 's')])
+          card('Safety', [sim ? roToggle('Exhaust interlock', !!feat.interlock, setFeat('interlock')) : feat.interlock && roToggle('Exhaust interlock', true), sim ? roToggle('Lid interlock', info.lid !== false, setInfo('lid')) : info.lid !== false && roToggle('Lid interlock', true), roText('Exhaust run-on', info.exhaust, 's', setInfo('exhaust'))])
         ]
       };
     } else {
       tabsDef = ['General', 'Work area', 'Tool heads'].concat(feat.conveyor ? ['Conveyor'] : []).concat(['Features', 'Timing']);
       cardsByTab = {
         'General': [connCard, jobCard],
-        'Work area': [bedCard, bedPreview, feat.vacuum && card('Vacuum', [roToggle('On at job start', info.vacStart), roToggle('Off at job end', info.vacEnd), roText('Release delay', info.vacDelay, 's')])].filter(Boolean),
+        'Work area': [bedCard, bedPreview, feat.vacuum && card('Vacuum', [roToggle('On at job start', info.vacStart, setInfo('vacStart')), roToggle('Off at job end', info.vacEnd, setInfo('vacEnd')), roText('Release delay', info.vacDelay, 's', setInfo('vacDelay'))])].filter(Boolean),
         'Tool heads': [
           { title: 'Tool heads', isHeads: true, span: '1 / -1' },
-          feat.pointer && card('Laser pointer', [roText('Offset X', info.ptrX, 'mm'), roText('Offset Y', info.ptrY, 'mm'), { isAction: true, l: 'Measure', btn: 'Measure offset', result: info.measured ? 'Measured ' + info.measured : '', run: () => {}, tip: 'Measure on the machine\'s HMI', ...RO }]),
-          feat.detect && card('Head detection', [roToggle('Detect loaded heads', true), roToggle('Stop if head missing', info.headStop)])
+          feat.pointer && card('Laser pointer', [roText('Offset X', info.ptrX, 'mm', setInfo('ptrX')), roText('Offset Y', info.ptrY, 'mm', setInfo('ptrY')), !sim && { isAction: true, l: 'Measure', btn: 'Measure offset', result: info.measured ? 'Measured ' + info.measured : '', run: () => {}, tip: 'Measure on the machine\'s HMI', ...RO }]),
+          feat.detect && card('Head detection', [roToggle('Detect loaded heads', true), roToggle('Stop if head missing', info.headStop, setInfo('headStop'))])
         ].filter(Boolean),
         'Conveyor': [
-          card('Conveyor', [roText('Feed length', info.feedLen || bed[1], 'mm'), roText('Feed overlap', info.feedOver, 'mm'), roToggle('Auto-feed between beds', info.autoFeed), roToggle('Vacuum off while feeding', info.feedVac),
-            { isAction: true, l: 'Test', btn: 'Feed one bed', result: canTalk ? '' : 'Needs an Ethernet connection', run: devCmd('feed', {}, 'Feeding one bed'), ro: !canTalk, op: canTalk ? 1 : 0.45 }]),
+          card('Conveyor', [roText('Feed length', info.feedLen || bed[1], 'mm', setInfo('feedLen')), roText('Feed overlap', info.feedOver, 'mm', setInfo('feedOver')), roToggle('Auto-feed between beds', info.autoFeed, setInfo('autoFeed')), roToggle('Vacuum off while feeding', info.feedVac, setInfo('feedVac')),
+            !sim && { isAction: true, l: 'Test', btn: 'Feed one bed', result: canTalk ? '' : 'Needs an Ethernet connection', run: devCmd('feed', {}, 'Feeding one bed'), ro: !canTalk, op: canTalk ? 1 : 0.45 }]),
           bedPreview
         ],
         'Features': [featCard([['Conveyor', 'conveyor'], ['Vacuum', 'vacuum'], ['Laser pointer', 'pointer'], ['Print & cut camera', 'camera']])],
         'Timing': [card('Time estimate', [
-          roText('Tool down', (info.timing && info.timing.toolDown) ?? CC.DEFAULTS.plotter.toolDown, 's'), roText('Tool up', (info.timing && info.timing.toolUp) ?? CC.DEFAULTS.plotter.toolUp, 's'),
-          roText('Tool change', (info.timing && info.timing.toolChange) ?? CC.DEFAULTS.plotter.toolChange, 's'), roText('Conveyor speed', (info.timing && info.timing.feedSpeed) ?? CC.DEFAULTS.plotter.feedSpeed, 'mm/s'),
-          { isNote: true, l: 'Used by the simulation to estimate job time. Read from the machine when it reports them.' }
+          roText('Tool down', (info.timing && info.timing.toolDown) ?? CC.DEFAULTS.plotter.toolDown, 's', setTiming('toolDown')), roText('Tool up', (info.timing && info.timing.toolUp) ?? CC.DEFAULTS.plotter.toolUp, 's', setTiming('toolUp')),
+          roText('Tool change', (info.timing && info.timing.toolChange) ?? CC.DEFAULTS.plotter.toolChange, 's', setTiming('toolChange')), roText('Conveyor speed', (info.timing && info.timing.feedSpeed) ?? CC.DEFAULTS.plotter.feedSpeed, 'mm/s', setTiming('feedSpeed')),
+          { isNote: true, l: sim ? 'Used by the simulation to estimate job time.' : 'Used by the simulation to estimate job time. Read from the machine when it reports them.' }
         ])]
       };
     }
@@ -470,6 +504,7 @@ class Component extends DCLogic {
     // status pill colours: plain .pill (idle), .pill.ok (Connected), .pill.err (Offline)
     const IDLE = { bg: 'var(--sunken)', fg: 'var(--text-2)', dot: 'var(--idle-dot)' };
     const statusOf = (m) => {
+      if (m.sim) return { status: 'Simulated', short: 'Simulated', ...IDLE };
       if (m.conn !== 'Ethernet') return { status: 'Save locally', short: 'Local', ...IDLE };
       const o = S.online[m.id];
       if (o === undefined) return { status: 'Checking…', short: 'Checking…', ...IDLE };
@@ -481,7 +516,7 @@ class Component extends DCLogic {
       const st = statusOf(x);
       return {
         ...TYPE[x.type], name: x.name,
-        sub: (x.ctrl ? x.ctrl + ' · ' : '') + (x.conn === 'Ethernet' ? (x.ip || 'no IP') : 'save locally'),
+        sub: x.sim ? 'Simulated · for testing' : (x.ctrl ? x.ctrl + ' · ' : '') + (x.conn === 'Ethernet' ? (x.ip || 'no IP') : 'save locally'),
         status: st.status, short: st.short, dot: st.dot, pbg: st.bg, pfg: st.fg, cur: on ? 'page' : 'false',
         bg: on ? accentSoft : '', bd: on ? accent : 'transparent',
         pick: () => this.setState({ mid: x.id, tab: null })
@@ -506,7 +541,8 @@ class Component extends DCLogic {
       openHmi: R(() => window.api.app.openExternal('http://' + raw.ip + ':' + (raw.port || 8470) + '/')),
       tabs, cards: cardsByTab[tab] || [], heads,
       syncCls: raw.syncedAt ? 'mono lbl' : 'lbl',
-      syncText: raw.syncedAt ? new Date(raw.syncedAt).toLocaleString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Not read yet — showing defaults'
+      syncTitle: sim ? 'Simulated machine' : 'Synced from machine', syncHint: sim ? 'Nothing to read from: set the bed, speeds and features on these tabs' : 'Greyed settings are set on the machine\'s HMI',
+      syncText: sim ? 'for testing' : raw.syncedAt ? new Date(raw.syncedAt).toLocaleString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Not read yet — showing defaults'
     };
   }
 }

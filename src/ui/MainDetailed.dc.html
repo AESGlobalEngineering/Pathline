@@ -1283,7 +1283,7 @@ class Component extends DCLogic {
       title: andStart ? 'Send and start' : 'Send to machine',
       sendLabel: andStart ? 'Send and start' : 'Send',
       rows: [['Job', job.name], ['Machine', m.name], ['Material', this.material() ? this.material().name + ' · ' + this.material().t + ' mm' : '—'], ['Estimated time', CC.fmtDuration(est.total, true)], ['Processes', String(est.perProcess.length)]],
-      via: m.conn === 'Ethernet' ? 'Ethernet' : 'Local',
+      via: m.conn === 'Ethernet' ? 'Ethernet' : 'Local', localOnly: !!m.sim,
       blocked: checks.filter((c) => c.block).map((c) => c.l),
       warnings: checks.filter((c) => !c.ok && !c.block).map((c) => c.l),
       check: () => (m.ip
@@ -1447,7 +1447,7 @@ class Component extends DCLogic {
 
     // ---- header: machine + device status
     const TYPE = { laser: { type: 'LASER', tbg: 'var(--badge-laser)' }, plotter: { type: 'PLOTTER', tbg: 'var(--badge-plotter)' } };
-    const subOf = (x) => (x.ctrl ? x.ctrl + ' · ' : '') + (x.placeholder ? 'not set up' : x.conn === 'Ethernet' ? (x.ip || 'no IP') : 'save locally');
+    const subOf = (x) => (x.sim ? 'Simulated · jobs saved as files' : (x.ctrl ? x.ctrl + ' · ' : '') + (x.placeholder ? 'not set up' : x.conn === 'Ethernet' ? (x.ip || 'no IP') : 'save locally'));
     const mach = { ...TYPE[m], name: machine.name, sub: (machine.kind || '') + (machine.kind ? ' · ' : '') + subOf(machine), toolsLabel: machine.ctrl };
     const machines = S.machines.map((x) => ({ ...TYPE[x.type], name: x.name, sub: subOf(x), on: x.id === machine.id, bg: x.id === machine.id ? accentSoft : 'transparent', pick: R(() => this.pickMachine(x.id)) }));
     const online = S.dev && S.dev.mid === machine.id;

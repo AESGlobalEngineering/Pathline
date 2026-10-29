@@ -15,6 +15,12 @@ Latest round (28 Oct, final):
 - **Dark mode bed is grey** (`--bed`, `--sheet`, `--bed-grid*` in theme.css). **ACI 7 shows as white in dark mode** (black in light), as in CAD, and so do the marks drawn on the bed (registration marks, engrave hatching, arrows, start points): see the `--aci7*` and `--ink` tokens, and `LRC.aci.hex/fg/stroke` in app.js. Exports (DXF/SVG/PDF) still use real black.
 - **Sample machines and materials from earlier builds are removed on first start** (main.js, tracked by `settings.samplesRemoved`). This is by exact id (trotec, flatbed, laser2, acr-print-3 … brass-1); anything the operator created stays.
 
+Version 1.2.0 (29 Oct):
+- **Simulated machines, for testing.** Setup → Machines → Add machine → "Simulated, for testing".
+  - Stored as `{ sim: true, conn: 'Local', ctrl: 'Simulated' }`. Ethernet is greyed out on the Machines page and in the Send dialog (`localOnly`), and main.js `deliver()` always saves simulated machines' jobs as files.
+  - Refresh from machine and Open HMI are disabled.
+  - The settings normally read from the machine are editable for simulated machines: bed, speeds, origin, units, laser source, camera, features, safety, vacuum, conveyor and plotter timing. Every `ro…` helper on the Machines page takes a setter that only applies when `raw.sim`. Save keeps the bed, speed and acceleration numeric.
+
 Version 1.1.0 (29 Oct):
 - **Nesting optimiser** (Arrange → Nest parts…, and a toolbar button) for lasers and plotters. `CC.nestRects` in core.js packs part footprints (a group counts as one part) with MaxRects, optionally turning parts 90°. It tries 5 sort orders × 3 placement rules and keeps the layout with the fewest areas, then the least material. Lasers nest on the sheet (or the whole bed); plotters add beds as needed. Parts that don't fit a single sheet stay where they were. `LRC.ops.nest` applies the result. This is rectangle (bounding-box) nesting, not true-shape nesting.
 - **Test grid range** (Setup → Materials): low and high power, low and high speed, and divisions (1–9 equal steps) for each. The defaults are the old 5 × 5 grid around the preset.

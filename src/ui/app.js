@@ -128,6 +128,8 @@
           return;
         }
         const wrap = add('label', f.full || f.type === 'seg' || f.type === 'select' && f.full !== false ? 'full' : '');
+        // fields a page may switch on and off (e.g. Add machine: only for a real machine)
+        if (f.real) wrap.dataset.real = '1';
         if (f.type === 'check') {
           wrap.className = 'chk full';
           const c = add('input');
@@ -235,7 +237,7 @@
   // ------------------------------------------------------------ send dialog
   // opts: { title, rows: [[k, v]], via: 'Ethernet'|'Local', blocked: [msg], warnings: [msg],
   //         check(): Promise (rejects when the machine doesn't answer), send(via): Promise<result|null>,
-  //         doneLabel(result) }
+  //         doneLabel(result), localOnly (no Ethernet: a simulated machine) }
   function sendDialog(opts) {
     return new Promise((resolve) => {
       const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
@@ -247,7 +249,7 @@
       const t = el('table');
       opts.rows.forEach(([a, b]) => { const tr = el('tr'); tr.appendChild(el('td', '', a)); tr.appendChild(el('td', numCls(b), b)); t.appendChild(tr); });
       box.appendChild(t);
-      let via = opts.via === 'Ethernet' ? 'Ethernet' : 'Local';
+      let via = opts.via === 'Ethernet' && !opts.localOnly ? 'Ethernet' : 'Local';
       const wrap = el('label', 'full');
       wrap.appendChild(el('span', 'lbl', 'Send via'));
       const seg = el('div', 'seg');
@@ -256,6 +258,7 @@
         const b = el('button', v === via ? 'on' : '', l);
         b.type = 'button';
         b.setAttribute('role', 'radio');
+        if (v === 'Ethernet' && opts.localOnly) { b.disabled = true; b.title = 'A simulated machine has nothing to connect to'; }
         b.onclick = (e) => { e.preventDefault(); if (busy) return; via = v; segBtns.forEach((x) => x.classList.toggle('on', x === b)); refresh(); };
         seg.appendChild(b);
         return b;
