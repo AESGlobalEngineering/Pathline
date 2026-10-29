@@ -6,6 +6,7 @@
 
 const { makeLink, controller } = require('./ctrl');
 const plan = require('./job/plan');
+const validate = require('./job/validate');
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const busyErr = (msg) => Object.assign(new Error(msg), { code: 409 });
@@ -30,6 +31,8 @@ class Machine {
     this.st.message = 'Connecting…';
     const link = makeLink(this.cfg, this.log);
     this.link = link;
+    // status the link reads on its own (e.g. while a Trotec's buffer is full during a job)
+    link.onPoll = (p) => { if (this.link === link) this.apply(p); };
     try {
       this.info = await link.connect();
       if (this.link !== link) return;
@@ -178,7 +181,11 @@ class Machine {
     this.guard();
     const job = this.store.next();
     if (!job) return { state: this.st.state, message: 'Nothing queued' };
-    const pkg = this.store.pkg(job.id);
+    // as placed: moved to the head if the operator anchored it there
+    const pkg = this.store.runPkg(job.id);
+    if (job.anchor) {
+      try { validate.check(pkg, this.cfg); } catch (e) { throw busyErr('"' + job.name + '" anchored at the head: ' + e.message); }
+    }
     let program;
     try { program = this.compile(pkg); } catch (e) { throw Object.assign(new Error('Couldn\'t convert "' + job.name + '": ' + e.message), { code: 409 }); }
     if (program.segments.some((s) => s.kind === 'inspect') && this.cfg.regMarks !== 'ignore') {

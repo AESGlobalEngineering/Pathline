@@ -158,6 +158,12 @@ class TrotecLink {
           try { u.resolve(await this.exchangeNow(u.imm)); } catch (e) { u.reject(e); }
           return this.exchangeNow(imm, data);
         }
+        // while waiting, keep the head position on screen up to date
+        if (this.onPoll && Date.now() - (this.lastPollAt || 0) > 700) {
+          this.lastPollAt = Date.now();
+          this.onPoll(this.view(await this.exchangeNow(POLL)));
+          return this.exchangeNow(imm, data);
+        }
         continue;
       }
       if (got.kind === 'invalidCrc' && ++crcErrors <= 5) continue;

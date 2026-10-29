@@ -18,6 +18,8 @@ const Machine = require('./machine');
 const validate = require('./job/validate');
 const plan = require('./job/plan');
 const changelog = require('./changelog');
+const network = require('./network');
+const anchor = require('./job/anchor');
 const { controller, CONTROLLERS } = require('./ctrl');
 const pkgJson = require('../package.json');
 
@@ -135,7 +137,7 @@ function start(opts = {}) {
 
   // ---------------------------------------------------------------- HMI screen
   function exportJob(id, format, ctrlName) {
-    const pkg = store.pkg(id);
+    const pkg = store.get(id) ? store.runPkg(id) : store.pkg(id);
     const c = controller(ctrlName || cfg.controller);
     const out = c.exportFiles(plan.build(pkg), { ...cfg, controller: ctrlName || cfg.controller });
     const job = store.get(id) || store.history.find((h) => h.id === id) || { name: id };
@@ -169,6 +171,16 @@ function start(opts = {}) {
       return { config: cfg };
     },
     'GET /presets': () => ({ trotec: config.defaults('trotec'), ruida: config.defaults('ruida') }),
+    // this computer's network adapters and addresses (what Pathline connects to)
+    'GET /network': async () => ({ port: PORT, adapters: await network.list(), canSet: process.platform === 'win32' || process.platform === 'linux' }),
+    'POST /network': async (b, req) => {
+      if (!isLocalReq(req)) throw err(403, 'The IP address can only be changed on the machine\'s own screen');
+      if (machine.run) throw err(409, 'Wait until the job has finished');
+      log('network: setting ' + b.adapter + ' to ' + (b.mode === 'static' ? b.ip + ' / ' + b.mask + (b.gateway ? ' via ' + b.gateway : '') : 'DHCP'));
+      const adapters = await network.apply(b);
+      log('network: done');
+      return { port: PORT, adapters };
+    },
     'POST /import': (b) => { const j = queueJob(validate.fromCjob(b), 'import'); return { id: j.id }; },
     // what's new: once after an update (then forgotten), and the whole list for ☰ → What's new
     'GET /whatsnew': () => { const w = whatsNew; whatsNew = []; return w; },
@@ -208,7 +220,25 @@ function start(opts = {}) {
           log('removed ' + id);
           return send(res, 200, { ok: true });
         }
-        if (isLocal && (m = route.match(/^GET \/jobs\/([^/]+)\/package$/))) return send(res, 200, store.pkg(decodeURIComponent(m[1])));
+        if (isLocal && (m = route.match(/^GET \/jobs\/([^/]+)\/package$/))) {
+          const id = decodeURIComponent(m[1]);
+          return send(res, 200, store.get(id) ? store.runPkg(id) : store.pkg(id));
+        }
+        // anchor the job's top-left corner to where the head is now ({ clear: true } puts it back)
+        if (isLocal && (m = route.match(/^POST \/jobs\/([^/]+)\/anchor$/))) {
+          const id = decodeURIComponent(m[1]);
+          const j = store.get(id);
+          if (!j) return send(res, 404, { error: 'No job ' + id });
+          if (j.status === 'running') return send(res, 409, { error: 'The job is running' });
+          const b = await body(req, 1024);
+          if (b.clear) { store.setAnchor(id, null); log('anchor cleared for ' + j.name); return send(res, 200, { anchor: null }); }
+          if (machine.st.link !== 'online') return send(res, 409, { error: 'The machine isn\'t connected, so the head position isn\'t known' });
+          const at = { x: +machine.st.pos.x.toFixed(3), y: +machine.st.pos.y.toFixed(3) };
+          anchor.check(store.pkg(id), at, cfg.bed);
+          store.setAnchor(id, at);
+          log('anchored ' + j.name + ' at the head, X ' + at.x + ' Y ' + at.y);
+          return send(res, 200, { anchor: at });
+        }
         if (isLocal && (m = route.match(/^GET \/jobs\/([^/]+)\/export$/))) {
           const f = exportJob(decodeURIComponent(m[1]), url.searchParams.get('format'), url.searchParams.get('ctrl'));
           res.writeHead(200, { 'content-type': f.type, 'content-disposition': 'attachment; filename="' + encodeURIComponent(f.name) + '"; filename*=UTF-8\'\'' + encodeURIComponent(f.name) });

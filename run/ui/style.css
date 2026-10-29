@@ -169,3 +169,4 @@ body{background:#0E0F11}
 @media (max-width:700px){.hmi .tabs.views > button{min-width:0;padding:0 10px}.hmi .tabs.views span.lab{display:none}.hmi .row{grid-template-columns:1fr}}
 .hmi[data-theme="dark"]{--bed:#3B3E44;--sheet:#44474E}
 .hmi .row .seg{flex-wrap:wrap;flex:initial;max-width:100%}
+@keyframes plr-pulse{0%,100%{box-shadow:0 0 0 3px var(--accent-ring)}50%{box-shadow:0 0 0 7px var(--accent-ring)}}

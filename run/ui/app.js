@@ -19,7 +19,8 @@ const ICON = {
   frame: 'M4 9V4h5 M15 4h5v5 M20 15v5h-5 M9 20H4v-5',
   up: 'M12 19V5 M6 11l6-6 6 6', down: 'M12 5v14 M6 13l6 6 6-6', left: 'M19 12H5 M11 6l-6 6 6 6', right: 'M5 12h14 M13 6l6 6-6 6',
   home: 'M4 11l8-7 8 7 M6 9.5V20h12V9.5', upload: 'M12 15V3 M7 8l5-5 5 5 M4 20h16', download: 'M12 3v12 M7 10l5 5 5-5 M4 20h16',
-  file: 'M6 3h8l4 4v14H6z M14 3v4h4', chevUp: 'M6 15l6-6 6 6', chevDown: 'M6 9l6 6 6-6'
+  file: 'M6 3h8l4 4v14H6z M14 3v4h4', chevUp: 'M6 15l6-6 6 6', chevDown: 'M6 9l6 6 6-6',
+  anchor: 'M12 3v4 M12 17v4 M3 12h4 M17 12h4 M12 8a4 4 0 1 0 0 8a4 4 0 1 0 0-8z'
 };
 const ACI = { 1: '#FF0000', 2: '#FFFF00', 3: '#00FF00', 4: '#00FFFF', 5: '#0000FF', 6: '#FF00FF', 7: null, 8: '#808080', 9: '#C0C0C0' };
 const aciHex = (n) => (n in ACI ? ACI[n] : 'hsl(' + ((n * 47) % 360) + ' 70% 45%)');
@@ -27,7 +28,8 @@ const aciFg = (n) => ([2, 3, 4, 9].includes(n) ? '#15181E' : '#FFFFFF');
 
 const ui = {
   view: 'queue', sel: null, dark: matchMedia('(prefers-color-scheme: dark)').matches, themeSet: false,
-  step: '10', navOpen: false, dlg: null, toast: null, setTab: 'Machine', draft: null, ports: [], pkgs: {}, histFilter: 'All'
+  step: '10', navOpen: false, dlg: null, toast: null, setTab: 'Machine', draft: null, ports: [], pkgs: {}, histFilter: 'All',
+  trail: { job: null, pts: [] }, net: null, netDraft: null
 };
 try { const t = localStorage.getItem('plr-theme'); if (t) { ui.dark = t === 'dark'; ui.themeSet = true; } } catch (e) { /* private mode */ }
 let S = null; // last /api/local/state
@@ -62,6 +64,14 @@ async function refresh() {
     S = next;
     S.offline = false;
     followUpdate(S.update);
+    // trace the head while a job runs (a new job starts a new trace)
+    const st = S.status;
+    if (st.job && st.job !== ui.trail.job) ui.trail = { job: st.job, pts: [] };
+    if (st.job && Number.isFinite(st.pos.x)) {
+      const last = ui.trail.pts[ui.trail.pts.length - 1];
+      if (!last || Math.hypot(last[0] - st.pos.x, last[1] - st.pos.y) > 0.5) ui.trail.pts.push([st.pos.x, st.pos.y]);
+      if (ui.trail.pts.length > 4000) ui.trail.pts.splice(0, 1000);
+    }
   } catch (e) { if (S) S.offline = true; }
   const queue = visibleQueue();
   if (!queue.some((j) => j.id === ui.sel)) {
@@ -93,10 +103,21 @@ function bedSvg(pkg, opts = {}) {
       }
     }
   }
-  if (opts.head) {
+  const r = Math.max(W, H) / 70;
+  // where an anchored job's top-left corner was pinned (green, as in the design)
+  if (opts.big && pkg && pkg.anchor) {
+    body += '<circle cx="' + pkg.anchor.x + '" cy="' + pkg.anchor.y + '" r="' + r * 0.6 + '" fill="var(--bed)" stroke="#30A46C" stroke-width="' + r / 4 + '"/>';
+  }
+  // the path the head has travelled in this job
+  if (opts.head && ui.trail.pts.length > 1) {
+    body += '<polyline points="' + ui.trail.pts.map((p) => p[0].toFixed(1) + ',' + p[1].toFixed(1)).join(' ') + '" fill="none" stroke="var(--accent)" stroke-opacity="0.45" vector-effect="non-scaling-stroke" style="stroke-width:1.5px" stroke-linejoin="round"/>';
+  }
+  // the toolhead: crosshair across the bed and a ring at its position
+  if (opts.head && Number.isFinite(S.status.pos.x)) {
     const { x, y } = S.status.pos;
-    const r = Math.max(W, H) / 70;
-    body += '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="var(--accent)" stroke-width="' + r / 4 + '"/><circle cx="' + x + '" cy="' + y + '" r="' + r / 4 + '" fill="var(--accent)"/>';
+    body += '<line x1="' + x + '" y1="0" x2="' + x + '" y2="' + H + '" stroke="var(--accent)" stroke-opacity="0.35" vector-effect="non-scaling-stroke" stroke-dasharray="4 4" style="stroke-width:1px"/>' +
+      '<line x1="0" y1="' + y + '" x2="' + W + '" y2="' + y + '" stroke="var(--accent)" stroke-opacity="0.35" vector-effect="non-scaling-stroke" stroke-dasharray="4 4" style="stroke-width:1px"/>' +
+      '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="var(--accent-ring)" stroke="var(--accent)" stroke-width="' + r / 4 + '"/><circle cx="' + x + '" cy="' + y + '" r="' + r / 4 + '" fill="var(--accent)"/>';
   }
   return '<svg class="bedsvg" viewBox="0 0 ' + W + ' ' + H + '" style="aspect-ratio:' + W + '/' + H + '" preserveAspectRatio="xMidYMid meet" aria-hidden="true">' + body + '</svg>';
 }
@@ -124,13 +145,16 @@ function header() {
     (ui.navOpen ? '<div role="menu" class="pop" style="position:absolute;left:0;top:52px;min-width:230px">' +
       '<button role="menuitem" class="opt" data-a="go" data-v="setup">Machine setup</button>' +
       '<button role="menuitem" class="opt" data-a="log">Diagnostics log</button>' +
+      '<div class="sep"></div>' +
+      '<button role="menuitem" aria-label="Dark mode ' + (ui.dark ? 'on' : 'off') + '" class="opt" data-a="theme" style="justify-content:space-between">' +
+      '<span style="display:inline-flex;align-items:center;gap:10px">' + ic(ui.dark ? ICON.moon : ICON.sun, 18) + 'Dark mode</span>' +
+      '<span class="sw" aria-hidden="true" aria-checked="' + ui.dark + '" style="pointer-events:none"></span></button>' +
       '<div class="sep"></div>' + (S && S.here ? '<button role="menuitem" class="opt" data-a="checkUpdate">Check for updates…</button>' : '') +
       '<button role="menuitem" class="opt" data-a="whatsNew">What\'s new</button><button role="menuitem" class="opt" data-a="about">About</button></div>' : '') +
     '</div><div class="brand"><img class="brand-mark" src="icon.svg" width="34" height="34" alt=""><span class="word">Pathline <span style="font-weight:400">Run</span></span></div></div>' +
     '<nav aria-label="Views" class="tabs views" style="flex:1 1 280px">' + views.map(([k, l, d]) =>
       '<button data-a="go" data-v="' + k + '" aria-current="' + (ui.view === k ? 'page' : 'false') + '">' + ic(d) + '<span class="lab">' + l + '</span>' + (k === 'queue' ? '<span class="count">' + nq + '</span>' : '') + '</button>').join('') + '</nav>' +
     '<div style="display:flex;align-items:center;gap:8px">' + updateChip() +
-    '<button class="ib theme-btn" data-a="theme" aria-label="Light or dark theme" title="Light or dark theme">' + ic(ui.dark ? ICON.sun : ICON.moon) + '</button>' +
     (c ? '<div style="display:flex;align-items:center;gap:10px;height:48px;padding:0 12px 0 8px;border:1px solid var(--line-strong);border-radius:var(--ctl-r)">' +
       '<span class="badge">LASER</span><span style="display:flex;flex-direction:column;line-height:1.2"><span style="font-weight:600">' + esc(c.name) + '</span><span class="lbl">' + esc((c.controller === 'ruida' ? 'Ruida' : 'Trotec') + ' · ' + conn) + '</span></span>' +
       '<span aria-hidden="true" style="width:9px;height:9px;border-radius:50%;background:' + dot + '"></span></div>' : '') +
@@ -215,6 +239,16 @@ function procRows(pkg) {
   }).join('');
 }
 
+// top of the preview: where the toolhead is now (live while a job runs)
+function headReadout(st, isRun) {
+  const ok = Number.isFinite(st.pos.x) && st.link === 'online';
+  const label = isRun ? (st.state === 'paused' ? 'Toolhead · paused' : 'Toolhead · processing') : 'Toolhead';
+  return '<div style="position:absolute;left:12px;top:12px;display:flex;align-items:center;gap:10px;padding:6px 12px;border-radius:8px;background:var(--surface);box-shadow:var(--shadow-1);font-size:13px">' +
+    '<span aria-hidden="true" style="width:10px;height:10px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 3px var(--accent-ring)' + (isRun && st.state === 'running' ? ';animation:plr-pulse 1.2s ease-in-out infinite' : '') + '"></span>' +
+    '<span style="color:var(--text-2)">' + label + '</span>' +
+    (ok ? '<span class="mono" style="font-weight:500">X ' + st.pos.x.toFixed(1) + '</span><span class="mono" style="font-weight:500">Y ' + st.pos.y.toFixed(1) + '</span><span class="lbl">mm</span>' : '<span class="lbl">position unknown</span>') + '</div>';
+}
+
 function queueView() {
   const st = S.status;
   const q = visibleQueue();
@@ -278,13 +312,19 @@ function queueView() {
     (shown ? '<div style="display:flex;gap:8px;flex-wrap:wrap"><a class="tb sm" href="' + LOCAL('/jobs/' + shown.id + '/export') + '">' + ic(ICON.download, 16) + 'Save ' + (cfg().controller === 'ruida' ? '.rd file' : 'Trotec stream') + '</a>' +
       '<a class="tb sm" href="' + LOCAL('/jobs/' + shown.id + '/export?format=txt') + '">' + ic(ICON.file, 16) + 'Code listing</a></div>' : '') +
     '</div>' +
-    '<div style="flex:1 1 440px;min-width:0;display:flex;flex-direction:column;gap:10px"><div class="viewport" style="position:relative;min-height:320px;display:flex;align-items:center;justify-content:center;padding:18px;border:1px solid var(--line);border-radius:10px">' +
-    (shown ? '<div style="width:100%">' + bedSvg(shownPkg, { big: true, head: true }) + '</div>' : '<span style="color:var(--text-3)">No job selected</span>') + '</div></div></div>' +
+    '<div style="flex:1 1 440px;min-width:0;display:flex;flex-direction:column;gap:10px"><div class="viewport" style="position:relative;min-height:320px;display:flex;align-items:center;justify-content:center;padding:52px 18px 18px;border:1px solid var(--line);border-radius:10px">' +
+    headReadout(st, isRun) +
+    '<div style="width:100%">' + bedSvg(shownPkg, { big: true, head: true }) + '</div></div>' +
+    (shown && shownPkg && shownPkg.anchor ? '<span class="lbl" style="display:flex;align-items:center;gap:8px"><span style="width:10px;height:10px;border-radius:50%;border:2px solid #30A46C;background:var(--bed);flex:none"></span>Anchored: the job\'s top-left corner is at the toolhead position X ' + shownPkg.anchor.x.toFixed(1) + ', Y ' + shownPkg.anchor.y.toFixed(1) + ' mm</span>' : '') +
+    '</div></div>' +
 
     '<div style="display:flex;flex-wrap:wrap;align-items:center;gap:14px 18px;padding:16px 22px;border-top:1px solid var(--line)">' +
     '<button class="run-btn" data-a="startPause" aria-label="' + (st.state === 'running' ? 'Pause' : st.state === 'paused' ? 'Resume' : 'Start') + '"' + (!isRun && cantStart ? ' disabled' : '') + ' style="background:' + (st.state === 'running' ? 'var(--pause)' : 'var(--go)') + ';cursor:pointer">' + ic(st.state === 'running' ? ICON.pause : ICON.play, 28) + '</button>' +
     '<button class="run-btn stop" data-a="stop" aria-label="Stop" style="color:var(--err)">' + ic(ICON.stop, 24) + '</button>' +
     '<button class="tb" data-a="frame" style="height:64px;padding:0 18px"' + (!shown || isRun ? ' disabled' : '') + '>' + ic(ICON.frame) + 'Frame</button>' +
+    (job && job.anchor
+      ? '<button class="tb" data-a="anchor" data-v="clear" style="height:64px;padding:0 18px;border-color:#30A46C;color:var(--ok)"' + (isRun ? ' disabled' : '') + '>' + ic(ICON.anchor) + 'Clear anchor</button>'
+      : '<button class="tb" data-a="anchor" style="height:64px;padding:0 18px"' + (!job || isRun || st.link !== 'online' ? ' disabled' : '') + ' title="Move the job so its top-left corner starts at the toolhead">' + ic(ICON.anchor) + 'Anchor to toolhead</button>') +
     '<div style="flex:1 1 280px;min-width:0;display:flex;flex-direction:column;gap:8px"><div style="height:14px;border-radius:7px;background:var(--sunken);box-shadow:inset 0 0 0 1px var(--line);overflow:hidden"><div style="height:100%;width:' + (frac * 100).toFixed(1) + '%;background:var(--accent)"></div></div>' +
     '<div style="display:flex;justify-content:space-between;gap:8px"><span style="color:var(--text-2)">' + esc(isRun ? (st.state === 'paused' ? 'Paused' : 'Running') + ' · ' + Math.round(frac * 100) + ' % · ' + st.message : st.message) + '</span><span class="mono" style="color:var(--text-2)">' + (isRun ? hms(frac * total) + ' / ' + hms(total) : 'Estimated ' + hms(total)) + '</span></div></div>' +
     '<div style="display:flex;flex-direction:column;align-items:flex-end"><span class="lbl">' + (isRun ? 'Remaining' : 'Estimated time') + '</span><span class="mono" style="font-size:60px;font-weight:500;line-height:1">' + hms(isRun ? total * (1 - frac) : total) + '</span></div>' +
@@ -349,6 +389,43 @@ function set(obj, path, v) {
   o[ks[ks.length - 1]] = v;
 }
 
+// Setup → Network: this computer's addresses (what Pathline connects to), and
+// DHCP or a static IP for one adapter. Applied to the computer straight away,
+// not saved with the machine setup.
+function networkCard(card) {
+  const n = ui.net;
+  if (!n) return card('This computer\'s IP address', '<span class="lbl">Reading the network adapters…</span>');
+  if (n.error) return card('This computer\'s IP address', '<div class="errbox">' + esc(n.error) + '</div>');
+  const port = n.port;
+  const live = n.adapters.filter((a) => a.addresses.length);
+  const connect = live.length
+    ? live.map((a) => '<div class="row"><span>' + esc(a.label) + (a.mode ? '<span class="hint">' + (a.mode === 'dhcp' ? 'DHCP' : 'Static') + (a.gateway ? ' · gateway ' + esc(a.gateway) : '') + '</span>' : '') + '</span><span class="mono" style="font-size:16px;font-weight:500">' + a.addresses.map((x) => esc(x.ip) + ':' + port).join('<br>') + '</span></div>').join('')
+    : '<span class="lbl">No network connection. Plug in the network cable.</span>';
+  if (!ui.netDraft) {
+    const a = live[0] || n.adapters[0] || { name: '', addresses: [], mode: 'dhcp', gateway: '' };
+    ui.netDraft = { adapter: a.name, connection: a.connection, mode: a.mode || 'dhcp', ip: (a.addresses[0] || {}).ip || '', mask: (a.addresses[0] || {}).mask || '255.255.255.0', gateway: a.gateway || '' };
+  }
+  const d = ui.netDraft;
+  const canSet = n.canSet && S.here;
+  const field = (l, k, hint) => '<label class="row"><span>' + l + (hint ? '<span class="hint">' + hint + '</span>' : '') + '</span><span class="fld"><input class="mono" data-n="' + k + '" value="' + esc(d[k]) + '"' + (canSet ? '' : ' disabled') + '></span></label>';
+  const form = !canSet
+    ? '<span class="lbl">' + (S.here ? 'This system can\'t be set from Pathline Run.' : 'The IP address can only be changed on the machine\'s own screen.') + '</span>'
+    : '<div class="row"><span>Adapter</span><select class="cell" data-n="adapter">' + n.adapters.map((a) => '<option value="' + esc(a.name) + '"' + (a.name === d.adapter ? ' selected' : '') + '>' + esc(a.label) + (a.up ? '' : ' (not connected)') + '</option>').join('') + '</select></div>' +
+      '<div class="row"><span>IP address</span><div role="radiogroup" aria-label="IP address mode" class="seg" style="justify-self:start">' +
+      [['dhcp', 'Automatic (DHCP)'], ['static', 'Static']].map(([v, t]) => '<button role="radio" aria-checked="' + (d.mode === v) + '" data-a="netMode" data-v="' + v + '">' + t + '</button>').join('') + '</div></div>' +
+      (d.mode === 'static' ? field('IP address', 'ip', 'e.g. 192.168.1.40') + field('Subnet mask', 'mask') + field('Gateway', 'gateway', 'Optional') : '') +
+      '<div style="display:flex;align-items:center;justify-content:flex-end;gap:12px;padding-top:6px;border-top:1px solid var(--line-soft)">' +
+      '<span class="lbl" style="flex:1">' + (process_platform() === 'win' ? 'Windows asks for administrator permission.' : 'The connection restarts with the new address.') + '</span>' +
+      '<button class="btn-primary" data-a="netApply"' + (n.busy ? ' disabled' : '') + '>' + (n.busy ? 'Applying…' : 'Apply') + '</button></div>';
+  return card('This computer\'s IP address', '<span class="h-sec" style="font-size:14px">Pathline connects to</span>' + connect + '<div class="hr" style="margin:6px 0"></div><span class="h-sec" style="font-size:14px">Set the IP address</span>' + form,
+    'In Pathline: Setup → Machines → the machine → Ethernet, this IP address and port ' + port + '. Changing the address disconnects Pathline until it uses the new one.');
+}
+const process_platform = () => (/Windows/i.test(navigator.userAgent) ? 'win' : 'other');
+async function loadNetwork() {
+  try { ui.net = await call('GET', LOCAL('/network')); } catch (e) { ui.net = { error: e.message }; }
+  render();
+}
+
 function setupView() {
   if (!ui.draft) ui.draft = JSON.parse(JSON.stringify(cfg()));
   const d = ui.draft;
@@ -362,7 +439,10 @@ function setupView() {
   const modes = trotec ? [['serial', 'USB'], ['tcp', 'TCP'], ['sim', 'Simulated']] : [['udp', 'Network'], ['sim', 'Simulated']];
   const portList = ui.ports.length ? '<span class="hint">Found: ' + ui.ports.map((p) => esc(p.path) + (p.label ? ' (' + esc(p.label) + ')' : '')).join(', ') + '</span>' : '';
 
-  const tabs = { Machine: [], 'Work area': [], Controller: [], Jobs: [] };
+  const tabs = { Machine: [], Network: [], 'Work area': [], Controller: [], Jobs: [] };
+  tabs.Network.push(networkCard(card), card('Pathline connection', num('HTTP port', 'httpPort', '', 'Takes effect after a restart') +
+    '<div class="row"><span>This screen is showing</span><span class="mono">' + esc(location.host) + '</span></div>',
+  'Pathline talks to Pathline Run on this port. Use the same port in Pathline\'s machine setup.'));
   tabs.Machine.push(card('Machine', text('Name', 'name') +
     seg('Controller', 'controller', [['trotec', 'Trotec'], ['ruida', 'Ruida']]) +
     seg('Connection', 'connection.mode', modes) +
@@ -387,7 +467,6 @@ function setupView() {
   }
   tabs.Jobs.push(card('Job defaults', seg('Registration marks', 'regMarks', [['refuse', 'Don\'t run'], ['ignore', 'Skip']]) + tog('Remove completed job from queue', 'removeDone') + text('File name prefix', 'prefix'),
     'Pathline Run has no camera yet: jobs with registration marks either wait, or run without print-and-cut correction.'));
-  tabs.Jobs.push(card('Network', '<div class="row"><span>Pathline connects to</span><span class="mono">' + esc(location.hostname) + ':' + esc(location.port || 80) + '</span></div>' + num('HTTP port', 'httpPort', '', 'Takes effect after a restart')));
 
   const tab = tabs[ui.setTab] ? ui.setTab : 'Machine';
   return '<div class="view" style="padding:12px;display:flex;flex-direction:column;gap:12px">' +
@@ -430,7 +509,7 @@ function render() {
   $app.dataset.theme = ui.dark ? 'dark' : 'light';
   if (!S) { $app.innerHTML = header() + '<div class="view" style="display:flex;align-items:center;justify-content:center;color:var(--text-3)">Connecting to Pathline Run…</div>'; return; }
   // don't redraw the setup form under the operator's fingers while a field has focus
-  const focused = document.activeElement && document.activeElement.dataset && document.activeElement.dataset.f;
+  const focused = document.activeElement && document.activeElement.dataset && (document.activeElement.dataset.f || document.activeElement.dataset.n);
   if (ui.view === 'setup' && focused) { const h = $app.querySelector('header'); if (h) h.outerHTML = header(); return; }
   const scroll = $app.querySelector('.view') && ui.drawn === ui.view ? $app.querySelector('.view').scrollTop : 0;
   ui.drawn = ui.view;
@@ -444,7 +523,7 @@ function render() {
 
 const H = {
   nav: () => { ui.navOpen = !ui.navOpen; render(); },
-  go: (v) => { ui.view = v; ui.navOpen = false; if (v === 'setup') { ui.draft = null; loadPorts(); } render(); },
+  go: (v) => { ui.view = v; ui.navOpen = false; if (v === 'setup') { ui.draft = null; ui.netDraft = null; loadPorts(); loadNetwork(); } render(); },
   theme: () => { ui.dark = !ui.dark; ui.themeSet = true; try { localStorage.setItem('plr-theme', ui.dark ? 'dark' : 'light'); } catch (e) { /* ignore */ } render(); },
   sel: (id) => { ui.sel = id; refresh(); },
   up: act(async (id) => move(id, -1)),
@@ -468,6 +547,13 @@ const H = {
     await call('POST', API('/frame'), { box: b });
   }),
   removeDone: act(async () => call('PUT', LOCAL('/config'), { removeDone: !cfg().removeDone })),
+  // pin the selected job's top-left corner to where the head is now (or put it back)
+  anchor: act(async (v) => {
+    if (!ui.sel) return;
+    const r = await call('POST', LOCAL('/jobs/' + ui.sel + '/anchor'), v === 'clear' ? { clear: true } : {});
+    delete ui.pkgs[ui.sel]; // reload the preview where it now sits
+    toast(r.anchor ? 'Anchored: the job starts at X ' + r.anchor.x.toFixed(1) + ', Y ' + r.anchor.y.toFixed(1) + ' mm' : 'Anchor cleared: the job runs where Pathline placed it');
+  }),
   jog: act(async (v) => call('POST', API('/jog'), { axis: v[0], distance: (v[1] === '-' ? -1 : 1) * Number(ui.step) })),
   step: (v) => { ui.step = v; render(); },
   home: act(async () => call('POST', API('/home'), {})),
@@ -476,7 +562,21 @@ const H = {
   simLid: act(async () => call('POST', LOCAL('/sim/lid'), { open: !S.status.interlock })),
   hist: (v) => { ui.histFilter = v; render(); },
   rerun: act(async (id) => { const j = await call('POST', LOCAL('/jobs/' + id + '/requeue'), {}); ui.sel = j.id; ui.view = 'queue'; }),
-  setTab: (v) => { ui.setTab = v; render(); },
+  setTab: (v) => { ui.setTab = v; if (v === 'Network') { ui.netDraft = null; loadNetwork(); } render(); },
+  netMode: (v) => { ui.netDraft.mode = v; render(); },
+  netApply: async () => {
+    const d = ui.netDraft;
+    const what = d.mode === 'dhcp' ? 'automatic (DHCP)' : d.ip + ' / ' + d.mask + (d.gateway ? ', gateway ' + d.gateway : '');
+    if (!window.confirm('Set "' + d.adapter + '" to ' + what + '?\n\nPathline loses the connection until it uses the new address.')) return;
+    ui.net = { ...ui.net, busy: true };
+    render();
+    try {
+      ui.net = await call('POST', LOCAL('/network'), d);
+      ui.netDraft = null;
+      toast('IP address set');
+    } catch (e) { ui.net = { ...ui.net, busy: false }; toast(e.message); }
+    render();
+  },
   setv: (v, el) => {
     let val = JSON.parse(v);
     const f = el.dataset.f;
@@ -537,7 +637,7 @@ $app.addEventListener('click', (e) => {
   if (!el || el.tagName === 'INPUT' || el.disabled) return;
   const fn = H[el.dataset.a];
   if (fn) { e.preventDefault(); fn(el.dataset.v, el); }
-  if (ui.navOpen && el.dataset.a !== 'nav') { ui.navOpen = false; render(); }
+  if (ui.navOpen && el.dataset.a !== 'nav' && el.dataset.a !== 'theme') { ui.navOpen = false; render(); }
 });
 $app.addEventListener('change', (e) => {
   const el = e.target;
@@ -550,6 +650,17 @@ $app.addEventListener('change', (e) => {
     });
     return;
   }
+  if (el.dataset.n && ui.netDraft) {
+    ui.netDraft[el.dataset.n] = el.value.trim();
+    if (el.dataset.n === 'adapter') {
+      // a different adapter: start from what it has now
+      const a = (ui.net.adapters || []).find((x) => x.name === el.value) || {};
+      Object.assign(ui.netDraft, { connection: a.connection, mode: a.mode || 'dhcp', ip: (a.addresses && a.addresses[0] || {}).ip || '', mask: (a.addresses && a.addresses[0] || {}).mask || '255.255.255.0', gateway: a.gateway || '' });
+    }
+    el.blur();
+    render();
+    return;
+  }
   if (el.dataset.f && ui.draft) {
     let v = el.value.trim();
     if (el.dataset.num) { v = Number(v.replace(',', '.')); if (!Number.isFinite(v)) { toast('Enter a number'); render(); return; } }
@@ -558,8 +669,8 @@ $app.addEventListener('change', (e) => {
     render();
   }
 });
-$app.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.dataset && e.target.dataset.f) e.target.blur(); });
-$app.addEventListener('focusout', (e) => { if (e.target.dataset && e.target.dataset.f) setTimeout(render, 0); });
+$app.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.dataset && (e.target.dataset.f || e.target.dataset.n)) e.target.blur(); });
+$app.addEventListener('focusout', (e) => { if (e.target.dataset && (e.target.dataset.f || e.target.dataset.n)) setTimeout(render, 0); });
 
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => { if (!ui.themeSet) { ui.dark = e.matches; render(); } });
 render();

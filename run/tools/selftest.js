@@ -130,6 +130,33 @@ console.log('Example job: ' + example.job.name);
   ok(rx2.notes.length === 2, 'notes say dwells and marks are left out of the file');
 }
 
+console.log('Anchor to toolhead');
+{
+  const anchor = require('../src/job/anchor');
+  const b0 = anchor.box(example);
+  const moved = anchor.apply(example, { x: 300, y: 150 });
+  const b1 = anchor.box(moved);
+  ok(Math.abs(b1[0] - 300) < 1e-6 && Math.abs(b1[1] - 150) < 1e-6, 'job\'s top-left corner moves to the head (300, 150)', b1.join(', '));
+  ok(Math.abs((b1[2] - b1[0]) - (b0[2] - b0[0])) < 1e-6, 'size unchanged');
+  const dx = 300 - b0[0];
+  ok(Math.abs(moved.entities[0].paths[0].p[0][0] - (example.entities[0].paths[0].p[0][0] + dx)) < 1e-3, 'shapes move with it (preview)');
+  ok(example.toolpath[3].p === undefined || anchor.box(example)[0] === b0[0], 'the original package is untouched');
+  let e3 = null; try { anchor.check(example, { x: 700, y: 400 }, [813, 508]); } catch (e) { e3 = e; }
+  ok(e3 && e3.code === 409 && /leave the bed/.test(e3.message), 'anchoring where the job would leave the bed is refused', e3 && e3.message);
+}
+
+console.log('Network address commands (not run)');
+{
+  const net = require('../src/network');
+  const w = net.commands({ adapter: 'Ethernet 2', mode: 'static', ip: '10.42.1.2', mask: '255.255.255.0', gateway: '' }, 'win32')[0];
+  ok(w[0] === 'netsh' && w[1].join(' ') === 'interface ipv4 set address name=Ethernet 2 source=static address=10.42.1.2 mask=255.255.255.0 gateway=none', 'Windows static: netsh set address', w[1].join(' '));
+  const l = net.commands({ adapter: 'eth0', connection: 'Wired connection 1', mode: 'dhcp' }, 'linux');
+  ok(l[0][1].join(' ') === 'connection modify Wired connection 1 ipv4.method auto ipv4.addresses  ipv4.gateway ' && l[1][1][1] === 'up', 'Pi DHCP: nmcli modify + up');
+  ok(net.maskToPrefix('255.255.255.0') === 24 && net.prefixToMask(20) === '255.255.240.0' && !net.validMask('255.0.255.0'), 'subnet masks');
+  let e4 = null; try { net.commands({ adapter: 'x', mode: 'static', ip: '192.168.1.300', mask: '255.255.255.0' }); } catch (e) { e4 = e; }
+  ok(e4 && e4.code === 400, 'a bad IP address is refused');
+}
+
 console.log('Refusals');
 {
   const cfg = config.defaults('trotec');

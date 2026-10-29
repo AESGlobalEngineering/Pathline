@@ -6,6 +6,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const anchor = require('./job/anchor');
 
 const KEEP_DONE = 30;      // finished jobs listed in GET /jobs
 const KEEP_HISTORY = 200;
@@ -59,6 +60,20 @@ class Store {
 
   pkg(id) {
     return JSON.parse(fs.readFileSync(path.join(this.jobDir(id), 'package.json'), 'utf8'));
+  }
+
+  // the package as it will run: moved to its anchor when the operator anchored it to the head
+  runPkg(id) {
+    const j = this.get(id);
+    return anchor.apply(this.pkg(id), j && j.anchor);
+  }
+
+  setAnchor(id, at) {
+    const j = this.get(id);
+    if (!j) return null;
+    j.anchor = at || null;
+    this.flush();
+    return j;
   }
 
   get(id) { return this.jobs.find((j) => j.id === id); }
