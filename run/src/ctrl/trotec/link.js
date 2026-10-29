@@ -276,10 +276,11 @@ class TrotecLink {
 
   send(seg, ctl) { return this.sendCmds(seg.cmds, ctl); }
 
-  async moveTo(x, y) {
+  // beam off; opts.speed in mm/s (press-and-hold jogging), otherwise travel speed
+  async moveTo(x, y, opts = {}) {
     await this.sendCmds([
       TT.definePowerLevels([0]), TT.selectPowerLevel(0), TT.commit(),
-      TT.setParam32(KEY.CutVelocity, this.U.v(this.S.travel)), TT.commit(),
+      TT.setParam32(KEY.CutVelocity, this.U.v(opts.speed || this.S.travel)), TT.commit(),
       TT.moveXY(this.U.x(x), this.U.y(y)), TT.commit()
     ]);
   }

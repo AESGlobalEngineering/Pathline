@@ -310,16 +310,6 @@ function queueView() {
   const runJob = isRun ? S.jobs.find((j) => j.id === st.job) : null;
   const shown = runJob || job;
 
-  // the job's state only: connection and machine problems show top right
-  const machineReady = !S.offline && st.link === 'online' && !st.interlock && st.state !== 'alarm';
-  let status;
-  if (st.state === 'running') status = ['Running', 'accent'];
-  else if (st.state === 'paused') status = ['Paused', 'warn'];
-  else if (st.state === 'framing') status = ['Framing', 'warn'];
-  else if (/^Finished/.test(st.message)) status = ['Job complete', 'ok'];
-  else if (job && machineReady) status = ['Ready', 'ok'];
-  else status = null; // nothing to say
-
   const total = shown ? shown.seconds : 0;
   const frac = isRun ? st.progress : 0;
   const cantStart = !job || st.link !== 'online' || st.interlock || st.state === 'alarm' || st.state === 'framing';
@@ -354,7 +344,6 @@ function queueView() {
     '<div style="display:flex;flex-direction:column;gap:4px"><h1 style="margin:0;font-size:28px;font-weight:600;line-height:1.2">' + esc(shown ? shown.name : 'No job selected') + '</h1>' +
     '<span style="color:var(--text-2)">' + esc(shown ? (shown.material || 'No material') + (cfg().configured ? ' · ' + cfg().name + ' · ' + ctrlName : '') : 'Choose a job from the queue') + '</span></div>' +
     (shownPkg && shownPkg !== 'loading' ? '<div style="display:flex;flex-direction:column;gap:6px">' + procRows(shownPkg) + '</div>' : '') + warn +
-    (status ? '<div style="display:flex;margin-top:4px"><span class="pill lg ' + status[1] + '">' + status[0] + '</span></div>' : '') +
     '<div style="display:flex;align-items:center;gap:12px;min-height:44px"><button role="switch" class="sw" aria-checked="' + !!cfg().removeDone + '" data-a="removeDone" aria-label="Remove completed job from queue"></button><span style="font-size:16px">Remove completed job from queue</span></div>' +
     // pin the job's top-left corner to where the head is now
     // (switching it on uses the head position at that moment; off puts the job back where Pathline placed it)
@@ -393,15 +382,21 @@ function jogView() {
   const tog = (l, k) => '<div style="display:flex;align-items:center;justify-content:space-between;min-height:48px;border-bottom:1px solid var(--line-soft)"><span>' + l + '</span><button role="switch" class="sw" aria-checked="' + !!st.io[k] + '" data-a="io" data-v="' + k + '" aria-label="' + l + '"></button></div>';
   const sim = c.connection.mode === 'sim';
   const btn = (a, d, label) => '<button class="tb" data-a="' + a + '" aria-label="' + label + '" style="height:76px;padding:0">' + ic(d, 26) + '</button>';
+  // jog arrows: tap moves one step, press and hold keeps moving (handled by pointer events below)
+  const arrow = (v, d, label) => {
+    const on = ui.hold && ui.hold.held && ui.hold.axis + (ui.hold.dir < 0 ? '-' : '+') === v;
+    return '<button class="tb" data-hold="' + v + '" aria-label="' + label + '" style="height:76px;padding:0;touch-action:none;user-select:none' + (on ? ';border-color:var(--accent);background:var(--accent-soft);color:var(--accent-fg)' : '') + '">' + ic(d, 26) + '</button>';
+  };
   return '<div class="view" style="display:flex;flex-wrap:wrap;gap:12px;padding:12px;align-content:flex-start">' +
     '<section aria-label="Jog" class="card" style="flex:2 1 560px;min-width:0;padding:22px;display:flex;flex-direction:column;gap:20px"><h2 class="h-sec">Position</h2>' +
     '<div style="display:flex;flex-wrap:wrap;gap:36px">' + [['X', st.pos.x], ['Y', st.pos.y]].map(([l, v]) => '<div style="display:flex;flex-direction:column;gap:2px"><span class="lbl">' + l + ' <span class="mono">mm</span></span><span class="mono" style="font-size:36px;font-weight:500">' + (Number.isFinite(v) ? v.toFixed(1) : '—') + '</span></div>').join('') + '</div>' +
     '<div style="display:flex;flex-wrap:wrap;align-items:center;gap:28px"><div style="display:grid;grid-template-columns:repeat(3,76px);grid-template-rows:repeat(3,76px);gap:8px">' +
-    '<span></span>' + btn('jog', ICON.up, 'Jog Y minus').replace('data-a="jog"', 'data-a="jog" data-v="y-"') + '<span></span>' +
-    btn('jog', ICON.left, 'Jog X minus').replace('data-a="jog"', 'data-a="jog" data-v="x-"') + btn('home', ICON.home, 'Home') + btn('jog', ICON.right, 'Jog X plus').replace('data-a="jog"', 'data-a="jog" data-v="x+"') +
-    '<span></span>' + btn('jog', ICON.down, 'Jog Y plus').replace('data-a="jog"', 'data-a="jog" data-v="y+"') + '<span></span></div>' +
-    '<div style="display:flex;flex-direction:column;gap:6px"><span class="lbl">Step</span><div role="radiogroup" aria-label="Step size" class="seg">' +
-    ['0.1', '1', '10', '100'].map((v) => '<button role="radio" class="mono" style="min-width:56px" aria-checked="' + (ui.step === v) + '" data-a="step" data-v="' + v + '">' + v + '</button>').join('') + '</div></div></div></section>' +
+    '<span></span>' + arrow('y-', ICON.up, 'Jog Y minus') + '<span></span>' +
+    arrow('x-', ICON.left, 'Jog X minus') + btn('home', ICON.home, 'Home') + arrow('x+', ICON.right, 'Jog X plus') +
+    '<span></span>' + arrow('y+', ICON.down, 'Jog Y plus') + '<span></span></div>' +
+    '<div style="display:flex;flex-direction:column;gap:6px"><span class="lbl">Tap: step in mm · Hold: speed in mm/s</span><div role="radiogroup" aria-label="Step size, or speed while held" class="seg">' +
+    ['0.1', '1', '10', '100'].map((v) => '<button role="radio" class="mono" style="min-width:56px" aria-checked="' + (ui.step === v) + '" data-a="step" data-v="' + v + '">' + v + '</button>').join('') + '</div>' +
+    '<span class="lbl" style="min-height:18px">' + (ui.hold && ui.hold.held ? 'Moving ' + ui.hold.axis.toUpperCase() + (ui.hold.dir < 0 ? '−' : '+') + ' at ' + ui.step + ' mm/s' : 'Hold an arrow to keep moving') + '</span></div></div></section>' +
     '<section aria-label="Machine" class="card" style="flex:1 1 360px;min-width:0;padding:22px;display:flex;flex-direction:column;gap:14px"><h2 class="h-sec">Machine</h2>' +
     '<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px">' +
     '<button class="tb" style="height:52px" data-a="home">Home</button><button class="tb" style="height:52px" data-a="frame">Frame job</button>' +
@@ -726,7 +721,40 @@ async function loadPorts() {
   render();
 }
 
+// ---------------------------------------------------------------- jog arrows: tap or hold
+// Shorter than 350 ms: one step of the chosen size. Longer: keep moving at that many mm/s,
+// telling the machine every 200 ms; it stops on release (or by itself if we go quiet).
+const HOLD_MS = 350;
+function endHold(tap) {
+  const h = ui.hold;
+  if (!h) return;
+  clearTimeout(h.timer);
+  clearInterval(h.every);
+  ui.hold = null;
+  if (h.held) call('POST', LOCAL('/jog/release'), {}).catch(() => {});
+  else if (tap) H.jog(h.axis + (h.dir < 0 ? '-' : '+'));
+  render();
+}
+$app.addEventListener('pointerdown', (e) => {
+  const el = e.target.closest('[data-hold]');
+  if (!el || el.disabled || e.button > 0) return;
+  e.preventDefault();
+  endHold(false);
+  const v = el.dataset.hold;
+  const h = { axis: v[0], dir: v[1] === '-' ? -1 : 1, held: false };
+  const send = () => call('POST', LOCAL('/jog/hold'), { axis: h.axis, dir: h.dir, speed: Number(ui.step) }).catch((err) => { toast(err.message); endHold(false); });
+  h.timer = setTimeout(() => { h.held = true; send(); h.every = setInterval(send, 200); render(); }, HOLD_MS);
+  ui.hold = h;
+});
+document.addEventListener('pointerup', () => endHold(true));
+document.addEventListener('pointercancel', () => endHold(false));
+window.addEventListener('blur', () => endHold(false));
+$app.addEventListener('contextmenu', (e) => { if (e.target.closest('[data-hold]')) e.preventDefault(); }); // long press on a touch screen
+
 $app.addEventListener('click', (e) => {
+  // keyboard (Enter/Space) on a jog arrow: one step
+  const arrowEl = e.target.closest('[data-hold]');
+  if (arrowEl) { if (e.detail === 0 && !arrowEl.disabled) H.jog(arrowEl.dataset.hold); return; }
   const el = e.target.closest('[data-a]');
   // the machine panel closes on a tap outside it, or on one of its buttons
   if (ui.machOpen && !(el && el.dataset.a === 'machMenu') && (!e.target.closest('[aria-label="Machine status"]') || el)) { ui.machOpen = false; if (!el) render(); }

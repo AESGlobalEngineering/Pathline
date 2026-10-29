@@ -5,6 +5,14 @@
 
 module.exports = [
   {
+    version: '0.4.3', date: '29 Oct 2026',
+    added: [
+      'Jog page: hold an arrow to keep moving. 0.1, 1, 10 and 100 are the step in mm for a tap, and the speed in mm/s while held. The head stops when you let go, at the edge of the bed, or by itself if the screen stops answering.',
+      'The head can be jogged, homed and sent to 0, 0 with the lid open (the beam is always off for these). Start, Frame and test fire still need the lid closed.'
+    ],
+    fixed: ['The "Ready" label on the Queue page is gone too.']
+  },
+  {
     version: '0.4.2', date: '29 Oct 2026',
     added: [],
     fixed: [

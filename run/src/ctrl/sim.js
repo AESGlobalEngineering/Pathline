@@ -61,9 +61,16 @@ class SimLink {
     return { state, pos: { ...this.pos }, interlock: this.lidOpen, marker: this.run ? this.run.marker : undefined };
   }
 
-  async moveTo(x, y) {
+  async moveTo(x, y, opts = {}) {
+    // start from where the head is right now, not where the last 100 ms tick left it
+    if (this.move) {
+      const k = Math.min(1, (Date.now() - this.move.t0) / this.move.ms);
+      this.pos.x = this.move.from.x + (this.move.to.x - this.move.from.x) * k;
+      this.pos.y = this.move.from.y + (this.move.to.y - this.move.from.y) * k;
+    }
     const d = Math.hypot(x - this.pos.x, y - this.pos.y);
-    this.move = { from: { ...this.pos }, to: { x, y }, t0: Date.now(), ms: Math.max(150, (d / (this.cfg.speed || 500)) * 1000) };
+    const ms = opts.speed ? (d / opts.speed) * 1000 : Math.max(150, (d / (this.cfg.speed || 500)) * 1000);
+    this.move = { from: { ...this.pos }, to: { x, y }, t0: Date.now(), ms: Math.max(1, ms) };
   }
 
   async home() { return this.moveTo(0, 0); }

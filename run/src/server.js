@@ -223,6 +223,9 @@ function start(opts = {}) {
       setTimeout(() => updates.install(), 300);
       return { restarting: true };
     },
+    // press and hold on the Jog page: { axis, dir: 1 | -1, speed mm/s }, repeated while held
+    'POST /jog/hold': (b) => machine.jogHold(b),
+    'POST /jog/release': () => machine.jogRelease(),
     'POST /alarm/clear': () => machine.clearAlarm(),
     'POST /reconnect': () => { machine.connect(); return { ok: true }; },
     'POST /sim/lid': (b) => {

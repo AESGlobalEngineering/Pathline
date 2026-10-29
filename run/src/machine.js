@@ -82,7 +82,7 @@ class Machine {
   }
 
   apply(p) {
-    if (p.pos && Number.isFinite(p.pos.x)) this.st.pos = p.pos;
+    if (p.pos && Number.isFinite(p.pos.x)) { this.st.pos = p.pos; this.posAt = Date.now(); }
     this.st.interlock = !!p.interlock;
     if (!this.run && this.st.state !== 'alarm') {
       this.st.state = this.framing ? 'framing' : 'idle';
@@ -100,22 +100,24 @@ class Machine {
   }
 
   // ------------------------------------------------------------ manual control
-  busy() { return !!this.run || this.st.state === 'framing' || !!this.framing; }
+  busy() { return !!this.run || this.st.state === 'framing' || !!this.framing || !!this.hold; }
 
-  guard() {
+  // opts.lidOpenOk: moves with the beam off (jog, hold, home) are allowed with the lid open
+  guard(opts = {}) {
     if (!this.cfg.configured) throw busyErr('No machine is set up in Pathline Run yet');
     if (this.st.link !== 'online') throw busyErr('The machine isn\'t connected: ' + this.st.message);
     if (this.run) throw busyErr('A job is running');
+    if (this.hold) throw busyErr('The head is being jogged');
     if (this.busy()) throw busyErr('The machine is framing');
     if (this.st.state === 'alarm') throw busyErr('Alarm: ' + this.st.message + '. Clear it on the HMI first.');
-    if (this.st.interlock) throw busyErr('Lid is open');
+    if (this.st.interlock && !opts.lidOpenOk) throw busyErr('Lid is open');
   }
 
   clampX(x) { return Math.max(0, Math.min(this.cfg.bed[0], x)); }
   clampY(y) { return Math.max(0, Math.min(this.cfg.bed[1], y)); }
 
   async jog(b) {
-    this.guard();
+    this.guard({ lidOpenOk: true }); // beam off: the head may move with the lid open
     let x = this.st.pos.x, y = this.st.pos.y;
     if (b.x !== undefined || b.y !== undefined) {
       if (b.x !== undefined) x = Number(b.x);
@@ -135,8 +137,65 @@ class Machine {
     return { pos: this.st.pos };
   }
 
+  // ------------------------------------------------------------ press and hold
+  // The screen sends this every ~200 ms while a jog arrow is held. The head moves in short
+  // steps at `speed` mm/s, never more than ~0.3 s ahead of where it is, and stops at the bed
+  // edge, when the lid opens, when anything else needs the machine, or when the screen goes
+  // quiet for 0.6 s (released, or the connection dropped).
+  async jogHold(b) {
+    const axis = b.axis;
+    const dir = Math.sign(Number(b.dir));
+    const speed = Math.max(0.1, Math.min(Number(b.speed) || 1, (this.cfg.trotec && this.cfg.trotec.maxSpeed) || 500, 500));
+    if ((axis !== 'x' && axis !== 'y') || !dir) throw Object.assign(new Error('axis must be x or y, dir 1 or -1'), { code: 400 });
+    const until = Date.now() + 450;
+    if (this.hold && this.hold.axis === axis && this.hold.dir === dir) {
+      Object.assign(this.hold, { until, speed });
+      return { holding: true };
+    }
+    if (!this.hold) this.guard({ lidOpenOk: true });
+    const at = { x: this.st.pos.x, y: this.st.pos.y };
+    this.hold = { axis, dir, speed, until, at, ideal: at[axis], last: Date.now(), busy: false };
+    if (!this.holdTimer) this.holdTimer = setInterval(() => this.holdTick(), 100);
+    return { holding: true };
+  }
+
+  jogRelease() {
+    this.hold = null;
+    clearInterval(this.holdTimer);
+    this.holdTimer = null;
+    return { holding: false };
+  }
+
+  async holdTick() {
+    const h = this.hold;
+    if (!h || h.busy) return;
+    if (Date.now() > h.until || this.run || this.framing || this.st.link !== 'online' || this.st.state === 'alarm') { this.jogRelease(); return; }
+    // where the head should be by now at this speed, but never more than ~0.15 s ahead of
+    // where it is, so it stops close to where the arrow was let go
+    const now = Date.now();
+    const max = h.axis === 'x' ? this.cfg.bed[0] : this.cfg.bed[1];
+    h.ideal += h.dir * h.speed * ((now - h.last) / 1000);
+    h.last = now;
+    const lead = h.speed * 0.15 + 0.05;
+    // the reported position is a moment old: allow for how far the head has moved since
+    const age = Math.min(0.3, (now - (this.posAt || now)) / 1000);
+    const cur = this.st.pos[h.axis] + h.dir * h.speed * age;
+    const target = Math.max(0, Math.min(max, h.dir > 0 ? Math.min(h.ideal, cur + lead) : Math.max(h.ideal, cur - lead)));
+    h.ideal = target;
+    if (h.dir * (target - h.at[h.axis]) < 0.005) return; // nothing new to send (or at the bed edge)
+    h.at[h.axis] = target;
+    h.busy = true;
+    try {
+      await this.link.moveTo(h.at.x, h.at.y, { speed: h.speed });
+      this.apply(await this.link.poll());
+    } catch (e) {
+      this.log('jog: ' + e.message);
+      this.jogRelease();
+    } finally { h.busy = false; }
+  }
+
   async home() {
-    this.guard();
+    this.guard({ lidOpenOk: true });
     await this.link.home();
     return { ok: true };
   }
@@ -313,6 +372,7 @@ class Machine {
 
   // always accepted, in every state
   async stop() {
+    this.jogRelease();
     this.framing = false;
     if (this.run) this.run.ctl.aborted = true;
     try { if (this.link) await this.link.abort(); } catch (e) { this.log('stop: ' + e.message); }
