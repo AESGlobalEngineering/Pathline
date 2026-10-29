@@ -1796,9 +1796,11 @@ class Component extends DCLogic {
       const on = selIds.includes(e.id);
       const b = CC.entityBox(e);
       const procOff = offAci.has(e.aci);
+      const pk = CC.processOfAci(job, e.aci);
+      const outOff = pk >= 0 && job.processes[pk].out === false;
       return {
         name: e.name + (e.locked ? ' · locked' : '') + (e.group ? ' · grouped' : ''),
-        meta: (e.type || 'Path') + ' · ' + CC.boxW(b).toFixed(1) + ' × ' + CC.boxH(b).toFixed(1) + ' mm' + (!isLaser ? ' · bed ' + ((e.bed || 0) + 1) : ''),
+        meta: (e.type || 'Path') + ' · ' + CC.boxW(b).toFixed(1) + ' × ' + CC.boxH(b).toFixed(1) + ' mm' + (!isLaser ? ' · bed ' + ((e.bed || 0) + 1) : '') + (outOff ? ' · ' + job.processes[pk].name + ' is off, not sent' : ''),
         chips: [chip(e.aci)], on, op: e.hidden || procOff ? 0.45 : 1, off: procOff,
         bg: on ? accentSoft : 'transparent', bd: on ? accent : 'transparent',
         pick: (ev) => { if (!procOff) this.setState({ sel: ev && ev.shiftKey ? (on ? selIds.filter((x) => x !== e.id) : selIds.concat(e.id)) : LRC.ops.expand(job, [e.id]) }); },

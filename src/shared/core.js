@@ -1338,6 +1338,9 @@
       out.push(inside ? { ok: true, l: isLaser ? 'Job inside bed' : 'Parts inside bed edges' } : { ok: false, l: 'Objects outside the bed' });
     }
     if (orphan.length) out.push({ ok: false, l: 'No process for ACI ' + orphan.join(', ') });
+    // objects whose process has output switched off are not sent: say so (by process)
+    const offNames = job.processes.filter((p) => p.out === false && !isRegProc(p) && (p.aci || []).some((a) => used.has(a))).map((p) => p.name);
+    if (offNames.length) out.push({ ok: false, warn: true, l: 'Output off: ' + offNames.join(', ') + ' — those objects won\'t be sent' });
     if (isLaser) {
       const cutAci = new Set(job.processes.filter((p) => p.proc === 'Cut' && p.out !== false).flatMap((p) => p.aci || []));
       // open lines are fine (tear-off lines, perforations); a contour whose ends

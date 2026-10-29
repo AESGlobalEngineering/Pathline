@@ -482,9 +482,11 @@
     const off = ops.offAci(job);
     return job.entities.filter((e) => ids.includes(e.id) || (e.group && groups.has(e.group) && !off.has(e.aci))).map((e) => e.id);
   };
-  // colours of processes hidden on the canvas (eye icon) or with output off
-  ops.offAci = (job) => new Set(job.processes.filter((p) => p.hidden || p.out === false).flatMap((p) => p.aci || []));
-  // everything that can be selected (visible, process output on)
+  // colours of processes hidden on the canvas (eye icon). Only the eye blocks
+  // selection: objects of a process with output off are drawn faded and aren't
+  // sent, but can still be selected, moved and recoloured.
+  ops.offAci = (job) => new Set(job.processes.filter((p) => p.hidden).flatMap((p) => p.aci || []));
+  // everything that can be selected (visible, and its process not hidden with the eye)
   ops.pickableIds = (job) => { const off = ops.offAci(job); return job.entities.filter((e) => !e.hidden && !off.has(e.aci)).map((e) => e.id); };
   ops.selected = (job, ids) => {
     const set = new Set(ids);

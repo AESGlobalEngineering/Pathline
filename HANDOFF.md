@@ -15,6 +15,9 @@ Latest round (28 Oct, final):
 - **Dark mode bed is grey** (`--bed`, `--sheet`, `--bed-grid*` in theme.css). **ACI 7 shows as white in dark mode** (black in light), as in CAD, and so do the marks drawn on the bed (registration marks, engrave hatching, arrows, start points): see the `--aci7*` and `--ink` tokens, and `LRC.aci.hex/fg/stroke` in app.js. Exports (DXF/SVG/PDF) still use real black.
 - **Sample machines and materials from earlier builds are removed on first start** (main.js, tracked by `settings.samplesRemoved`). This is by exact id (trotec, flatbed, laser2, acr-print-3 … brass-1); anything the operator created stays.
 
+Version 1.2.3 (29 Oct):
+- **Fixed: imported objects couldn't be selected** when their colour belonged to a process with output off. A plotter material's Pen (ACI 7, 8) is off by default, and DXF lines usually import as ACI 7. Those objects were treated like hidden ones. Now only the eye icon blocks selection (`ops.offAci`): output-off objects are drawn faded and not sent, but can be selected, moved and recoloured. The Objects list says "<process> is off, not sent", and `checkJob` warns "Output off: <process> — those objects won't be sent". (Reported via the new bug report: plotter, simulated Ruida, one DXF outline in ACI 7.)
+
 Version 1.2.2 (29 Oct):
 - **Bug reports are sent through GitHub.** Help → Report a bug…:
   - keeps a copy in the reports folder;
