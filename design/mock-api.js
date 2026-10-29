@@ -127,6 +127,8 @@
   // ---------------------------------------------------------------- api
   window.api = {
     app: {
+      whatsNew: () => wait([]),
+      changelog: () => wait([{ version: '1.2.5', date: 'sample', added: ['A new feature, as it appears in What\'s new.'], fixed: ['A fixed bug.'] }]),
       info: () => wait({ version: '1.0.0 (design preview)', dataDir: '(not saved in the design preview)', platform: 'win32' }),
       openExternal: () => { toast('Opens a web page in the browser'); return wait(null); },
       showItem: () => wait(null),

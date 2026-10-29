@@ -12,8 +12,22 @@ const ex = require('./exporters');
 const device = require('./device');
 const { Reports } = require('./reports');
 const updates = require('./updates');
+const changelog = require('./changelog');
+
+// "1.2.10" > "1.2.9"
+const newer = (a, b) => {
+  const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number);
+  for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0);
+  return false;
+};
+// the changelog entries to show once after an update (set at start)
+let whatsNew = [];
 
 const UI = path.join(__dirname, '..', 'ui');
+// how often a running Pathline checks GitHub for a new version: each check reads
+// a few hundred bytes (latest.yml), so this costs nothing noticeable
+// (LRC_UPDATE_EVERY_MS overrides, for testing)
+const UPDATE_EVERY_MS = 5 * 60 * 1000;
 let store;
 let win;
 let reports = null;
@@ -235,6 +249,10 @@ function handle(name, fn) {
 
 function registerIpc() {
   handle('app:info', () => ({ version: app.getVersion(), dataDir: store.dir, reportsDir: reports.dir, platform: process.platform, updates: updates.configured() }));
+
+  // what's new: once after an update (then forgotten), and the whole list for Help → What's new
+  handle('app:whatsNew', () => { const w = whatsNew; whatsNew = []; return w; });
+  handle('app:changelog', () => changelog);
 
   // bug and crash reports (saved in the reports folder, never sent)
   handle('report:error', (e) => { reports.log('page', (e.page || '') + ' ' + (e.stack || e.message)); });
@@ -516,13 +534,16 @@ function createWindow() {
     win.loadFile(path.join(UI, 'MainDetailed.dc.html'));
   });
   win.webContents.on('unresponsive', () => reports && reports.log('page', 'window not responding'));
-  // check for updates each time the app opens; the page asks before anything downloads
+  // check for updates when the app opens and every few hours while it runs;
+  // the page asks before anything downloads
   win.webContents.once('did-finish-load', () => {
     // test runs skip update checks unless LRC_UPDATES=1
     if (process.env.LRC_SHOT && process.env.LRC_UPDATES !== '1') return;
     updates.setup((k, m) => reports.log(k, m), (s) => { if (win && !win.isDestroyed()) win.webContents.send('update:state', s); });
     // a found update is sent to the window as 'available', which asks the operator
     setTimeout(() => updates.check(), 3000);
+    const every = Number(process.env.LRC_UPDATE_EVERY_MS) || UPDATE_EVERY_MS;
+    setInterval(() => updates.check({ periodic: true }), every);
   });
   if (process.env.LRC_SHOT) attachTestHarness(win);
   win.loadFile(path.join(UI, process.env.LRC_PAGE || 'MainDetailed.dc.html'));
@@ -597,7 +618,19 @@ if (!testRun && !app.requestSingleInstanceLock()) {
     if (!process.env.LRC_DATA_DIR && !fs.existsSync(dataDir) && fs.existsSync(oldDir)) {
       try { fs.cpSync(oldDir, dataDir, { recursive: true }); } catch (e) { /* start fresh */ }
     }
+    const hadData = fs.existsSync(path.join(dataDir, 'settings.json'));
     store = new Store(dataDir);
+    // after an update: the changes since the version that last ran. Installs from
+    // before this was recorded see the current version's changes; a fresh
+    // install sees none.
+    {
+      const s = store.get('settings');
+      const current = app.getVersion();
+      const prev = s.lastRunVersion || (hadData ? (changelog.find((c) => newer(current, c.version)) || {}).version : current);
+      if (prev && newer(current, prev)) whatsNew = changelog.filter((c) => newer(c.version, prev) && !newer(c.version, current));
+      if (testRun && !process.env.LRC_WHATSNEW) whatsNew = [];
+      if (s.lastRunVersion !== current) store.set('settings', { ...s, lastRunVersion: current });
+    }
     // bug and crash reports live beside the data folder
     reports = new Reports(path.join(path.dirname(dataDir), 'reports'), () => ({ version: app.getVersion(), packaged: app.isPackaged }));
     reports.startSession();

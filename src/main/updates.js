@@ -13,6 +13,7 @@ const { app } = require('electron');
 
 let updater = null;
 let send = () => {};
+let offered = null; // version already offered to the operator this session
 // what the window needs to show: idle | available | downloading | ready | error
 let now = { state: 'idle' };
 const set = (s) => { now = { ...s, current: app.getVersion() }; send(now); return now; };
@@ -38,13 +39,20 @@ function setup(log, toWindow) {
 }
 
 // Asks GitHub. Returns { state: 'current' | 'available' | 'downloading' | 'ready' | 'none' | 'off' | 'portable' | 'error', version, ... }
-async function check() {
+// opts.periodic: the background check — a version already offered this session
+// isn't offered again (the operator said Later), only a newer one is.
+async function check(opts) {
   if (now.state === 'downloading' || now.state === 'ready') return now;
   if (process.env.PORTABLE_EXECUTABLE_DIR) return { state: 'portable', version: app.getVersion() };
   if (!updater) return { state: 'off', version: app.getVersion() };
   try {
     const r = await updater.checkForUpdates();
-    if (r && r.isUpdateAvailable) return set({ state: 'available', version: r.updateInfo.version });
+    if (r && r.isUpdateAvailable) {
+      const v = r.updateInfo.version;
+      if (opts && opts.periodic && offered === v) return { state: 'available', version: v, current: app.getVersion() };
+      offered = v;
+      return set({ state: 'available', version: v });
+    }
     return { state: 'current', version: app.getVersion() };
   } catch (e) {
     // a repository with no published release yet is not an error for the operator

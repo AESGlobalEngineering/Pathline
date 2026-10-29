@@ -15,6 +15,13 @@ Latest round (28 Oct, final):
 - **Dark mode bed is grey** (`--bed`, `--sheet`, `--bed-grid*` in theme.css). **ACI 7 shows as white in dark mode** (black in light), as in CAD, and so do the marks drawn on the bed (registration marks, engrave hatching, arrows, start points): see the `--aci7*` and `--ink` tokens, and `LRC.aci.hex/fg/stroke` in app.js. Exports (DXF/SVG/PDF) still use real black.
 - **Sample machines and materials from earlier builds are removed on first start** (main.js, tracked by `settings.samplesRemoved`). This is by exact id (trotec, flatbed, laser2, acr-print-3 … brass-1); anything the operator created stays.
 
+Version 1.2.5 (29 Oct):
+- **Periodic update checks:** every 5 minutes while Pathline runs (`UPDATE_EVERY_MS` in main.js; each check reads only latest.yml), as well as at start. A version the operator said Later to isn't offered again that session (`check({ periodic: true })` in updates.js).
+- **What's new after an update:**
+  - `src/main/changelog.js` lists every release, newest first, with `added` and `fixed`. **Add an entry with every version bump**; the self-test fails if the top entry isn't the package.json version.
+  - At start, main.js compares with `settings.lastRunVersion` and shows the entries in between once. Installs from before this feature see the current version's entry; fresh installs see none.
+  - Help → What's new shows the whole list. `LRC_WHATSNEW=1` lets harness runs show it.
+
 Version 1.2.4 (29 Oct):
 - **Arrays are editable** (from a bug report: changing an array added a second set of copies on top, 757 objects). The original objects keep the settings (`array: { id, cols, rows, gx, gy }`) and each copy is marked `arrayOf: id`.
   - Array on any part of an existing array opens as **Edit array** with its current values, and **Update** replaces the copies; 1 × 1 removes them (`ops.arrayOf`, `ops.array` in app.js).

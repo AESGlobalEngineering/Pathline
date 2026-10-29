@@ -223,6 +223,13 @@ async function main() {
     ok(beds.placed.length === 30 && beds.areas === 2 && one.placed.length + one.unplaced.length === 30 && one.unplaced.length > 0, 'plotter nesting adds beds as needed (' + beds.areas + ' beds); a single sheet leaves out what does not fit (' + one.unplaced.length + ')');
   }
 
+  console.log('Release notes');
+  {
+    const changelog = require('../src/main/changelog');
+    const version = require('../package.json').version;
+    ok(changelog[0].version === version && changelog.every((c) => c.version && Array.isArray(c.added) && Array.isArray(c.fixed)), 'What\'s new has an entry for this version (' + version + ')');
+  }
+
   console.log('Bug report file');
   {
     // the .zip writer: read the first entry back (local header → deflated data)

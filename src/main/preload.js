@@ -14,7 +14,7 @@ const call = (channel) => async (...args) => {
 };
 
 contextBridge.exposeInMainWorld('api', {
-  app: { info: call('app:info'), openExternal: call('app:openExternal'), showItem: call('app:showItem'), confirm: call('app:confirm'), pickFolder: call('app:pickFolder') },
+  app: { whatsNew: call('app:whatsNew'), changelog: call('app:changelog'), info: call('app:info'), openExternal: call('app:openExternal'), showItem: call('app:showItem'), confirm: call('app:confirm'), pickFolder: call('app:pickFolder') },
   settings: { get: call('settings:get'), set: call('settings:set') },
   machines: { list: call('machines:list'), save: call('machines:save'), saveAll: call('machines:saveAll'), remove: call('machines:remove'), create: call('machines:create'), duplicate: call('machines:duplicate'), placeholder: call('machines:placeholder') },
   materials: {

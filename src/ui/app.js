@@ -1461,6 +1461,41 @@
       if (send.button === 'github') window.api.app.openExternal(res.issueUrl).catch(fail);
     },
     openReports: () => window.api.report.openFolder(),
+    // What's new: entries [{ version, date, added: [], fixed: [] }], newest first
+    showChangelog(entries, title) {
+      if (!entries || !entries.length) return;
+      const scrim = document.createElement('div');
+      scrim.className = 'lrc-scrim';
+      const box = document.createElement('div');
+      box.className = 'lrc-dlg';
+      box.style.maxWidth = '560px';
+      box.setAttribute('role', 'dialog');
+      box.setAttribute('aria-label', 'What\'s new');
+      const add = (parent, tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; parent.appendChild(e); return e; };
+      add(box, 'h2', '', title || 'What\'s new');
+      for (const c of entries) {
+        const sec = add(box, 'section', 'cl-ver');
+        add(sec, 'h3', '', 'Pathline ' + c.version);
+        if (c.date) add(sec, 'span', 'lbl', c.date);
+        [['New', c.added], ['Fixed', c.fixed]].forEach(([label, list]) => {
+          if (!list || !list.length) return;
+          add(sec, 'div', 'cl-kind', label);
+          const ul = add(sec, 'ul');
+          list.forEach((t) => add(ul, 'li', '', t));
+        });
+      }
+      const row = add(box, 'div', 'btns');
+      const ok = add(row, 'button', 'primary', 'Got it');
+      ok.type = 'button';
+      const close = () => { scrim.remove(); document.removeEventListener('keydown', onKey, true); };
+      const onKey = (e) => { if (e.key === 'Escape' || e.key === 'Enter') { e.stopPropagation(); close(); } };
+      ok.onclick = close;
+      document.addEventListener('keydown', onKey, true);
+      scrim.appendChild(box);
+      document.body.appendChild(scrim);
+      ok.focus();
+    },
+    async whatsNew() { this.showChangelog(await window.api.app.changelog(), 'What\'s new in Pathline'); },
     // the update window for a given state (used by the test harness)
     showUpdate: (s) => updateWindow(s),
     // Help → Check for updates: an update opens the update window; otherwise says what it found
@@ -1546,6 +1581,10 @@
       else if (s.state === 'ready') readyToast(s);
       else if (s.state === 'error') toast('The update didn\'t download: ' + (s.message || 'no connection'), { kind: 'err', action: 'Try again', onAction: () => window.api.update.download().then((n) => updateWindow(n)).catch(fail) });
     });
+    // the first page after an update shows what changed since the last version that ran
+    window.api.app.whatsNew().then((list) => {
+      if (list && list.length) setTimeout(() => support.showChangelog(list, 'Pathline has been updated to ' + list[0].version), 600);
+    }).catch(() => {});
     // after moving to another page: a download in progress shows its window again
     window.api.update.status().then((s) => { if (s.state === 'downloading') updateWindow(s); }).catch(() => {});
   }

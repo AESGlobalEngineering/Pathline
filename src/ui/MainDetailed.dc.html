@@ -1778,6 +1778,7 @@ class Component extends DCLogic {
       ['Help', [
         ['Keyboard shortcuts', 'Ctrl+/', null, () => this.showShortcuts()], '-',
         ['Check for updates…', null, null, () => LRC.support.checkUpdates(true)],
+        ['What\'s new', null, null, () => LRC.support.whatsNew()],
         ['Report a bug…', null, null, () => LRC.support.reportBug()],
         ['Open reports folder', null, null, () => LRC.support.openReports()], '-',
         ['About', null, null, () => this.about()]

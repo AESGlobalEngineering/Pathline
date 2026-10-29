@@ -32,6 +32,12 @@ html, body { height: 100%; overflow: hidden; background: var(--bg, #F3F4F6); }
 .lrc-dlg .fld input.sans, .lrc-dlg .fld select { font-family: var(--font); }
 .lrc-dlg .fld select option { background: var(--surface); color: var(--text); }
 .lrc-dlg .fld.area { height: auto; padding: 8px 10px; align-items: stretch; }
+/* What's new: one section per version */
+.lrc-dlg .cl-ver { display: flex; flex-direction: column; gap: 4px; padding-top: 10px; border-top: 1px solid var(--line-soft); }
+.lrc-dlg .cl-ver h3 { margin: 0; font-size: 14px; font-weight: 600; }
+.lrc-dlg .cl-kind { margin-top: 6px; font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-3); }
+.lrc-dlg .cl-ver ul { margin: 2px 0 0; padding-left: 18px; color: var(--text-2); line-height: 1.45; }
+.lrc-dlg .cl-ver li + li { margin-top: 3px; }
 .lrc-dlg .fld textarea { border: 0; outline: 0; width: 100%; min-width: 0; resize: vertical; font: 13px/1.45 var(--font); background: transparent; color: var(--text); padding: 0; }
 .lrc-dlg .seg { display: flex; padding: 3px; gap: 2px; background: var(--sunken); border-radius: var(--ctl-r); }
 .lrc-dlg .seg button { flex: 1; height: 30px; border: 0; border-radius: 6px; background: transparent; color: var(--text-3); cursor: pointer; font: 500 13px var(--font); }
