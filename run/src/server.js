@@ -16,6 +16,7 @@ const Machine = require('./machine');
 const validate = require('./job/validate');
 const plan = require('./job/plan');
 const { controller, CONTROLLERS } = require('./ctrl');
+const { Updates } = require('./updates');
 const pkgJson = require('../package.json');
 
 const argv = process.argv.slice(2);
@@ -41,6 +42,7 @@ function log(msg) {
 
 const store = new Store(DATA);
 const machine = new Machine(cfg, store, log);
+const updates = new Updates({ log, auto: () => cfg.autoUpdate !== false });
 
 const err = (code, msg) => Object.assign(new Error(msg), { code });
 
@@ -116,7 +118,7 @@ function exportJob(id, format, ctrlName) {
 
 const local = {
   'GET /state': () => ({
-    app: pkgJson.version, config: cfg, status: machine.status(), info: machine.info,
+    app: pkgJson.version, update: updates.status(), config: cfg, status: machine.status(), info: machine.info,
     jobs: store.jobs.filter((j) => !j.hidden), history: store.history.slice(0, 100), controllers: Object.keys(CONTROLLERS)
   }),
   'GET /log': () => logLines,
@@ -138,6 +140,16 @@ const local = {
   },
   'GET /presets': () => ({ trotec: config.defaults('trotec'), ruida: config.defaults('ruida') }),
   'POST /import': (b) => { const j = queueJob(validate.fromCjob(b), 'import'); return { id: j.id }; },
+  'POST /update/check': () => updates.check(false),
+  'POST /update/download': () => updates.download(),
+  // the launcher starts the newly installed version when we exit with 75
+  'POST /update/restart': () => {
+    if (updates.status().state === 'off') throw err(409, 'Running from the source folder: restart it yourself');
+    if (machine.run || machine.busy()) throw err(409, 'Wait until the job has finished');
+    log('restarting for the update');
+    setTimeout(() => process.exit(75), 300);
+    return { restarting: true };
+  },
   'POST /alarm/clear': () => machine.clearAlarm(),
   'POST /reconnect': () => { machine.connect(); return { ok: true }; },
   'POST /sim/lid': (b) => {
@@ -192,6 +204,7 @@ const server = http.createServer(async (req, res) => {
 server.listen(PORT, () => {
   log('Pathline Run ' + pkgJson.version + ' on http://localhost:' + PORT + ' · ' + CONTROLLERS[cfg.controller].label + ' · ' + cfg.connection.mode + ' · data in ' + DATA);
   machine.connect().then(() => machine.startPolling());
+  updates.start();
   if (flag('open')) {
     const u = 'http://localhost:' + PORT + '/';
     const cmd = process.platform === 'win32' ? ['cmd', ['/c', 'start', '', u]] : process.platform === 'darwin' ? ['open', [u]] : ['xdg-open', [u]];

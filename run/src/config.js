@@ -34,6 +34,7 @@ const BASE = {
   origin: 'tl', units: 'mm', home: true, prefix: '',
   regMarks: 'refuse',            // 'refuse' or 'ignore' (run without print-and-cut correction)
   removeDone: true,              // completed jobs leave the queue for History
+  autoUpdate: true,              // download new versions in the background (they install on restart)
   trotec: { unit: 0.010125, offset: [14.833125, 9.527625], laserSource: 5, travelSpeed: 700, maxSpeed: 2000, airOutput: 4, overscan: 10, cutPowerCorrection: 15, engravePowerCorrection: 20 },
   ruida: { magic: 0x88, origin: 'tr' },
   sim: { speedup: 20 }

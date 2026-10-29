@@ -54,7 +54,13 @@ const act = (fn) => async (...a) => { try { await fn(...a); } catch (e) { toast(
 
 // ---------------------------------------------------------------- data
 async function refresh() {
-  try { S = await call('GET', LOCAL('/state')); S.offline = false; } catch (e) { if (S) S.offline = true; }
+  try {
+    const next = await call('GET', LOCAL('/state'));
+    // a new version is running: load its screen
+    if (S && next.app !== S.app) { location.reload(); return; }
+    S = next;
+    S.offline = false;
+  } catch (e) { if (S) S.offline = true; }
   const queue = visibleQueue();
   if (!queue.some((j) => j.id === ui.sel)) {
     const run = queue.find((j) => j.status === 'running');
@@ -116,16 +122,41 @@ function header() {
     (ui.navOpen ? '<div role="menu" class="pop" style="position:absolute;left:0;top:52px;min-width:230px">' +
       '<button role="menuitem" class="opt" data-a="go" data-v="setup">Machine setup</button>' +
       '<button role="menuitem" class="opt" data-a="log">Diagnostics log</button>' +
-      '<div class="sep"></div><button role="menuitem" class="opt" data-a="about">About</button></div>' : '') +
+      '<div class="sep"></div><button role="menuitem" class="opt" data-a="checkUpdate">Check for updates…</button>' +
+      '<button role="menuitem" class="opt" data-a="about">About</button></div>' : '') +
     '</div><div class="brand"><img class="brand-mark" src="icon.svg" width="34" height="34" alt=""><span class="word">Pathline <span style="font-weight:400">Run</span></span></div></div>' +
     '<nav aria-label="Views" class="tabs views" style="flex:1 1 280px">' + views.map(([k, l, d]) =>
       '<button data-a="go" data-v="' + k + '" aria-current="' + (ui.view === k ? 'page' : 'false') + '">' + ic(d) + '<span class="lab">' + l + '</span>' + (k === 'queue' ? '<span class="count">' + nq + '</span>' : '') + '</button>').join('') + '</nav>' +
-    '<div style="display:flex;align-items:center;gap:8px">' +
+    '<div style="display:flex;align-items:center;gap:8px">' + updateChip() +
     '<button class="ib theme-btn" data-a="theme" aria-label="Light or dark theme" title="Light or dark theme">' + ic(ui.dark ? ICON.sun : ICON.moon) + '</button>' +
     (c ? '<div style="display:flex;align-items:center;gap:10px;height:48px;padding:0 12px 0 8px;border:1px solid var(--line-strong);border-radius:var(--ctl-r)">' +
       '<span class="badge">LASER</span><span style="display:flex;flex-direction:column;line-height:1.2"><span style="font-weight:600">' + esc(c.name) + '</span><span class="lbl">' + esc((c.controller === 'ruida' ? 'Ruida' : 'Trotec') + ' · ' + conn) + '</span></span>' +
       '<span aria-hidden="true" style="width:9px;height:9px;border-radius:50%;background:' + dot + '"></span></div>' : '') +
     '</div></header>';
+}
+
+// update notice in the header: only while downloading or ready to install
+function updateChip() {
+  const u = S && S.update;
+  if (!u) return '';
+  if (u.state === 'ready') return '<button class="tb sm" data-a="about" style="border-color:var(--ok-dot);color:var(--ok)">Update ' + esc(u.version) + ' ready · Restart</button>';
+  if (u.state === 'downloading') return '<span class="pill">Downloading update ' + (u.percent || 0) + ' %</span>';
+  return '';
+}
+
+function updateText(u) {
+  if (!u) return '';
+  switch (u.state) {
+    case 'off': return 'Running from the source folder: updates come with git pull.';
+    case 'idle': return 'Checks for updates shortly after starting, then every 6 hours.';
+    case 'checking': return 'Checking for updates…';
+    case 'current': return 'Up to date' + (u.message ? ' (' + u.message + ')' : '') + '.';
+    case 'available': return 'Pathline Run ' + u.version + ' is available.';
+    case 'downloading': return 'Downloading ' + u.version + '… ' + (u.percent || 0) + ' %';
+    case 'ready': return 'Pathline Run ' + u.version + ' is downloaded. It installs when Pathline Run restarts.';
+    case 'error': return 'Couldn\'t update: ' + (u.message || 'unknown error');
+    default: return '';
+  }
 }
 
 // ---------------------------------------------------------------- queue view
@@ -308,7 +339,7 @@ function setupView() {
       num('Swizzle magic', 'ruida.magic', '', '136 (0x88) for most cards; 17 (0x11) for 634XG'),
     'Origin is the corner the head homes to. Pathline\'s top-left coordinates are mirrored to match.'));
   }
-  tabs.Jobs.push(card('Job defaults', seg('Registration marks', 'regMarks', [['refuse', 'Don\'t run'], ['ignore', 'Skip']]) + tog('Remove completed job from queue', 'removeDone') + text('File name prefix', 'prefix'),
+  tabs.Jobs.push(card('Job defaults', seg('Registration marks', 'regMarks', [['refuse', 'Don\'t run'], ['ignore', 'Skip']]) + tog('Remove completed job from queue', 'removeDone') + text('File name prefix', 'prefix') + tog('Download updates automatically', 'autoUpdate'),
     'Pathline Run has no camera yet: jobs with registration marks either wait, or run without print-and-cut correction.'));
   tabs.Jobs.push(card('Network', '<div class="row"><span>Pathline connects to</span><span class="mono">' + esc(location.hostname) + ':' + esc(location.port || 80) + '</span></div>' + num('HTTP port', 'httpPort', '', 'Takes effect after a restart')));
 
@@ -340,7 +371,13 @@ function dialog() {
   if (ui.dlg.kind === 'about') {
     return '<div class="scrim"><div role="dialog" aria-label="About" class="dlg"><div style="display:flex;gap:14px;align-items:center"><img src="icon.svg" width="48" height="48" alt=""><div><div class="h-sec" style="font-size:18px">Pathline Run ' + esc(S.app) + '</div><span class="lbl">The machine side of Pathline</span></div></div>' +
       '<span style="color:var(--text-2);line-height:1.5">Receives jobs from Pathline over Ethernet (port ' + esc(cfg().httpPort) + '), converts them for Trotec or Ruida controllers, and runs them.</span>' +
-      '<div style="display:flex;justify-content:flex-end"><button class="tb" data-a="close">Close</button></div></div></div>';
+      '<div class="hr"></div><span class="h-sec">Updates</span><span style="color:var(--text-2);line-height:1.5">' + esc(updateText(S.update)) + '</span>' +
+      (S.update.checkedAt ? '<span class="lbl">Last checked ' + stamp(S.update.checkedAt) + '</span>' : '') +
+      '<div style="display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap">' +
+      (S.update.state === 'ready' ? '<button class="btn-primary" data-a="restart"' + (running() ? ' disabled title="Wait until the job has finished"' : '') + '>Restart now</button>'
+        : S.update.state === 'available' || (S.update.state === 'error' && S.update.version) ? '<button class="btn-primary" data-a="download">Download ' + esc(S.update.version) + '</button>'
+          : S.update.state !== 'off' ? '<button class="tb" data-a="checkNow"' + (S.update.state === 'checking' || S.update.state === 'downloading' ? ' disabled' : '') + '>Check now</button>' : '') +
+      '<button class="tb" data-a="close">Close</button></div></div></div>';
   }
   return '';
 }
@@ -414,6 +451,10 @@ const H = {
   importGo: act(async () => { const r = await call('POST', LOCAL('/import'), ui.dlg.data); ui.dlg = null; ui.sel = r.id; ui.view = 'queue'; }),
   log: act(async () => { ui.navOpen = false; ui.dlg = { kind: 'log', lines: await call('GET', LOCAL('/log')) }; }),
   about: () => { ui.navOpen = false; ui.dlg = { kind: 'about' }; render(); },
+  checkUpdate: act(async () => { ui.navOpen = false; ui.dlg = { kind: 'about' }; await call('POST', LOCAL('/update/check'), {}); }),
+  checkNow: act(async () => call('POST', LOCAL('/update/check'), {})),
+  download: act(async () => call('POST', LOCAL('/update/download'), {})),
+  restart: act(async () => { await call('POST', LOCAL('/update/restart'), {}); ui.dlg = null; toast('Restarting with the new version…'); }),
   close: () => { ui.dlg = null; render(); }
 };
 

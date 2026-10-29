@@ -7,9 +7,40 @@ Pathline (design PC) ──HTTP/JSON──▶ Pathline Run ──USB serial─�
                                                 └─UDP 50200───▶ Ruida (.rd stream)
 ```
 
-Plain Node.js (18 or newer), no build step. The only dependency is `serialport` for Trotec USB, and it's optional: Ruida, simulation and conversion work without it.
+## Download
 
-## Try it on Windows
+| For | Download | Then |
+|---|---|---|
+| **Windows PC** | **[⬇ Pathline-Run-windows.zip](https://github.com/AESGlobalEngineering/Pathline/releases/download/run-latest/Pathline-Run-windows.zip)** | Unzip it anywhere, double-click **Pathline Run.cmd**. Node.js is included. |
+| **Raspberry Pi** | **[⬇ Pathline-Run-pi.tar.gz](https://github.com/AESGlobalEngineering/Pathline/releases/download/run-latest/Pathline-Run-pi.tar.gz)** | Extract it, run `bash pathline-run/install.sh`. Or use the one line below. |
+
+```bash
+curl -fsSL https://github.com/AESGlobalEngineering/Pathline/releases/download/run-latest/install-pi.sh | bash
+```
+
+These links always give the newest version. Every version also has its own `run-v…` release under [Releases](https://github.com/AESGlobalEngineering/Pathline/releases).
+
+**Windows:** the screen opens in your browser at `http://localhost:8470/`. Close the black window to stop Pathline Run. Windows Firewall asks once about Node.js: allow private networks, so Pathline can connect.
+
+**Raspberry Pi** (Raspberry Pi OS Bookworm 64-bit with desktop, Pi 4 or 5, touchscreen): the installer sets up Node.js 22 if needed. It adds a `pathline-run` service that starts at boot, opens the screen full size at login, and allows the USB port (`/dev/ttyACM0` for a Trotec). Logs: `journalctl -u pathline-run -f`.
+
+**Then:** in Pathline Run, **Setup** → Machine → choose Trotec or Ruida and the connection → **Save to machine**. In Pathline, **Setup → Machines → Add machine** → Ethernet, the Pathline Run computer's IP address, port 8470.
+
+## Updates
+
+Pathline Run updates itself. It checks GitHub shortly after it starts and then every 6 hours, and downloads a new version in the background. It installs the update when you click **Restart now** (the header shows **Update … ready**), or the next time it starts. It never restarts during a job. **☰ → Check for updates…** checks on demand. **Setup → Jobs → Download updates automatically** turns background downloads off.
+
+The update goes into a new folder next to the running version, so nothing in use is replaced. If the new version stops with an error within 30 seconds of starting, the launcher goes back to the previous version and skips the broken one. The machine PC can be offline: a failed check only shows in the log.
+
+Settings, the queue and received jobs are kept outside the program, in `%APPDATA%\Pathline Run` (Windows) or `~/.config/pathline-run` (Pi), so updates keep them.
+
+## Releasing a new version
+
+Set the new `version` in `run/package.json`, commit and push to `main`. The workflow ([../.github/workflows/release-run.yml](../.github/workflows/release-run.yml)) runs the self-test and builds the downloads with `node tools/package.js`. It publishes release `run-v<version>` and refreshes `run-latest`, the fixed download links and the update manifest. Installed copies pick the new version up within 6 hours.
+
+## Develop and try it on Windows
+
+Plain Node.js (18 or newer), no build step. The only dependency is `serialport` for Trotec USB, and it's optional: Ruida, simulation and conversion work without it.
 
 ```bash
 cd run
@@ -19,20 +50,7 @@ npm run sim
 
 That starts Pathline Run with a **simulated** controller and opens `http://localhost:8470/`. In Pathline, add a machine with IP `127.0.0.1`, port 8470, and send a job. Or use **Import** on the Queue page to load a `.cjob`. The simulator still converts every job for the configured controller, so conversion problems show up, then replays the estimated times 20× faster. Toggle the simulated lid on the Jog page.
 
-For the real machine: `npm start`, then **Setup** → Machine → controller and connection → **Save to machine**.
-
-Settings, the queue and received jobs are kept in `%APPDATA%\Pathline Run` (Windows) or `~/.config/pathline-run` (Pi). Use `--data <folder>` to keep them somewhere else.
-
-## Raspberry Pi
-
-Raspberry Pi OS Bookworm (64-bit, desktop), Pi 4 or 5 with a touchscreen. Copy or clone the repository onto the Pi, then:
-
-```bash
-cd Pathline/run
-bash deploy/pi/install.sh
-```
-
-The script installs Node.js 22 if needed and runs `npm install`. It adds a `pathline-run` systemd service, so the server starts at boot, and adds your user to `dialout` for the USB port. It also opens Chromium full screen on the touchscreen at login. Logs: `journalctl -u pathline-run -f`. Trotec over USB shows up as `/dev/ttyACM0`.
+For the real machine from source: `npm start`. A copy run from source never updates itself. Use `--data <folder>` to keep settings somewhere else.
 
 ## Convert without a machine
 
@@ -85,4 +103,5 @@ Sources: the Trotec protocol comes from our own decompile and captures (`TROTEC_
 - `src/machine.js`: link, status, manual control with the safety rules, and the job runner
 - `src/job/`: package checks and the controller-neutral plan
 - `src/ctrl/trotec`, `src/ctrl/ruida`: converters, links and decoders. `src/ctrl/sim.js`: simulated link
-- `ui/`: touchscreen page (plain JS). `tools/`: convert, decode, self-test. `deploy/pi/`: Raspberry Pi install
+- `src/updates.js`, `launcher.js`: self-update and the launcher that starts the installed version
+- `ui/`: touchscreen page (plain JS). `tools/`: convert, decode, self-test, package (downloads). `deploy/pi/`: Raspberry Pi install

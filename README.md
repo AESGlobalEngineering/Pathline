@@ -13,11 +13,29 @@ The builds are not code-signed, so Windows SmartScreen will warn the first time 
 
 Problems: **Help → Report a bug…** saves a report (with a screenshot and, if you like, the job) in Pathline's reports folder, `%APPDATA%\Pathline\reports`. Crash reports are saved there automatically. Nothing is sent anywhere, so attach the report folder to a [GitHub issue](https://github.com/AESGlobalEngineering/Pathline/issues).
 
+## Download Pathline Run (for the machine)
+
+**Pathline Run** is the app for the PC or Raspberry Pi next to the laser. It receives jobs from Pathline and runs them on a Trotec or Ruida controller. More in [run/README.md](run/README.md).
+
+| For | Download | Then |
+|---|---|---|
+| **Windows PC** | **[⬇ Pathline-Run-windows.zip](https://github.com/AESGlobalEngineering/Pathline/releases/download/run-latest/Pathline-Run-windows.zip)** | Unzip it, double-click **Pathline Run.cmd** (nothing else to install) |
+| **Raspberry Pi** | **[⬇ Pathline-Run-pi.tar.gz](https://github.com/AESGlobalEngineering/Pathline/releases/download/run-latest/Pathline-Run-pi.tar.gz)** | Or install in one line, below |
+
+```bash
+curl -fsSL https://github.com/AESGlobalEngineering/Pathline/releases/download/run-latest/install-pi.sh | bash
+```
+
+Both update themselves. Older versions are under [Releases](https://github.com/AESGlobalEngineering/Pathline/releases), tagged `run-v…`.
+
+
 ## Releasing a new version
 
 1. Set the new `version` in `package.json` (e.g. 1.3.0), commit, and push to `main`.
 2. That's it: the workflow ([.github/workflows/release.yml](.github/workflows/release.yml)) sees a version with no release yet, runs the self-test, builds the installer and publishes release `v1.3.0` with `latest.yml` (about 10 minutes). Installed copies pick it up the next time they open.
 3. To redo a release, use **Actions → Release → Run workflow**. It builds the latest commit. (**Re-run** on an old run rebuilds that run's old commit instead.)
+
+Pathline Run is released the same way from `run/package.json`, by [.github/workflows/release-run.yml](.github/workflows/release-run.yml). It publishes `run-v<version>` and refreshes the fixed `run-latest` downloads. Neither ever becomes the repository's "latest" release, which Pathline's own updater reads.
 
 Pathline comes with no machines or materials. Add your machines under **Setup → Machines** (connection, then **Refresh from machine**), and your materials under **Setup → Materials** (or import a library). Until a machine is added, the Job page lays jobs out on a stand-in bed and can't send.
 

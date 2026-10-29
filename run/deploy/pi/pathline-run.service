@@ -6,8 +6,8 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=@USER@
-WorkingDirectory=@APP_DIR@
-ExecStart=/usr/bin/env node src/server.js
+WorkingDirectory=@ROOT@
+ExecStart=/usr/bin/env node @ROOT@/launcher.js
 Restart=always
 RestartSec=3
 Environment=NODE_ENV=production
