@@ -309,6 +309,10 @@ function queueView() {
     (shownPkg && shownPkg !== 'loading' ? '<div style="display:flex;flex-direction:column;gap:6px">' + procRows(shownPkg) + '</div>' : '') + warn +
     '<div style="display:flex;margin-top:4px"><span class="pill lg ' + status[1] + '">' + status[0] + '</span></div>' +
     '<div style="display:flex;align-items:center;gap:12px;min-height:44px"><button role="switch" class="sw" aria-checked="' + !!cfg().removeDone + '" data-a="removeDone" aria-label="Remove completed job from queue"></button><span style="font-size:16px">Remove completed job from queue</span></div>' +
+    // pin the job's top-left corner to where the head is now
+    '<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">' + (job && job.anchor
+      ? '<button class="tb" data-a="anchor" data-v="clear" style="border-color:#30A46C;color:var(--ok)"' + (isRun ? ' disabled' : '') + '>' + ic(ICON.anchor) + 'Clear anchor</button><span class="lbl">Starts at the toolhead: X ' + job.anchor.x.toFixed(1) + ', Y ' + job.anchor.y.toFixed(1) + ' mm</span>'
+      : '<button class="tb" data-a="anchor"' + (!job || isRun || st.link !== 'online' ? ' disabled' : '') + '>' + ic(ICON.anchor) + 'Anchor to toolhead</button><span class="lbl">Moves the job so its top-left corner starts at the head</span>') + '</div>' +
     (shown ? '<div style="display:flex;gap:8px;flex-wrap:wrap"><a class="tb sm" href="' + LOCAL('/jobs/' + shown.id + '/export') + '">' + ic(ICON.download, 16) + 'Save ' + (cfg().controller === 'ruida' ? '.rd file' : 'Trotec stream') + '</a>' +
       '<a class="tb sm" href="' + LOCAL('/jobs/' + shown.id + '/export?format=txt') + '">' + ic(ICON.file, 16) + 'Code listing</a></div>' : '') +
     '</div>' +
@@ -322,11 +326,11 @@ function queueView() {
     '<button class="run-btn" data-a="startPause" aria-label="' + (st.state === 'running' ? 'Pause' : st.state === 'paused' ? 'Resume' : 'Start') + '"' + (!isRun && cantStart ? ' disabled' : '') + ' style="background:' + (st.state === 'running' ? 'var(--pause)' : 'var(--go)') + ';cursor:pointer">' + ic(st.state === 'running' ? ICON.pause : ICON.play, 28) + '</button>' +
     '<button class="run-btn stop" data-a="stop" aria-label="Stop" style="color:var(--err)">' + ic(ICON.stop, 24) + '</button>' +
     '<button class="tb" data-a="frame" style="height:64px;padding:0 18px"' + (!shown || isRun ? ' disabled' : '') + '>' + ic(ICON.frame) + 'Frame</button>' +
-    (job && job.anchor
-      ? '<button class="tb" data-a="anchor" data-v="clear" style="height:64px;padding:0 18px;border-color:#30A46C;color:var(--ok)"' + (isRun ? ' disabled' : '') + '>' + ic(ICON.anchor) + 'Clear anchor</button>'
-      : '<button class="tb" data-a="anchor" style="height:64px;padding:0 18px"' + (!job || isRun || st.link !== 'online' ? ' disabled' : '') + ' title="Move the job so its top-left corner starts at the toolhead">' + ic(ICON.anchor) + 'Anchor to toolhead</button>') +
-    '<div style="flex:1 1 280px;min-width:0;display:flex;flex-direction:column;gap:8px"><div style="height:14px;border-radius:7px;background:var(--sunken);box-shadow:inset 0 0 0 1px var(--line);overflow:hidden"><div style="height:100%;width:' + (frac * 100).toFixed(1) + '%;background:var(--accent)"></div></div>' +
-    '<div style="display:flex;justify-content:space-between;gap:8px"><span style="color:var(--text-2)">' + esc(isRun ? (st.state === 'paused' ? 'Paused' : 'Running') + ' · ' + Math.round(frac * 100) + ' % · ' + st.message : st.message) + '</span><span class="mono" style="color:var(--text-2)">' + (isRun ? hms(frac * total) + ' / ' + hms(total) : 'Estimated ' + hms(total)) + '</span></div></div>' +
+    '<div style="flex:1 1 280px;min-width:0;display:flex;flex-direction:column;gap:8px">' +
+    // the bar, with the percentage complete at its end
+    '<div style="display:flex;align-items:center;gap:12px"><div role="progressbar" aria-label="Job progress" aria-valuenow="' + Math.round(frac * 100) + '" aria-valuemin="0" aria-valuemax="100" style="flex:1;height:14px;border-radius:7px;background:var(--sunken);box-shadow:inset 0 0 0 1px var(--line);overflow:hidden"><div style="height:100%;width:' + (frac * 100).toFixed(1) + '%;background:var(--accent)"></div></div>' +
+    '<span class="mono" style="min-width:52px;text-align:right;font-size:18px;font-weight:500;color:' + (isRun ? 'var(--text)' : 'var(--text-3)') + '">' + Math.floor(frac * 100) + ' %</span></div>' +
+    '<div style="display:flex;justify-content:space-between;gap:8px"><span style="color:var(--text-2)">' + esc(isRun ? (st.state === 'paused' ? 'Paused' : 'Running') + ' · ' + st.message : st.message) + '</span><span class="mono" style="color:var(--text-2)">' + (isRun ? hms(frac * total) + ' / ' + hms(total) : 'Estimated ' + hms(total)) + '</span></div></div>' +
     '<div style="display:flex;flex-direction:column;align-items:flex-end"><span class="lbl">' + (isRun ? 'Remaining' : 'Estimated time') + '</span><span class="mono" style="font-size:60px;font-weight:500;line-height:1">' + hms(isRun ? total * (1 - frac) : total) + '</span></div>' +
     '</div></main></div>';
 }

@@ -5,6 +5,14 @@
 
 module.exports = [
   {
+    version: '0.3.1', date: '29 Oct 2026',
+    added: [
+      'Anchor to toolhead moved under "Remove completed job from queue".',
+      'The progress bar shows the percentage complete at its end.'
+    ],
+    fixed: []
+  },
+  {
     version: '0.3.0', date: '29 Oct 2026',
     added: [
       'Setup → Network shows the IP address Pathline connects to, and sets this computer\'s address: automatic (DHCP) or a static IP, subnet mask and gateway.',
