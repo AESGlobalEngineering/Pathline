@@ -44,10 +44,11 @@ async function call(method, url, body) {
   if (!r.ok) throw new Error(data.error || r.status + ' ' + r.statusText);
   return data;
 }
-function toast(msg) {
-  ui.toast = msg;
+// opts: { action: button label, onAction: handler name in H, ms }
+function toast(msg, opts = {}) {
+  ui.toast = { msg, action: opts.action, onAction: opts.onAction };
   clearTimeout(toast.t);
-  toast.t = setTimeout(() => { ui.toast = null; render(); }, 4500);
+  toast.t = setTimeout(() => { ui.toast = null; render(); }, opts.ms || 4500);
   render();
 }
 const act = (fn) => async (...a) => { try { await fn(...a); } catch (e) { toast(e.message); } await refresh(); };
@@ -60,6 +61,7 @@ async function refresh() {
     if (S && next.app !== S.app) { location.reload(); return; }
     S = next;
     S.offline = false;
+    followUpdate(S.update);
   } catch (e) { if (S) S.offline = true; }
   const queue = visibleQueue();
   if (!queue.some((j) => j.id === ui.sel)) {
@@ -122,8 +124,8 @@ function header() {
     (ui.navOpen ? '<div role="menu" class="pop" style="position:absolute;left:0;top:52px;min-width:230px">' +
       '<button role="menuitem" class="opt" data-a="go" data-v="setup">Machine setup</button>' +
       '<button role="menuitem" class="opt" data-a="log">Diagnostics log</button>' +
-      '<div class="sep"></div><button role="menuitem" class="opt" data-a="checkUpdate">Check for updates…</button>' +
-      '<button role="menuitem" class="opt" data-a="about">About</button></div>' : '') +
+      '<div class="sep"></div>' + (S && S.here ? '<button role="menuitem" class="opt" data-a="checkUpdate">Check for updates…</button>' : '') +
+      '<button role="menuitem" class="opt" data-a="whatsNew">What\'s new</button><button role="menuitem" class="opt" data-a="about">About</button></div>' : '') +
     '</div><div class="brand"><img class="brand-mark" src="icon.svg" width="34" height="34" alt=""><span class="word">Pathline <span style="font-weight:400">Run</span></span></div></div>' +
     '<nav aria-label="Views" class="tabs views" style="flex:1 1 280px">' + views.map(([k, l, d]) =>
       '<button data-a="go" data-v="' + k + '" aria-current="' + (ui.view === k ? 'page' : 'false') + '">' + ic(d) + '<span class="lab">' + l + '</span>' + (k === 'queue' ? '<span class="count">' + nq + '</span>' : '') + '</button>').join('') + '</nav>' +
@@ -135,28 +137,72 @@ function header() {
     '</div></header>';
 }
 
-// update notice in the header: only while downloading or ready to install
+// ---------------------------------------------------------------- updates (as in Pathline)
+// The installed app checks when it opens and every 5 minutes. A found update
+// asks first (Later / Download and install), the download shows its progress,
+// then Restart and install. Nothing downloads or installs without a tap. Only
+// the machine's own screen sees this, not browsers elsewhere on the network.
+let seenSeq = null;
+function followUpdate(u) {
+  if (!u || !S.here) return;
+  const first = seenSeq === null;
+  if (u.seq === seenSeq) return;
+  seenSeq = u.seq;
+  const open = ui.dlg && ui.dlg.kind === 'update';
+  if (open) return; // the window follows the state on its own
+  if (u.state === 'available' && !first) ui.dlg = { kind: 'update' };
+  else if (u.state === 'downloading' && first) ui.dlg = { kind: 'update' };
+  else if (u.state === 'ready') toast('Pathline Run ' + u.version + ' is ready to install', { action: 'Restart and install', onAction: 'install', ms: 20000 });
+  else if (u.state === 'error') toast('The update didn\'t download: ' + (u.message || 'no connection'), { action: 'Try again', onAction: 'download', ms: 12000 });
+}
+
+// header: while an update downloads, and once it's ready
 function updateChip() {
   const u = S && S.update;
-  if (!u) return '';
-  if (u.state === 'ready') return '<button class="tb sm" data-a="about" style="border-color:var(--ok-dot);color:var(--ok)">Update ' + esc(u.version) + ' ready · Restart</button>';
-  if (u.state === 'downloading') return '<span class="pill">Downloading update ' + (u.percent || 0) + ' %</span>';
+  if (!u || !S.here) return '';
+  if (u.state === 'ready') return '<button class="tb sm" data-a="showUpdate" style="border-color:var(--ok-dot);color:var(--ok)">Update ' + esc(u.version) + ' ready</button>';
+  if (u.state === 'downloading') return '<button class="tb sm" data-a="showUpdate">Downloading ' + Math.round(u.percent || 0) + ' %</button>';
   return '';
 }
 
-function updateText(u) {
-  if (!u) return '';
-  switch (u.state) {
-    case 'off': return 'Running from the source folder: updates come with git pull.';
-    case 'idle': return 'Checks for updates shortly after starting, then every 6 hours.';
-    case 'checking': return 'Checking for updates…';
-    case 'current': return 'Up to date' + (u.message ? ' (' + u.message + ')' : '') + '.';
-    case 'available': return 'Pathline Run ' + u.version + ' is available.';
-    case 'downloading': return 'Downloading ' + u.version + '… ' + (u.percent || 0) + ' %';
-    case 'ready': return 'Pathline Run ' + u.version + ' is downloaded. It installs when Pathline Run restarts.';
-    case 'error': return 'Couldn\'t update: ' + (u.message || 'unknown error');
-    default: return '';
+const mb = (b) => (b / 1048576).toFixed(1) + ' MB';
+function updateWindow() {
+  const u = S.update;
+  const v = esc(u.version || '');
+  const btns = (list) => '<div style="display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap">' + list.map(([l, a, primary, off]) => '<button class="' + (primary ? 'btn-primary' : 'tb') + '" data-a="' + a + '"' + (off ? ' disabled' : '') + '>' + l + '</button>').join('') + '</div>';
+  let inner;
+  if (u.state === 'available') {
+    inner = '<span class="h-sec" style="font-size:18px">Update available</span><span style="color:var(--text-2);line-height:1.5">Pathline Run ' + v + ' is available. You have version ' + esc(u.current) + '.<br>Download it now, then restart Pathline Run to install it.</span>' +
+      btns([['Later', 'close'], ['Download and install', 'download', true]]);
+  } else if (u.state === 'downloading') {
+    const pct = Math.max(1, Math.min(100, u.percent || 0));
+    inner = '<span class="h-sec" style="font-size:18px">Downloading Pathline Run ' + v + '</span>' +
+      '<div role="progressbar" aria-valuenow="' + Math.round(pct) + '" style="height:12px;border-radius:6px;background:var(--sunken);box-shadow:inset 0 0 0 1px var(--line);overflow:hidden"><div style="height:100%;width:' + pct + '%;background:var(--accent);transition:width .3s ease-out"></div></div>' +
+      '<span class="mono" style="color:var(--text-2)">' + Math.round(u.percent || 0) + ' %' + (u.total ? ' · ' + mb(u.transferred || 0) + ' of ' + mb(u.total) : '') + (u.bytesPerSecond ? ' · ' + mb(u.bytesPerSecond) + '/s' : '') + '</span>' +
+      '<span class="lbl">The machine keeps working. Hide this window and you\'ll be told when the download has finished.</span>' + btns([['Hide', 'close']]);
+  } else if (u.state === 'ready') {
+    const busy = running();
+    inner = '<span class="h-sec" style="font-size:18px">Update ready to install</span><span style="color:var(--text-2);line-height:1.5">Pathline Run ' + v + ' has downloaded. Restart to install it: Pathline Run closes, installs the update and opens again. Queued jobs and settings are kept.' +
+      (busy ? '<br><b>A job is running: restart once it has finished.</b>' : '') + '</span>' + btns([['Later', 'close'], ['Restart and install', 'install', true, busy]]);
+  } else if (u.state === 'error') {
+    inner = '<span class="h-sec" style="font-size:18px">Update didn\'t download</span><div class="errbox">' + esc(u.message || 'The download failed.') + '</div>' + btns([['Close', 'close'], ['Try again', 'download', true]]);
+  } else {
+    ui.dlg = null;
+    return '';
   }
+  return '<div class="scrim"><div role="dialog" aria-label="Pathline Run update" class="dlg">' + inner + '</div></div>';
+}
+
+function changelogWindow(entries, title) {
+  return '<div class="scrim"><div role="dialog" aria-label="What\'s new" class="dlg" style="max-width:560px"><span class="h-sec" style="font-size:18px">' + esc(title) + '</span>' +
+    entries.map((c) => '<section style="display:flex;flex-direction:column;gap:6px;padding-top:8px;border-top:1px solid var(--line-soft)"><span style="font-weight:600">Pathline Run ' + esc(c.version) + '</span>' + (c.date ? '<span class="lbl">' + esc(c.date) + '</span>' : '') +
+      [['New', c.added], ['Fixed', c.fixed]].filter(([, l]) => l && l.length).map(([label, l]) => '<span class="lbl" style="font-weight:600;text-transform:uppercase;letter-spacing:.04em">' + label + '</span><ul style="margin:0;padding-left:20px;line-height:1.5;color:var(--text-2)">' + l.map((t) => '<li>' + esc(t) + '</li>').join('') + '</ul>').join('') + '</section>').join('') +
+    '<div style="display:flex;justify-content:flex-end"><button class="btn-primary" data-a="close">Got it</button></div></div></div>';
+}
+
+function messageWindow(title, msg) {
+  return '<div class="scrim"><div role="dialog" aria-label="' + esc(title) + '" class="dlg"><span class="h-sec" style="font-size:18px">' + esc(title) + '</span><span style="color:var(--text-2);line-height:1.5">' + esc(msg) + '</span>' +
+    '<div style="display:flex;justify-content:flex-end"><button class="btn-primary" data-a="close">Close</button></div></div></div>';
 }
 
 // ---------------------------------------------------------------- queue view
@@ -339,7 +385,7 @@ function setupView() {
       num('Swizzle magic', 'ruida.magic', '', '136 (0x88) for most cards; 17 (0x11) for 634XG'),
     'Origin is the corner the head homes to. Pathline\'s top-left coordinates are mirrored to match.'));
   }
-  tabs.Jobs.push(card('Job defaults', seg('Registration marks', 'regMarks', [['refuse', 'Don\'t run'], ['ignore', 'Skip']]) + tog('Remove completed job from queue', 'removeDone') + text('File name prefix', 'prefix') + tog('Download updates automatically', 'autoUpdate'),
+  tabs.Jobs.push(card('Job defaults', seg('Registration marks', 'regMarks', [['refuse', 'Don\'t run'], ['ignore', 'Skip']]) + tog('Remove completed job from queue', 'removeDone') + text('File name prefix', 'prefix'),
     'Pathline Run has no camera yet: jobs with registration marks either wait, or run without print-and-cut correction.'));
   tabs.Jobs.push(card('Network', '<div class="row"><span>Pathline connects to</span><span class="mono">' + esc(location.hostname) + ':' + esc(location.port || 80) + '</span></div>' + num('HTTP port', 'httpPort', '', 'Takes effect after a restart')));
 
@@ -371,14 +417,11 @@ function dialog() {
   if (ui.dlg.kind === 'about') {
     return '<div class="scrim"><div role="dialog" aria-label="About" class="dlg"><div style="display:flex;gap:14px;align-items:center"><img src="icon.svg" width="48" height="48" alt=""><div><div class="h-sec" style="font-size:18px">Pathline Run ' + esc(S.app) + '</div><span class="lbl">The machine side of Pathline</span></div></div>' +
       '<span style="color:var(--text-2);line-height:1.5">Receives jobs from Pathline over Ethernet (port ' + esc(cfg().httpPort) + '), converts them for Trotec or Ruida controllers, and runs them.</span>' +
-      '<div class="hr"></div><span class="h-sec">Updates</span><span style="color:var(--text-2);line-height:1.5">' + esc(updateText(S.update)) + '</span>' +
-      (S.update.checkedAt ? '<span class="lbl">Last checked ' + stamp(S.update.checkedAt) + '</span>' : '') +
-      '<div style="display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap">' +
-      (S.update.state === 'ready' ? '<button class="btn-primary" data-a="restart"' + (running() ? ' disabled title="Wait until the job has finished"' : '') + '>Restart now</button>'
-        : S.update.state === 'available' || (S.update.state === 'error' && S.update.version) ? '<button class="btn-primary" data-a="download">Download ' + esc(S.update.version) + '</button>'
-          : S.update.state !== 'off' ? '<button class="tb" data-a="checkNow"' + (S.update.state === 'checking' || S.update.state === 'downloading' ? ' disabled' : '') + '>Check now</button>' : '') +
-      '<button class="tb" data-a="close">Close</button></div></div></div>';
+      '<div style="display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap">' + (S.here ? '<button class="tb" data-a="checkUpdate">Check for updates…</button>' : '') + '<button class="tb" data-a="whatsNew">What\'s new</button><button class="btn-primary" data-a="close">Close</button></div></div></div>';
   }
+  if (ui.dlg.kind === 'update') return updateWindow();
+  if (ui.dlg.kind === 'changelog') return changelogWindow(ui.dlg.entries, ui.dlg.title);
+  if (ui.dlg.kind === 'message') return messageWindow(ui.dlg.title, ui.dlg.msg);
   return '';
 }
 
@@ -392,7 +435,9 @@ function render() {
   const scroll = $app.querySelector('.view') && ui.drawn === ui.view ? $app.querySelector('.view').scrollTop : 0;
   ui.drawn = ui.view;
   const v = ui.view === 'jog' ? jogView() : ui.view === 'history' ? historyView() : ui.view === 'setup' ? setupView() : queueView();
-  $app.innerHTML = header() + v + dialog() + (ui.toast ? '<div class="toast" role="status">' + esc(ui.toast) + '</div>' : '');
+  const t = ui.toast;
+  $app.innerHTML = header() + v + dialog() + (t ? '<div class="toast" role="status" style="display:flex;align-items:center;gap:14px">' + esc(t.msg) +
+    (t.action ? '<button class="tb sm" data-a="toastAction">' + esc(t.action) + '</button>' : '') + '</div>' : '');
   const nv = $app.querySelector('.view');
   if (nv) nv.scrollTop = scroll;
 }
@@ -451,10 +496,25 @@ const H = {
   importGo: act(async () => { const r = await call('POST', LOCAL('/import'), ui.dlg.data); ui.dlg = null; ui.sel = r.id; ui.view = 'queue'; }),
   log: act(async () => { ui.navOpen = false; ui.dlg = { kind: 'log', lines: await call('GET', LOCAL('/log')) }; }),
   about: () => { ui.navOpen = false; ui.dlg = { kind: 'about' }; render(); },
-  checkUpdate: act(async () => { ui.navOpen = false; ui.dlg = { kind: 'about' }; await call('POST', LOCAL('/update/check'), {}); }),
-  checkNow: act(async () => call('POST', LOCAL('/update/check'), {})),
-  download: act(async () => call('POST', LOCAL('/update/download'), {})),
-  restart: act(async () => { await call('POST', LOCAL('/update/restart'), {}); ui.dlg = null; toast('Restarting with the new version…'); }),
+  // ☰ → Check for updates: an update opens the update window; otherwise says what it found
+  checkUpdate: act(async () => {
+    ui.navOpen = false;
+    const s = await call('POST', LOCAL('/update/check'), {});
+    if (['available', 'downloading', 'ready'].includes(s.state)) { await refresh(); seenSeq = S.update.seq; ui.dlg = { kind: 'update' }; return; }
+    const msg = {
+      current: 'Pathline Run ' + s.version + ' is up to date.',
+      none: 'No Pathline Run releases have been published yet. You have version ' + s.version + '.',
+      off: 'Update checks aren\'t set up in this copy of Pathline Run (version ' + s.version + '). Copies run from the source folder update with git pull.',
+      portable: 'This is the portable copy (version ' + s.version + '). It can\'t update itself: download the latest version from the releases page.',
+      error: 'Couldn\'t check for updates: ' + (s.message || 'no connection') + '.'
+    }[s.state];
+    ui.dlg = { kind: 'message', title: 'Check for updates', msg };
+  }),
+  showUpdate: () => { ui.dlg = { kind: 'update' }; render(); },
+  download: act(async () => { await call('POST', LOCAL('/update/download'), {}); ui.dlg = { kind: 'update' }; ui.toast = null; }),
+  install: act(async () => { await call('POST', LOCAL('/update/install'), {}); ui.dlg = null; ui.toast = null; toast('Pathline Run is closing to install the update…', { ms: 20000 }); }),
+  toastAction: (v, el) => { const a = ui.toast && ui.toast.onAction; ui.toast = null; if (a && H[a]) H[a](); else render(); },
+  whatsNew: act(async () => { ui.navOpen = false; ui.dlg = { kind: 'changelog', title: 'What\'s new in Pathline Run', entries: await call('GET', LOCAL('/changelog')) }; }),
   close: () => { ui.dlg = null; render(); }
 };
 
@@ -503,5 +563,12 @@ $app.addEventListener('focusout', (e) => { if (e.target.dataset && e.target.data
 
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => { if (!ui.themeSet) { ui.dark = e.matches; render(); } });
 render();
-refresh();
+refresh().then(() => {
+  // the first screen after an update shows what changed since the last version that ran
+  if (S && S.here) {
+    call('GET', LOCAL('/whatsnew')).then((list) => {
+      if (list && list.length && !ui.dlg) { ui.dlg = { kind: 'changelog', title: 'Pathline Run has been updated to ' + list[0].version, entries: list }; render(); }
+    }).catch(() => {});
+  }
+});
 setInterval(refresh, 700);

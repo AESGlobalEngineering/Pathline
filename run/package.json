@@ -1,24 +1,98 @@
 {
   "name": "pathline-run",
   "productName": "Pathline Run",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Pathline Run: the machine-side HMI. Receives Pathline jobs over Ethernet, converts them for a Trotec or Ruida controller and runs them.",
-  "main": "src/server.js",
+  "main": "electron/main.js",
   "private": true,
   "bin": {
     "pathline-convert": "tools/convert.js"
   },
   "scripts": {
-    "start": "node src/server.js",
-    "sim": "node src/server.js --sim --open",
+    "start": "electron .",
+    "sim": "electron . --sim",
+    "server": "node src/server.js",
     "convert": "node tools/convert.js",
     "decode": "node tools/decode.js",
-    "test": "node tools/selftest.js"
+    "test": "node tools/selftest.js",
+    "dist": "electron-builder --win",
+    "dist:pi": "electron-builder --linux AppImage --arm64",
+    "pack": "electron-builder --win --dir"
   },
   "engines": {
     "node": ">=18"
   },
-  "optionalDependencies": {
+  "dependencies": {
+    "electron-updater": "6.6.2",
     "serialport": "12.0.0"
+  },
+  "devDependencies": {
+    "electron": "44.7.0",
+    "electron-builder": "26.17.0"
+  },
+  "build": {
+    "appId": "com.pathline.run",
+    "productName": "Pathline Run",
+    "publish": [
+      {
+        "provider": "generic",
+        "url": "https://github.com/AESGlobalEngineering/Pathline/releases/download/run-latest"
+      }
+    ],
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "electron/**/*",
+      "src/**/*",
+      "ui/**/*",
+      "package.json"
+    ],
+    "asar": false,
+    "npmRebuild": false,
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "Pathline Run",
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "artifactName": "Pathline-Run-Setup-${version}.exe"
+    },
+    "portable": {
+      "artifactName": "Pathline-Run-${version}-portable.exe"
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.png",
+      "category": "Utility",
+      "artifactName": "Pathline-Run-${version}-${arch}.${ext}"
+    }
   }
 }

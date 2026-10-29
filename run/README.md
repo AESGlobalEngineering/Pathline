@@ -7,40 +7,45 @@ Pathline (design PC) ──HTTP/JSON──▶ Pathline Run ──USB serial─�
                                                 └─UDP 50200───▶ Ruida (.rd stream)
 ```
 
-## Download
+## Install
+
+Pathline Run installs and updates like Pathline.
 
 | For | Download | Then |
 |---|---|---|
-| **Windows PC** | **[⬇ Pathline-Run-windows.zip](https://github.com/AESGlobalEngineering/Pathline/releases/download/run-latest/Pathline-Run-windows.zip)** | Unzip it anywhere, double-click **Pathline Run.cmd**. Node.js is included. |
-| **Raspberry Pi** | **[⬇ Pathline-Run-pi.tar.gz](https://github.com/AESGlobalEngineering/Pathline/releases/download/run-latest/Pathline-Run-pi.tar.gz)** | Extract it, run `bash pathline-run/install.sh`. Or use the one line below. |
+| **Windows PC** | **[⬇ Pathline-Run-Setup.exe](https://github.com/AESGlobalEngineering/Pathline/releases/download/run-latest/Pathline-Run-Setup.exe)** | Run the installer. It adds a Start menu entry and a desktop shortcut, and **Pathline Run updates itself**. |
+| Windows, no install | [Pathline-Run-portable.exe](https://github.com/AESGlobalEngineering/Pathline/releases/download/run-latest/Pathline-Run-portable.exe) | A single file. It can't update itself. |
+| **Raspberry Pi** | The line below, in a terminal on the Pi | Installs the AppImage, which opens full screen at login and updates itself |
 
 ```bash
 curl -fsSL https://github.com/AESGlobalEngineering/Pathline/releases/download/run-latest/install-pi.sh | bash
 ```
 
-These links always give the newest version. Every version also has its own `run-v…` release under [Releases](https://github.com/AESGlobalEngineering/Pathline/releases).
+These links always give the newest version. Every version also has its own `run-v…` release under [Releases](https://github.com/AESGlobalEngineering/Pathline/releases). The builds aren't code-signed, so Windows SmartScreen warns the first time ("More info" → "Run anyway"). The first time Pathline Run starts, Windows Firewall asks about it: allow private networks, so Pathline can connect.
 
-**Windows:** the screen opens in your browser at `http://localhost:8470/`. Close the black window to stop Pathline Run. Windows Firewall asks once about Node.js: allow private networks, so Pathline can connect.
-
-**Raspberry Pi** (Raspberry Pi OS Bookworm 64-bit with desktop, Pi 4 or 5, touchscreen): the installer sets up Node.js 22 if needed. It adds a `pathline-run` service that starts at boot, opens the screen full size at login, and allows the USB port (`/dev/ttyACM0` for a Trotec). Logs: `journalctl -u pathline-run -f`.
+**Raspberry Pi:** Raspberry Pi OS Bookworm 64-bit with desktop, on a Pi 4 or 5 with a touchscreen. The script puts `Pathline-Run.AppImage` in `~/Applications`, adds it to the menu, and starts it full screen (`--kiosk`) at login. It also installs `libfuse2` (AppImages need it) and allows the USB port (`/dev/ttyACM0` for a Trotec). Restart the Pi afterwards. There's also an x64 AppImage for Linux PCs (`Pathline-Run-x86_64.AppImage`).
 
 **Then:** in Pathline Run, **Setup** → Machine → choose Trotec or Ruida and the connection → **Save to machine**. In Pathline, **Setup → Machines → Add machine** → Ethernet, the Pathline Run computer's IP address, port 8470.
 
+Settings, the queue and received jobs are kept in `%APPDATA%\Pathline Run\data` (Windows) or `~/.config/Pathline Run/data` (Pi), so updates and reinstalls keep them. Pathline Run 0.1.0's data is brought across the first time.
+
 ## Updates
 
-Pathline Run updates itself. It checks GitHub shortly after it starts and then every 6 hours, and downloads a new version in the background. It installs the update when you click **Restart now** (the header shows **Update … ready**), or the next time it starts. It never restarts during a job. **☰ → Check for updates…** checks on demand. **Setup → Jobs → Download updates automatically** turns background downloads off.
+The same as Pathline. Pathline Run checks for a newer release when it opens and every 5 minutes while it runs. When it finds one it **asks first**: **Later** or **Download and install**. A version you said Later to isn't offered again until the next start. The download shows its progress and can be hidden. When it has finished, **Restart and install** closes Pathline Run, installs the update and opens it again. Queued jobs and settings are kept. It can't restart while a job is running. After the update, Pathline Run shows **what's new**. **☰ → Check for updates…** checks on demand, and **☰ → What's new** lists every version.
 
-The update goes into a new folder next to the running version, so nothing in use is replaced. If the new version stops with an error within 30 seconds of starting, the launcher goes back to the previous version and skips the broken one. The machine PC can be offline: a failed check only shows in the log.
+Only the machine's own screen offers updates. Browsers on other PCs viewing the same page (Pathline's **Open HMI**) don't. The portable exe and copies run from source don't update themselves.
 
-Settings, the queue and received jobs are kept outside the program, in `%APPDATA%\Pathline Run` (Windows) or `~/.config/pathline-run` (Pi), so updates keep them.
+Updates come from the `run-latest` release (a generic feed, set in `build.publish` in `package.json`), so Pathline's own releases never mix in.
 
 ## Releasing a new version
 
-Set the new `version` in `run/package.json`, commit and push to `main`. The workflow ([../.github/workflows/release-run.yml](../.github/workflows/release-run.yml)) runs the self-test and builds the downloads with `node tools/package.js`. It publishes release `run-v<version>` and refreshes `run-latest`, the fixed download links and the update manifest. Installed copies pick the new version up within 6 hours.
+1. Set the new `version` in `run/package.json` and add an entry to `src/changelog.js`. Commit and push to `main`.
+2. That's it. The workflow ([../.github/workflows/release-run.yml](../.github/workflows/release-run.yml)) runs the self-test. It builds the Windows installer and portable exe on Windows, and the AppImages on Linux. It publishes `run-v<version>` and refreshes `run-latest`, which installed copies read. They offer the update within 5 minutes.
+3. To redo a release, use **Actions → Release Pathline Run → Run workflow**.
 
-## Develop and try it on Windows
+## Develop
 
-Plain Node.js (18 or newer), no build step. The only dependency is `serialport` for Trotec USB, and it's optional: Ruida, simulation and conversion work without it.
+Node.js 22 for `npm install` (as for Pathline: Electron's download step needs it).
 
 ```bash
 cd run
@@ -48,9 +53,9 @@ npm install
 npm run sim
 ```
 
-That starts Pathline Run with a **simulated** controller and opens `http://localhost:8470/`. In Pathline, add a machine with IP `127.0.0.1`, port 8470, and send a job. Or use **Import** on the Queue page to load a `.cjob`. The simulator still converts every job for the configured controller, so conversion problems show up, then replays the estimated times 20× faster. Toggle the simulated lid on the Jog page.
+That opens Pathline Run in its window with a **simulated** controller. In Pathline, add a machine with IP `127.0.0.1`, port 8470, and send a job. Or use **Import** on the Queue page to load a `.cjob`. The simulator still converts every job for the configured controller, so conversion problems show up, then replays the estimated times 20× faster. Toggle the simulated lid on the Jog page.
 
-For the real machine from source: `npm start`. A copy run from source never updates itself. Use `--data <folder>` to keep settings somewhere else.
+`npm start` runs it with the real controller. `npm run server` runs only the server, with no window, and the screen is at `http://localhost:8470/`. `npm test` runs the self-test. `npm run dist` builds the Windows installer into `dist\`. `npm run dist:pi` builds the Pi AppImage (on Linux).
 
 ## Convert without a machine
 
@@ -103,5 +108,5 @@ Sources: the Trotec protocol comes from our own decompile and captures (`TROTEC_
 - `src/machine.js`: link, status, manual control with the safety rules, and the job runner
 - `src/job/`: package checks and the controller-neutral plan
 - `src/ctrl/trotec`, `src/ctrl/ruida`: converters, links and decoders. `src/ctrl/sim.js`: simulated link
-- `src/updates.js`, `launcher.js`: self-update and the launcher that starts the installed version
-- `ui/`: touchscreen page (plain JS). `tools/`: convert, decode, self-test, package (downloads). `deploy/pi/`: Raspberry Pi install
+- `electron/`: the app window and updates (`electron-updater`, as in Pathline). `src/changelog.js`: What's new
+- `ui/`: touchscreen page (plain JS). `tools/`: convert, decode, self-test. `deploy/pi/install-pi.sh`: Raspberry Pi install

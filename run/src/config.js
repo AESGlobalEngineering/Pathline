@@ -1,7 +1,7 @@
 // Machine settings, kept on the HMI (GET /machine reports them to Pathline).
-// Stored as config.json in the data folder:
-//   Windows  %APPDATA%\Pathline Run
-//   Linux    ~/.config/pathline-run (Raspberry Pi)
+// Stored as config.json in the data folder. The installed app uses
+// %APPDATA%\Pathline Run\data (Windows) or ~/.config/Pathline Run/data (Pi);
+// src/server.js run on its own uses the folders below.
 'use strict';
 
 const fs = require('fs');
@@ -34,7 +34,6 @@ const BASE = {
   origin: 'tl', units: 'mm', home: true, prefix: '',
   regMarks: 'refuse',            // 'refuse' or 'ignore' (run without print-and-cut correction)
   removeDone: true,              // completed jobs leave the queue for History
-  autoUpdate: true,              // download new versions in the background (they install on restart)
   trotec: { unit: 0.010125, offset: [14.833125, 9.527625], laserSource: 5, travelSpeed: 700, maxSpeed: 2000, airOutput: 4, overscan: 10, cutPowerCorrection: 15, engravePowerCorrection: 20 },
   ruida: { magic: 0x88, origin: 'tr' },
   sim: { speedup: 20 }

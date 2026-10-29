@@ -13,4 +13,3 @@ src/ui/__preview*
 # large or local-only material
 handoff/transcript.jsonl
 _backup-before-rebrand-*/
-run/out/

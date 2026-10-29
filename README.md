@@ -19,14 +19,15 @@ Problems: **Help → Report a bug…** saves a report (with a screenshot and, if
 
 | For | Download | Then |
 |---|---|---|
-| **Windows PC** | **[⬇ Pathline-Run-windows.zip](https://github.com/AESGlobalEngineering/Pathline/releases/download/run-latest/Pathline-Run-windows.zip)** | Unzip it, double-click **Pathline Run.cmd** (nothing else to install) |
-| **Raspberry Pi** | **[⬇ Pathline-Run-pi.tar.gz](https://github.com/AESGlobalEngineering/Pathline/releases/download/run-latest/Pathline-Run-pi.tar.gz)** | Or install in one line, below |
+| **Windows PC** | **[⬇ Pathline-Run-Setup.exe](https://github.com/AESGlobalEngineering/Pathline/releases/download/run-latest/Pathline-Run-Setup.exe)** | Installer, like Pathline's: Start menu and desktop shortcut, and it updates itself |
+| Windows, no install | [Pathline-Run-portable.exe](https://github.com/AESGlobalEngineering/Pathline/releases/download/run-latest/Pathline-Run-portable.exe) | A single file. It can't update itself. |
+| **Raspberry Pi** | The line below, in a terminal on the Pi | Opens full screen at login and updates itself |
 
 ```bash
 curl -fsSL https://github.com/AESGlobalEngineering/Pathline/releases/download/run-latest/install-pi.sh | bash
 ```
 
-Both update themselves. Older versions are under [Releases](https://github.com/AESGlobalEngineering/Pathline/releases), tagged `run-v…`.
+Updates work as in Pathline: it checks when it opens and every 5 minutes, then asks before downloading. Older versions are under [Releases](https://github.com/AESGlobalEngineering/Pathline/releases), tagged `run-v…`.
 
 
 ## Releasing a new version
