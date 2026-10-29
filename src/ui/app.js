@@ -1402,7 +1402,7 @@
     async reportBug() {
       const r = await dialog({
         title: 'Report a bug',
-        message: 'Saves a report on this computer, in Pathline\'s reports folder, with the app version, a screenshot and, if you like, the current job. Attach the folder when you ask for help.',
+        message: 'Saves the report as a file wherever you choose (with the app version, recent errors, a screenshot and, if you like, the current job), then you can send it to the Pathline developers as a GitHub issue.',
         fields: [
           { key: 'title', label: 'What went wrong (one line)', value: '', full: true },
           { key: 'description', label: 'What happened, and what you expected', type: 'textarea', value: '', full: true, rows: 4 },
@@ -1416,8 +1416,18 @@
       if (!r.values.title && !r.values.description) return toast('Describe the problem first');
       // let the dialog close so it isn't in the screenshot
       await new Promise((res) => setTimeout(res, 250));
-      const folder = await window.api.report.bug({ ...r.values, page: location.pathname.split('/').pop() });
-      toast('Bug report saved', { kind: 'ok', action: 'Show', onAction: () => window.api.report.openFolder(folder), ms: 8000 });
+      const res = await window.api.report.bug({ ...r.values, page: location.pathname.split('/').pop() });
+      const name = res.zip ? res.zip.split(/[\\/]/).pop() : '';
+      const showZip = () => (res.zip ? window.api.app.showItem(res.zip) : window.api.report.openFolder(res.folder));
+      const send = await dialog({
+        title: res.zip ? 'Bug report saved' : 'Bug report not saved as a file',
+        message: (res.zip ? 'Saved as ' + name + '.' : 'You cancelled saving, so there\'s no file to attach (a copy is in Pathline\'s reports folder).') +
+          (res.issueUrl ? '\n\nTo send it to the Pathline developers, choose Report on GitHub: it opens a GitHub issue in your browser, already filled in' + (res.zip ? ', and shows the report file so you can drag it into the issue.' : '.') + ' You need to be signed in to GitHub. Issues are public, so don\'t attach anything confidential.' : ''),
+        buttons: [{ label: 'Close', value: null }].concat(res.zip ? [{ label: 'Show file', value: 'show' }] : []).concat(res.issueUrl ? [{ label: 'Report on GitHub', value: 'github', primary: true }] : [])
+      });
+      if (!send) return;
+      if (send.button === 'show' || send.button === 'github') showZip();
+      if (send.button === 'github') window.api.app.openExternal(res.issueUrl).catch(fail);
     },
     openReports: () => window.api.report.openFolder(),
     // the update window for a given state (used by the test harness)

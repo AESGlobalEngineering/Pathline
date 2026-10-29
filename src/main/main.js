@@ -26,6 +26,30 @@ function reportCrash(what, detail) {
   try { console.error(what, detail); } catch (e) { /* no console */ }
   return null;
 }
+// A "new issue" address on the project's GitHub (the repository updates come
+// from), filled in with the report text. GitHub needs the operator signed in,
+// and files can't be attached through the address, so they drag the saved
+// .zip in. The text stays short enough for a URL; issues are public, so the
+// job itself is only in the zip.
+const pkg = require('../../package.json');
+function issueUrl(rep, zip) {
+  const pub = [].concat((pkg.build && pkg.build.publish) || []).find((p) => p.provider === 'github');
+  if (!pub) return null;
+  const cut = (s, n) => (String(s || '').length > n ? String(s).slice(0, n) + '…' : String(s || ''));
+  const log = reports.recent(15).map((l) => cut(l, 300));
+  const body = [
+    '### What happened', cut(rep.description, 2500) || '_(not given)_', '',
+    '### Steps to make it happen again', cut(rep.steps, 1500) || '_(not given)_', '',
+    '### Details',
+    '- Pathline ' + app.getVersion() + ' · Windows ' + require('os').release() + ' · page ' + (rep.page || '?'),
+    rep.machine ? '- Machine: ' + rep.machine.type + (rep.machine.sim ? ' (simulated)' : '') + ' · ' + (rep.machine.ctrl || '?') + ' · ' + rep.machine.conn : '- Machine: none',
+    rep.job ? '- Job: ' + rep.job.objects + ' objects, ' + rep.job.processes + ' processes' : '',
+    '', zip ? '**Please drag the saved report into this issue:** `' + path.basename(zip) + '`' : '_No report file was saved._',
+    '', '<details><summary>Recent errors</summary>', '', '```', log.join('\n') || '(none)', '```', '</details>'
+  ].filter((l) => l !== null).join('\n');
+  return 'https://github.com/' + pub.owner + '/' + pub.repo + '/issues/new?labels=bug&title=' + encodeURIComponent(cut(rep.title || 'Bug report', 120)) + '&body=' + encodeURIComponent(body);
+}
+
 process.on('uncaughtException', (err) => {
   const folder = reportCrash('main-error', err);
   if (win && !win.isDestroyed()) win.webContents.send('report:crashed', { folder });
@@ -225,11 +249,25 @@ function registerIpc() {
       try { files['job.cjob'] = JSON.stringify(jobFileContent(session.job), null, 2); } catch (e) { files['job-error.txt'] = e.stack; }
     }
     const m = session.job ? machineById(session.job.machineId) : null;
-    return reports.bug({
+    const report = {
       title: fields.title || '', description: fields.description || '', steps: fields.steps || '', page: fields.page || '',
-      machine: m ? { name: m.name, type: m.type, ctrl: m.ctrl, conn: m.conn } : null,
+      machine: m ? { name: m.name, type: m.type, ctrl: m.ctrl, conn: m.conn, sim: !!m.sim } : null,
       job: session.job ? { name: session.job.name, objects: (session.job.entities || []).length, processes: (session.job.processes || []).length } : null
-    }, files);
+    };
+    // a copy stays in the reports folder; the operator chooses where the .zip goes
+    const folder = reports.bug(report, files);
+    const stamp = path.basename(folder).replace(/^bug-/, '');
+    const fileName = 'Pathline bug report ' + stamp + '.zip';
+    // (test runs with LRC_SAVE_DIR save there without asking)
+    const r = process.env.LRC_SHOT && process.env.LRC_SAVE_DIR
+      ? { canceled: false, filePath: path.join(process.env.LRC_SAVE_DIR, fileName) }
+      : await dialog.showSaveDialog(win, {
+        title: 'Save bug report', defaultPath: path.join(app.getPath('documents'), fileName),
+        filters: [{ name: 'Bug report', extensions: ['zip'] }], properties: ['createDirectory', 'showOverwriteConfirmation']
+      });
+    const zip = r.canceled ? null : r.filePath;
+    if (zip) fs.writeFileSync(zip, reports.zip(folder));
+    return { folder, zip, issueUrl: issueUrl(report, zip) };
   });
 
   // updates (GitHub releases)

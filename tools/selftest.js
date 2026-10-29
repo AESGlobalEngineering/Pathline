@@ -223,6 +223,18 @@ async function main() {
     ok(beds.placed.length === 30 && beds.areas === 2 && one.placed.length + one.unplaced.length === 30 && one.unplaced.length > 0, 'plotter nesting adds beds as needed (' + beds.areas + ' beds); a single sheet leaves out what does not fit (' + one.unplaced.length + ')');
   }
 
+  console.log('Bug report file');
+  {
+    // the .zip writer: read the first entry back (local header → deflated data)
+    const { zipFiles } = require('../src/main/reports');
+    const text = Buffer.from('{"title":"zip test","n":' + '1234567890'.repeat(50) + '}');
+    const zip = zipFiles([{ name: 'report.json', data: text }, { name: 'b.txt', data: Buffer.from('second') }]);
+    const nameLen = zip.readUInt16LE(26), size = zip.readUInt32LE(18);
+    const back = require('zlib').inflateRawSync(zip.slice(30 + nameLen, 30 + nameLen + size));
+    const end = zip.length - 22;
+    ok(zip.readUInt32LE(0) === 0x04034b50 && zip.readUInt32LE(end) === 0x06054b50 && zip.readUInt16LE(end + 10) === 2 && back.equals(text), 'bug report zip holds the files, readable back (' + zip.length + ' bytes)');
+  }
+
   console.log('Plotter estimate');
   {
     const { job, plotter } = testJob();

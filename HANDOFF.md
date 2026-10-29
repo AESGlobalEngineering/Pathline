@@ -16,6 +16,12 @@ Latest round (28 Oct, final):
 - **Sample machines and materials from earlier builds are removed on first start** (main.js, tracked by `settings.samplesRemoved`). This is by exact id (trotec, flatbed, laser2, acr-print-3 … brass-1); anything the operator created stays.
 
 Version 1.2.2 (29 Oct):
+- **Bug reports are sent through GitHub.** Help → Report a bug…:
+  - keeps a copy in the reports folder;
+  - **asks where to save** the report, as one `.zip` (report.json, log.txt, screenshot, job);
+  - then offers **Report on GitHub**: a pre-filled issue on the project's repository (title, description, steps, version, Windows, machine and job summary, recent errors), with the zip shown so it can be dragged in.
+
+  Pathline can't file issues itself without a GitHub token in the app, which would be extractable from a public installer, so the operator submits the issue while signed in. `issueUrl()` in main.js builds the address from `build.publish`; the zip writer is in reports.js. `LRC_SAVE_DIR` lets harness runs save without the dialog.
 - **Fixed: importing several drawings stacked some on top of each other.** Each drawing was placed below the last; when the next one didn't fit, it went back to the top, over what was there. Now each drawing goes in the first free spot (`LRC.ops.freeSpot`: topmost, then leftmost, 10 mm apart) on the sheet or bed, never over existing objects or other imported drawings. A drawing that doesn't fit goes on the next plotter bed (adding beds as needed), or beside the laser bed with a note suggesting Nest parts.
 
 Version 1.2.1 (29 Oct):
