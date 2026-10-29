@@ -1,20 +1,43 @@
 # Builds Pathline on GitHub and publishes the installer as a GitHub release
 # named after the version in package.json (tag v<version>, created with the
 # release). The release includes latest.yml, which installed copies read to
-# find updates. Start it from the Actions tab (Release → Run workflow), or by
-# pushing a v* tag. Running it again for the same version replaces the files.
+# find updates.
+#
+# - Pushing to main releases automatically when package.json has a version
+#   that has no release yet (bump the version, push, done).
+# - Actions → Release → Run workflow builds the latest commit and replaces the
+#   files of that version's release (use it to redo a release).
+# (Re-running an old run rebuilds that run's old commit, not the latest one.)
 name: Release
 
 on:
-  workflow_dispatch:
   push:
-    tags: ['v*']
+    branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      released: ${{ steps.v.outputs.released }}
+    steps:
+      - uses: actions/checkout@v5
+      - id: v
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          V=$(node -p "require('./package.json').version")
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          if gh release view "v$V" > /dev/null 2>&1; then echo "released=true" >> "$GITHUB_OUTPUT"; else echo "released=false" >> "$GITHUB_OUTPUT"; fi
+
   windows:
+    needs: check
+    # a push only builds a version that isn't released yet; Run workflow always builds
+    if: github.event_name == 'workflow_dispatch' || needs.check.outputs.released != 'true'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v5

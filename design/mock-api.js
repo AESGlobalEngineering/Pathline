@@ -76,7 +76,7 @@
       machineId: m.id, machineType: m.type, materialId: mt ? mt.id : null,
       sheet: { on: false, w: Math.min(600, bed[0]), h: Math.min(400, bed[1]), x: 0, y: 0 },
       regMode: m.type === 'laser' && m.info.f && m.info.f.camera ? 'linear' : 'off',
-      processes: (pre.length ? pre : CC.defaultPresets(m.type, mt ? mt.t : 3)).map((p) => ({ ...p, src: 'preset' })),
+      processes: pre.map((p) => ({ ...p, src: 'preset' })),
       entities: [], beds: 1, cutOrder: { ...CC.CUT_ORDER_DEFAULT }, createdAt: new Date().toISOString()
     };
   }

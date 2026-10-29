@@ -44,11 +44,10 @@ function materialFor(type, id) {
   const mats = store.get('materials');
   return mats.find((m) => m.id === id && m.m.includes(type)) || mats.find((m) => m.m.includes(type)) || null;
 }
-// the material's presets for this machine (its own tab, else the shared ones for its type)
+// the material's presets for this machine (its own tab, else the shared ones for
+// its type); with no material, or none set up, a job starts with no processes
 function presetsFor(material, machine) {
-  const p = CC.presetsFor(material, machine);
-  if (p && p.length) return clone(p);
-  return machine.type === 'laser' ? seed.laserPresets(material ? material.t : 3) : seed.plotterPresets(material ? material.t : 3);
+  return clone(CC.presetsFor(material, machine));
 }
 function newJob(machineId) {
   const settings = store.get('settings');
