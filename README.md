@@ -16,8 +16,8 @@ Problems: **Help → Report a bug…** saves a report (with a screenshot and, if
 ## Releasing a new version
 
 1. Set the new `version` in `package.json` (e.g. 1.2.0), commit, and push.
-2. Tag the commit `v1.2.0` and push the tag (in GitHub Desktop: History → right-click the commit → Create Tag…, then Push).
-3. GitHub Actions ([.github/workflows/release.yml](.github/workflows/release.yml)) runs the self-test, builds the installer and publishes the release with `latest.yml`. Installed copies pick it up the next time they open.
+2. On GitHub, open **Actions → Release → Run workflow** (branch `main`). Alternatively push a tag `v1.2.0`; GitHub Desktop pushes tags made with History → right-click the commit → Create Tag….
+3. The workflow ([.github/workflows/release.yml](.github/workflows/release.yml)) runs the self-test, builds the installer and publishes release `v1.2.0` with `latest.yml`. It takes about 10 minutes. Installed copies pick the release up the next time they open.
 
 Pathline comes with no machines or materials. Add your machines under **Setup → Machines** (connection, then **Refresh from machine**), and your materials under **Setup → Materials** (or import a library). Until a machine is added, the Job page lays jobs out on a stand-in bed and can't send.
 

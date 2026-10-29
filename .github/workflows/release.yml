@@ -1,9 +1,12 @@
 # Builds Pathline on GitHub and publishes the installer as a GitHub release
-# when a version tag is pushed (git tag v1.1.0 && git push --tags). The release
-# includes latest.yml, which installed copies read to find updates.
+# named after the version in package.json (tag v<version>, created by the
+# release). The release includes latest.yml, which installed copies read to
+# find updates. Start it from the Actions tab (Release → Run workflow), or by
+# pushing a v* tag.
 name: Release
 
 on:
+  workflow_dispatch:
   push:
     tags: ['v*']
 
