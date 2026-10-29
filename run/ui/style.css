@@ -170,3 +170,4 @@ body{background:#0E0F11}
 .hmi[data-theme="dark"]{--bed:#3B3E44;--sheet:#44474E}
 .hmi .row .seg{flex-wrap:wrap;flex:initial;max-width:100%}
 @keyframes plr-pulse{0%,100%{box-shadow:0 0 0 3px var(--accent-ring)}50%{box-shadow:0 0 0 7px var(--accent-ring)}}
+@keyframes plr-pulse-blue{0%,100%{box-shadow:0 0 0 2px rgba(62,99,221,.25)}50%{box-shadow:0 0 0 6px rgba(62,99,221,.25)}}

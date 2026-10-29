@@ -66,7 +66,7 @@ async function refresh() {
     followUpdate(S.update);
     // trace the head while a job runs (a new job starts a new trace)
     const st = S.status;
-    if (st.job && st.job !== ui.trail.job) ui.trail = { job: st.job, pts: [] };
+    if (st.job !== ui.trail.job) ui.trail = { job: st.job, pts: [] }; // a new job, or none: start again
     if (st.job && Number.isFinite(st.pos.x)) {
       const last = ui.trail.pts[ui.trail.pts.length - 1];
       if (!last || Math.hypot(last[0] - st.pos.x, last[1] - st.pos.y) > 0.5) ui.trail.pts.push([st.pos.x, st.pos.y]);
@@ -137,13 +137,53 @@ function jobBox(pkg) {
 }
 
 // ---------------------------------------------------------------- header
+// The machine's status, shown top right:
+// orange = a warning or error that needs attention (flagged), red = not connected,
+// blue = processing, green = connected and ready
+const STATUS_COLOR = { warn: '#F5841F', off: 'var(--err-dot)', busy: '#3E63DD', ok: 'var(--ok-dot)' };
+function machineStatus() {
+  if (!S || S.offline) return { key: 'off', label: 'Pathline Run isn\'t responding', detail: 'The screen lost contact with Pathline Run.' };
+  const st = S.status;
+  if (st.state === 'alarm') return { key: 'warn', flag: true, label: 'Error', detail: st.message, action: ['clearAlarm', 'Clear error'] };
+  if (st.link === 'online' && st.interlock) return { key: 'warn', flag: true, label: 'Lid open', detail: 'Close the lid: the machine won\'t move or fire while it\'s open.' };
+  if (st.link !== 'online') return { key: 'off', label: st.link === 'connecting' ? 'Connecting…' : 'Not connected', detail: st.message, action: ['reconnect', 'Reconnect'] };
+  if (st.state === 'running' || st.state === 'paused' || st.state === 'framing') return { key: 'busy', label: st.state === 'paused' ? 'Processing · paused' : st.state === 'framing' ? 'Framing' : 'Processing', detail: st.message };
+  return { key: 'ok', label: 'Connected', detail: S.info.model || '' };
+}
+
+function connText(c) {
+  const m = c.connection;
+  if (m.mode === 'sim') return 'Simulated';
+  if (m.mode === 'udp') return 'Network · ' + (m.ip || 'no IP set');
+  if (m.mode === 'tcp') return 'TCP · ' + (m.host || 'no host set') + ':' + m.tcpPort;
+  return 'USB · ' + (m.port || 'no port set');
+}
+
+// the panel under the machine name: status, connection details, what to do
+function machinePanel() {
+  const c = cfg();
+  const st = S.status;
+  const ms = machineStatus();
+  const row = (l, v) => '<div style="display:grid;grid-template-columns:120px minmax(0,1fr);gap:10px;align-items:baseline;padding:6px 0;border-bottom:1px solid var(--line-soft)"><span class="lbl">' + l + '</span><span style="overflow-wrap:anywhere">' + v + '</span></div>';
+  const addrs = ui.net && ui.net.adapters ? ui.net.adapters.filter((a) => a.addresses.length).map((a) => a.addresses.map((x) => esc(x.ip) + ':' + ui.net.port).join(', ') + ' <span class="lbl">(' + esc(a.label) + ')</span>').join('<br>') : '…';
+  return '<div role="dialog" aria-label="Machine status" class="pop" style="position:absolute;right:0;top:56px;width:360px;padding:16px;gap:10px;border-radius:12px;z-index:60;cursor:default">' +
+    '<div style="display:flex;align-items:center;gap:10px"><span style="width:12px;height:12px;border-radius:50%;background:' + STATUS_COLOR[ms.key] + ';flex:none"></span><span style="font-size:17px;font-weight:600">' + esc(ms.label) + '</span></div>' +
+    (ms.key === 'warn' || ms.key === 'off' ? '<div style="padding:10px 12px;border-radius:10px;background:' + (ms.key === 'warn' ? 'rgba(245,132,31,0.14)' : 'var(--err-soft)') + ';color:' + (ms.key === 'warn' ? '#F5841F' : 'var(--err)') + ';line-height:1.4">' + esc(ms.detail || '') + '</div>' : '') +
+    '<div>' + row('Machine', esc(c.name)) + row('Controller', c.controller === 'ruida' ? 'Ruida' : 'Trotec') + row('Connection', esc(connText(c))) +
+    (S.info.model ? row('Model', esc(S.info.model)) : '') + (S.info.firmware ? row('Firmware', esc(S.info.firmware)) : '') +
+    (st.link === 'online' && Number.isFinite(st.pos.x) ? row('Head', '<span class="mono">X ' + st.pos.x.toFixed(1) + '  Y ' + st.pos.y.toFixed(1) + ' mm</span>') : '') +
+    row('Pathline connects to', '<span class="mono">' + addrs + '</span>') + '</div>' +
+    '<div style="display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap">' +
+    '<button class="tb sm" data-a="go" data-v="setup">Machine setup</button>' +
+    (ms.action ? '<button class="btn-primary" style="height:40px" data-a="' + ms.action[0] + '">' + ms.action[1] + '</button>' : '') + '</div></div>';
+}
+
 function header() {
-  const st = S ? S.status : null;
-  const dot = !S || S.offline || st.link !== 'online' || st.state === 'alarm' || st.interlock ? 'var(--err-dot)' : st.state === 'idle' ? 'var(--ok-dot)' : 'var(--warn-dot)';
+  const ms = machineStatus();
+  const dot = STATUS_COLOR[ms.key];
   const views = [['queue', 'Queue', ICON.queue], ['jog', 'Jog', ICON.jog], ['history', 'History', ICON.history], ['setup', 'Setup', ICON.gear]];
   const nq = visibleQueue().length;
   const c = S ? cfg() : null;
-  const conn = c ? (c.connection.mode === 'sim' ? 'Simulated' : c.connection.mode === 'udp' ? c.connection.ip : c.connection.mode === 'tcp' ? c.connection.host : c.connection.port) : '';
   return '<header class="hmi-bar">' +
     '<div style="display:flex;align-items:center;gap:10px"><div style="position:relative">' +
     '<button class="ib" data-a="nav" aria-label="Menu" aria-expanded="' + ui.navOpen + '">' + ic(ICON.menu) + '</button>' +
@@ -160,9 +200,11 @@ function header() {
     '<nav aria-label="Views" class="tabs views" style="flex:1 1 280px">' + views.map(([k, l, d]) =>
       '<button data-a="go" data-v="' + k + '" aria-current="' + (ui.view === k ? 'page' : 'false') + '">' + ic(d) + '<span class="lab">' + l + '</span>' + (k === 'queue' ? '<span class="count">' + nq + '</span>' : '') + '</button>').join('') + '</nav>' +
     '<div style="display:flex;align-items:center;gap:8px">' + updateChip() +
-    (c ? '<div style="display:flex;align-items:center;gap:10px;height:48px;padding:0 12px 0 8px;border:1px solid var(--line-strong);border-radius:var(--ctl-r)">' +
-      '<span class="badge">LASER</span><span style="display:flex;flex-direction:column;line-height:1.2"><span style="font-weight:600">' + esc(c.name) + '</span><span class="lbl">' + esc((c.controller === 'ruida' ? 'Ruida' : 'Trotec') + ' · ' + conn) + '</span></span>' +
-      '<span aria-hidden="true" style="width:9px;height:9px;border-radius:50%;background:' + dot + '"></span></div>' : '') +
+    (c ? '<div style="position:relative"><button data-a="machMenu" aria-haspopup="dialog" aria-expanded="' + !!ui.machOpen + '" aria-label="' + esc(c.name + ': ' + ms.label) + '" title="' + esc(ms.label) + '" style="display:flex;align-items:center;gap:10px;height:48px;padding:0 12px 0 8px;border:1px solid ' + (ms.flag ? STATUS_COLOR.warn : 'var(--line-strong)') + ';border-radius:var(--ctl-r);background:var(--surface);color:var(--text);cursor:pointer;text-align:left">' +
+      '<span class="badge">LASER</span><span style="display:flex;flex-direction:column;line-height:1.2"><span style="font-weight:600">' + esc(c.name) + '</span><span class="lbl">' + esc(ms.label) + '</span></span>' +
+      (ms.flag ? '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" style="flex:none"><path d="M12 3L2 21h20z" fill="' + STATUS_COLOR.warn + '"/><path d="M12 10v5 M12 17.5v.5" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round"/></svg>' : '') +
+      '<span aria-hidden="true" style="width:11px;height:11px;border-radius:50%;background:' + dot + (ms.key === 'busy' ? ';animation:plr-pulse-blue 1.4s ease-in-out infinite' : '') + '"></span></button>' +
+      (ui.machOpen ? machinePanel() : '') + '</div>' : '') +
     '</div></header>';
 }
 
@@ -263,17 +305,15 @@ function queueView() {
   const runJob = isRun ? S.jobs.find((j) => j.id === st.job) : null;
   const shown = runJob || job;
 
+  // the job's state only: connection and machine problems show top right
+  const machineReady = !S.offline && st.link === 'online' && !st.interlock && st.state !== 'alarm';
   let status;
-  if (S.offline) status = ['Pathline Run is not responding', 'err'];
-  else if (st.state === 'alarm') status = ['Alarm', 'err'];
-  else if (st.link !== 'online') status = ['Device not connected', 'err'];
-  else if (st.interlock) status = ['Lid open', 'err'];
-  else if (st.state === 'running') status = ['Running', 'accent'];
+  if (st.state === 'running') status = ['Running', 'accent'];
   else if (st.state === 'paused') status = ['Paused', 'warn'];
   else if (st.state === 'framing') status = ['Framing', 'warn'];
   else if (/^Finished/.test(st.message)) status = ['Job complete', 'ok'];
-  else if (!job) status = ['Idle', ''];
-  else status = ['Ready', 'ok'];
+  else if (job && machineReady) status = ['Ready', 'ok'];
+  else status = ['Idle', ''];
 
   const total = shown ? shown.seconds : 0;
   const frac = isRun ? st.progress : 0;
@@ -294,8 +334,6 @@ function queueView() {
 
   const shownPkg = shown ? ui.pkgs[shown.id] : null;
   const warn = shown && shown.warnings && shown.warnings.length ? '<div class="warnbox">' + shown.warnings.map(esc).join('<br>') + '</div>' : '';
-  const alarm = st.state === 'alarm' ? '<div class="errbox"><span style="flex:1">' + esc(st.message) + '</span><button class="tb sm" data-a="clearAlarm">Clear alarm</button></div>'
-    : st.link !== 'online' && !S.offline ? '<div class="errbox"><span style="flex:1">' + esc(st.message) + '</span><button class="tb sm" data-a="reconnect">Reconnect</button></div>' : '';
   const ctrlName = cfg().controller === 'ruida' ? 'Ruida' : 'Trotec';
 
   return '<div class="view" style="display:flex;gap:12px;padding:12px">' +
@@ -310,7 +348,6 @@ function queueView() {
     '<div style="flex:1 1 380px;min-width:0;display:flex;flex-direction:column;gap:14px">' +
     '<div style="display:flex;flex-direction:column;gap:4px"><h1 style="margin:0;font-size:28px;font-weight:600;line-height:1.2">' + esc(shown ? shown.name : 'No job selected') + '</h1>' +
     '<span style="color:var(--text-2)">' + esc(shown ? (shown.material || 'No material') + ' · ' + cfg().name + ' · ' + ctrlName : 'Choose a job from the queue') + '</span></div>' +
-    alarm +
     (shownPkg && shownPkg !== 'loading' ? '<div style="display:flex;flex-direction:column;gap:6px">' + procRows(shownPkg) + '</div>' : '') + warn +
     '<div style="display:flex;margin-top:4px"><span class="pill lg ' + status[1] + '">' + status[0] + '</span></div>' +
     '<div style="display:flex;align-items:center;gap:12px;min-height:44px"><button role="switch" class="sw" aria-checked="' + !!cfg().removeDone + '" data-a="removeDone" aria-label="Remove completed job from queue"></button><span style="font-size:16px">Remove completed job from queue</span></div>' +
@@ -323,8 +360,6 @@ function queueView() {
         '<span style="display:flex;flex-direction:column;gap:2px;line-height:1.3"><span style="font-size:16px">Anchor to toolhead</span>' +
         '<span class="lbl">' + (on ? 'The job\'s top-left corner starts at X ' + job.anchor.x.toFixed(1) + ', Y ' + job.anchor.y.toFixed(1) + ' mm' : 'Moves the job so its top-left corner starts at the head') + '</span></span></div>';
     })() +
-    (shown ? '<div style="display:flex;gap:8px;flex-wrap:wrap"><a class="tb sm" href="' + LOCAL('/jobs/' + shown.id + '/export') + '">' + ic(ICON.download, 16) + 'Save ' + (cfg().controller === 'ruida' ? '.rd file' : 'Trotec stream') + '</a>' +
-      '<a class="tb sm" href="' + LOCAL('/jobs/' + shown.id + '/export?format=txt') + '">' + ic(ICON.file, 16) + 'Code listing</a></div>' : '') +
     '</div>' +
     '<div style="flex:1 1 440px;min-width:0;display:flex;flex-direction:column;gap:10px"><div class="viewport" style="position:relative;min-height:320px;display:flex;align-items:center;justify-content:center;padding:52px 18px 18px;border:1px solid var(--line);border-radius:10px">' +
     headReadout(st, isRun) +
@@ -340,7 +375,7 @@ function queueView() {
     // the bar, with the percentage complete at its end
     '<div style="display:flex;align-items:center;gap:12px"><div role="progressbar" aria-label="Job progress" aria-valuenow="' + Math.round(frac * 100) + '" aria-valuemin="0" aria-valuemax="100" style="flex:1;height:14px;border-radius:7px;background:var(--sunken);box-shadow:inset 0 0 0 1px var(--line);overflow:hidden"><div style="height:100%;width:' + (frac * 100).toFixed(1) + '%;background:var(--accent)"></div></div>' +
     '<span class="mono" style="min-width:52px;text-align:right;font-size:18px;font-weight:500;color:' + (isRun ? 'var(--text)' : 'var(--text-3)') + '">' + Math.floor(frac * 100) + ' %</span></div>' +
-    '<div style="display:flex;justify-content:space-between;gap:8px"><span style="color:var(--text-2)">' + esc(isRun ? (st.state === 'paused' ? 'Paused' : 'Running') + ' · ' + st.message : st.message) + '</span><span class="mono" style="color:var(--text-2)">' + (isRun ? hms(frac * total) + ' / ' + hms(total) : 'Estimated ' + hms(total)) + '</span></div></div>' +
+    '<div style="display:flex;justify-content:space-between;gap:8px"><span style="color:var(--text-2)">' + esc(isRun ? (st.state === 'paused' ? 'Paused' : 'Running') + ' · ' + st.message : /^(Finished|Stopped)/.test(st.message) ? st.message : 'Not started') + '</span><span class="mono" style="color:var(--text-2)">' + (isRun ? hms(frac * total) + ' / ' + hms(total) : 'Estimated ' + hms(total)) + '</span></div></div>' +
     '<div style="display:flex;flex-direction:column;align-items:flex-end"><span class="lbl">' + (isRun ? 'Remaining' : 'Estimated time') + '</span><span class="mono" style="font-size:60px;font-weight:500;line-height:1">' + hms(isRun ? total * (1 - frac) : total) + '</span></div>' +
     '</div></main></div>';
 }
@@ -536,7 +571,9 @@ function render() {
 }
 
 const H = {
-  nav: () => { ui.navOpen = !ui.navOpen; render(); },
+  nav: () => { ui.navOpen = !ui.navOpen; ui.machOpen = false; render(); },
+  // the machine name, top right: status and connection details
+  machMenu: () => { ui.machOpen = !ui.machOpen; ui.navOpen = false; if (ui.machOpen && !ui.net) loadNetwork(); render(); },
   go: (v) => { ui.view = v; ui.navOpen = false; if (v === 'setup') { ui.draft = null; ui.netDraft = null; loadPorts(); loadNetwork(); } render(); },
   theme: () => { ui.dark = !ui.dark; ui.themeSet = true; try { localStorage.setItem('plr-theme', ui.dark ? 'dark' : 'light'); } catch (e) { /* ignore */ } render(); },
   sel: (id) => { ui.sel = id; refresh(); },
@@ -648,6 +685,8 @@ async function loadPorts() {
 
 $app.addEventListener('click', (e) => {
   const el = e.target.closest('[data-a]');
+  // the machine panel closes on a tap outside it, or on one of its buttons
+  if (ui.machOpen && !(el && el.dataset.a === 'machMenu') && (!e.target.closest('[aria-label="Machine status"]') || el)) { ui.machOpen = false; if (!el) render(); }
   if (!el || el.tagName === 'INPUT' || el.disabled) return;
   const fn = H[el.dataset.a];
   if (fn) { e.preventDefault(); fn(el.dataset.v, el); }

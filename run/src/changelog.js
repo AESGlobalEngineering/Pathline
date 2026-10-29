@@ -5,6 +5,14 @@
 
 module.exports = [
   {
+    version: '0.3.4', date: '29 Oct 2026',
+    added: [
+      'The machine\'s status is shown top right, by the machine name: green connected, blue processing, red not connected, orange for a warning or error (flagged with a warning sign).',
+      'Tap the machine name for its status and connection details: controller, connection, model, firmware, head position, the address Pathline connects to, and Reconnect or Clear error when needed.'
+    ],
+    fixed: ['The Queue page no longer shows connection errors, "Device not connected", or the Save stream and Code listing buttons.']
+  },
+  {
     version: '0.3.3', date: '29 Oct 2026',
     added: ['Anchor to toolhead is a switch, like "Remove completed job from queue". On: the job starts at the head\'s position when you switched it on. Off: back where Pathline placed it.'],
     fixed: [
