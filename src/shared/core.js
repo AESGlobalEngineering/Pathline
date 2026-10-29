@@ -803,22 +803,80 @@
     opts = opts || {};
     const isLaser = (machine && machine.type ? machine.type : job.machineType) !== 'plotter';
     const base = processOrder(job, isLaser);
-    if (opts.procOrder || cutOrderOf(job).order !== 'speed' || base.length < 2 || base.length > 5) return estimateIn(job, machine, opts, opts.procOrder || base);
-    // Fastest: time every order of the processes (at most 5! = 120) and keep the quickest
-    const perms = [];
-    const perm = (done, left) => {
-      if (!left.length) return perms.push(done);
-      left.forEach((p, i) => perm(done.concat(p), left.filter((_, k) => k !== i)));
+    if (opts.procOrder || cutOrderOf(job).order !== 'speed' || base.length < 2) return estimateIn(job, machine, opts, opts.procOrder || base);
+    // Fastest: engraving may come before or after cutting, but never inside a
+    // shape that has already been cut out. The candidates are every order of
+    // the processes (up to 5) that keeps to that, and on a laser a part-by-part
+    // plan (each part's engraving, then its cuts, parts nearest next). The
+    // quickest one runs.
+    const ents = (job.entities || []).filter((e) => !e.hidden && !e.isRegMark);
+    const procOf = (e) => base.find((pi) => (job.processes[pi].aci || []).includes(e.aci));
+    const through = (pi) => pi !== undefined && (isLaser ? job.processes[pi].proc === 'Cut' : /Knife/.test(job.processes[pi].tool || ''));
+    const cuts = ents.filter((e) => through(procOf(e)))
+      .map((e) => ({ e, b: entityBox(e), rings: (e.paths || []).filter((p) => p.c && p.p.length > 2).map((p) => p.p) }))
+      .filter((c) => c.rings.length);
+    // the cut shapes around an entity: its centre is inside one of their closed paths
+    const encl = new Map(ents.map((e) => {
+      const b = entityBox(e), x = (b.x0 + b.x1) / 2, y = (b.y0 + b.y1) / 2;
+      return [e, cuts.filter((c) => c.e !== e && x >= c.b.x0 && x <= c.b.x1 && y >= c.b.y0 && y <= c.b.y1 && c.rings.some((r) => pointInPoly(x, y, r)))];
+    }));
+    const allowed = (p) => {
+      const pos = new Map(p.map((pi, k) => [pi, k]));
+      return ents.every((e) => {
+        const pe = procOf(e);
+        return pe === undefined || through(pe) || encl.get(e).every((c) => pos.get(procOf(c.e)) > pos.get(pe));
+      });
     };
-    perm([], base);
-    let best = base, bt = Infinity;
-    for (const p of perms) {
-      const t = estimateIn(job, machine, { ...opts, timeline: false }, p).total;
-      if (t < bt - 1e-6) { bt = t; best = p; }
+    const cands = [];
+    if (base.length <= 5) {
+      const perm = (done, left) => {
+        if (!left.length) { if (allowed(done)) cands.push({ order: done }); return; }
+        left.forEach((p, i) => perm(done.concat(p), left.filter((_, k) => k !== i)));
+      };
+      perm([], base);
     }
-    return estimateIn(job, machine, opts, best);
+    if (!cands.length) cands.push({ order: base });
+    if (isLaser && cuts.length) {
+      // each entity goes with the outermost cut shape around it (or stands alone)
+      const area = (b) => boxW(b) * boxH(b);
+      const groups = new Map();
+      for (const e of ents) {
+        if (procOf(e) === undefined) continue;
+        const cs = encl.get(e);
+        const o = cs.length ? cs.reduce((a, c) => (area(c.b) > area(a.b) ? c : a)).e : e;
+        if (!groups.has(o)) groups.set(o, []);
+        groups.get(o).push(e);
+      }
+      // parts nearest next, from the machine origin
+      const bedSize = bedOf(machine), o = ((machine && machine.info) || {}).origin || 'tl';
+      let at = [o.includes('r') ? bedSize[0] : 0, o.includes('b') ? bedSize[1] : 0];
+      const left = [...groups.values()].map((list) => { const b = boxOf(list); return { list, c: [(b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2] }; });
+      const plan = [];
+      while (left.length) {
+        let bi = 0, bd = Infinity;
+        left.forEach((g, i) => { const d = Math.hypot(g.c[0] - at[0], g.c[1] - at[1]); if (d < bd) { bd = d; bi = i; } });
+        const g = left.splice(bi, 1)[0];
+        at = g.c;
+        // engraving (and marking) before the cuts, as processOrder ranks them
+        for (const pi of base) {
+          const ids = new Set(g.list.filter((e) => procOf(e) === pi));
+          if (ids.size) plan.push({ pi, ids });
+        }
+      }
+      if (plan.length > base.length) cands.push({ order: [...new Set(plan.map((s) => s.pi))], plan });
+    }
+    let best = cands[0], bt = Infinity;
+    if (cands.length > 1) {
+      for (const c of cands) {
+        const t = estimateIn(job, machine, { ...opts, timeline: false }, c.order, c.plan).total;
+        if (t < bt - 1e-6) { bt = t; best = c; }
+      }
+    }
+    return estimateIn(job, machine, opts, best.order, best.plan);
   }
-  function estimateIn(job, machine, opts, order) {
+  // plan (Fastest, part by part): [{ pi, ids: Set of entities }] run in that
+  // order instead of whole processes
+  function estimateIn(job, machine, opts, order, plan) {
     const isLaser = (machine && machine.type ? machine.type : job.machineType) !== 'plotter';
     const info = (machine && machine.info) || {};
     const D = isLaser ? DEFAULTS.laser : DEFAULTS.plotter;
@@ -916,9 +974,11 @@
     });
     for (let bed = 0; bed < nBeds; bed++) {
       const bedEnts = isLaser ? ents : ents.filter((e) => (e.bed || 0) === bed);
-      const work = order.map((pi) => ({ pi, mine: bedEnts.filter((e) => (job.processes[pi].aci || []).includes(e.aci)) })).filter((w) => w.mine.length);
+      const work = (plan && isLaser
+        ? plan.map((s, k) => ({ pi: s.pi, key: 's' + k, mine: bedEnts.filter((e) => s.ids.has(e)) }))
+        : order.map((pi) => ({ pi, key: pi, mine: bedEnts.filter((e) => (job.processes[pi].aci || []).includes(e.aci)) }))).filter((w) => w.mine.length);
       const cache = new Map();
-      for (const { pi, mine } of work) runPass(bed, pi, job.processes[pi], mine, passesOf(job.processes[pi]), cache);
+      for (const { pi, key, mine } of work) runPass(bed, pi, job.processes[pi], mine, passesOf(job.processes[pi]), cache, key);
       if (!isLaser && bed < nBeds - 1) {
         const dur = travelTime(feedLen, plot.feedSpeed, 500) + plot.feedSettle;
         feeds++;
@@ -946,7 +1006,7 @@
     }
 
     // One process on one bed, with all its passes.
-    function runPass(bed, pi, proc, mine, passes, cache) {
+    function runPass(bed, pi, proc, mine, passes, cache, key) {
       const passNo = (k) => (passes > 1 ? k : null);
       // laser processes can wait between passes (the head stays put, the beam off)
       const dwell = isLaser ? Math.max(0, Number(proc.dwell) || 0) : 0;
@@ -979,7 +1039,7 @@
         const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
         // bottom up when set, or for "fastest" when the bottom line is nearer the head
         const goesUp = (r, from) => scan.dir === 'up' || (scan.dir === 'fastest' && dist(startAt(rowsOf(r, true)), from) < dist(startAt(r.rows), from));
-        let isl = cache.get(pi);
+        let isl = cache.get(key);
         if (!isl) {
           isl = rasterBands(rasterIslands(mine, dpi, speed, acc, opts.timeline, undefined, scan.uni, vTravel), mine, dpi, speed, acc, vTravel, opts.timeline, scan.uni);
           isl.forEach((r) => { per[pi].area += r.area; engArea += r.area; });
@@ -996,7 +1056,7 @@
             }
             isl = out;
           }
-          cache.set(pi, isl);
+          cache.set(key, isl);
         }
         const engrave = (r, k) => {
           const up = goesUp(r, at);
@@ -1017,7 +1077,7 @@
       }
 
       // the cut order is worked out once and repeated on later passes
-      let ordered = cache.get(pi);
+      let ordered = cache.get(key);
       if (!ordered) {
         const items = [];
         mine.forEach((e) => e.paths.forEach((path, k) => items.push({ ent: e.id, k, path })));
@@ -1025,7 +1085,7 @@
           nest: isLaser ? proc.proc === 'Cut' : /Knife/.test(proc.tool || ''),
           inside: cut.inside, order: 'speed', start: at
         });
-        cache.set(pi, ordered);
+        cache.set(key, ordered);
       }
       // consecutive paths of the same group (nesting layer / part layer) form a block
       const blocks = [];

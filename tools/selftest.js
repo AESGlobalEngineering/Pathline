@@ -103,7 +103,19 @@ async function main() {
       const by = (order) => CC.estimate({ ...mix, cutOrder: { inside: 'part', order } }, laser);
       ok(by('process').procOrder.join() === '0,1', 'by process runs the processes in list order (' + by('process').procOrder + ')');
       ok(by('ordered').procOrder.join() === '1,0', 'ordered engraves before cutting (' + by('ordered').procOrder + ')');
-      ok(by('speed').total <= Math.min(by('process').total, by('ordered').total) + 1e-6, 'fastest is never slower than the other orders');
+      ok(by('speed').total <= by('ordered').total + 1e-6, 'fastest is never slower than ordered');
+      // here the engraving sits inside the cut, so fastest may not cut first (by process would)
+      ok(by('speed').procOrder.join() === '1,0', 'fastest engraves before cutting the part it sits in (' + by('speed').procOrder + ')');
+      // fastest may engrave after cutting, but never inside a part already cut out
+      const part = (x, k) => [{ id: 'c' + k, aci: 1, paths: [{ p: CC.shapes.rect(x, 20, 80, 80, 0), c: true }] }, { id: 'g' + k, aci: 7, paths: [{ p: CC.shapes.rect(x + 20, 40, 40, 40, 0), c: true }] }];
+      const far = { ...mix, entities: [...part(10, 0), ...part(600, 1), { id: 'gx', aci: 7, paths: [{ p: CC.shapes.rect(700, 300, 30, 30, 0), c: true }] }] };
+      const ops = CC.estimate({ ...far, cutOrder: { inside: 'part', order: 'speed' } }, laser, { timeline: true }).timeline.filter((o) => o.kind === 'op');
+      const runs = ops.map((o) => (o.mode === 'raster' ? (o.ents || []).join('+') : o.ent));
+      const at = (id) => runs.findIndex((r) => String(r).split('+').includes(id));
+      ok(at('g0') < at('c0') && at('g1') < at('c1'), 'fastest engraves inside a part before cutting it out (' + runs.join(' ') + ')');
+      ok(Math.min(at('c0'), at('c1')) < Math.max(at('g0'), at('g1'), at('gx')), 'fastest can engrave after cutting (' + runs.join(' ') + ')');
+      const t = (order) => CC.estimate({ ...far, cutOrder: { inside: 'part', order } }, laser).total;
+      ok(t('speed') <= t('ordered') + 1e-6, 'part by part is no slower than ordered (' + t('speed').toFixed(1) + ' s vs ' + t('ordered').toFixed(1) + ' s)');
     }
     // 2 passes, any order: item 1, 2, 3, 4 once, then 1, 2, 3, 4 again
     const twoPass = { ...pj, entities: grid.slice(0, 4), processes: pj.processes.map((p, i) => (i === 0 ? { ...p, passes: 2 } : p)) };

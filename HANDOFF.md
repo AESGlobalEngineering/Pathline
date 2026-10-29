@@ -15,6 +15,12 @@ Latest round (28 Oct, final):
 - **Dark mode bed is grey** (`--bed`, `--sheet`, `--bed-grid*` in theme.css). **ACI 7 shows as white in dark mode** (black in light), as in CAD, and so do the marks drawn on the bed (registration marks, engrave hatching, arrows, start points): see the `--aci7*` and `--ink` tokens, and `LRC.aci.hex/fg/stroke` in app.js. Exports (DXF/SVG/PDF) still use real black.
 - **Sample machines and materials from earlier builds are removed on first start** (main.js, tracked by `settings.samplesRemoved`). This is by exact id (trotec, flatbed, laser2, acr-print-3 … brass-1); anything the operator created stays.
 
+Version 1.2.9 (29 Oct):
+- **Fastest never engraves inside a cut-out part** (`estimate()` in core.js). An entity is "inside" a through-cut (laser `Cut`, plotter knife) when its centre lies within one of that cut's closed paths.
+  - Process orders where such an engraving would come after its cut are not used.
+  - On a laser, Fastest also tries a **part-by-part plan**. Each entity is grouped with the outermost cut around it; groups run nearest next from the origin; within a group, engraving comes before cutting. These steps go to `estimateIn(…, plan)`, and `runPass` caches per step key.
+  - The quickest candidate runs. Engraving outside any cut can come before or after the cuts.
+
 Version 1.2.8 (29 Oct):
 - **Cut order modes are `process` (By process), `speed` (Fastest) and `ordered` (Ordered)** (`cutOrderOf` in core.js). Old `file` and `heat` jobs read as `ordered`. Paths within a process always go to the nearest next one; "As drawn" and "Spread heat" are gone.
   - By process: processes run in the job's list order (`processOrder`).

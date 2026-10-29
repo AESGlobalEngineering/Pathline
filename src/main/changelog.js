@@ -5,6 +5,11 @@
 
 module.exports = [
   {
+    version: '1.2.9', date: '29 Oct 2026',
+    added: ['Fastest cut order can engrave before or after cutting, part by part, but never inside a part that has already been cut out.'],
+    fixed: []
+  },
+  {
     version: '1.2.8', date: '29 Oct 2026',
     added: [
       'Cut order is now By process, Fastest or Ordered. By process runs the processes in the order they are listed; Fastest runs them in whichever order is quickest; Ordered reads registration marks, then engraves, then cuts, one whole pass at a time.',
