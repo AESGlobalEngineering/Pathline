@@ -14,21 +14,23 @@ function dataDir(override) {
   return path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config'), 'pathline-run');
 }
 
-// Starting values per controller. Trotec values are from the Q500 in TROTEC_PROTOCOL.md.
+// Starting values per controller when a machine is added (no name, port or IP: the operator sets those).
+// Trotec values are from the Q500 in TROTEC_PROTOCOL.md.
 const PRESETS = {
   trotec: {
-    name: 'Trotec Q500', bed: [1300, 900], speed: 2000, acc: 20000, power: 130, source: 'CO2', lens: '2.0"', minPower: 0,
-    connection: { mode: 'serial', port: process.platform === 'win32' ? 'COM4' : '/dev/ttyACM0', host: '', tcpPort: 4713, ip: '' },
+    name: '', bed: [1300, 900], speed: 2000, acc: 20000, power: 130, source: 'CO2', lens: '2.0"', minPower: 0,
+    connection: { mode: 'serial', port: '', host: '', tcpPort: 4713, ip: '' },
     f: { air: true, pointer: false, camera: false, autofocus: false, rotary: false, interlock: true }
   },
   ruida: {
-    name: 'Ruida laser', bed: [900, 600], speed: 500, acc: 3000, power: 100, source: 'CO2', lens: '2.0"', minPower: 10,
-    connection: { mode: 'udp', port: '', host: '', tcpPort: 4713, ip: '192.168.1.100' },
+    name: '', bed: [900, 600], speed: 500, acc: 3000, power: 100, source: 'CO2', lens: '2.0"', minPower: 10,
+    connection: { mode: 'udp', port: '', host: '', tcpPort: 4713, ip: '' },
     f: { air: false, pointer: false, camera: false, autofocus: false, rotary: false, interlock: false }
   }
 };
 
 const BASE = {
+  configured: false,             // true once a machine has been added in Setup
   controller: 'trotec',
   httpPort: 8470,
   origin: 'tl', units: 'mm', home: true, prefix: '',
@@ -38,6 +40,15 @@ const BASE = {
   ruida: { magic: 0x88, origin: 'tr' },
   sim: { speedup: 20 }
 };
+
+// settings that belong to Pathline Run, not to the machine (kept when a machine is removed)
+const APP_PREFS = ['httpPort', 'regMarks', 'removeDone', 'prefix', 'sim'];
+
+// the setup with the machine removed
+function withoutMachine(cfg) {
+  const keep = Object.fromEntries(Object.entries(cfg).filter(([k]) => APP_PREFS.includes(k)));
+  return { ...defaults(cfg.controller), ...keep, configured: false };
+}
 
 function defaults(controller) {
   const c = controller === 'ruida' ? 'ruida' : 'trotec';
@@ -58,6 +69,8 @@ function load(dir, overrides) {
   const file = path.join(dir, 'config.json');
   let saved = {};
   try { saved = JSON.parse(fs.readFileSync(file, 'utf8')); } catch (e) { /* first run */ }
+  // no machine added yet (or settings from before machines were added): keep only the app's own preferences
+  if (!saved.configured) saved = Object.fromEntries(Object.entries(saved).filter(([k]) => APP_PREFS.includes(k)));
   const ctrl = (overrides && overrides.controller) || saved.controller;
   let cfg = merge(defaults(ctrl), saved);
   if (overrides) cfg = merge(cfg, overrides);
@@ -78,4 +91,4 @@ function machineView(cfg) {
   };
 }
 
-module.exports = { dataDir, defaults, load, save, merge, machineView, PRESETS };
+module.exports = { dataDir, defaults, load, save, merge, machineView, withoutMachine, PRESETS };

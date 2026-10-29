@@ -27,6 +27,14 @@ class Machine {
   // ------------------------------------------------------------ link
   async connect() {
     if (this.link) await this.link.close().catch(() => {});
+    clearTimeout(this.retry);
+    // no machine added yet: nothing to connect to
+    if (!this.cfg.configured) {
+      this.link = null;
+      Object.assign(this.st, { link: 'none', message: 'No machine set up', interlock: false });
+      if (this.st.state === 'alarm') this.st.state = 'idle';
+      return;
+    }
     this.st.link = 'connecting';
     this.st.message = 'Connecting…';
     const link = makeLink(this.cfg, this.log);
@@ -54,7 +62,7 @@ class Machine {
 
   // reconnects only when something the link depends on changed
   async reconfigure(cfg) {
-    const linkKeys = (c) => JSON.stringify([c.controller, c.connection, c.trotec, c.ruida, c.sim, c.bed]);
+    const linkKeys = (c) => JSON.stringify([c.configured, c.controller, c.connection, c.trotec, c.ruida, c.sim, c.bed]);
     const relink = linkKeys(cfg) !== linkKeys(this.cfg);
     if (relink && this.run) throw busyErr('Stop the running job before changing the controller setup');
     this.cfg = cfg;
@@ -93,6 +101,7 @@ class Machine {
   busy() { return !!this.run || this.st.state === 'framing' || !!this.framing; }
 
   guard() {
+    if (!this.cfg.configured) throw busyErr('No machine is set up in Pathline Run yet');
     if (this.st.link !== 'online') throw busyErr('The machine isn\'t connected: ' + this.st.message);
     if (this.run) throw busyErr('A job is running');
     if (this.busy()) throw busyErr('The machine is framing');

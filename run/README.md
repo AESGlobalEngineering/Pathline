@@ -25,7 +25,7 @@ These links always give the newest version. They all live in one release, [**pat
 
 **Raspberry Pi:** Raspberry Pi OS Bookworm 64-bit with desktop, on a Pi 4 or 5 with a touchscreen. The script puts `Pathline-Run.AppImage` in `~/Applications`, adds it to the menu, and starts it full screen (`--kiosk`) at login. It also installs `libfuse2` (AppImages need it) and allows the USB port (`/dev/ttyACM0` for a Trotec). Restart the Pi afterwards. There's also an x64 AppImage for Linux PCs (`Pathline-Run-x86_64.AppImage`).
 
-**Then:** in Pathline Run, **Setup** → Machine → choose Trotec or Ruida and the connection → **Save to machine**. In Pathline, **Setup → Machines → Add machine** → Ethernet, the Pathline Run computer's IP address, port 8470.
+**Then:** Pathline Run opens on **Setup → Add a machine**. Name the machine, choose Trotec or Ruida and how it's connected, check the bed size, then **Add machine**. (☰ → Remove machine… removes it again, after two checks.) In Pathline, **Setup → Machines → Add machine** → Ethernet, the Pathline Run computer's IP address, port 8470.
 
 Settings, the queue and received jobs are kept in `%APPDATA%\Pathline Run\data` (Windows) or `~/.config/Pathline Run/data` (Pi), so updates and reinstalls keep them. Pathline Run 0.1.0's data is brought across the first time.
 

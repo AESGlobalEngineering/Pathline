@@ -47,7 +47,10 @@ function start(opts = {}) {
   const DATA = opts.dataDir || config.dataDir();
   fs.mkdirSync(DATA, { recursive: true });
   let cfg = config.load(DATA, opts.controller ? { controller: opts.controller } : undefined);
-  if (opts.sim) cfg.connection = { ...cfg.connection, mode: 'sim' };
+  if (opts.sim) {
+    cfg.connection = { ...cfg.connection, mode: 'sim' };
+    if (!cfg.configured) Object.assign(cfg, { configured: true, name: cfg.name || 'Simulated laser' });
+  }
   const PORT = Number(opts.port || cfg.httpPort || 8470);
   const updates = opts.updates || NO_UPDATES;
   const isLocalReq = (req) => /^(::1|127\.0\.0\.1|::ffff:127\.0\.0\.1)$/.test(req.socket.remoteAddress || '');
@@ -101,7 +104,11 @@ function start(opts = {}) {
     seconds: j.seconds, receivedAt: j.receivedAt, finishedAt: j.finishedAt
   }));
 
+  // what Pathline is told while no machine has been added
+  const needMachine = () => { if (!cfg.configured) throw err(409, 'No machine is set up in Pathline Run yet. Add one on its screen: Setup → Add machine.'); };
+
   function queueJob(pkg, source) {
+    needMachine();
     const warnings = validate.check(pkg, cfg);
     // convert now, so a job the controller can't take is refused at send time
     try { controller(cfg.controller).compile(plan.build(pkg), cfg); } catch (e) { throw err(400, 'Can\'t convert this job for ' + CONTROLLERS[cfg.controller].label + ': ' + e.message); }
@@ -112,11 +119,11 @@ function start(opts = {}) {
 
   // ---------------------------------------------------------------- Pathline protocol
   const api = {
-    'GET /info': () => ({
+    'GET /info': () => (needMachine(), {
       name: cfg.name, type: 'laser', ctrl: CONTROLLERS[cfg.controller].label, model: machine.info.model || cfg.name,
       firmware: machine.info.firmware || '', protocol: 1, bed: cfg.bed, app: 'Pathline Run ' + pkgJson.version
     }),
-    'GET /machine': () => config.machineView(cfg),
+    'GET /machine': () => (needMachine(), config.machineView(cfg)),
     'GET /status': () => machine.status(),
     'GET /jobs': () => jobsView(),
     'POST /jobs/order': (b) => { store.order(Array.isArray(b.ids) ? b.ids : []); return { ok: true }; },
@@ -164,6 +171,15 @@ function start(opts = {}) {
       const next = config.merge(cfg, b);
       if (!CONTROLLERS[next.controller]) throw err(400, 'Unknown controller');
       if (!Array.isArray(next.bed) || next.bed.length !== 2 || !next.bed.every((v) => Number.isFinite(v) && v > 0)) throw err(400, 'Bed size must be two numbers above 0');
+      if (next.configured) {
+        // adding or changing a machine: it needs a name and somewhere to connect
+        const c = next.connection;
+        if (!String(next.name || '').trim()) throw err(400, 'Give the machine a name');
+        if (c.mode === 'serial' && !String(c.port || '').trim()) throw err(400, 'Choose the USB serial port the laser is on (for example COM4)');
+        if (c.mode === 'tcp' && !String(c.host || '').trim()) throw err(400, 'Enter the laser\'s host or IP address');
+        if (c.mode === 'udp' && !/^\d{1,3}(\.\d{1,3}){3}$/.test(String(c.ip || '').trim())) throw err(400, 'Enter the Ruida controller\'s IP address, for example 192.168.1.100');
+      }
+      if (next.configured && !cfg.configured) log('machine added: ' + next.name + ' (' + next.controller + ', ' + next.connection.mode + ')');
       await machine.reconfigure(next);
       cfg = next;
       config.save(DATA, cfg);
@@ -171,6 +187,20 @@ function start(opts = {}) {
       return { config: cfg };
     },
     'GET /presets': () => ({ trotec: config.defaults('trotec'), ruida: config.defaults('ruida') }),
+    // ☰ → Remove machine (the screen asks twice first): forgets the machine's setup.
+    // Queued jobs and history stay.
+    'POST /machine/remove': async (b, req) => {
+      if (!isLocalReq(req)) throw err(403, 'The machine can only be removed on its own screen');
+      if (machine.run || machine.busy()) throw err(409, 'Stop the running job first');
+      if (!cfg.configured) return { config: cfg };
+      const name = cfg.name;
+      const next = config.withoutMachine(cfg);
+      await machine.reconfigure(next);
+      cfg = next;
+      config.save(DATA, cfg);
+      log('machine removed: ' + name);
+      return { config: cfg };
+    },
     // this computer's network adapters and addresses (what Pathline connects to)
     'GET /network': async () => ({ port: PORT, adapters: await network.list(), canSet: process.platform === 'win32' || process.platform === 'linux' }),
     'POST /network': async (b, req) => {

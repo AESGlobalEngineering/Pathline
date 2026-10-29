@@ -61,6 +61,8 @@ async function refresh() {
     const next = await call('GET', LOCAL('/state'));
     // a new version is running: load its screen
     if (S && next.app !== S.app) { location.reload(); return; }
+    // first look and no machine yet: open Setup to add one
+    if (!S && !next.config.configured) { ui.view = 'setup'; setTimeout(() => { loadPorts(); loadNetwork(); }, 0); }
     S = next;
     S.offline = false;
     followUpdate(S.update);
@@ -144,6 +146,7 @@ const STATUS_COLOR = { warn: '#F5841F', off: 'var(--err-dot)', busy: '#3E63DD', 
 function machineStatus() {
   if (!S || S.offline) return { key: 'off', label: 'Pathline Run isn\'t responding', detail: 'The screen lost contact with Pathline Run.' };
   const st = S.status;
+  if (!S.config.configured) return { key: 'off', label: 'No machine set up', detail: 'Add the machine Pathline Run controls: Setup → Add machine.', action: ['go', 'Set up a machine', 'setup'] };
   if (st.state === 'alarm') return { key: 'warn', flag: true, label: 'Error', detail: st.message, action: ['clearAlarm', 'Clear error'] };
   if (st.link === 'online' && st.interlock) return { key: 'warn', flag: true, label: 'Lid open', detail: 'Close the lid: the machine won\'t move or fire while it\'s open.' };
   if (st.link !== 'online') return { key: 'off', label: st.link === 'connecting' ? 'Connecting…' : 'Not connected', detail: st.message, action: ['reconnect', 'Reconnect'] };
@@ -169,13 +172,13 @@ function machinePanel() {
   return '<div role="dialog" aria-label="Machine status" class="pop" style="position:absolute;right:0;top:56px;width:360px;padding:16px;gap:10px;border-radius:12px;z-index:60;cursor:default">' +
     '<div style="display:flex;align-items:center;gap:10px"><span style="width:12px;height:12px;border-radius:50%;background:' + STATUS_COLOR[ms.key] + ';flex:none"></span><span style="font-size:17px;font-weight:600">' + esc(ms.label) + '</span></div>' +
     (ms.key === 'warn' || ms.key === 'off' ? '<div style="padding:10px 12px;border-radius:10px;background:' + (ms.key === 'warn' ? 'rgba(245,132,31,0.14)' : 'var(--err-soft)') + ';color:' + (ms.key === 'warn' ? '#F5841F' : 'var(--err)') + ';line-height:1.4">' + esc(ms.detail || '') + '</div>' : '') +
-    '<div>' + row('Machine', esc(c.name)) + row('Controller', c.controller === 'ruida' ? 'Ruida' : 'Trotec') + row('Connection', esc(connText(c))) +
+    '<div>' + (c.configured ? row('Machine', esc(c.name)) + row('Controller', c.controller === 'ruida' ? 'Ruida' : 'Trotec') + row('Connection', esc(connText(c))) : row('Machine', 'None yet')) +
     (S.info.model ? row('Model', esc(S.info.model)) : '') + (S.info.firmware ? row('Firmware', esc(S.info.firmware)) : '') +
     (st.link === 'online' && Number.isFinite(st.pos.x) ? row('Head', '<span class="mono">X ' + st.pos.x.toFixed(1) + '  Y ' + st.pos.y.toFixed(1) + ' mm</span>') : '') +
     row('Pathline connects to', '<span class="mono">' + addrs + '</span>') + '</div>' +
     '<div style="display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap">' +
-    '<button class="tb sm" data-a="go" data-v="setup">Machine setup</button>' +
-    (ms.action ? '<button class="btn-primary" style="height:40px" data-a="' + ms.action[0] + '">' + ms.action[1] + '</button>' : '') + '</div></div>';
+    (c.configured ? '<button class="tb sm" data-a="go" data-v="setup">Machine setup</button>' : '') +
+    (ms.action ? '<button class="btn-primary" style="height:40px" data-a="' + ms.action[0] + '"' + (ms.action[2] ? ' data-v="' + ms.action[2] + '"' : '') + '>' + ms.action[1] + '</button>' : '') + '</div></div>';
 }
 
 function header() {
@@ -188,8 +191,9 @@ function header() {
     '<div style="display:flex;align-items:center;gap:10px"><div style="position:relative">' +
     '<button class="ib" data-a="nav" aria-label="Menu" aria-expanded="' + ui.navOpen + '">' + ic(ICON.menu) + '</button>' +
     (ui.navOpen ? '<div role="menu" class="pop" style="position:absolute;left:0;top:52px;min-width:230px">' +
-      '<button role="menuitem" class="opt" data-a="go" data-v="setup">Machine setup</button>' +
+      '<button role="menuitem" class="opt" data-a="go" data-v="setup">' + (S && !S.config.configured ? 'Add machine' : 'Machine setup') + '</button>' +
       '<button role="menuitem" class="opt" data-a="log">Diagnostics log</button>' +
+      (S && S.here && S.config.configured ? '<button role="menuitem" class="opt" data-a="removeMachine" style="color:var(--err)">Remove machine…</button>' : '') +
       '<div class="sep"></div>' +
       '<button role="menuitem" aria-label="Dark mode ' + (ui.dark ? 'on' : 'off') + '" class="opt" data-a="theme" style="justify-content:space-between">' +
       '<span style="display:inline-flex;align-items:center;gap:10px">' + ic(ui.dark ? ICON.moon : ICON.sun, 18) + 'Dark mode</span>' +
@@ -200,8 +204,8 @@ function header() {
     '<nav aria-label="Views" class="tabs views" style="flex:1 1 280px">' + views.map(([k, l, d]) =>
       '<button data-a="go" data-v="' + k + '" aria-current="' + (ui.view === k ? 'page' : 'false') + '">' + ic(d) + '<span class="lab">' + l + '</span>' + (k === 'queue' ? '<span class="count">' + nq + '</span>' : '') + '</button>').join('') + '</nav>' +
     '<div style="display:flex;align-items:center;gap:8px">' + updateChip() +
-    (c ? '<div style="position:relative"><button data-a="machMenu" aria-haspopup="dialog" aria-expanded="' + !!ui.machOpen + '" aria-label="' + esc(c.name + ': ' + ms.label) + '" title="' + esc(ms.label) + '" style="display:flex;align-items:center;gap:10px;height:48px;padding:0 12px 0 8px;border:1px solid ' + (ms.flag ? STATUS_COLOR.warn : 'var(--line-strong)') + ';border-radius:var(--ctl-r);background:var(--surface);color:var(--text);cursor:pointer;text-align:left">' +
-      '<span class="badge">LASER</span><span style="display:flex;flex-direction:column;line-height:1.2"><span style="font-weight:600">' + esc(c.name) + '</span><span class="lbl">' + esc(ms.label) + '</span></span>' +
+    (c ? '<div style="position:relative"><button data-a="machMenu" aria-haspopup="dialog" aria-expanded="' + !!ui.machOpen + '" aria-label="' + esc((c.configured ? c.name : 'No machine') + ': ' + ms.label) + '" title="' + esc(ms.label) + '" style="display:flex;align-items:center;gap:10px;height:48px;padding:0 12px 0 8px;border:1px solid ' + (ms.flag ? STATUS_COLOR.warn : 'var(--line-strong)') + ';border-radius:var(--ctl-r);background:var(--surface);color:var(--text);cursor:pointer;text-align:left">' +
+      '<span class="badge">LASER</span><span style="display:flex;flex-direction:column;line-height:1.2"><span style="font-weight:600">' + esc(c.configured ? c.name : 'No machine') + '</span><span class="lbl">' + esc(ms.label) + '</span></span>' +
       (ms.flag ? '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" style="flex:none"><path d="M12 3L2 21h20z" fill="' + STATUS_COLOR.warn + '"/><path d="M12 10v5 M12 17.5v.5" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round"/></svg>' : '') +
       '<span aria-hidden="true" style="width:11px;height:11px;border-radius:50%;background:' + dot + (ms.key === 'busy' ? ';animation:plr-pulse-blue 1.4s ease-in-out infinite' : '') + '"></span></button>' +
       (ui.machOpen ? machinePanel() : '') + '</div>' : '') +
@@ -313,7 +317,7 @@ function queueView() {
   else if (st.state === 'framing') status = ['Framing', 'warn'];
   else if (/^Finished/.test(st.message)) status = ['Job complete', 'ok'];
   else if (job && machineReady) status = ['Ready', 'ok'];
-  else status = ['Idle', ''];
+  else status = null; // nothing to say
 
   const total = shown ? shown.seconds : 0;
   const frac = isRun ? st.progress : 0;
@@ -347,9 +351,9 @@ function queueView() {
     '<div style="flex:1;display:flex;flex-wrap:wrap;gap:24px;padding:22px">' +
     '<div style="flex:1 1 380px;min-width:0;display:flex;flex-direction:column;gap:14px">' +
     '<div style="display:flex;flex-direction:column;gap:4px"><h1 style="margin:0;font-size:28px;font-weight:600;line-height:1.2">' + esc(shown ? shown.name : 'No job selected') + '</h1>' +
-    '<span style="color:var(--text-2)">' + esc(shown ? (shown.material || 'No material') + ' · ' + cfg().name + ' · ' + ctrlName : 'Choose a job from the queue') + '</span></div>' +
+    '<span style="color:var(--text-2)">' + esc(shown ? (shown.material || 'No material') + (cfg().configured ? ' · ' + cfg().name + ' · ' + ctrlName : '') : 'Choose a job from the queue') + '</span></div>' +
     (shownPkg && shownPkg !== 'loading' ? '<div style="display:flex;flex-direction:column;gap:6px">' + procRows(shownPkg) + '</div>' : '') + warn +
-    '<div style="display:flex;margin-top:4px"><span class="pill lg ' + status[1] + '">' + status[0] + '</span></div>' +
+    (status ? '<div style="display:flex;margin-top:4px"><span class="pill lg ' + status[1] + '">' + status[0] + '</span></div>' : '') +
     '<div style="display:flex;align-items:center;gap:12px;min-height:44px"><button role="switch" class="sw" aria-checked="' + !!cfg().removeDone + '" data-a="removeDone" aria-label="Remove completed job from queue"></button><span style="font-size:16px">Remove completed job from queue</span></div>' +
     // pin the job's top-left corner to where the head is now
     // (switching it on uses the head position at that moment; off puts the job back where Pathline placed it)
@@ -518,11 +522,16 @@ function setupView() {
     'Pathline Run has no camera yet: jobs with registration marks either wait, or run without print-and-cut correction.'));
 
   const tab = tabs[ui.setTab] ? ui.setTab : 'Machine';
+  // no machine yet: this page adds one (name, controller and connection on the Machine tab)
+  const adding = !cfg().configured;
   return '<div class="view" style="padding:12px;display:flex;flex-direction:column;gap:12px">' +
     '<section class="card" style="padding:16px 18px;display:flex;flex-wrap:wrap;align-items:center;gap:14px"><span class="badge" style="height:28px;padding:0 9px;border-radius:6px">LASER</span>' +
-    '<div style="flex:1 1 280px;min-width:0;display:flex;flex-direction:column;gap:4px"><span style="font-size:17px;font-weight:600">' + esc(d.name) + '</span><span class="lbl">' + (d.controller === 'ruida' ? 'Ruida' : 'Trotec') + ' · ' + esc(S.info.model || 'not connected') + (S.info.firmware ? ' · ' + esc(S.info.firmware) : '') + '</span></div>' +
-    (dirty ? '<span class="tag warn">Unsaved changes</span><button class="tb" data-a="discard">Discard</button>' : '') +
-    '<button class="btn-primary" data-a="save"' + (dirty ? '' : ' disabled') + '>Save to machine</button></section>' +
+    (adding
+      ? '<div style="flex:1 1 280px;min-width:0;display:flex;flex-direction:column;gap:4px"><span style="font-size:17px;font-weight:600">Add a machine</span><span class="lbl">Name it, choose Trotec or Ruida and how it\'s connected (Machine tab), check the bed size (Work area), then Add machine.</span></div>' +
+        '<button class="btn-primary" data-a="save">Add machine</button></section>'
+      : '<div style="flex:1 1 280px;min-width:0;display:flex;flex-direction:column;gap:4px"><span style="font-size:17px;font-weight:600">' + esc(d.name) + '</span><span class="lbl">' + (d.controller === 'ruida' ? 'Ruida' : 'Trotec') + ' · ' + esc(S.info.model || 'not connected') + (S.info.firmware ? ' · ' + esc(S.info.firmware) : '') + '</span></div>' +
+        (dirty ? '<span class="tag warn">Unsaved changes</span><button class="tb" data-a="discard">Discard</button>' : '') +
+        '<button class="btn-primary" data-a="save"' + (dirty ? '' : ' disabled') + '>Save to machine</button></section>') +
     '<div role="tablist" aria-label="Setup sections" class="tabs">' + Object.keys(tabs).map((t) => '<button role="tab" aria-selected="' + (t === tab) + '" data-a="setTab" data-v="' + t + '">' + t + '</button>').join('') + '</div>' +
     '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));gap:12px;align-items:start">' + tabs[tab].join('') + '</div></div>';
 }
@@ -546,6 +555,18 @@ function dialog() {
     return '<div class="scrim"><div role="dialog" aria-label="About" class="dlg"><div style="display:flex;gap:14px;align-items:center"><img src="icon.svg" width="48" height="48" alt=""><div><div class="h-sec" style="font-size:18px">Pathline Run ' + esc(S.app) + '</div><span class="lbl">The machine side of Pathline</span></div></div>' +
       '<span style="color:var(--text-2);line-height:1.5">Receives jobs from Pathline over Ethernet (port ' + esc(cfg().httpPort) + '), converts them for Trotec or Ruida controllers, and runs them.</span>' +
       '<div style="display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap">' + (S.here ? '<button class="tb" data-a="checkUpdate">Check for updates…</button>' : '') + '<button class="tb" data-a="whatsNew">What\'s new</button><button class="btn-primary" data-a="close">Close</button></div></div></div>';
+  }
+  if (ui.dlg.kind === 'remove1' || ui.dlg.kind === 'remove2') {
+    const name = esc(cfg().name);
+    const busy = running();
+    const first = ui.dlg.kind === 'remove1';
+    return '<div class="scrim"><div role="dialog" aria-label="Remove machine" class="dlg">' +
+      (first
+        ? '<span class="h-sec" style="font-size:18px">Remove ' + name + '?</span><span style="color:var(--text-2);line-height:1.5">Pathline Run forgets this machine: its controller, connection, bed size and calibration values. Pathline can\'t send jobs here until a machine is added again.<br>Queued jobs and history stay.</span>'
+        : '<span class="h-sec" style="font-size:18px">Are you sure?</span><span style="color:var(--text-2);line-height:1.5">' + name + '\'s setup will be deleted and can\'t be brought back. You\'d have to set it up again from the start.</span>') +
+      (busy ? '<div class="errbox">A job is running. Stop it before removing the machine.</div>' : '') +
+      '<div style="display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap"><button class="tb" data-a="close">' + (first ? 'Cancel' : 'Keep ' + name) + '</button>' +
+      '<button class="btn-primary" data-a="' + (first ? 'removeAsk2' : 'removeGo') + '"' + (busy ? ' disabled' : '') + '>' + (first ? 'Remove machine' : 'Yes, remove it') + '</button></div></div></div>';
   }
   if (ui.dlg.kind === 'update') return updateWindow();
   if (ui.dlg.kind === 'changelog') return changelogWindow(ui.dlg.entries, ui.dlg.title);
@@ -640,7 +661,24 @@ const H = {
     render();
   },
   discard: () => { ui.draft = null; render(); },
-  save: act(async () => { await call('PUT', LOCAL('/config'), ui.draft); ui.draft = null; toast('Saved. Reconnecting to the controller…'); }),
+  save: act(async () => {
+    const adding = !cfg().configured;
+    const r = await call('PUT', LOCAL('/config'), { ...ui.draft, configured: true });
+    S.config = r.config; // so the form shows what was saved, not the settings from before
+    ui.draft = null;
+    toast(adding ? 'Machine added. Connecting to the controller…' : 'Saved. Reconnecting to the controller…');
+  }),
+  // ☰ → Remove machine: two confirmations, then the setup is forgotten
+  removeMachine: () => { ui.navOpen = false; ui.dlg = { kind: 'remove1' }; render(); },
+  removeAsk2: () => { ui.dlg = { kind: 'remove2' }; render(); },
+  removeGo: act(async () => {
+    const name = cfg().name;
+    const r = await call('POST', LOCAL('/machine/remove'), {});
+    S.config = r.config;
+    ui.dlg = null; ui.draft = null;
+    ui.view = 'setup';
+    toast(name + ' was removed. Add a machine to use Pathline Run again.', { ms: 8000 });
+  }),
   clearAlarm: act(async () => call('POST', LOCAL('/alarm/clear'), {})),
   reconnect: act(async () => call('POST', LOCAL('/reconnect'), {})),
   import: () => { ui.dlg = { kind: 'import' }; render(); },

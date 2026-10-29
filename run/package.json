@@ -1,7 +1,7 @@
 {
   "name": "pathline-run",
   "productName": "Pathline Run",
-  "version": "0.3.4",
+  "version": "0.4.0",
   "description": "Pathline Run: the machine-side HMI. Receives Pathline jobs over Ethernet, converts them for a Trotec or Ruida controller and runs them.",
   "main": "electron/main.js",
   "private": true,
