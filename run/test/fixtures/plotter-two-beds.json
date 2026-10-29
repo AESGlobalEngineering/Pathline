@@ -1,0 +1,601 @@
+{
+  "format": "lrc-job-package",
+  "version": 1,
+  "createdAt": "2026-10-28T12:00:00.000Z",
+  "job": {
+    "id": "j-example-plotter",
+    "name": "Folding box ×2",
+    "notes": ""
+  },
+  "machine": {
+    "id": "m-plotter",
+    "name": "Plotter B",
+    "type": "plotter",
+    "ctrl": "Ruida",
+    "bed": [
+      1600,
+      1000
+    ]
+  },
+  "material": {
+    "id": "foam-5",
+    "name": "Foam board",
+    "thickness": 5
+  },
+  "sheet": null,
+  "regMarks": null,
+  "beds": 2,
+  "cutOrder": {
+    "order": "speed",
+    "inside": "part"
+  },
+  "processes": [
+    {
+      "index": 2,
+      "name": "V-cut 45°",
+      "tool": "T2 · V-cut 45°",
+      "speed": 250,
+      "passes": 1,
+      "dash": false,
+      "dl": 5,
+      "gl": 2,
+      "out": true,
+      "aci": [
+        5
+      ],
+      "adv": {},
+      "summary": "T2 · V-cut 45° · 250 mm/s · 1×"
+    },
+    {
+      "index": 3,
+      "name": "Crease",
+      "tool": "T3 · Crease wheel",
+      "speed": 300,
+      "passes": 1,
+      "dash": false,
+      "dl": 5,
+      "gl": 2,
+      "out": true,
+      "aci": [
+        3
+      ],
+      "adv": {},
+      "summary": "T3 · Crease wheel · 300 mm/s · 1×"
+    },
+    {
+      "index": 0,
+      "name": "Knife through",
+      "tool": "T1 · Knife",
+      "speed": 300,
+      "passes": 2,
+      "dash": false,
+      "dl": 5,
+      "gl": 2,
+      "out": true,
+      "aci": [
+        1
+      ],
+      "adv": {},
+      "summary": "T1 · Knife · 300 mm/s · 2×"
+    },
+    {
+      "index": 1,
+      "name": "Perforate",
+      "tool": "T1 · Knife",
+      "speed": 300,
+      "passes": 1,
+      "dash": true,
+      "dl": 8,
+      "gl": 2,
+      "out": true,
+      "aci": [
+        6
+      ],
+      "adv": {},
+      "summary": "T1 · Knife · 300 mm/s · 1× · dash 8/2 mm"
+    }
+  ],
+  "disabledProcesses": [
+    "Pen"
+  ],
+  "estimate": {
+    "totalSeconds": 102,
+    "total": "1 min 42 s",
+    "perProcess": [
+      {
+        "name": "Knife through",
+        "seconds": 44,
+        "cutLengthMm": 8000,
+        "engraveAreaMm2": 0
+      },
+      {
+        "name": "Perforate",
+        "seconds": 14,
+        "cutLengthMm": 1200,
+        "engraveAreaMm2": 0
+      },
+      {
+        "name": "V-cut 45°",
+        "seconds": 12,
+        "cutLengthMm": 800,
+        "engraveAreaMm2": 0
+      },
+      {
+        "name": "Crease",
+        "seconds": 19,
+        "cutLengthMm": 800,
+        "engraveAreaMm2": 0
+      }
+    ],
+    "travelSeconds": 4,
+    "travelMm": 2600,
+    "cutLengthMm": 10800,
+    "engraveAreaMm2": 0,
+    "toolChanges": 5,
+    "feeds": 1
+  },
+  "checks": [
+    {
+      "ok": true,
+      "l": "Parts inside bed edges"
+    }
+  ],
+  "toolpath": [
+    {
+      "type": "cut",
+      "process": 2,
+      "name": "V-cut 45°",
+      "ent": "vcut0",
+      "bed": 0,
+      "closed": false,
+      "passes": 1,
+      "seconds": 1.901,
+      "p": [
+        [
+          250,
+          100
+        ],
+        [
+          250,
+          500
+        ]
+      ]
+    },
+    {
+      "type": "toolchange",
+      "process": 3,
+      "tool": "T3",
+      "bed": 0
+    },
+    {
+      "type": "cut",
+      "process": 3,
+      "name": "Crease",
+      "ent": "crease0",
+      "bed": 0,
+      "closed": false,
+      "passes": 1,
+      "seconds": 1.641,
+      "p": [
+        [
+          400,
+          500
+        ],
+        [
+          400,
+          100
+        ]
+      ]
+    },
+    {
+      "type": "toolchange",
+      "process": 0,
+      "tool": "T1",
+      "bed": 0
+    },
+    {
+      "type": "cut",
+      "process": 0,
+      "name": "Knife through",
+      "ent": "box0",
+      "bed": 0,
+      "closed": true,
+      "passes": 1,
+      "pass": 1,
+      "seconds": 7.065,
+      "p": [
+        [
+          100,
+          100
+        ],
+        [
+          700,
+          100
+        ],
+        [
+          700,
+          500
+        ],
+        [
+          100,
+          500
+        ]
+      ]
+    },
+    {
+      "type": "cut",
+      "process": 0,
+      "name": "Knife through",
+      "ent": "box0",
+      "bed": 0,
+      "closed": true,
+      "passes": 1,
+      "pass": 2,
+      "seconds": 7.065,
+      "p": [
+        [
+          100,
+          100
+        ],
+        [
+          700,
+          100
+        ],
+        [
+          700,
+          500
+        ],
+        [
+          100,
+          500
+        ]
+      ]
+    },
+    {
+      "type": "cut",
+      "process": 1,
+      "name": "Perforate",
+      "ent": "perf0",
+      "bed": 0,
+      "closed": false,
+      "passes": 1,
+      "seconds": 7.107,
+      "p": [
+        [
+          100,
+          300
+        ],
+        [
+          700,
+          300
+        ]
+      ]
+    },
+    {
+      "type": "feed",
+      "bed": 0
+    },
+    {
+      "type": "toolchange",
+      "process": 2,
+      "tool": "T2",
+      "bed": 1
+    },
+    {
+      "type": "cut",
+      "process": 2,
+      "name": "V-cut 45°",
+      "ent": "vcut1",
+      "bed": 1,
+      "closed": false,
+      "passes": 1,
+      "seconds": 1.901,
+      "p": [
+        [
+          250,
+          100
+        ],
+        [
+          250,
+          500
+        ]
+      ]
+    },
+    {
+      "type": "toolchange",
+      "process": 3,
+      "tool": "T3",
+      "bed": 1
+    },
+    {
+      "type": "cut",
+      "process": 3,
+      "name": "Crease",
+      "ent": "crease1",
+      "bed": 1,
+      "closed": false,
+      "passes": 1,
+      "seconds": 1.641,
+      "p": [
+        [
+          400,
+          500
+        ],
+        [
+          400,
+          100
+        ]
+      ]
+    },
+    {
+      "type": "toolchange",
+      "process": 0,
+      "tool": "T1",
+      "bed": 1
+    },
+    {
+      "type": "cut",
+      "process": 0,
+      "name": "Knife through",
+      "ent": "box1",
+      "bed": 1,
+      "closed": true,
+      "passes": 1,
+      "pass": 1,
+      "seconds": 7.065,
+      "p": [
+        [
+          100,
+          100
+        ],
+        [
+          700,
+          100
+        ],
+        [
+          700,
+          500
+        ],
+        [
+          100,
+          500
+        ]
+      ]
+    },
+    {
+      "type": "cut",
+      "process": 0,
+      "name": "Knife through",
+      "ent": "box1",
+      "bed": 1,
+      "closed": true,
+      "passes": 1,
+      "pass": 2,
+      "seconds": 7.065,
+      "p": [
+        [
+          100,
+          100
+        ],
+        [
+          700,
+          100
+        ],
+        [
+          700,
+          500
+        ],
+        [
+          100,
+          500
+        ]
+      ]
+    },
+    {
+      "type": "cut",
+      "process": 1,
+      "name": "Perforate",
+      "ent": "perf1",
+      "bed": 1,
+      "closed": false,
+      "passes": 1,
+      "seconds": 7.107,
+      "p": [
+        [
+          100,
+          300
+        ],
+        [
+          700,
+          300
+        ]
+      ]
+    }
+  ],
+  "entities": [
+    {
+      "id": "box0",
+      "name": "Box 1",
+      "aci": 1,
+      "bed": 0,
+      "paths": [
+        {
+          "p": [
+            [
+              100,
+              100
+            ],
+            [
+              700,
+              100
+            ],
+            [
+              700,
+              500
+            ],
+            [
+              100,
+              500
+            ]
+          ],
+          "c": true
+        }
+      ]
+    },
+    {
+      "id": "perf0",
+      "name": "Perforation 1",
+      "aci": 6,
+      "bed": 0,
+      "paths": [
+        {
+          "p": [
+            [
+              100,
+              300
+            ],
+            [
+              700,
+              300
+            ]
+          ],
+          "c": false
+        }
+      ]
+    },
+    {
+      "id": "crease0",
+      "name": "Crease 1",
+      "aci": 3,
+      "bed": 0,
+      "paths": [
+        {
+          "p": [
+            [
+              400,
+              100
+            ],
+            [
+              400,
+              500
+            ]
+          ],
+          "c": false
+        }
+      ]
+    },
+    {
+      "id": "vcut0",
+      "name": "V-cut 1",
+      "aci": 5,
+      "bed": 0,
+      "paths": [
+        {
+          "p": [
+            [
+              250,
+              100
+            ],
+            [
+              250,
+              500
+            ]
+          ],
+          "c": false
+        }
+      ]
+    },
+    {
+      "id": "box1",
+      "name": "Box 2",
+      "aci": 1,
+      "bed": 1,
+      "paths": [
+        {
+          "p": [
+            [
+              100,
+              100
+            ],
+            [
+              700,
+              100
+            ],
+            [
+              700,
+              500
+            ],
+            [
+              100,
+              500
+            ]
+          ],
+          "c": true
+        }
+      ]
+    },
+    {
+      "id": "perf1",
+      "name": "Perforation 2",
+      "aci": 6,
+      "bed": 1,
+      "paths": [
+        {
+          "p": [
+            [
+              100,
+              300
+            ],
+            [
+              700,
+              300
+            ]
+          ],
+          "c": false
+        }
+      ]
+    },
+    {
+      "id": "crease1",
+      "name": "Crease 2",
+      "aci": 3,
+      "bed": 1,
+      "paths": [
+        {
+          "p": [
+            [
+              400,
+              100
+            ],
+            [
+              400,
+              500
+            ]
+          ],
+          "c": false
+        }
+      ]
+    },
+    {
+      "id": "vcut1",
+      "name": "V-cut 2",
+      "aci": 5,
+      "bed": 1,
+      "paths": [
+        {
+          "p": [
+            [
+              250,
+              100
+            ],
+            [
+              250,
+              500
+            ]
+          ],
+          "c": false
+        }
+      ]
+    }
+  ]
+}

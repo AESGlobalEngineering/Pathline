@@ -1,0 +1,171 @@
+/* Pathline Run HMI. Copied from hmi/project/HMI.dc.html (the design), then app additions at the end. */
+/* Pathline Run HMI. Tokens and components copied from src/ui/theme.css (this artboard
+   can't link it), scoped to .hmi so dark mode works via .hmi[data-theme="dark"].
+   Touch screen: controls are 44 px (--ctl-h), not the app's 36. */
+body{margin:0}
+.hmi{
+  color-scheme:light;
+  --bg:#F3F4F6;--surface:#FFFFFF;--surface-2:#F8F9FA;--sunken:#EDEFF2;--hover:#EEF0F3;
+  --canvas:#E7E9EC;--canvas-dot:#CDD2D9;--seg-on:#FFFFFF;--knob:#FFFFFF;
+  --line:#E1E4E8;--line-soft:#EEF0F3;--line-strong:#D5D9DF;--line-hover:#AEB5C0;--track:#C9CED6;
+  --text:#111214;--text-2:#3A414C;--text-3:#5B6370;--text-4:#8A919C;
+  --accent:#D62828;--accent-hover:#BC1F1F;--accent-fg:#C21F1F;--accent-soft:#FCECEB;--accent-ring:rgba(214,40,40,0.22);--on-accent:#FFFFFF;
+  --ok:#1B6B43;--ok-soft:#EDF7F1;--ok-dot:#30A46C;
+  --warn:#8A4B00;--warn-soft:#FFF1DB;--warn-dot:#E5A000;
+  --err:#B42318;--err-soft:#FDECEC;--err-dot:#E5484D;--idle-dot:#AEB5C0;
+  --badge-laser:#111214;--badge-plotter:#0B7F75;
+  --shadow-1:0 1px 2px rgba(17,18,20,0.14);--shadow-pop:0 14px 36px rgba(17,18,20,0.16);--shadow-dlg:0 20px 48px rgba(17,18,20,0.24);
+  --scrim:rgba(17,18,20,0.32);--chip-ring:inset 0 0 0 1px rgba(17,18,20,0.18);
+  --bed:#FFFFFF;--bed-line:#CDD2D9;--sheet:#FBFBFC;
+  /* HMI run buttons: Start = ok green, Pause = warn (fills with white icons) */
+  --go:#1B6B43;--pause:#8A4B00;
+  --ctl-h:44px;--ctl-r:10px;--card-r:12px;
+  --font:'IBM Plex Sans',system-ui,sans-serif;--mono:'IBM Plex Mono',ui-monospace,monospace;
+  height:100vh;display:flex;flex-direction:column;background:var(--bg);color:var(--text);font:14px var(--font)
+}
+.hmi[data-theme="dark"]{
+  color-scheme:dark;
+  --bg:#0E0F11;--surface:#17181B;--surface-2:#1C1E22;--sunken:#0F1012;--hover:#24262B;
+  --canvas:#0B0C0E;--canvas-dot:#2A2D33;--seg-on:#2C2F36;--knob:#FFFFFF;
+  --line:#2A2D33;--line-soft:#222429;--line-strong:#3A3E46;--line-hover:#555B66;--track:#4A4F59;
+  --text:#ECEDEF;--text-2:#C3C7CE;--text-3:#9AA1AC;--text-4:#727985;
+  --accent:#D62828;--accent-hover:#E5332D;--accent-fg:#FF6159;--accent-soft:rgba(239,59,51,0.16);--accent-ring:rgba(239,59,51,0.35);--on-accent:#FFFFFF;
+  --ok:#5CCB95;--ok-soft:rgba(48,164,108,0.16);--ok-dot:#30A46C;
+  --warn:#F2B65C;--warn-soft:rgba(229,160,0,0.16);--warn-dot:#E5A000;
+  --err:#FF7B72;--err-soft:rgba(229,72,77,0.16);--err-dot:#E5484D;--idle-dot:#6F7682;
+  --badge-laser:#4A4F59;--badge-plotter:#0E8A7F;
+  --shadow-1:0 1px 2px rgba(0,0,0,0.5);--shadow-pop:0 14px 36px rgba(0,0,0,0.55);--shadow-dlg:0 20px 48px rgba(0,0,0,0.6);
+  --scrim:rgba(0,0,0,0.55);--chip-ring:inset 0 0 0 1px rgba(255,255,255,0.22);
+  --bed-line:#3A3E46;
+  --go:#238553;--pause:#A86400
+}
+
+/* base */
+.hmi a{color:var(--accent-fg)}.hmi a:hover{color:var(--accent-hover)}
+.hmi button,.hmi select,.hmi input{font:inherit;color:inherit}
+.hmi button:disabled{opacity:0.45;cursor:default !important}
+.hmi ::selection{background:var(--accent-ring)}
+.hmi *{scrollbar-color:var(--line-hover) transparent;scrollbar-width:thin}
+.hmi :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.hmi input[type=checkbox]{accent-color:var(--accent)}
+.hmi input::placeholder{color:var(--text-4)}
+.hmi .mono,.hmi .num{font-family:var(--mono)}
+.hmi .lbl{font-size:12px;color:var(--text-3)}
+.hmi svg.i{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.hmi .h-sec{margin:0;font-size:16px;font-weight:600;color:var(--text)}
+.hmi .hr{height:1px;background:var(--line);border:0;margin:0}
+
+/* header */
+.hmi .hmi-bar{min-height:64px;display:flex;flex-wrap:wrap;align-items:stretch;gap:8px 16px;padding:0 16px;background:var(--surface);border-bottom:1px solid var(--line);position:relative;z-index:30}
+.hmi .brand{display:flex;align-items:center;gap:10px;flex:none;color:var(--text)}
+.hmi .brand .word{font-weight:600;font-size:17px;letter-spacing:-0.01em;white-space:nowrap}
+.hmi .brand-mark{display:inline-flex;flex:none;border-radius:8px}
+.hmi[data-theme="dark"] .brand-mark{box-shadow:0 0 0 1px var(--line-strong)}
+.hmi .theme-btn .when-dark{display:none}
+.hmi[data-theme="dark"] .theme-btn .when-dark{display:block}
+.hmi[data-theme="dark"] .theme-btn .when-light{display:none}
+
+/* buttons */
+.hmi .tb{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:var(--ctl-h);padding:0 14px;border:1px solid var(--line-strong);border-radius:var(--ctl-r);background:var(--surface);cursor:pointer;font-size:14px;color:var(--text);white-space:nowrap;text-decoration:none;box-sizing:border-box}
+.hmi .tb:hover{border-color:var(--line-hover);color:var(--text)}
+.hmi .tb.sm{height:40px;padding:0 12px;font-size:13px}
+.hmi .btn-primary{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:var(--ctl-h);padding:0 20px;border:0;border-radius:var(--ctl-r);background:var(--accent);color:var(--on-accent);font-size:14px;font-weight:600;cursor:pointer;white-space:nowrap;box-sizing:border-box}
+.hmi .btn-primary:hover{background:var(--accent-hover);color:var(--on-accent)}
+.hmi .btn-primary:disabled:hover{background:var(--accent)}
+.hmi .ib{display:inline-flex;align-items:center;justify-content:center;width:var(--ctl-h);height:var(--ctl-h);border:0;border-radius:var(--ctl-r);background:transparent;cursor:pointer;color:var(--text-2);padding:0;flex:none;box-sizing:border-box}
+.hmi .ib:hover{background:var(--hover);color:var(--text)}
+.hmi .run-btn{width:64px;height:64px;border:0;border-radius:12px;color:var(--on-accent);display:inline-flex;align-items:center;justify-content:center;flex:none}
+.hmi .run-btn.stop{border:1px solid var(--line-strong);background:var(--surface);cursor:pointer}
+
+/* fields */
+.hmi .fld{display:flex;align-items:center;height:var(--ctl-h);border:1px solid var(--line-strong);border-radius:var(--ctl-r);background:var(--surface);padding:0 12px;gap:6px;box-sizing:border-box;min-width:0}
+.hmi .fld input{border:0;outline:0;width:100%;min-width:0;font:14px var(--mono);background:transparent;color:var(--text);padding:0}
+.hmi .fld input.sans{font-family:var(--font)}
+.hmi .fld:focus-within{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-ring)}
+.hmi .fld .lbl{flex:none}
+.hmi .cell{width:100%;min-width:0;height:var(--ctl-h);border:1px solid var(--line-strong);border-radius:var(--ctl-r);padding:0 10px;box-sizing:border-box;font:14px var(--mono);background:var(--surface);color:var(--text)}
+.hmi .cell:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-ring)}
+.hmi .dd{display:inline-flex;align-items:center;justify-content:space-between;gap:8px;width:100%;height:var(--ctl-h);padding:0 10px 0 12px;border:1px solid var(--line-strong);border-radius:var(--ctl-r);background:var(--surface);color:var(--text);font:14px var(--font);cursor:pointer;text-align:left;box-sizing:border-box;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hmi .dd:hover{border-color:var(--line-hover)}
+.hmi .dd[aria-expanded="true"]{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-ring)}
+.hmi .dd svg.i{color:var(--text-3);width:16px;height:16px}
+
+/* popovers and menus */
+.hmi .pop{display:flex;flex-direction:column;padding:4px;border:1px solid var(--line);border-radius:10px;background:var(--surface);box-shadow:var(--shadow-pop);color:var(--text);box-sizing:border-box}
+.hmi .pop .opt{display:flex;width:100%;align-items:center;justify-content:space-between;gap:24px;min-height:44px;padding:0 12px;border:0;border-radius:6px;background:transparent;cursor:pointer;text-align:left;white-space:nowrap;color:var(--text);box-sizing:border-box}
+.hmi .pop .opt:hover{background:var(--hover)}
+.hmi .pop .opt[aria-selected="true"],.hmi .pop .opt[aria-checked="true"]{background:var(--accent-soft)}
+.hmi .pop .opt svg.i{width:16px;height:16px;color:var(--accent-fg)}
+.hmi .pop .sep{height:1px;background:var(--line);margin:4px 6px}
+
+/* choices */
+.hmi .seg{display:inline-flex;padding:3px;gap:2px;background:var(--sunken);border-radius:var(--ctl-r);box-sizing:border-box;flex:none}
+.hmi .seg > button{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:38px;padding:0 14px;border:0;border-radius:7px;background:transparent;color:var(--text-3);font-weight:500;cursor:pointer;white-space:nowrap;box-sizing:border-box}
+.hmi .seg > button:hover{color:var(--text)}
+.hmi .seg > [aria-checked="true"]{background:var(--seg-on);color:var(--text);box-shadow:var(--shadow-1)}
+.hmi .seg.fill{display:flex}
+.hmi .seg.fill > *{flex:1 1 auto}
+.hmi .tabs{display:flex;flex-wrap:wrap;align-items:stretch;gap:2px;border-bottom:1px solid var(--line)}
+.hmi .tabs > button{display:inline-flex;align-items:center;gap:8px;height:var(--ctl-h);padding:0 16px;border:0;border-bottom:3px solid transparent;margin-bottom:-1px;background:transparent;color:var(--text-3);font-weight:500;cursor:pointer}
+.hmi .tabs > button:hover{color:var(--text)}
+.hmi .tabs > [aria-selected="true"],.hmi .tabs > [aria-current="page"]{color:var(--text);font-weight:600;border-bottom-color:var(--accent)}
+.hmi .tabs .count{min-width:20px;height:20px;padding:0 6px;box-sizing:border-box;border-radius:10px;background:var(--sunken);color:var(--text-2);font:500 12px var(--mono);display:inline-flex;align-items:center;justify-content:center}
+/* the four views live in the header and share its bottom border */
+.hmi .tabs.views{border-bottom:0;justify-content:center;gap:4px}
+.hmi .tabs.views > button{height:auto;min-width:104px;justify-content:center;padding:0 18px;font-size:15px}
+.hmi .tabs.views svg.i{width:22px;height:22px}
+
+/* switch (touch size) */
+.hmi .sw{width:48px;height:28px;flex:none;border:0;border-radius:14px;padding:3px;box-sizing:border-box;background:var(--track);display:inline-flex;justify-content:flex-start;cursor:pointer;transition:background 0.12s}
+.hmi .sw::after{content:'';width:22px;height:22px;border-radius:50%;background:var(--knob);box-shadow:0 1px 2px rgba(0,0,0,0.3)}
+.hmi .sw[aria-checked="true"]{background:var(--accent);justify-content:flex-end}
+
+/* containers */
+.hmi .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--card-r)}
+.hmi .viewport{background-color:var(--canvas);background-image:radial-gradient(var(--canvas-dot) 1px,transparent 1px);background-size:16px 16px}
+
+/* status and tags */
+.hmi .pill{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 10px;border-radius:13px;font-size:12px;font-weight:500;white-space:nowrap;background:var(--sunken);color:var(--text-2);box-sizing:border-box}
+.hmi .pill::before{content:'';width:7px;height:7px;border-radius:50%;background:var(--idle-dot);flex:none}
+.hmi .pill.ok{background:var(--ok-soft);color:var(--ok)}
+.hmi .pill.ok::before{background:var(--ok-dot)}
+.hmi .pill.warn{background:var(--warn-soft);color:var(--warn)}
+.hmi .pill.warn::before{background:var(--warn-dot)}
+.hmi .pill.err{background:var(--err-soft);color:var(--err)}
+.hmi .pill.err::before{background:var(--err-dot)}
+.hmi .pill.accent{background:var(--accent-soft);color:var(--accent-fg)}
+.hmi .pill.accent::before{background:var(--accent)}
+.hmi .pill.lg{height:48px;padding:0 20px 0 18px;gap:12px;border-radius:24px;font-size:26px;font-weight:600}
+.hmi .pill.lg::before{width:12px;height:12px}
+.hmi .tag{display:inline-flex;align-items:center;height:26px;padding:0 10px;border-radius:6px;font-size:12px;font-weight:600;white-space:nowrap;flex:none;background:var(--sunken);color:var(--text-2)}
+.hmi .tag.warn{background:var(--warn-soft);color:var(--warn)}
+.hmi .badge{display:inline-flex;align-items:center;justify-content:center;height:22px;padding:0 7px;border-radius:5px;font-size:11px;font-weight:600;letter-spacing:0.04em;color:#FFFFFF;background:var(--badge-laser);flex:none}
+/* ACI swatch: background is the real ACI colour (data), set inline */
+.hmi .chip{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:4px;font:500 10px var(--mono);box-shadow:var(--chip-ring);flex:none}
+
+/* ---- app additions ---- */
+html,body{height:100%}
+body{background:#0E0F11}
+.hmi .view{flex:1;min-height:0;overflow:auto}
+.hmi button:disabled{opacity:.45;cursor:not-allowed}
+.hmi .jobcard{position:relative;display:flex;gap:10px;padding:10px;border-radius:10px;background:var(--surface-2);box-shadow:inset 0 0 0 1px var(--line)}
+.hmi .jobcard.on{background:var(--accent-soft);box-shadow:inset 0 0 0 2px var(--accent)}
+.hmi .jobcard > button.pick{flex:1;min-width:0;display:flex;flex-direction:column;gap:8px;border:0;background:transparent;color:var(--text);padding:0;text-align:left;cursor:pointer}
+.hmi .bedsvg{display:block;width:100%;background:var(--bed);box-shadow:0 0 0 1px var(--bed-line);border-radius:4px}
+.hmi .ink{stroke:var(--text)}
+.hmi .ord{display:flex;flex-direction:column;gap:4px}
+.hmi .ord .ib{width:36px;height:36px}
+.hmi .warnbox{padding:10px 12px;border-radius:10px;background:var(--warn-soft);color:var(--warn);font-size:13px;line-height:1.4}
+.hmi .errbox{padding:10px 12px;border-radius:10px;background:var(--err-soft);color:var(--err);font-size:14px;line-height:1.4;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+.hmi .toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:200;max-width:min(92vw,640px);padding:12px 18px;border-radius:12px;background:var(--text);color:var(--surface);box-shadow:var(--shadow-dlg);font-size:15px}
+.hmi .scrim{position:fixed;inset:0;z-index:100;background:var(--scrim);display:flex;align-items:center;justify-content:center;padding:16px}
+.hmi .dlg{width:100%;max-width:520px;max-height:90vh;overflow:auto;background:var(--surface);color:var(--text);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow-dlg);padding:22px;display:flex;flex-direction:column;gap:16px;box-sizing:border-box}
+.hmi .dlg.wide{max-width:900px}
+.hmi pre.log{margin:0;font:12px/1.5 var(--mono);white-space:pre-wrap;color:var(--text-2);background:var(--sunken);border-radius:8px;padding:12px;max-height:60vh;overflow:auto}
+.hmi .row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,260px);align-items:center;gap:12px;min-height:44px}
+.hmi .row > span:first-child{color:var(--text-2)}
+.hmi .row .hint{display:block;font-size:12px;color:var(--text-4)}
+.hmi select.cell{font-family:var(--font)}
+@media (max-width:700px){.hmi .tabs.views > button{min-width:0;padding:0 10px}.hmi .tabs.views span.lab{display:none}.hmi .row{grid-template-columns:1fr}}
+.hmi[data-theme="dark"]{--bed:#3B3E44;--sheet:#44474E}
+.hmi .row .seg{flex-wrap:wrap;flex:initial;max-width:100%}

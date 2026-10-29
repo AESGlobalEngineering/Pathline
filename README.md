@@ -41,7 +41,7 @@ Run order: registration marks are read first (the head visits each mark, in the 
 
 ## The controller side
 
-Ethernet jobs, status and jogging use a small HTTP/JSON protocol, described in **[PROTOCOL.md](PROTOCOL.md)**. The device that runs the machine (your HMI) needs to implement it. Until it does, use the emulator:
+Ethernet jobs, status and jogging use a small HTTP/JSON protocol, described in **[PROTOCOL.md](PROTOCOL.md)**. **[Pathline Run](run/README.md)** (in `run/`) implements it for Trotec and Ruida lasers, on a Raspberry Pi or a Windows PC, and converts jobs into controller code. For a pretend machine, use the emulator:
 
 ```bash
 npm run emulator
