@@ -159,7 +159,8 @@ function connText(c) {
   if (m.mode === 'sim') return 'Simulated';
   if (m.mode === 'udp') return 'Network · ' + (m.ip || 'no IP set');
   if (m.mode === 'tcp') return 'TCP · ' + (m.host || 'no host set') + ':' + m.tcpPort;
-  return 'USB · ' + (m.port || 'no port set');
+  if (!m.port || m.port === 'auto') return 'USB · automatic' + (S.info.port ? ' (' + S.info.port + ')' : '');
+  return 'USB · ' + m.port;
 }
 
 // the panel under the machine name: status, connection details, what to do
@@ -490,7 +491,11 @@ function setupView() {
   const card = (title, inner, note) => '<section class="card" style="padding:18px;display:flex;flex-direction:column;gap:10px"><h2 class="h-sec">' + title + '</h2>' + (note ? '<span class="lbl">' + note + '</span>' : '') + inner + '</section>';
   const trotec = d.controller === 'trotec';
   const modes = trotec ? [['serial', 'USB'], ['tcp', 'TCP'], ['sim', 'Simulated']] : [['udp', 'Network'], ['sim', 'Simulated']];
-  const portList = ui.ports.length ? '<span class="hint">Found: ' + ui.ports.map((p) => esc(p.path) + (p.label ? ' (' + esc(p.label) + ')' : '')).join(', ') + '</span>' : '';
+  // serial port: Automatic finds the Trotec by its USB id; the ports found are listed too
+  const curPort = d.connection.port || 'auto';
+  const portOpts = [['auto', 'Automatic (finds the Trotec)']].concat(ui.ports.map((p) => [p.path, p.path + (p.label ? ' · ' + p.label : '')]));
+  if (!portOpts.some(([v]) => v === curPort)) portOpts.push([curPort, curPort + ' · not found now']);
+  const portSelect = '<label class="row"><span>Serial port<span class="hint">' + (ui.ports.some((p) => p.trotec) ? 'Trotec found on ' + esc(ui.ports.find((p) => p.trotec).path) : 'No Trotec found on USB right now') + '</span></span><select class="cell" data-f="connection.port">' + portOpts.map(([v, l]) => '<option value="' + esc(v) + '"' + (v === curPort ? ' selected' : '') + '>' + esc(l) + '</option>').join('') + '</select></label>';
 
   const tabs = { Machine: [], Network: [], 'Work area': [], Controller: [], Jobs: [] };
   tabs.Network.push(networkCard(card), card('Pathline connection', num('HTTP port', 'httpPort', '', 'Takes effect after a restart') +
@@ -499,7 +504,7 @@ function setupView() {
   tabs.Machine.push(card('Machine', text('Name', 'name') +
     seg('Controller', 'controller', [['trotec', 'Trotec'], ['ruida', 'Ruida']]) +
     seg('Connection', 'connection.mode', modes) +
-    (d.connection.mode === 'serial' ? '<label class="row"><span>Serial port' + portList + '</span><span class="fld"><input class="mono" data-f="connection.port" value="' + esc(d.connection.port) + '"></span></label>' : '') +
+    (d.connection.mode === 'serial' ? portSelect : '') +
     (d.connection.mode === 'tcp' ? text('Host', 'connection.host') + num('TCP port', 'connection.tcpPort') : '') +
     (d.connection.mode === 'udp' ? text('Controller IP address', 'connection.ip', '', 'UDP 50200') : '') +
     (d.connection.mode === 'sim' ? num('Simulation speed', 'sim.speedup', '×', 'Jobs run this many times faster') : ''),

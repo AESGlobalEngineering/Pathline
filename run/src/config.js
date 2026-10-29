@@ -19,7 +19,7 @@ function dataDir(override) {
 const PRESETS = {
   trotec: {
     name: '', bed: [1300, 900], speed: 2000, acc: 20000, power: 130, source: 'CO2', lens: '2.0"', minPower: 0,
-    connection: { mode: 'serial', port: '', host: '', tcpPort: 4713, ip: '' },
+    connection: { mode: 'serial', port: 'auto', host: '', tcpPort: 4713, ip: '' }, // auto: find the Trotec by its USB id
     f: { air: true, pointer: false, camera: false, autofocus: false, rotary: false, interlock: true }
   },
   ruida: {

@@ -163,8 +163,8 @@ function start(opts = {}) {
     'GET /log': () => logLines,
     'GET /ports': async () => {
       try {
-        const { SerialPort } = require('serialport');
-        return (await SerialPort.list()).map((p) => ({ path: p.path, label: [p.manufacturer, p.vendorId && p.vendorId + ':' + p.productId].filter(Boolean).join(' · ') }));
+        const ports = await require('./ctrl/trotec/link').listPorts();
+        return ports.map((p) => ({ path: p.path, trotec: p.trotec, label: p.trotec ? 'Trotec laser' : (p.friendlyName || p.manufacturer || '').replace(/\s*\(COM\d+\)$/, '') }));
       } catch (e) { return []; }
     },
     'PUT /config': async (b) => {
@@ -175,7 +175,6 @@ function start(opts = {}) {
         // adding or changing a machine: it needs a name and somewhere to connect
         const c = next.connection;
         if (!String(next.name || '').trim()) throw err(400, 'Give the machine a name');
-        if (c.mode === 'serial' && !String(c.port || '').trim()) throw err(400, 'Choose the USB serial port the laser is on (for example COM4)');
         if (c.mode === 'tcp' && !String(c.host || '').trim()) throw err(400, 'Enter the laser\'s host or IP address');
         if (c.mode === 'udp' && !/^\d{1,3}(\.\d{1,3}){3}$/.test(String(c.ip || '').trim())) throw err(400, 'Enter the Ruida controller\'s IP address, for example 192.168.1.100');
       }

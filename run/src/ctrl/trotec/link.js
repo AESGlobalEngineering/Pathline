@@ -14,6 +14,48 @@ const MAX_DATA = 1024;
 const REPLY_MS = 1500;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// The Trotec controller's USB serial device (TI Stellaris/Tiva CDC, TROTEC_PROTOCOL.md §0)
+const TROTEC_USB = { vendorId: '1cbe', productId: '0002' };
+const isTrotec = (p) => String(p.vendorId || '').toLowerCase() === TROTEC_USB.vendorId && String(p.productId || '').toLowerCase() === TROTEC_USB.productId;
+
+async function listPorts() {
+  const { SerialPort } = require('serialport');
+  return (await SerialPort.list()).map((p) => ({ ...p, trotec: isTrotec(p) }));
+}
+
+async function findTrotec() {
+  const all = await listPorts();
+  const found = all.filter((p) => p.trotec);
+  if (!found.length) {
+    throw new Error('No Trotec found on USB. Check the laser is switched on and its USB cable is plugged into this computer' +
+      (all.length ? ' (serial ports found: ' + all.map((p) => p.path).join(', ') + ')' : '') + '.');
+  }
+  return found[0].path;
+}
+
+// a serial port that won't open: say why in operator's terms
+async function openError(port, err) {
+  if (/access denied|busy|EBUSY|resource busy|being used/i.test(err.message)) {
+    const holder = await portHolder();
+    return port + ' is in use by another program' + (holder ? ': ' + holder + '. Close it' : '. Close it (for example Trotec Ruby or JobControl)') + ', then Reconnect.';
+  }
+  if (/file not found|no such file|ENOENT|cannot find/i.test(err.message)) return port + ' isn\'t there. Is the laser switched on and plugged in? Set the port to Automatic in Setup to find it.';
+  return 'Can\'t open ' + port + ': ' + err.message;
+}
+
+// Windows: Trotec's own programs that keep the port open
+function portHolder() {
+  if (process.platform !== 'win32') return Promise.resolve('');
+  const known = { 'JobDispatcher.ConsoleServer.exe': 'Trotec JobDispatcher (part of Ruby)', 'JobControl.exe': 'Trotec JobControl', 'Ruby.exe': 'Trotec Ruby' };
+  return new Promise((resolve) => {
+    require('child_process').execFile('tasklist', ['/FO', 'CSV', '/NH'], { windowsHide: true }, (e, out) => {
+      if (e) return resolve('');
+      const running = Object.keys(known).filter((exe) => out.toLowerCase().includes('"' + exe.toLowerCase() + '"'));
+      resolve(running.map((exe) => known[exe]).join(', '));
+    });
+  });
+}
+
 class TrotecLink {
   constructor(cfg, log) {
     this.cfg = cfg;
@@ -49,10 +91,13 @@ class TrotecLink {
     try { ({ SerialPort } = require('serialport')); } catch (e) {
       throw new Error('USB serial support is not installed. Run "npm install" in the run folder.');
     }
+    // no port chosen (or "auto"): find the Trotec by its USB id
+    const port = !c.port || c.port === 'auto' ? await findTrotec() : c.port;
+    this.port = port;
     this.io = await new Promise((resolve, reject) => {
-      const p = new SerialPort({ path: c.port, baudRate: 19200, autoOpen: false });
-      p.open((err) => (err ? reject(new Error('Can\'t open ' + c.port + ': ' + err.message)) : resolve(p)));
-    });
+      const p = new SerialPort({ path: port, baudRate: 19200, autoOpen: false });
+      p.open((err) => (err ? reject(err) : resolve(p)));
+    }).catch(async (err) => { throw new Error(await openError(port, err)); });
     this.write = (b) => this.io.write(b);
     this.io.on('data', (d) => this.onData(d));
     this.io.on('close', () => { this.closed = true; });
@@ -101,7 +146,7 @@ class TrotecLink {
     this.rx = Buffer.alloc(0);
     this.binary = true;
     this.id = 0;
-    this.info = { model: 'Trotec model ' + model[1], firmware: conn[1] + (cpu ? ' · CPU ' + cpu[1] : '') };
+    this.info = { model: 'Trotec model ' + model[1], firmware: conn[1] + (cpu ? ' · CPU ' + cpu[1] : ''), port: this.port || '' };
     this.log('trotec connected: ' + this.info.model + ', ' + this.info.firmware);
     return this.info;
   }
@@ -242,3 +287,4 @@ class TrotecLink {
 }
 
 module.exports = TrotecLink;
+module.exports.listPorts = listPorts;
