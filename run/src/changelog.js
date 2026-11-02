@@ -5,6 +5,13 @@
 
 module.exports = [
   {
+    version: '0.5.8', date: '2 Nov 2026',
+    fixed: [
+      'RDD6584 jobs land where they are on Pathline\'s bed: the machine counts from its top right corner (Setup → origin), and jobs now do too. A shape at the top right was cut at the top middle.',
+      'X and Y readouts (Jog page, toolhead, machine panel) show the machine\'s own coordinates, as its panel does.'
+    ]
+  },
+  {
     version: '0.5.7', date: '2 Nov 2026',
     added: [
       'RDD6584 knife controllers: jobs in the knife\'s own format, as VCutWorks sends them. Each bed is uploaded to the controller as a file (START, replacing the last one) and started; every cut carries the knife\'s angle, and the knife lifts and turns at sharp corners.',

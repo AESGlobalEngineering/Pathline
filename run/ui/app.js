@@ -225,7 +225,7 @@ function machinePanel() {
     (ms.key === 'warn' || ms.key === 'off' ? '<div style="padding:10px 12px;border-radius:10px;background:' + (ms.key === 'warn' ? 'rgba(245,132,31,0.14)' : 'var(--err-soft)') + ';color:' + (ms.key === 'warn' ? '#F5841F' : 'var(--err)') + ';line-height:1.4">' + esc(ms.detail || '') + '</div>' : '') +
     '<div>' + (c.configured ? row('Machine', esc(c.name)) + row('Controller', c.controller === 'ruida' ? 'Ruida' : 'Trotec') + row('Connection', esc(connText(c))) : row('Machine', 'None yet')) +
     (S.info.model ? row('Model', esc(S.info.model)) : '') + (S.info.firmware ? row('Firmware', esc(S.info.firmware)) : '') +
-    (st.link === 'online' && Number.isFinite(st.pos.x) ? row('Head', '<span class="mono">X ' + st.pos.x.toFixed(1) + '  Y ' + st.pos.y.toFixed(1) + ' mm</span>') : '') +
+    (st.link === 'online' && Number.isFinite(st.pos.x) ? row('Head', '<span class="mono">X ' + shownPos(st).x.toFixed(1) + '  Y ' + shownPos(st).y.toFixed(1) + ' mm</span>') : '') +
     row('Pathline connects to', '<span class="mono">' + addrs + '</span>') + '</div>' +
     '<div style="display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap">' +
     (c.configured ? '<button class="tb sm" data-a="go" data-v="setup">Machine setup</button>' : '') +
@@ -343,6 +343,10 @@ function procRows(pkg) {
   }).join('');
 }
 
+// X/Y as the machine's own panel shows them (Ruida: from the controller's origin, e.g. top
+// right on a YC-1610); the bed view still draws in Pathline's top-left frame
+const shownPos = (st) => st.mpos || st.pos;
+
 // top of the preview: where the toolhead is now (live while a job runs)
 function headReadout(st, isRun) {
   const ok = Number.isFinite(st.pos.x) && st.link === 'online';
@@ -350,7 +354,7 @@ function headReadout(st, isRun) {
   return '<div style="position:absolute;left:12px;top:12px;display:flex;align-items:center;gap:10px;padding:6px 12px;border-radius:8px;background:var(--surface);box-shadow:var(--shadow-1);font-size:13px">' +
     '<span aria-hidden="true" style="width:10px;height:10px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 3px var(--accent-ring)' + (isRun && st.state === 'running' ? ';animation:plr-pulse 1.2s ease-in-out infinite' : '') + '"></span>' +
     '<span style="color:var(--text-2)">' + label + '</span>' +
-    (ok ? '<span class="mono" style="font-weight:500">X ' + st.pos.x.toFixed(1) + '</span><span class="mono" style="font-weight:500">Y ' + st.pos.y.toFixed(1) + '</span><span class="lbl">mm</span>' : '<span class="lbl">position unknown</span>') + '</div>';
+    (ok ? '<span class="mono" style="font-weight:500">X ' + shownPos(st).x.toFixed(1) + '</span><span class="mono" style="font-weight:500">Y ' + shownPos(st).y.toFixed(1) + '</span><span class="lbl">mm</span>' : '<span class="lbl">position unknown</span>') + '</div>';
 }
 
 function queueView() {
@@ -445,7 +449,7 @@ function jogView() {
   return '<div class="view fit jview">' +
     '<section aria-label="Jog" class="card" style="flex:1 1 auto;min-width:0;min-height:0;overflow-y:auto;padding:20px;display:flex;flex-direction:column;gap:16px"><h2 class="h-sec">Position</h2>' +
     (outside ? '<div class="warnbox">The head is outside the ' + bw + ' × ' + bh + ' mm bed set in Setup. If the machine is bigger than that, set its work area in Setup → Work area (Read from controller fills it in).</div>' : '') +
-    '<div style="display:flex;flex-wrap:wrap;gap:36px">' + [['X', st.pos.x], ['Y', st.pos.y]].map(([l, v]) => '<div style="display:flex;flex-direction:column;gap:2px"><span class="lbl">' + l + ' <span class="mono">mm</span></span><span class="mono" style="font-size:36px;font-weight:500">' + (Number.isFinite(v) ? v.toFixed(1) : '—') + '</span></div>').join('') + '</div>' +
+    '<div style="display:flex;flex-wrap:wrap;gap:36px">' + [['X', shownPos(st).x], ['Y', shownPos(st).y]].map(([l, v]) => '<div style="display:flex;flex-direction:column;gap:2px"><span class="lbl">' + l + ' <span class="mono">mm</span></span><span class="mono" style="font-size:36px;font-weight:500">' + (Number.isFinite(v) ? v.toFixed(1) : '—') + '</span></div>').join('') + '</div>' +
     '<div style="display:flex;flex-wrap:wrap;align-items:center;gap:28px"><div style="display:grid;grid-template-columns:repeat(3,76px);grid-template-rows:repeat(3,76px);gap:8px">' +
     '<span></span>' + arrow('y-', ICON.up, 'Jog Y minus') + '<span></span>' +
     arrow('x-', ICON.left, 'Jog X minus') + btn('home', ICON.home, 'Home') + arrow('x+', ICON.right, 'Jog X plus') +

@@ -186,7 +186,8 @@ class RuidaLink {
     const [mx, my] = this.M.toMm(x, y);
     // status bits (MeerK40t): 0x01000000 moving, 0x01 job running
     const busy = !!(st & 0x01000000) || !!(st & 0x01);
-    return { state: busy ? 'busy' : 'idle', pos: { x: +mx.toFixed(3), y: +my.toFixed(3), z: 0 }, interlock: false, raw: st.toString(16) };
+    // mpos: the controller's own coordinates, as its panel shows them (for the X/Y readouts)
+    return { state: busy ? 'busy' : 'idle', pos: { x: +mx.toFixed(3), y: +my.toFixed(3), z: 0 }, mpos: { x: x / 1000, y: y / 1000 }, interlock: false, raw: st.toString(16) };
   }
 
   send(seg, ctl) { return seg.kind === 'file' ? this.runFile(seg.data, ctl) : this.sendRaw(seg.data, ctl); }

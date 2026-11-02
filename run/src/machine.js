@@ -84,6 +84,7 @@ class Machine {
 
   apply(p) {
     if (p.pos && Number.isFinite(p.pos.x)) { this.st.pos = p.pos; this.posAt = Date.now(); }
+    if (p.mpos) this.st.mpos = p.mpos;
     this.st.interlock = !!p.interlock;
     if (!this.run && this.st.state !== 'alarm') {
       this.st.state = this.framing ? 'framing' : 'idle';

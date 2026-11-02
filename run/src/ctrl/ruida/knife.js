@@ -82,9 +82,20 @@ function bedFile(cuts, opts) {
   return Buffer.from(f);
 }
 
+// Pathline's bed (origin top left, Y to the front) → the machine's job coordinates. A YC-1610
+// counts from the top right, X to the left (Setup → Ruida origin "top right"): a shape at the
+// right of the bed has a small X. Knife angles follow from the mapped points.
+function mapPts(cfg) {
+  const r = cfg.ruida || {};
+  const [W, H] = cfg.bed || [0, 0];
+  const fx = r.origin === 'tr' || r.origin === 'br', fy = r.origin === 'bl' || r.origin === 'br';
+  return (pts) => pts.map(([x, y]) => [fx ? W - x : x, fy ? H - y : y]);
+}
+
 // opts.card: the controller's card ID (from link.info), for CA 30
 function compile(plan, cfg, opts = {}) {
   const warnings = plan.warnings.slice();
+  const map = mapPts(cfg);
   const feedLen = cfg.feedLen || 1000;
   const segments = [];
   let bed = null;
@@ -103,7 +114,7 @@ function compile(plan, cfg, opts = {}) {
     if (!bed) bed = { cuts: [], steps: [] };
     bed.steps.push(step);
     if (step.proc && step.proc.slot) tools.add(step.proc.slot);
-    for (const run of step.runs) if (run.length > 1) bed.cuts.push({ speed: step.proc.speed, pts: run });
+    for (const run of step.runs) if (run.length > 1) bed.cuts.push({ speed: step.proc.speed, pts: map(run) });
   }
   close(0);
   if (tools.size > 1) warnings.push('This job uses ' + [...tools].join(', ') + ': on the RDD6584 every cut uses the tool chosen on the machine for now');
@@ -113,4 +124,4 @@ function compile(plan, cfg, opts = {}) {
 // the Conveyor button: a job with no cuts and a feed after it
 const feedFile = (mm, opts = {}) => bedFile([], { ...opts, feed: mm });
 
-module.exports = { compile, bedFile, feedFile, angle };
+module.exports = { compile, bedFile, feedFile, angle, mapPts };

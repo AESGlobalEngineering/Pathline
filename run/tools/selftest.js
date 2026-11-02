@@ -193,6 +193,12 @@ console.log('RDD6584 knife job (compared with VCutWorks, recorded on a YC-1610)'
     'e7180000000001ebe700da010620000000027b000000027bd7';
   ok(h.endsWith(recorded), 'cuts, knife angles (90°, 0°, 270°, 180°), Y bands and cut length (379 mm) match VCutWorks byte for byte', h.slice(h.indexOf('ca0000ca02')));
   ok(h.includes('e706000000000200001e4220') && h.startsWith('d81000000a5e07000009146c040ce601ca306910f10200d800'), 'feed 500 mm after the job; header as VCutWorks writes it');
+  // origin top right (YC-1610): a cut near the right of the bed has a small machine X, and a
+  // cut running right in Pathline runs towards smaller X (knife at 180°)
+  const planR = { name: 'right', warnings: [], seconds: 1, steps: [{ op: 'cut', i: 0, proc: { speed: 60 }, runs: [[[900, 50], [950, 50]]], seconds: 1 }] };
+  const hr = knife.compile(planR, { bed: [1000, 1600], ruida: { origin: 'tr' }, timing: {} }).segments[0].data;
+  const mv = rd.commands(hr).filter((c) => c[0] === 0x80 || c[0] === 0xa0).map((c) => [rd.dec(c.subarray(1, 6)) / 1000, rd.dec(c.subarray(6, 11)) / 1000, rd.dec(c.subarray(11, 16)) / 1000]);
+  ok(JSON.stringify(mv) === '[[100,50,180],[50,50,180]]', 'origin top right: Pathline X 900 → 950 cuts at machine X 100 → 50, knife at 180°', JSON.stringify(mv));
   // a Pathline job over two beds: two files, the first feeding the conveyor one bed
   const twoBeds = JSON.parse(fs.readFileSync(path.join(FIX, 'plotter-two-beds.json'), 'utf8'));
   const cfgK = { ...config.defaults('ruida'), configured: true, type: 'plotter', bed: [1600, 1000], feedLen: 1000, f: { ...config.defaults('ruida').f, conveyor: true }, ruida: { model: 'RDD6584G', magic: 0xa1, origin: 'tr' } };
