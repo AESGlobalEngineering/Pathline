@@ -5,6 +5,13 @@
 
 module.exports = [
   {
+    version: '0.5.5', date: '2 Nov 2026',
+    fixed: [
+      'RDD6584 knife controllers: jogging no longer runs away. These controllers move BY the distance in a move command, not TO it (found by recording VCutWorks): Pathline Run now sends a speed, then the distance to go, as VCutWorks does. Go to 0, 0, Frame and Feed work the same way.',
+      'RDD6584: Home asks you to use the machine\'s panel, until its home command is known.'
+    ]
+  },
+  {
     version: '0.5.4', date: '2 Nov 2026',
     fixed: [
       'Ruida: moves by hand (jog, go to 0, 0, frame) use the one-axis move commands. The two-axis command isn\'t the same on every controller: on an RDD6584 knife controller one jog ran on for seconds, with the controller deaf to Pathline Run and its own panel.'

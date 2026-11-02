@@ -389,9 +389,10 @@ async function linkTests() {
     for (const c of rd.commands(raw)) {
       rdev.cmds.push(c[0]);
       rdev.keys = (rdev.keys || []).concat(hex(c.subarray(0, 2)));
+      rdev.raw = (rdev.raw || []).concat(hex(c));
       if (c[0] === 0xda && c[1] === 0x00) {
         const addr = (c[2] << 8) | c[3];
-        const v = { 0x057e: 0x6445, 0x0400: 0, 0x0421: 850000, 0x0431: 20000, 0x0026: 900000, 0x0036: 600000, 0x0023: 400000, 0x0033: 300000, 0x0025: 3000000, 0x0035: 2500000 }[addr] || 0;
+        const v = { 0x057e: rdev.card || 0x6445, 0x0400: 0, 0x0421: 850000, 0x0431: 20000, 0x0026: 900000, 0x0036: 600000, 0x0023: 400000, 0x0033: 300000, 0x0025: 3000000, 0x0035: 2500000 }[addr] || 0;
         sock.send(rd.swizzle(Buffer.from([0xda, 0x01, c[2], c[3], ...rd.enc(v, 5), ...rd.enc(0, 5)]), magic), from.port, from.address);
       }
     }
@@ -430,8 +431,29 @@ async function linkTests() {
   } catch (e) { ok(false, 'magic detection', e.message); }
   await rl2.close();
 
-  // Setup → Find on network: the controller answers and gives away its magic and card ID
+  // an RDD6584 knife controller (card 0x6910, magic 0xA1) moves BY the D9 value: as VCutWorks,
+  // speed (C9 02) then the distance, two's complement for minus (captured on a YC-1610)
   magic = 0xa1;
+  rdev.card = 0x6910;
+  const rk = new RuidaLink({ ...cfgR, ruida: { ...cfgR.ruida, model: 'RDD6584G', magic: 0xa1 } }, () => {});
+  try {
+    await rk.connect();
+    rdev.keys = []; rdev.raw = [];
+    await rk.moveTo(50, 30, { axis: 'y' });   // controller Y 20 mm → 30 mm: +10
+    await rk.moveTo(40, 10, { axis: 'x' });   // controller X 850 mm → 860 mm (origin top right): +10
+    await rk.moveTo(50, 10, { axis: 'y' });   // controller Y 20 mm → 10 mm: −10
+    await rk.feed(100);
+    const moves = rdev.raw.filter((h) => /^(c902|d90)/.test(h));
+    const want = ['speed', 'd901020000004e10', 'speed', 'd900020000004e10', 'speed', 'd901027f7f7f3170', 'speed', 'd903020000060d20'];
+    ok(moves.length === want.length && want.every((w, i) => (w === 'speed' ? moves[i].startsWith('c902') : moves[i] === w)) && !rdev.keys.includes('d910'),
+    'RDD6584: jog Y +10, X +10, Y −10 and feed 100 mm sent as speed + move-by, as VCutWorks does', moves.join(' '));
+    let eh = null; try { await rk.home(); } catch (e) { eh = e; }
+    ok(eh && /panel/.test(eh.message), 'RDD6584: Home refused (its home command is unknown)', eh && eh.message);
+  } catch (e) { ok(false, 'RDD6584 moves', e.stack); }
+  await rk.close();
+  rdev.card = 0;
+
+  // Setup → Find on network: the controller answers and gives away its magic and card ID
   try {
     const found = await RuidaLink.find(null, ['127.0.0.1']);
     ok(found.length === 1 && found[0].magic === 0xa1 && found[0].card === '0x6445', 'Find on network: controller at 127.0.0.1, magic 0xA1, card 0x6445', JSON.stringify(found));

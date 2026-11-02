@@ -56,6 +56,9 @@ class RuidaLink {
     });
     const id = await this.query(MEM.cardId).catch(() => { throw new Error('No answer from the Ruida controller at ' + this.host); });
     const model = MODELS.byId((this.cfg.ruida || {}).model);
+    // knife controllers (RDD6584, card 0x69xx) move BY the D9 value, not TO it (see moveTo)
+    this.relMoves = /^RDD/.test(model.id) || ((id & 0xff00) === 0x6900);
+    this.cmd = null;
     this.info = {
       model: 'Ruida card ' + cardText(id) + (model.id !== 'OTHER' ? ' · set up as ' + model.label : ''),
       firmware: 'swizzle magic 0x' + this.magic.toString(16) + (this.magicFixed ? ' (detected)' : ''),
@@ -181,12 +184,28 @@ class RuidaLink {
   // Moves by hand go one axis at a time (D9 00 / D9 01): the two-axis D9 10 isn't the same
   // command on every controller (see rd.js). o.axis: only that axis moves (jogging).
   async moveTo(x, y, o = {}) {
-    const mx = Buffer.from(RD.rapidX(this.M.x(x), o.light)), my = Buffer.from(RD.rapidY(this.M.y(y), o.light));
-    if (o.axis === 'x') return this.sendRaw(mx);
-    if (o.axis === 'y') return this.sendRaw(my);
-    await this.sendRaw(mx);
-    await this.waitStill();
-    return this.sendRaw(my);
+    const to = { x: this.M.x(x), y: this.M.y(y) }; // controller µm
+    const axes = o.axis ? [o.axis] : ['x', 'y'];
+    for (const [i, a] of axes.entries()) {
+      if (i > 0) await this.waitStill();
+      if (!this.relMoves) { await this.sendRaw(Buffer.from(a === 'x' ? RD.rapidX(to.x, o.light) : RD.rapidY(to.y, o.light))); continue; }
+      // RDD6584: speed, then the distance from where the head is (or is already going)
+      const from = await this.movingFrom(a);
+      const d = Math.round(to[a] - from);
+      if (Math.abs(d) < 1) continue;
+      const mm = Math.max(1, Math.min(this.cfg.speed || 200, o.speed || 100));
+      await this.sendRaw(Buffer.from([...RD.speed(mm), ...(a === 'x' ? RD.rapidX(d, o.light) : RD.rapidY(d, o.light))]));
+      this.cmd = { ...(this.cmd || {}), [a]: to[a], at: Date.now() };
+    }
+  }
+
+  // Where a relative move starts from (controller µm): the target of the move still under
+  // way (a new move adds to it), else where the controller says the head is.
+  async movingFrom(a) {
+    const st = await this.query(MEM.status).catch(() => 0);
+    if (this.cmd && this.cmd[a] !== undefined && (st & 0x01000000)) return this.cmd[a];
+    if (this.cmd) delete this.cmd[a];
+    return this.query(a === 'x' ? MEM.x : MEM.y);
   }
 
   // until the controller says it isn't moving (it may not answer while it moves)
@@ -198,7 +217,11 @@ class RuidaLink {
       await sleep(100);
     }
   }
-  home() { return this.sendRaw(Buffer.from(RD.homeXY())); }
+  home() {
+    // D8 2A isn't in any reference, and a knife controller's commands differ: don't guess
+    if (this.relMoves) throw Object.assign(new Error('Home from the machine\'s own panel: Pathline Run doesn\'t know this controller\'s home command yet'), { code: 409 });
+    return this.sendRaw(Buffer.from(RD.homeXY()));
+  }
   // a jog arrow let go: every move is a rapid at the controller's own travel speed, which it
   // would otherwise finish, so stop it where it is
   stopMove() { return this.sendRaw(Buffer.from(RD.stop())); }
@@ -225,6 +248,8 @@ class RuidaLink {
     return raw;
   }
   async feed(mm) {
+    // RDD6584: D9 03 moves the conveyor BY the value (as D9 00 / D9 01 do X and Y)
+    if (this.relMoves) return this.sendRaw(Buffer.from([...RD.speed(Math.max(1, (this.cfg.timing && this.cfg.timing.feedSpeed) || 100)), ...RD.moveByU(Math.round(mm * 1000))]));
     const u = await this.readU();
     await this.sendRaw(Buffer.from(RD.rapidU(Math.round((u + mm) * 1000))));
   }

@@ -98,9 +98,12 @@ const RD = {
   // a knife controller: some references list D9 10 as Home XY, and an RDD6584 ran on for
   // seconds, deaf to the network and its own panel, after one.
   rapidXY: (x, y, light) => [0xd9, 0x10, light ? 0x03 : 0x02, ...abs(x), ...abs(y)],
-  // rapid move along one axis (D9 00 = X, D9 01 = Y), the same in every reference
+  // move along one axis (D9 00 = X, D9 01 = Y, D9 03 = U). Laser references call the value
+  // absolute; an RDD6584 knife controller moves BY it (VCutWorks sends C9 02 speed, then
+  // D9 00 02 +10 mm or −10 mm, two's complement), so link.js chooses what to send.
   rapidX: (x, light) => [0xd9, 0x00, light ? 0x03 : 0x02, ...abs(x)],
   rapidY: (y, light) => [0xd9, 0x01, light ? 0x03 : 0x02, ...abs(y)],
+  moveByU: (du) => [0xd9, 0x03, 0x02, ...abs(du)],
   getSetting: (addr) => [0xda, 0x00, addr >> 8, addr & 0xff]
 };
 const MEM = { cardId: 0x057e, status: 0x0400, x: 0x0421, y: 0x0431, z: 0x0441, u: 0x0451, bedX: 0x0026, bedY: 0x0036 };
