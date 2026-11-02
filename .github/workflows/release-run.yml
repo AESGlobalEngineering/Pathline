@@ -99,6 +99,9 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           V: ${{ needs.check.outputs.version }}
         run: |
+          # GitHub's API sometimes answers 500 for a moment (seen replacing a file): every call
+          # that changes the release gets a few tries, with a pause between
+          retry() { for i in 1 2 3 4 5; do "$@" && return 0; echo "::warning::try $i failed: $*"; sleep $((i * 10)); done; return 1; }
           cd files
           cp ../run/deploy/pi/install-pi.sh .
           ls -l
@@ -119,17 +122,18 @@ jobs:
             cp "Pathline-Run-$V-x86_64.AppImage" latest/Pathline-Run-x86_64.AppImage
           fi
           if ! gh release view pathlinerun > /dev/null 2>&1; then
-            gh release create pathlinerun --target "$GITHUB_SHA" --title "Pathline Run $V" --latest=false --notes "$NOTES"
+            retry gh release create pathlinerun --target "$GITHUB_SHA" --title "Pathline Run $V" --latest=false --notes "$NOTES"
           fi
-          gh release upload pathlinerun latest/* --clobber
+          # one file at a time, so a failed try only repeats that file
+          for f in latest/*; do retry gh release upload pathlinerun "$f" --clobber; done
           # drop the previous version's files
           KEEP=$(ls latest)
           for a in $(gh release view pathlinerun --json assets --jq '.assets[].name'); do
             # while Linux builds are paused, its files (AppImages, latest-linux*.yml) stay
             if [ "$LINUX" = false ] && echo "$a" | grep -qE '\.AppImage$|^latest-linux'; then continue; fi
-            echo "$KEEP" | grep -qxF "$a" || gh release delete-asset pathlinerun "$a" -y
+            echo "$KEEP" | grep -qxF "$a" || retry gh release delete-asset pathlinerun "$a" -y
           done
-          gh release edit pathlinerun --title "Pathline Run $V" --latest=false --notes "$NOTES"
+          retry gh release edit pathlinerun --title "Pathline Run $V" --latest=false --notes "$NOTES"
           # the earlier layout (run-latest plus one run-v… release per version) is gone
           for t in $(gh release list --limit 200 --json tagName --jq '.[].tagName' | grep -E '^run-(latest|v[0-9])' || true); do
             gh release delete "$t" --cleanup-tag -y
