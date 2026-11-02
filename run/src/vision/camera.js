@@ -216,8 +216,9 @@ class SimCamera {
   // grey level of the bed at p (mm)
   shade(p) {
     for (const m of this.scene.dots.concat(this.scene.marks)) if (Math.hypot(p[0] - m.x, p[1] - m.y) <= m.d / 2) return 25;
-    const b = this.scene.board;
-    if (b) {
+    // the bed checkerboard, and any others (scene.boards: e.g. the small 10 mm one for stage 1)
+    for (const b of [this.scene.board].concat(this.scene.boards || [])) {
+      if (!b) continue;
       const a = (-b.angle * Math.PI) / 180, dx = p[0] - b.x, dy = p[1] - b.y;
       let bu = dx * Math.cos(a) - dy * Math.sin(a), bv = dx * Math.sin(a) + dy * Math.cos(a);
       if (b.bump) { const d = b.bump(bu, bv); bu -= d[0]; bv -= d[1]; }

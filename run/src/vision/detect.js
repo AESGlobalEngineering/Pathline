@@ -153,7 +153,9 @@ function shrink(img, size) {
 // board is turned. Fine: the classic gradient refinement (every edge pixel nearby points at the
 // corner) at full size. Returns { x, y, contrast, angle } or null; angle (deg) is the direction
 // of one of the board's lines through the corner, in the image.
-function findCorner(img, opts = {}) {
+// The ChESS response over a shrunk, evened-out copy: score and contrast per pixel (score > 0 and
+// contrast above the minimum: a corner there).
+function chessMap(img, opts = {}) {
   const s = shrink(img, opts.work || 400);
   // even out the light: each pixel against the darkest and lightest round it (a quarter of
   // the picture), so a dim side and a bright side both read as black and white squares
@@ -162,9 +164,8 @@ function findCorner(img, opts = {}) {
   const r = Math.max(4, Math.round(Math.min(w, h) * (opts.ring || 0.04)));
   const ring = [];
   for (let k = 0; k < 16; k++) { const a = (k * Math.PI) / 8; ring.push(Math.round(Math.cos(a) * r) + Math.round(Math.sin(a) * r) * w); }
-  const cx = w / 2, cy = h / 2;
+  const score = new Float32Array(w * h), contrast = new Float32Array(w * h);
   const v = new Float32Array(16);
-  let best = null;
   for (let y = r + 1; y < h - r - 1; y++) {
     for (let x = r + 1; x < w - r - 1; x++) {
       const i = y * w + x;
@@ -175,18 +176,62 @@ function findCorner(img, opts = {}) {
       for (let k = 0; k < 4; k++) sum += Math.abs(v[k] + v[k + 8] - v[k + 4] - v[k + 12]);
       for (let k = 0; k < 8; k++) diff += Math.abs(v[k] - v[k + 8]);
       const local = (data[i] + data[i - 1] + data[i + 1] + data[i - w] + data[i + w]) / 5;
-      const score = sum - diff - 16 * Math.abs(mean - local) / 4;
-      const contrast = sum / 8;
-      if (contrast < (opts.minContrast || 25) || score <= 0) continue;
+      score[i] = sum - diff - 16 * Math.abs(mean - local) / 4;
+      contrast[i] = sum / 8;
+    }
+  }
+  return { s, w, h, r, score, contrast, minContrast: opts.minContrast || 25 };
+}
+
+function findCorner(img, opts = {}) {
+  const M = chessMap(img, opts);
+  const { w, h, r, s } = M;
+  const cx = w / 2, cy = h / 2;
+  let best = null;
+  for (let y = r + 1; y < h - r - 1; y++) {
+    for (let x = r + 1; x < w - r - 1; x++) {
+      const i = y * w + x;
+      if (M.contrast[i] < M.minContrast || M.score[i] <= 0) continue;
       // prefer the middle: a strong corner a little further out loses to one near the centre
-      const val = score - 0.5 * Math.hypot(x - cx, y - cy);
-      if (!best || val > best.val) best = { x, y, val, contrast };
+      const val = M.score[i] - 0.5 * Math.hypot(x - cx, y - cy);
+      if (!best || val > best.val) best = { x, y, val, contrast: M.contrast[i] };
     }
   }
   if (!best) return null;
-  // refine at full size: sum over the window of g gᵀ (q − p) = 0 for the corner q
-  let qx = best.x * s.f + s.f / 2, qy = best.y * s.f + s.f / 2;
   const win = Math.max(6, Math.round(r * s.f * 0.8));
+  const q = refineCorner(img, best.x * s.f + s.f / 2, best.y * s.f + s.f / 2, win);
+  return q ? { ...q, contrast: best.contrast, angle: cornerAngle(img, q.x, q.y, win) } : null;
+}
+
+// Every corner in the picture (a small checkerboard filling the view): the ChESS peaks, each
+// refined to sub-pixel; nearest the middle first.
+function findCorners(img, opts = {}) {
+  const M = chessMap(img, opts);
+  const { w, h, r, s } = M;
+  const peaks = [];
+  const nr = Math.max(2, Math.round(r * 0.75));
+  for (let y = r + 1; y < h - r - 1; y++) {
+    for (let x = r + 1; x < w - r - 1; x++) {
+      const i = y * w + x, v = M.score[i];
+      if (v <= 0 || M.contrast[i] < M.minContrast) continue;
+      let top = true;
+      for (let dy = -nr; dy <= nr && top; dy++) for (let dx = -nr; dx <= nr; dx++) { if ((dx || dy) && M.score[i + dy * w + dx] > v) { top = false; break; } }
+      if (top) peaks.push({ x, y, v });
+    }
+  }
+  const win = Math.max(6, Math.round(r * s.f * 0.8));
+  const out = [];
+  for (const p of peaks.sort((a, b) => b.v - a.v)) {
+    const q = refineCorner(img, p.x * s.f + s.f / 2, p.y * s.f + s.f / 2, win);
+    if (!q || out.some((o) => Math.hypot(o.x - q.x, o.y - q.y) < win)) continue;
+    out.push(q);
+  }
+  const cx = (img.w - 1) / 2, cy = (img.h - 1) / 2;
+  return out.sort((a, b) => Math.hypot(a.x - cx, a.y - cy) - Math.hypot(b.x - cx, b.y - cy));
+}
+
+// the corner near (qx, qy), sub-pixel: over the window, Σ g gᵀ (q − p) = 0
+function refineCorner(img, qx, qy, win) {
   const px = (x, y) => img.data[y * img.w + x];
   for (let it = 0; it < 12; it++) {
     let a = 0, b = 0, c = 0, bx = 0, by = 0;
@@ -208,8 +253,13 @@ function findCorner(img, opts = {}) {
     if (moved < 0.01) break;
   }
   if (!(qx > 0 && qy > 0 && qx < img.w && qy < img.h)) return null;
-  // the board's angle here: edges round a corner run two ways a quarter turn apart, so average
-  // the edge directions ×4 (both ways then agree) and divide by 4 → a line's angle, 0 … 90°
+  return { x: qx, y: qy };
+}
+
+// The board's angle at a corner: edges round it run two ways a quarter turn apart, so average
+// the edge directions ×4 (both ways then agree) and divide by 4 → a line's angle, 0 … 90°
+function cornerAngle(img, qx, qy, win) {
+  const px = (x, y) => img.data[y * img.w + x];
   let s4 = 0, c4 = 0;
   const x0 = Math.max(1, Math.round(qx) - win), x1 = Math.min(img.w - 2, Math.round(qx) + win);
   const y0 = Math.max(1, Math.round(qy) - win), y1 = Math.min(img.h - 2, Math.round(qy) + win);
@@ -224,7 +274,54 @@ function findCorner(img, opts = {}) {
   }
   let angle = (Math.atan2(s4, c4) / 4) * (180 / Math.PI);
   if (angle < 0) angle += 90;
-  return { x: qx, y: qy, contrast: best.contrast, angle };
+  return angle;
+}
+
+// The corners of a small checkerboard as a grid: two lattice vectors from the corner nearest
+// the middle to its nearest neighbours, every corner given whole-number grid indices, then a
+// least-squares fit pixel = o + i·a + j·b. Returns { a, b, o, n, worst } (px; worst = the
+// largest misfit of a corner, px: how much the lens bends straight lines here) or null.
+function fitLattice(corners) {
+  if (corners.length < 6) return null;
+  const c0 = corners[0];
+  const vecs = corners.slice(1).map((c) => [c.x - c0.x, c.y - c0.y]).sort((p, q) => Math.hypot(...p) - Math.hypot(...q));
+  const a = vecs[0];
+  const la = Math.hypot(...a);
+  const b = vecs.find((v) => { const cos = Math.abs(v[0] * a[0] + v[1] * a[1]) / (la * Math.hypot(...v)); return cos < 0.3 && Math.hypot(...v) < la * 1.5; });
+  if (!b) return null;
+  const det = a[0] * b[1] - a[1] * b[0];
+  const rows = [], X = [], Y = [];
+  for (const c of corners) {
+    const dx = c.x - c0.x, dy = c.y - c0.y;
+    const fi = (dx * b[1] - dy * b[0]) / det, fj = (a[0] * dy - a[1] * dx) / det;
+    const i = Math.round(fi), j = Math.round(fj);
+    if (Math.abs(fi - i) > 0.25 || Math.abs(fj - j) > 0.25) continue;
+    rows.push({ i, j, c });
+  }
+  if (rows.length < 6) return null;
+  // least squares for x and y separately: [1, i, j]
+  const solve = (val) => {
+    const N = [[0, 0, 0], [0, 0, 0], [0, 0, 0]], B = [0, 0, 0];
+    for (const r of rows) { const v = [1, r.i, r.j], y = val(r.c); for (let p = 0; p < 3; p++) { for (let q = 0; q < 3; q++) N[p][q] += v[p] * v[q]; B[p] += v[p] * y; } }
+    const d3 = (m) => m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0]) + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
+    const D = d3(N);
+    return [0, 1, 2].map((k) => d3(N.map((row, i) => row.map((v, j) => (j === k ? B[i] : v)))) / D);
+  };
+  // fit; drop corners that don't fit (a false corner at the edge of the picture, say); again
+  let use = rows, fx, fy, miss;
+  for (let it = 0; it < 3; it++) {
+    fx = solve((c) => c.x); fy = solve((c) => c.y);
+    miss = (r) => Math.hypot(fx[0] + r.i * fx[1] + r.j * fx[2] - r.c.x, fy[0] + r.i * fy[1] + r.j * fy[2] - r.c.y);
+    const d = use.map(miss).sort((p, q) => p - q);
+    const limit = Math.max(1.5, 3 * d[Math.floor(d.length / 2)]);
+    const keep = use.filter((r) => miss(r) <= limit);
+    if (keep.length === use.length || keep.length < 6) break;
+    use = keep;
+    rows.splice(0, rows.length, ...use);
+  }
+  const fitA = [fx[1], fy[1]], fitB = [fx[2], fy[2]], o = [fx[0], fy[0]];
+  const worst = Math.max(...use.map(miss));
+  return { a: fitA, b: fitB, o, n: use.length, worst };
 }
 
 // local min / max over a (2r+1)² box, then stretched to 0 … 255 (flat areas stay mid grey)
@@ -256,4 +353,4 @@ function preview(img, size) {
   return { w: s.w, h: s.h, data };
 }
 
-module.exports = { otsu, findDots, findCorner, shrink, preview };
+module.exports = { otsu, findDots, findCorner, findCorners, fitLattice, shrink, preview };

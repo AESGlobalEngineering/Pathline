@@ -671,12 +671,18 @@ function setupView() {
       tog('Camera light (laser parameter 186)', 'vision.light') + num('Re-centre a mark further than', 'vision.tolerance', 'mm', 'From the middle of the picture') +
       ro('Camera', S.camera.info ? esc(S.camera.info.model + ' · ' + S.camera.info.serial) : 'not opened yet'),
     'The Alvium on the head plugs into this computer by USB (not into the laser). It needs Allied Vision\'s Vimba X installed, and Ruby / JobDispatcher closed: only one program can use it.'));
-    tabs.Camera.push(card('Calibration', ro('Pixel size', (pixel * 1000).toFixed(2) + ' µm') + ro('Picture turned', turned.toFixed(2) + '°') +
-      num('Camera offset X', 'vision.offset.0', 'mm', 'Laser − camera') + num('Camera offset Y', 'vision.offset.1', 'mm') +
-      num('Mark power', 'vision.mark.power', '%', 'For the offset mark') + num('Mark speed', 'vision.mark.speed', 'mm/s') +
-      ro('Calibrated', v.calibrated ? new Date(v.calibrated).toLocaleString() : 'not yet') +
-      '<div style="display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end"><button class="tb" data-a="camPixels"' + need + '>Calibrate pixel size</button><button class="btn-primary" data-a="camOffsetAsk"' + need + '>Calibrate offset (fires the laser)</button></div>',
-    '1. Pixel size: put any dark printed dot (or a checkerboard corner) under the camera; the head moves a few mm while the camera watches. 2. Offset: jog the laser over scrap; it marks a 3 mm dot there and the camera finds it.'));
+    const when = (t) => (t ? new Date(t).toLocaleString() : 'not yet');
+    tabs.Camera.push(card('1 · Camera calibration', num('Checkerboard squares', 'vision.camBoard.square', 'mm', 'The small board under the camera') +
+      ro('Pixel size', (pixel * 1000).toFixed(2) + ' µm') + ro('Picture turned', turned.toFixed(2) + '°' + (ma * md - mb * mc < 0 ? ' (mirrored)' : '')) +
+      ro('Lens bends lines', v.cameraLens !== undefined ? (v.cameraLens * 1000).toFixed(0) + ' µm at most' : '—') + ro('Calibrated', when(v.cameraAt)) +
+      '<div style="display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end"><button class="btn-primary" data-a="camCalibrate"' + need + '>Calibrate camera</button></div>',
+    'Lay the ' + (get(d, 'vision.camBoard.square') || 10) + ' mm checkerboard flat under the camera, at any angle, so it fills the picture (Jog → Camera). Its squares give the pixel size; then the head moves a few mm along X and Y so Pathline Run knows which way the picture is turned.'));
+    const stage2 = !v.cameraAt ? ' disabled title="Calibrate the camera (stage 1) first"' : need;
+    tabs.Camera.push(card('2 · Offset calibration (cut check)', num('Camera offset X', 'vision.offset.0', 'mm', 'Laser − camera') + num('Camera offset Y', 'vision.offset.1', 'mm') +
+      num('Cut power', 'vision.mark.power', '%', 'For the check mark') + num('Cut speed', 'vision.mark.speed', 'mm/s') +
+      ro('Last cut check', v.offsetCheck !== undefined && v.offsetCheck !== null ? (v.offsetCheck * 1000).toFixed(0) + ' µm off · ' + when(v.offsetAt) : 'not yet') +
+      '<div style="display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end"><button class="btn-primary" data-a="camOffsetAsk"' + stage2 + '>Cut check: calibrate offset</button></div>',
+    'Jog the laser over scrap card or board. The laser cuts a small 3 mm mark there, the camera finds it and sets the offset, then looks again to check: the cut check says how far off it still is.'));
     const b = ui.board;
     const map = v.map;
     tabs.Camera.push(card('Checkerboard: bed accuracy', num('Square size', 'vision.board.square', 'mm') + num('Corners across', 'vision.board.across', '', 'Inner corners (squares − 1)') + num('Corners down', 'vision.board.down') +
@@ -774,9 +780,9 @@ function dialog() {
   // Setup → Camera → Calibrate offset: the laser fires, so say where and how hard first
   if (ui.dlg.kind === 'camOffset') {
     const v = cfg().vision, p = S.status.pos;
-    return '<div class="scrim"><div role="dialog" aria-label="Calibrate the camera offset" class="dlg"><span class="h-sec" style="font-size:18px">Fire the laser to calibrate?</span>' +
-      '<span style="color:var(--text-2);line-height:1.5">The laser marks a 3 mm dot where the head is now (X ' + p.x.toFixed(1) + ', Y ' + p.y.toFixed(1) + ' mm) at <b>' + v.mark.power + ' %</b> and <b>' + v.mark.speed + ' mm/s</b>, then the camera finds it. Put scrap card or board under the head, focus, and close the lid.</span>' +
-      '<div style="display:flex;justify-content:flex-end;gap:8px"><button class="tb" data-a="close">Cancel</button><button class="btn-primary" data-a="camOffset">Fire and calibrate</button></div></div></div>';
+    return '<div class="scrim"><div role="dialog" aria-label="Cut check: calibrate the camera offset" class="dlg"><span class="h-sec" style="font-size:18px">Cut check: fire the laser?</span>' +
+      '<span style="color:var(--text-2);line-height:1.5">The laser cuts a small 3 mm mark where the head is now (X ' + p.x.toFixed(1) + ', Y ' + p.y.toFixed(1) + ' mm) at <b>' + v.mark.power + ' %</b> and <b>' + v.mark.speed + ' mm/s</b>. The camera finds it, sets the offset, and checks it. Put scrap card or board under the head, focus, and close the lid.</span>' +
+      '<div style="display:flex;justify-content:flex-end;gap:8px"><button class="tb" data-a="close">Cancel</button><button class="btn-primary" data-a="camOffset">Cut and calibrate</button></div></div></div>';
   }
   if (ui.dlg.kind === 'found') {
     const l = ui.dlg.list;
@@ -882,16 +888,16 @@ const H = {
   // head camera
   camLive: () => { ui.live = !ui.live; ui.camErr = null; if (!ui.live) ui.cam = null; render(); },
   camGoto: act(async (v) => call('POST', LOCAL('/camera/goto'), { to: v })),
-  camPixels: act(async () => {
-    const r = await call('POST', LOCAL('/camera/pixels'), {});
-    toast('Pixel size ' + (r.pixel * 1000).toFixed(2) + ' µm, picture turned ' + r.rotation.toFixed(2) + '°: saved', { ms: 8000 });
+  camCalibrate: act(async () => {
+    const r = await call('POST', LOCAL('/camera/calibrate'), {});
+    toast('Camera calibrated on ' + r.corners + ' corners: pixel size ' + (r.pixel * 1000).toFixed(2) + ' µm, picture turned ' + r.rotation.toFixed(2) + '°' + (r.mirrored ? ' (mirrored)' : '') + ': saved', { ms: 8000 });
     ui.draft = null;
   }),
   camOffsetAsk: () => { ui.dlg = { kind: 'camOffset' }; render(); },
   camOffset: act(async () => {
     ui.dlg = null; render();
     const r = await call('POST', LOCAL('/camera/offset'), { power: cfg().vision.mark.power, speed: cfg().vision.mark.speed });
-    toast('Camera offset X ' + r.offset[0].toFixed(3) + ', Y ' + r.offset[1].toFixed(3) + ' mm: saved', { ms: 8000 });
+    toast('Camera offset X ' + r.offset[0].toFixed(3) + ', Y ' + r.offset[1].toFixed(3) + ' mm: saved' + (r.check !== null ? '. Cut check: ' + (r.check * 1000).toFixed(0) + ' µm off' : ''), { ms: 10000 });
     ui.draft = null;
   }),
   camBoard: act(async (v) => {

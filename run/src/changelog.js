@@ -5,6 +5,12 @@
 
 module.exports = [
   {
+    version: '0.7.3', date: '2 Nov 2026',
+    added: [
+      'Camera calibration in two stages (Setup → Camera). 1 · Camera: a small checkerboard (10 mm squares) under the camera, at any angle; its corners give the pixel size, independent of how accurately the machine moves, and how much the lens bends lines; a few mm of head movement gives which way the picture is turned. 2 · Offset (cut check): the laser cuts a small mark on scrap, the camera finds it and sets the offset, then checks it and says how far off it still is. Stage 2 waits for stage 1.'
+    ]
+  },
+  {
     version: '0.7.2', date: '2 Nov 2026',
     added: [
       'Head camera: auto exposure (the default). It aims the brightest part of the view (the paper) at a set brightness, whatever the light does elsewhere, and keeps the exposure for the next picture. Setup → Camera shows the exposure in use; Fixed is still there.',

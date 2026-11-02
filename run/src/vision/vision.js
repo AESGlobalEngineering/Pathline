@@ -26,6 +26,7 @@ const DEFAULTS = {
   tolerance: 1.0, recentre: 3,         // Ruby's AcceptableDistanceToCenterMm, MaxRepositionCount
   mark: { power: 20, speed: 50 },      // calibration mark: a small dark disc of tight circles
   board: { square: 50, across: 25, down: 17, every: 2, model: 'linear' }, // model: linear / smooth / full
+  camBoard: { square: 10 },            // stage 1: the small checkerboard under the camera
   map: null, mapOn: true, calibrated: ''
 };
 
@@ -170,8 +171,61 @@ class Vision {
   }
 
   // ---------------------------------------------------------------- calibration
-  // Pixel size and rotation: with any dot or checkerboard corner under the camera, move the head
-  // a few mm along X, then Y, and see how far it moves in the frame.
+  // Stage 1, camera: a small checkerboard (10 mm squares) under the camera, filling the picture.
+  // Its corners give the pixel size: the squares are a known size, so it doesn't depend on how
+  // accurately the machine moves; how far its corners stray from a perfect grid shows how much
+  // the lens bends straight lines. Then the head moves a little along X, then Y (under half a
+  // square, so the corner followed can't be mistaken for its neighbour): that gives which way the
+  // picture is turned and whether it's mirrored, relative to the machine. The board itself can
+  // lie at any angle.
+  async calibrateCamera(opts = {}) {
+    await this.m.waitIdle(30000, 150);
+    const square = Number(opts.square || (this.cfg.camBoard || {}).square || 10);
+    const start = { x: this.m.st.pos.x, y: this.m.st.pos.y };
+    const img0 = await this.grab();
+    const cs0 = detect.findCorners(img0);
+    const L = detect.fitLattice(cs0);
+    if (!L) throw err('Put the ' + square + ' mm checkerboard under the camera so it fills the picture (' + cs0.length + ' corners seen)');
+    const spacing = Math.sqrt(Math.abs(L.a[0] * L.b[1] - L.a[1] * L.b[0])); // px per square
+    const pixel = square / spacing;
+    const c0 = cs0[0];
+    const d = square * 0.3;
+    const follow = async (x, y) => {
+      await this.m.link.moveTo(x, y);
+      await this.m.waitIdle(30000, 150);
+      const cs = detect.findCorners(await this.grab());
+      const near = cs.sort((p, q) => Math.hypot(p.x - c0.x, p.y - c0.y) - Math.hypot(q.x - c0.x, q.y - c0.y))[0];
+      if (!near || Math.hypot(near.x - c0.x, near.y - c0.y) > (d / pixel) * 1.6) throw err('Lost the board while moving: keep it flat under the camera and try again');
+      return [near.x - c0.x, near.y - c0.y];
+    };
+    let u1, u2;
+    try { u1 = await follow(start.x + d, start.y); u2 = await follow(start.x, start.y + d); } finally {
+      await this.m.link.moveTo(start.x, start.y);
+      await this.m.waitIdle(30000, 150);
+    }
+    // the head moves +d → the board moves u px in the picture: A·u = −d along that axis
+    const det = u1[0] * u2[1] - u1[1] * u2[0];
+    if (Math.abs(det) < 1) throw err('The picture hardly moved: is the camera on?');
+    const inv = [u2[1] / det, -u2[0] / det, -u1[1] / det, u1[0] / det];
+    const motion = inv.map((v) => -d * v);
+    const motionPx = Math.sqrt(Math.abs(motion[0] * motion[3] - motion[1] * motion[2]));
+    // direction from the move, size from the board
+    const matrix = motion.map((v) => +((v * pixel) / motionPx).toPrecision(8));
+    const rotation = (Math.atan2(matrix[2], matrix[0]) * 180) / Math.PI;
+    const mirrored = matrix[0] * matrix[3] - matrix[1] * matrix[2] < 0;
+    const r = {
+      matrix, pixel, rotation, mirrored, corners: L.n,
+      // how far the corners stray from a perfect grid (lens), and how the head's moves compare
+      // with the board (the machine's own length error, roughly: the checkerboard bed check says more)
+      lens: L.worst * pixel, moveVsBoard: (motionPx / pixel - 1) * 1000
+    };
+    this.log('camera calibrated on the ' + square + ' mm board: ' + L.n + ' corners, pixel size ' + (pixel * 1000).toFixed(3) + ' µm, picture turned ' + rotation.toFixed(2) + '°' + (mirrored ? ' (mirrored)' : '') + ', lens bends lines up to ' + (r.lens * 1000).toFixed(0) + ' µm');
+    return r;
+  }
+
+  // Pixel size and rotation without the small board: with any dot or checkerboard corner under
+  // the camera, move the head a few mm along X, then Y, and see how far it moves in the frame
+  // (the size then rests on the machine's own accuracy).
   async calibratePixels() {
     await this.m.waitIdle(30000, 150); // the head may still be on its way here
     const start = { x: this.m.st.pos.x, y: this.m.st.pos.y };
@@ -201,8 +255,9 @@ class Vision {
     return { matrix: m, pixel: px, rotation: rot };
   }
 
-  // Camera offset: the laser marks a small dark disc on scrap where the head is now, the camera
-  // looks for it, and the offset is corrected by how far from where it should be it shows up.
+  // Stage 2, offset (cut check): the laser cuts a small dark disc on scrap where the head is
+  // now, the camera looks for it, and the offset is corrected by how far from where it should be
+  // it shows up; then one more picture checks it (`check`: how far off the cut still is, mm).
   async calibrateOffset({ power, speed } = {}, ctl = {}) {
     await this.m.waitIdle(30000, 150);
     const at = [this.m.st.pos.x, this.m.st.pos.y];
@@ -218,8 +273,11 @@ class Vision {
       o = [o[0] + (r.found[0] - at[0]), o[1] + (r.found[1] - at[1])];
       this.m.cfg.vision = { ...this.m.cfg.vision, offset: o };
     }
-    this.log('offset laser − camera: ' + o.map((v) => v.toFixed(3)).join(', ') + ' mm');
-    return { offset: o.map((v) => +v.toFixed(4)), mark: at };
+    // the check: with the new offset, the camera sent to the cut should see it in the middle
+    const c = await this.measure(at, 'dot', { d: 3, ctl });
+    const check = c ? Math.hypot(c.found[0] - at[0], c.found[1] - at[1]) : null;
+    this.log('offset laser − camera: ' + o.map((v) => v.toFixed(3)).join(', ') + ' mm' + (check !== null ? '; cut check: ' + (check * 1000).toFixed(0) + ' µm off' : ''));
+    return { offset: o.map((v) => +v.toFixed(4)), mark: at, check };
   }
 
   // ---------------------------------------------------------------- checkerboard

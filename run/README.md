@@ -112,8 +112,8 @@ The Trotec's camera is an Allied Vision **Alvium 1800 U-500c** on the head. It p
 1. Install Allied Vision's **Vimba X** (free, from alliedvision.com) on the PC or the Pi (64-bit Raspberry Pi OS). Pathline Run calls its `VmbC` library through `koffi`, so nothing is compiled.
 2. Close Ruby and JobDispatcher: only one program can use the camera.
 3. **Setup → Camera:** turn the camera on and save, then:
-   - **Calibrate pixel size:** put any dark printed dot, or a checkerboard corner, under the camera. The head moves a few mm while the camera watches.
-   - **Calibrate offset:** jog the laser over scrap. It marks a 3 mm dot there (power and speed are in Setup), and the camera finds it.
+   - **1 · Camera calibration:** lay the small checkerboard (10 mm squares, size in Setup) flat under the camera, at any angle, filling the picture. Its corners give the pixel size, independent of the machine's own accuracy, and show how much the lens bends straight lines. A few mm of head movement then shows which way the picture is turned.
+   - **2 · Offset calibration (cut check):** jog the laser over scrap. It cuts a small 3 mm mark there (power and speed are in Setup), and the camera finds it and sets the offset. One more picture then checks it and reports how far off the cut still is.
    - **Checkerboard:** lay the 50 mm board anywhere, at any angle. Jog the camera over its top-left inner corner (Jog → Camera), then **Calibrate bed**. The board's position and angle are fitted out, and the rest is saved as a bed map applied to every job. **Check bed** measures again with the map on.
 4. Jobs with registration marks: the camera reads each mark (re-centring if it's more than 1 mm out) and fits Pathline's mode. `pos` is shift + rotation, `linear` is affine, `nonlinear` is triangles. The job is then moved onto the marks.
 

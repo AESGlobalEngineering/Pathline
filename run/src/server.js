@@ -51,7 +51,7 @@ function start(opts = {}) {
   fs.mkdirSync(DATA, { recursive: true });
   let cfg = config.load(DATA, opts.controller ? { controller: opts.controller } : undefined);
   // the head camera's settings, every one present (Setup → Camera shows them all)
-  cfg.vision = { ...VisionDefaults, ...(cfg.vision || {}), mark: { ...VisionDefaults.mark, ...((cfg.vision || {}).mark || {}) }, board: { ...VisionDefaults.board, ...((cfg.vision || {}).board || {}) } };
+  cfg.vision = { ...VisionDefaults, ...(cfg.vision || {}), mark: { ...VisionDefaults.mark, ...((cfg.vision || {}).mark || {}) }, board: { ...VisionDefaults.board, ...((cfg.vision || {}).board || {}) }, camBoard: { ...VisionDefaults.camBoard, ...((cfg.vision || {}).camBoard || {}) } };
   if (opts.sim) {
     cfg.connection = { ...cfg.connection, mode: 'sim' };
     if (!cfg.configured) Object.assign(cfg, { configured: true, name: cfg.name || 'Simulated laser' });
@@ -85,7 +85,9 @@ function start(opts = {}) {
           x: 100, y: 300, angle: 1.5, square: 50, nx: 20, ny: 10,
           // a bump round board point (450, 150): the pattern pushed outward up to 0.3 mm
           bump: (u, v) => { const dx = u - 450, dy = v - 150, r = Math.hypot(dx, dy); if (r < 1) return [0, 0]; const k = 0.3 * Math.exp(-(r * r) / 4050); return [(k * dx) / r, (k * dy) / r]; }
-        }
+        },
+        // the small one for camera calibration: 10 mm squares, turned 7°
+        boards: [{ x: 700, y: 100, angle: 7, square: 10, nx: 10, ny: 10 }]
       },
       light: (ix, iy) => 0.25 + 0.75 * Math.exp(-((ix - 14) ** 2 + (iy + 8) ** 2) / 648)
     }
@@ -284,7 +286,14 @@ function start(opts = {}) {
       return { raw, ...require('./ctrl/ruida/readback').interpret(raw) };
     },
     // ---- the Trotec's head camera (Setup → Camera, Jog → Camera)
-    // pixel size and rotation: a dot or checkerboard corner under the camera, the head moves a little
+    // stage 1, camera: the small (10 mm) checkerboard under the camera gives the pixel size and
+    // how much the lens bends lines; a small head move gives which way the picture is turned
+    'POST /camera/calibrate': async () => {
+      const r = await machine.cameraTask('Calibrating the camera on the small checkerboard', () => machine.vision.calibrateCamera({ square: cfg.vision.camBoard && cfg.vision.camBoard.square }));
+      await learnt({ vision: { ...(cfg.vision || {}), matrix: r.matrix, cameraAt: new Date().toISOString(), cameraLens: +r.lens.toFixed(4) } }, 'camera: pixel size ' + (r.pixel * 1000).toFixed(3) + ' µm, turned ' + r.rotation.toFixed(2) + '° saved');
+      return r;
+    },
+    // pixel size and rotation without the small board: a dot or checkerboard corner under the camera, the head moves a little
     'POST /camera/pixels': async () => {
       const r = await machine.cameraTask('Calibrating the camera\'s pixel size', () => machine.vision.calibratePixels());
       await learnt({ vision: { ...(cfg.vision || {}), matrix: r.matrix, calibrated: new Date().toISOString() } }, 'camera: pixel size ' + (r.pixel * 1000).toFixed(3) + ' µm, turned ' + r.rotation.toFixed(2) + '° saved');
@@ -294,7 +303,7 @@ function start(opts = {}) {
     'POST /camera/offset': async (b) => {
       if (machine.st.interlock) throw err(409, 'Close the lid: the laser fires to make the mark');
       const r = await machine.cameraTask('Calibrating the camera offset', (ctl) => machine.vision.calibrateOffset(b || {}, ctl));
-      await learnt({ vision: { ...(cfg.vision || {}), offset: r.offset, calibrated: new Date().toISOString() } }, 'camera: offset ' + r.offset.join(', ') + ' mm saved');
+      await learnt({ vision: { ...(cfg.vision || {}), offset: r.offset, calibrated: new Date().toISOString(), offsetAt: new Date().toISOString(), offsetCheck: r.check } }, 'camera: offset ' + r.offset.join(', ') + ' mm saved');
       return r;
     },
     // checkerboard: check (with the bed map on) or calibrate (measure as it is, save the map)

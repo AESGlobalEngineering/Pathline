@@ -612,14 +612,16 @@ async function visionTests() {
   const jogTo = async (x, y) => { await call('POST', 'v1/jog', { x, y }); await new Promise((r) => setTimeout(r, 400)); };
   try {
     for (let i = 0; i < 50; i++) { try { await call('GET', 'v1/info'); break; } catch (e) { await new Promise((r) => setTimeout(r, 100)); } }
-    // pixel size: the camera over the first mark (sheet ≈ 40.7, 24.7), head = camera + offset
-    await jogTo(40.7 + 41.4, 24.7 + 12.7);
-    const px = await call('POST', 'local/camera/pixels');
-    ok(px.status === 200 && Math.abs(px.data.pixel - 0.08) < 0.0005 && Math.abs(Math.abs(px.data.rotation) - 90) < 0.5, 'pixel size and rotation: ' + (px.data && (px.data.pixel * 1000).toFixed(2)) + ' µm, ' + (px.data && px.data.rotation.toFixed(2)) + '° (80 µm, 90°)', JSON.stringify(px.data));
-    // offset: the laser marks scrap at a clear spot, the camera finds it
+    // stage 1, camera: over the small 10 mm board (laid at 7°, unevenly lit), head = camera + offset
+    await jogTo(745 + 41.4, 145 + 12.7);
+    const px = await call('POST', 'local/camera/calibrate');
+    ok(px.status === 200 && Math.abs(px.data.pixel - 0.08) < 0.0002 && Math.abs(Math.abs(px.data.rotation) - 90) < 0.2 && !px.data.mirrored,
+      'stage 1, camera on the 10 mm board: ' + (px.data && px.data.corners) + ' corners, ' + (px.data && (px.data.pixel * 1000).toFixed(2)) + ' µm, picture turned ' + (px.data && px.data.rotation.toFixed(2)) + '° (80 µm, 90°)', JSON.stringify(px.data));
+    // stage 2, offset: the laser cuts its mark on scrap at a clear spot, the camera finds it, then checks
     await jogTo(900, 150);
     const of = await call('POST', 'local/camera/offset', { power: 20, speed: 50 });
-    ok(of.status === 200 && Math.abs(of.data.offset[0] - 41.2) < 0.2 && Math.abs(of.data.offset[1] - 12.9) < 0.2, 'camera offset from a laser mark: ' + (of.data && of.data.offset.join(', ')) + ' mm (41.2, 12.9)', JSON.stringify(of.data));
+    ok(of.status === 200 && Math.abs(of.data.offset[0] - 41.2) < 0.2 && Math.abs(of.data.offset[1] - 12.9) < 0.2 && of.data.check < 0.05,
+      'stage 2, offset from the cut: ' + (of.data && of.data.offset.join(', ')) + ' mm (41.2, 12.9), cut check ' + (of.data && (of.data.check * 1000).toFixed(0)) + ' µm off', JSON.stringify(of.data));
     // checkerboard: camera over its first corner (100, 300); calibrate, then check with the map on
     const off = of.data.offset;
     await jogTo(100 + off[0], 300 + off[1]);
