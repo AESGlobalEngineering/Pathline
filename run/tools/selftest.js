@@ -193,6 +193,24 @@ console.log('RDD6584 knife job (compared with VCutWorks, recorded on a YC-1610)'
     'e7180000000001ebe700da010620000000027b000000027bd7';
   ok(h.endsWith(recorded), 'cuts, knife angles (90°, 0°, 270°, 180°), Y bands and cut length (379 mm) match VCutWorks byte for byte', h.slice(h.indexOf('ca0000ca02')));
   ok(h.includes('e706000000000200001e4220') && h.startsWith('d81000000a5e07000009146c040ce601ca306910f10200d800'), 'feed 500 mm after the job; header as VCutWorks writes it');
+  // the pen square VCutWorks drew: one continuous path, no knife plunges, tool code 11
+  const penPts = [[53.163, 214.829], [53.163, 960.05], [166.954, 960.05], [166.954, 214.829], [53.163, 214.829]];
+  const penFile = knife.bedFile([{ tool: 'pen', speed: 60, runs: [penPts] }], { feed: 500 }).toString('hex');
+  const penRec = 'ca0011ca0200c9020000035460800000031f2b00000d0e2d0000053f10ca080000053f10a00000031f2b00003a4c320000053f10' +
+    'a000000a182a00003a4c320000000000a000000a182a00000d0e2d0000103d30a00000031f2b00000d0e2d00000a7e20ca090000000000e7180000000001';
+  ok(penFile.includes(penRec) && penFile.includes('ca410011') && penFile.includes('f30a000000000000f309000000000001'), 'pen: drawn in one go with tool code 11, as VCutWorks did', penFile);
+  // pen + knife + punch in one job: a layer each, in order, tool change marked on layers 2 and 3
+  const planT = { name: 'tools', warnings: [], seconds: 3, steps: [
+    { op: 'cut', i: 0, proc: { index: 0, speed: 60, tool: 'T3 · Pen' }, runs: [[[10, 10], [60, 10]]], seconds: 1 },
+    { op: 'cut', i: 1, proc: { index: 1, speed: 60, tool: 'T1 · Knife' }, runs: [[[10, 20], [60, 20]]], seconds: 1 },
+    { op: 'cut', i: 2, proc: { index: 2, speed: 60, tool: 'T2 · Punch' }, runs: [[[10, 30], [30, 30]]], seconds: 1 }] };
+  const ht = knife.compile(planT, { bed: [1000, 1600], timing: {} }).segments[0].data;
+  const cmds = rd.commands(ht).map((c) => Buffer.from(c).toString('hex'));
+  const layerStarts = cmds.filter((h) => /^ca00/.test(h)).join();
+  const punches = cmds.filter((h) => h === 'ca0a0000002708').length;
+  ok(layerStarts === 'ca0011,ca0040,ca0060' && cmds.filter((h) => /^e718/.test(h)).slice(1).join() === 'e7180000000001,e7180000000002,e7180000000003' &&
+    cmds.includes('f30a000000000001') && cmds.includes('f309000000000003') && punches === 5,
+  'pen, knife and punch: three layers (11, 40, 60 as VCutWorks marks them), knife flagged, 3 layers counted, a 20 mm punch line = 5 holes 5 mm apart', layerStarts + ' · ' + punches + ' holes');
   // origin top right (YC-1610): a cut near the right of the bed has a small machine X, and a
   // cut running right in Pathline runs towards smaller X (knife at 180°)
   const planR = { name: 'right', warnings: [], seconds: 1, steps: [{ op: 'cut', i: 0, proc: { speed: 60 }, runs: [[[900, 50], [950, 50]]], seconds: 1 }] };

@@ -5,6 +5,14 @@
 
 module.exports = [
   {
+    version: '0.6.0', date: '2 Nov 2026',
+    added: [
+      'RDD6584: each Pathline process runs with its own tool, taken from its name (or Setup → Tools): knife, pen or punch. One layer per process, in Pathline\'s order, with the tool changes the controller expects.',
+      'Pen paths are drawn in one go; punch processes punch a hole every 5 mm along a line, or one hole in the middle of a small closed shape (10 mm or less).'
+    ],
+    fixed: ['RDD6584: the Conveyor button no longer starts the knife: its feed-only job uses the pen.']
+  },
+  {
     version: '0.5.9', date: '2 Nov 2026',
     fixed: [
       'RDD6584 jobs no longer land offset by the origin set on the machine\'s panel: the controller runs a job relative to that origin, so Pathline Run reads it before each job and allows for it. The Diagnostics log shows the origin it read.'
