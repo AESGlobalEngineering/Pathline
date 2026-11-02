@@ -237,6 +237,18 @@ async function jogTests() {
   const stopAt = sent.findIndex((s) => s[0] === 'stop');
   const after = sent.slice(stopAt + 1).filter((s) => s[0] === 'move');
   ok(stopAt > 0 && after.length > 0 && after[after.length - 1][1] < after[0][1] + 0.001, 'change of direction: stop, then moves the other way', JSON.stringify(sent));
+  // a controller that slows to a stop at the end of every move (RDD6584): one move to the
+  // bed edge at the chosen speed, stopped on release
+  sent.length = 0;
+  link.continuousJog = true;
+  link.moveTo = async (x, y, o) => { sent.push(['move', +x.toFixed(2), +y.toFixed(2), o.speed]); };
+  m.st.pos = { x: 100, y: 200, z: 0 };
+  await m.jogHold({ axis: 'y', dir: 1, speed: 10 });
+  await new Promise((r) => setTimeout(r, 300));
+  await m.jogHold({ axis: 'y', dir: 1, speed: 10 });
+  await new Promise((r) => setTimeout(r, 300));
+  await m.jogRelease();
+  ok(JSON.stringify(sent) === '[["move",100,1600,10],["stop"]]', 'held arrow on an RDD6584: one move to the bed edge at 10 mm/s, then stop on release', JSON.stringify(sent));
 }
 
 // ---------------------------------------------------------------- server, simulated machine
@@ -447,8 +459,7 @@ async function linkTests() {
     const want = ['speed', 'd901020000004e10', 'speed', 'd900020000004e10', 'speed', 'd901027f7f7f3170', 'speed', 'd903020000060d20'];
     ok(moves.length === want.length && want.every((w, i) => (w === 'speed' ? moves[i].startsWith('c902') : moves[i] === w)) && !rdev.keys.includes('d910'),
     'RDD6584: jog Y +10, X +10, Y −10 and feed 100 mm sent as speed + move-by, as VCutWorks does', moves.join(' '));
-    let eh = null; try { await rk.home(); } catch (e) { eh = e; }
-    ok(eh && /panel/.test(eh.message), 'RDD6584: Home refused (its home command is unknown)', eh && eh.message);
+    ok(rk.continuousJog, 'RDD6584: a held arrow is one long move (no judder between steps)');
   } catch (e) { ok(false, 'RDD6584 moves', e.stack); }
   await rk.close();
   rdev.card = 0;

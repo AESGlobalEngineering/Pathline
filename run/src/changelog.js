@@ -5,6 +5,15 @@
 
 module.exports = [
   {
+    version: '0.5.6', date: '2 Nov 2026',
+    added: ['Jog page: the conveyor button is called Conveyor.'],
+    fixed: [
+      'RDD6584: holding a jog arrow is one smooth move at the chosen speed, stopped when you let go (it moved a step, slowed to a stop, then the next step).',
+      'Home works again on RDD6584 controllers.',
+      'Go to 0, 0 removed from the Jog page.'
+    ]
+  },
+  {
     version: '0.5.5', date: '2 Nov 2026',
     fixed: [
       'RDD6584 knife controllers: jogging no longer runs away. These controllers move BY the distance in a move command, not TO it (found by recording VCutWorks): Pathline Run now sends a speed, then the distance to go, as VCutWorks does. Go to 0, 0, Frame and Feed work the same way.',

@@ -456,8 +456,10 @@ function jogView() {
     '<section aria-label="Machine" class="card" style="flex:0 1 360px;min-width:260px;min-height:0;overflow-y:auto;padding:20px;display:flex;flex-direction:column;gap:12px"><h2 class="h-sec">Machine</h2>' +
     '<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px">' +
     '<button class="tb" style="height:52px" data-a="home">Home</button><button class="tb" style="height:52px" data-a="frame">Frame job</button>' +
-    '<button class="tb" style="height:52px" data-a="goto0">Go to 0, 0</button><button class="tb" style="height:52px" data-a="stop">Stop</button>' +
-    (c.controller === 'ruida' && c.type === 'plotter' && c.f.conveyor ? '<button class="tb" style="height:52px" data-a="feed">Feed one bed (' + esc(c.feedLen) + ' mm)</button>' : '') + '</div>' +
+    (c.controller === 'ruida' && c.type === 'plotter' && c.f.conveyor ? '<button class="tb" style="height:52px" data-a="feed" title="Advances the material ' + esc(c.feedLen) + ' mm">Conveyor</button>' : '') +
+    '<button class="tb" style="height:52px" data-a="stop">Stop</button></div>' +
+    // a plotter's vacuum table, switched by hand: only once the controller can do it
+    (c.controller === 'ruida' && c.type === 'plotter' && c.f.vacuum && S.info.vacuum ? tog('Vacuum', 'vacuum') : '') +
     '<div class="hr" style="margin:4px 0"></div><h2 class="h-sec">Status</h2><div style="display:flex;flex-direction:column;gap:4px">' +
     pill('Controller', st.link === 'online' ? (S.info.model || 'Connected') : st.link === 'connecting' ? 'Connecting…' : 'Not connected', st.link === 'online') +
     (sim ? '<div style="display:flex;align-items:center;justify-content:space-between;min-height:48px;border-bottom:1px solid var(--line-soft)"><span>Lid closed (simulated)</span><button role="switch" class="sw" aria-checked="' + !st.interlock + '" data-a="simLid" aria-label="Lid closed"></button></div>'
@@ -590,7 +592,7 @@ function setupView() {
   tabs['Work area'].push(card('Bed', num('Width', 'bed.0', 'mm') + num('Height', 'bed.1', 'mm') + num('Max speed', 'speed', 'mm/s', 'Used by Pathline\'s time estimate') + num('Acceleration', 'acc', 'mm/s²')));
   if (isPlotter) {
     tabs['Work area'].push(card('Conveyor and vacuum', tog('Conveyor', 'f.conveyor') + (d.f.conveyor ? num('Feed length', 'feedLen', 'mm', 'Material advanced per bed (U axis)') + num('Feed time', 'timing.feedSettle', 's', 'For Pathline\'s estimate') : '') + tog('Vacuum', 'f.vacuum'),
-      'Jobs over several beds feed the conveyor between beds. The Jog page has Feed one bed.'));
+      'Jobs over several beds feed the conveyor between beds. The Jog page has Conveyor (one feed length).'));
   }
   if (trotec) {
     tabs.Controller.push(card('Trotec', num('Position unit', 'trotec.unit', 'mm') + num('Mechanical offset X', 'trotec.offset.0', 'mm') + num('Mechanical offset Y', 'trotec.offset.1', 'mm') +
@@ -739,7 +741,6 @@ const H = {
   zoomOut: () => zoomBed(1 / 1.5),
   zoomFit: () => { ui.zoom = { k: 1, cx: NaN, cy: NaN }; render(); },
   home: act(async () => call('POST', API('/home'), {})),
-  goto0: act(async () => call('POST', API('/jog'), { x: 0, y: 0 })),
   feed: act(async () => { const r = await call('POST', API('/feed'), {}); toast('Conveyor fed ' + r.fed + ' mm'); }),
   io: act(async (k) => call('POST', API('/io'), { [k]: !S.status.io[k] })),
   simLid: act(async () => call('POST', LOCAL('/sim/lid'), { open: !S.status.interlock })),

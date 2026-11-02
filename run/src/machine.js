@@ -170,8 +170,18 @@ class Machine {
     this.guard({ lidOpenOk: true });
     if (!Number.isFinite(this.st.pos.x) || !Number.isFinite(this.st.pos.y)) throw busyErr('The head position isn\'t known yet');
     const at = { x: this.st.pos.x, y: this.st.pos.y };
-    this.hold = { axis, dir, speed, until, at, range: this.jogRange(axis), ideal: at[axis], last: Date.now(), busy: false, moved: false };
+    const h = { axis, dir, speed, until, at, range: this.jogRange(axis), ideal: at[axis], last: Date.now(), busy: false, moved: false };
+    this.hold = h;
     if (!this.holdTimer) this.holdTimer = setInterval(() => this.holdTick(), 100);
+    // one move to the edge of the bed at this speed, stopped when the arrow is let go
+    if (this.link.continuousJog) {
+      h.continuous = true;
+      const to = { ...at, [axis]: dir > 0 ? h.range[1] : h.range[0] };
+      if (Math.abs(to[axis] - at[axis]) < 0.01) return { holding: true }; // at the edge already
+      h.busy = true;
+      h.moved = true;
+      try { await this.link.moveTo(to.x, to.y, { axis, speed }); } catch (e) { this.log('jog: ' + e.message); await this.jogRelease(); throw e; } finally { h.busy = false; }
+    }
     return { holding: true };
   }
 
@@ -192,6 +202,12 @@ class Machine {
     const h = this.hold;
     if (!h || h.busy) return;
     if (Date.now() > h.until || this.run || this.framing || this.st.link !== 'online' || this.st.state === 'alarm') { this.jogRelease(); return; }
+    // one long move under way: only follow where the head is
+    if (h.continuous) {
+      h.busy = true;
+      try { this.apply(await this.link.poll()); } catch (e) { /* busy controller: ask again next tick */ } finally { h.busy = false; }
+      return;
+    }
     // where the head should be by now at this speed, but never more than ~0.15 s ahead of
     // where it is, so it stops close to where the arrow was let go
     const now = Date.now();
@@ -273,6 +289,13 @@ class Machine {
         if (this.st.link !== 'online') throw busyErr('The machine isn\'t connected');
         await this.link.setIo(k, !!b[k]);
         this.st.io[k] = !!b[k];
+      } else if (k === 'vacuum' && this.cfg.f.vacuum) {
+        // a plotter's vacuum table, by hand (Jog page)
+        if (this.st.link !== 'online') throw busyErr('The machine isn\'t connected');
+        if (!this.link.setVacuum) throw busyErr('This controller can\'t switch the vacuum by hand');
+        await this.link.setVacuum(!!b[k]);
+        this.st.io[k] = !!b[k];
+        this.log('vacuum ' + (b[k] ? 'on' : 'off'));
       } else throw busyErr('This machine has no ' + k + ' output');
     }
     return { io: this.st.io };

@@ -217,11 +217,10 @@ class RuidaLink {
       await sleep(100);
     }
   }
-  home() {
-    // D8 2A isn't in any reference, and a knife controller's commands differ: don't guess
-    if (this.relMoves) throw Object.assign(new Error('Home from the machine\'s own panel: Pathline Run doesn\'t know this controller\'s home command yet'), { code: 409 });
-    return this.sendRaw(Buffer.from(RD.homeXY()));
-  }
+  home() { return this.sendRaw(Buffer.from(RD.homeXY())); }
+  // a held jog arrow: one long move, stopped on release (RDD6584: every move slows to a
+  // stop at its end, so short steps one after another judder)
+  get continuousJog() { return !!this.relMoves; }
   // a jog arrow let go: every move is a rapid at the controller's own travel speed, which it
   // would otherwise finish, so stop it where it is
   stopMove() { return this.sendRaw(Buffer.from(RD.stop())); }
