@@ -349,6 +349,23 @@ async function serverTests() {
     const page = await fetch('http://127.0.0.1:' + port + '/');
     ok(page.status === 200 && /Pathline Run/.test(await page.text()), 'HMI page at /');
 
+    // Queue → Select: three jobs queued, the 1st and 3rd ticked: they run one after the other,
+    // the 2nd stays in the queue
+    const three = [];
+    for (let k = 0; k < 3; k++) three.push((await call('POST', '/jobs', example)).data.id);
+    await new Promise((r) => setTimeout(r, 700));
+    const sb = await call('POST', '/start', { ids: [three[0], three[2]] });
+    let js = [];
+    for (let i = 0; i < 160; i++) {
+      await new Promise((r) => setTimeout(r, 250));
+      js = (await call('GET', '/jobs')).data;
+      const st3 = (id) => (js.find((j) => j.id === id) || {}).status;
+      if (st3(three[0]) === 'done' && st3(three[2]) === 'done' && (await call('GET', '/status')).data.state === 'idle') break;
+    }
+    const stOf = (id) => (js.find((j) => j.id === id) || {}).status;
+    ok(sb.data.job === three[0] && stOf(three[0]) === 'done' && stOf(three[2]) === 'done' && stOf(three[1]) === 'queued',
+      'chosen jobs (1st and 3rd of three) run back to back; the 2nd stays queued', three.map(stOf).join(', '));
+
     const checker = path.join(__dirname, '..', '..', 'hmi-handoff', 'tools', 'check-hmi.js');
     if (fs.existsSync(checker)) {
       const res = await new Promise((resolve) => {

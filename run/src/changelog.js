@@ -5,6 +5,11 @@
 
 module.exports = [
   {
+    version: '0.6.3', date: '2 Nov 2026',
+    added: ['Queue → Select (replaces Run all): tick the jobs you want, then Start runs them one after another, in queue order. Stopping, or a job that doesn\'t complete, ends the run.'],
+    fixed: ['Start runs the job selected in the queue.']
+  },
+  {
     version: '0.6.2', date: '2 Nov 2026',
     added: [
       'Queue → Run all: when a job completes, the next one in the queue starts by itself (it stops at a job that is stopped or can\'t start).',

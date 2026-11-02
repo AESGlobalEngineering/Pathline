@@ -151,7 +151,7 @@ function start(opts = {}) {
     'GET /jobs': () => jobsView(),
     'POST /jobs/order': (b) => { store.order(Array.isArray(b.ids) ? b.ids : []); return { ok: true }; },
     'POST /jobs': (b) => { const j = queueJob(b, 'pathline'); return { id: j.id, status: 'queued' }; },
-    'POST /start': () => machine.start(),
+    'POST /start': (b) => machine.start(b || {}),
     'POST /pause': () => machine.pause(),
     'POST /resume': () => machine.resume(),
     'POST /stop': () => machine.stop(),

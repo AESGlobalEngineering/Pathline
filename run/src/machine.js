@@ -342,10 +342,22 @@ class Machine {
     return controller(this.cfg.controller).compile(p, this.cfg, opts);
   }
 
-  async start() {
+  // b.id: run that job; b.ids: run those jobs one after another (Queue → Select), in queue
+  // order; neither: the first job in the queue (Pathline's Start)
+  async start(b = {}) {
     if (this.run) return { state: this.st.state };
     this.guard();
-    const job = this.store.next();
+    const want = Array.isArray(b.ids) ? b.ids : b.id ? [b.id] : null;
+    let job;
+    if (want) {
+      const queued = this.store.jobs.filter((j) => j.status === 'queued' && want.includes(j.id));
+      if (!queued.length) return { state: this.st.state, message: 'None of those jobs are queued' };
+      job = queued[0];
+      this.batch = queued.slice(1).map((j) => j.id);
+    } else {
+      job = this.store.next();
+      this.batch = [];
+    }
     if (!job) return { state: this.st.state, message: 'Nothing queued' };
     // as placed: moved to the head if the operator anchored it there
     const pkg = this.store.runPkg(job.id);
@@ -450,11 +462,14 @@ class Machine {
         if (result === 'Completed') this.st.progress = 1;
       }
       this.log((result === 'Completed' ? 'done ' : 'stopped ') + job.name);
-      // Queue → Run all: the next job follows a completed one
-      if (result === 'Completed' && this.cfg.runAll && this.store.next()) {
+      // Queue → Select: the next of the chosen jobs follows a completed one; anything else ends the run
+      const rest = result === 'Completed' ? (this.batch || []) : [];
+      this.batch = [];
+      if (rest.length) {
         setTimeout(() => {
-          if (this.run || !this.cfg.runAll) return;
-          this.start().then((r) => { if (r.job) this.log('Run all: next job'); }).catch((e) => { this.log('Run all stopped: ' + e.message); this.st.message = 'Run all stopped: ' + e.message; });
+          if (this.run) return;
+          this.start({ ids: rest }).then((r) => { if (r.job) this.log('next chosen job (' + rest.length + ' left)'); else if (r.message) this.st.message = r.message; })
+            .catch((e) => { this.log('chosen jobs stopped: ' + e.message); this.st.message = 'Stopped before the next job: ' + e.message; });
         }, 2000);
       }
     })();
@@ -483,6 +498,7 @@ class Machine {
   async stop() {
     this.jogRelease();
     this.framing = false;
+    this.batch = []; // Stop also ends a run of chosen jobs
     if (this.run) this.run.ctl.aborted = true;
     try { if (this.link) await this.link.abort(); } catch (e) { this.log('stop: ' + e.message); }
     if (!this.run && this.st.state !== 'alarm') { this.st.state = 'idle'; this.st.message = 'Stopped'; }

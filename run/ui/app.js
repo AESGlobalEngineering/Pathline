@@ -29,7 +29,8 @@ const aciFg = (n) => ([2, 3, 4, 9].includes(n) ? '#15181E' : '#FFFFFF');
 const ui = {
   view: 'queue', sel: null, dark: matchMedia('(prefers-color-scheme: dark)').matches, themeSet: false,
   step: '10', navOpen: false, dlg: null, toast: null, setTab: 'Machine', draft: null, ports: [], pkgs: {}, histFilter: 'All',
-  trail: { job: null, pts: [] }, net: null, netDraft: null, zoom: { k: 1, cx: NaN, cy: NaN }
+  trail: { job: null, pts: [] }, net: null, netDraft: null, zoom: { k: 1, cx: NaN, cy: NaN },
+  multi: false, picked: [] // Queue → Select: the ticked jobs
 };
 try { const t = localStorage.getItem('plr-theme'); if (t) { ui.dark = t === 'dark'; ui.themeSet = true; } } catch (e) { /* private mode */ }
 let S = null; // last /api/local/state
@@ -371,14 +372,21 @@ function queueView() {
 
   const total = shown ? shown.seconds : 0;
   const frac = isRun ? st.progress : 0;
-  const cantStart = !job || st.link !== 'online' || st.interlock || st.state === 'alarm' || st.state === 'framing';
+  ui.picked = ui.picked.filter((id) => q.some((j) => j.id === id && j.status === 'queued'));
+  const cantStart = (ui.multi ? !ui.picked.length : !job) || st.link !== 'online' || st.interlock || st.state === 'alarm' || st.state === 'framing';
 
   const list = q.map((j, i) => {
     const p = ui.pkgs[j.id];
+    const ticked = ui.picked.includes(j.id);
+    // Select mode: a tap ticks the job (and shows it); otherwise a tap shows it
+    const tick = ui.multi && j.status === 'queued'
+      ? '<span aria-hidden="true" style="position:absolute;left:16px;top:16px;width:24px;height:24px;border-radius:6px;display:flex;align-items:center;justify-content:center;box-shadow:var(--shadow-1);' +
+        (ticked ? 'background:var(--accent);color:var(--on-accent)">' + ic('M5 12l5 5L19 7', 16) : 'background:var(--surface);border:2px solid var(--line-strong)">') + '</span>'
+      : '';
     return '<div class="jobcard' + (j.id === ui.sel ? ' on' : '') + '">' +
-      '<button class="pick" data-a="sel" data-v="' + j.id + '" aria-pressed="' + (j.id === ui.sel) + '">' + bedSvg(p) +
+      '<button class="pick" data-a="' + (ui.multi && j.status === 'queued' ? 'pick' : 'sel') + '" data-v="' + j.id + '" aria-pressed="' + (ui.multi ? ticked : j.id === ui.sel) + '">' + bedSvg(p) +
       '<span style="display:flex;flex-direction:column;gap:1px;line-height:1.3"><span style="font-weight:600">' + (i + 1) + '. ' + esc(j.name) + '</span>' +
-      '<span class="lbl">' + esc(j.material || '—') + '</span><span class="lbl mono">' + stamp(j.receivedAt) + ' · ' + short(j.seconds) + '</span></span></button>' +
+      '<span class="lbl">' + esc(j.material || '—') + '</span><span class="lbl mono">' + stamp(j.receivedAt) + ' · ' + short(j.seconds) + '</span></span></button>' + tick +
       (j.status === 'running' ? '<span class="pill accent" style="position:absolute;top:16px;right:16px;box-shadow:var(--shadow-1)">Running</span>'
         : '<div class="ord"><button class="ib" data-a="up" data-v="' + j.id + '" aria-label="Move up"' + (i === 0 ? ' disabled' : '') + '>' + ic(ICON.chevUp, 18) + '</button><button class="ib" data-a="down" data-v="' + j.id + '" aria-label="Move down"' + (i === q.length - 1 ? ' disabled' : '') + '>' + ic(ICON.chevDown, 18) + '</button></div>') +
       '</div>';
@@ -393,8 +401,8 @@ function queueView() {
   return '<div class="view fit qview">' +
     '<aside aria-label="Job queue" class="card qlist">' +
     '<div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:14px 14px 10px"><span class="h-sec">Queue</span><span class="lbl">' + q.length + (q.length === 1 ? ' job' : ' jobs') + '</span><span style="flex:1"></span>' +
-    // run the queue back to back: when a job completes, the next one starts
-    '<label style="display:inline-flex;align-items:center;gap:8px;cursor:pointer" title="When a job completes, start the next one"><span class="lbl" style="font-size:13px;color:var(--text-2)">Run all</span><button role="switch" class="sw" aria-checked="' + !!cfg().runAll + '" data-a="runAll" aria-label="Run all jobs back to back"></button></label>' +
+    // Select: tick several jobs; Start runs them one after another
+    '<label style="display:inline-flex;align-items:center;gap:8px;cursor:pointer" title="Tick several jobs, then Start runs them one after another"><span class="lbl" style="font-size:13px;color:var(--text-2)">' + (ui.multi ? ui.picked.length + ' ticked' : 'Select') + '</span><button role="switch" class="sw" aria-checked="' + !!ui.multi + '" data-a="multi" aria-label="Select several jobs"></button></label>' +
     '<button class="tb sm" data-a="import">' + ic(ICON.upload, 16) + 'Import</button></div>' +
     '<div style="flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:8px;padding:0 12px 12px">' + (list || '<div style="padding:28px 8px;text-align:center;color:var(--text-3)">Queue empty. Send a job from Pathline, or import a .cjob file.</div>') + '</div>' +
     '<div style="display:flex;gap:8px;padding:12px;border-top:1px solid var(--line)"><button class="tb" data-a="remove"' + (!job || job.status === 'running' ? ' disabled' : '') + '>' + ic(ICON.trash, 18) + 'Remove</button></div></aside>' +
@@ -732,6 +740,14 @@ const H = {
     const s = S.status.state;
     if (s === 'running') return call('POST', API('/pause'), {});
     if (s === 'paused') return call('POST', API('/resume'), {});
+    // Select mode: the ticked jobs, one after another, in queue order
+    if (ui.multi) {
+      const ids = visibleQueue().filter((j) => j.status === 'queued' && ui.picked.includes(j.id)).map((j) => j.id);
+      const r = await call('POST', API('/start'), { ids });
+      if (r.message) toast(r.message); else if (ids.length > 1) toast('Running ' + ids.length + ' jobs, one after another');
+      ui.multi = false; ui.picked = [];
+      return;
+    }
     // Start runs the next queued job: put the selected one first
     const ids = visibleQueue().filter((j) => j.status === 'queued').map((j) => j.id);
     if (ui.sel && ids[0] !== ui.sel) await call('POST', API('/jobs/order'), { ids: [ui.sel].concat(ids.filter((i) => i !== ui.sel)) });
@@ -746,7 +762,8 @@ const H = {
     await call('POST', API('/frame'), { box: b });
   }),
   removeDone: act(async () => call('PUT', LOCAL('/config'), { removeDone: !cfg().removeDone })),
-  runAll: act(async () => call('PUT', LOCAL('/config'), { runAll: !cfg().runAll })),
+  multi: () => { ui.multi = !ui.multi; ui.picked = []; render(); },
+  pick: (id) => { ui.picked = ui.picked.includes(id) ? ui.picked.filter((x) => x !== id) : ui.picked.concat(id); ui.sel = id; refresh(); },
   // Setup: put a setting back to the controller's own value
   resetCtl: (p) => { set(ui.draft, p, S.fromController[p]); render(); },
   // pin the selected job's top-left corner to where the head is now (or put it back)
