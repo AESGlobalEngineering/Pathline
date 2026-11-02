@@ -101,8 +101,23 @@ Sources: the Trotec protocol comes from our own decompile and captures (`TROTEC_
 
 - **Trotec:** jog, home and frame first. Then cut a 20 mm square at low power and compare with Ruby. Engraving (`ACTIVATEPPIMODE` 5 at every DPI, which power level the switch table fires) is copied from one capture at 500 DPI.
 - **Ruida:** the header, the layer blocks and the work-mode-3 raster are from public notes and haven't been tried on a controller. Choose the controller model in Setup → Machine. The swizzle magic is also detected from the controller's first reply. Check the checksum, status bits and rapid-move option bytes. The origin corner is a setting. Run a small square at low power first, or save the `.rd` file and open it in RDWorks/LightBurn to check it.
-- **Ruida plotters:** tools on outputs 1–4 and the conveyor on the U axis are the laser-family command set used for tools. That's the likely wiring for a plotter on a Ruida laser-family board, but it's unconfirmed. Ruida's own knife-cutter controllers (RDD6584 series) aren't documented publicly: a capture from RDCutting or the controller's own software is the way to confirm them. Try a pen first, with the knife out.
-- **Not supported:** registration marks (no camera: jobs wait, or run uncorrected if Setup → Jobs → Registration marks is "Skip"), test fire, auto-focus, Z, rotary, Trotec plotters. Pathline is told through `GET /machine` features, so it hides those controls.
+- **Ruida plotters:** tools on outputs 1–4 and the conveyor on the U axis are the laser-family command set used for tools. That's the likely wiring for a plotter on a Ruida laser-family board, but it's unconfirmed. RDD6584 knife controllers use their own format (`src/ctrl/ruida/knife.js`), copied from VCutWorks captures on a YC-1610.
+- **Head camera (Trotec):** built and tested against the simulated camera only. See below.
+- **Not supported:** test fire, auto-focus, Z, rotary, Trotec plotters. Pathline is told through `GET /machine` features, so it hides those controls.
+
+## Head camera (Trotec print and cut)
+
+The Trotec's camera is an Allied Vision **Alvium 1800 U-500c** on the head. It plugs into the **computer** by USB 3, not into the laser.
+
+1. Install Allied Vision's **Vimba X** (free, from alliedvision.com) on the PC or the Pi (64-bit Raspberry Pi OS). Pathline Run calls its `VmbC` library through `koffi`, so nothing is compiled.
+2. Close Ruby and JobDispatcher: only one program can use the camera.
+3. **Setup → Camera:** turn the camera on and save, then:
+   - **Calibrate pixel size:** put any dark printed dot, or a checkerboard corner, under the camera. The head moves a few mm while the camera watches.
+   - **Calibrate offset:** jog the laser over scrap. It marks a 3 mm dot there (power and speed are in Setup), and the camera finds it.
+   - **Checkerboard:** lay the 50 mm board anywhere, at any angle. Jog the camera over its top-left inner corner (Jog → Camera), then **Calibrate bed**. The board's position and angle are fitted out, and the rest is saved as a bed map applied to every job. **Check bed** measures again with the map on.
+4. Jobs with registration marks: the camera reads each mark (re-centring if it's more than 1 mm out) and fits Pathline's mode. `pos` is shift + rotation, `linear` is affine, `nonlinear` is triangles. The job is then moved onto the marks.
+
+Everything is in `src/vision/`: `camera.js` (Vimba X and the simulated camera), `detect.js` (dots and checkerboard corners, plain JS), `fit.js` (the corrections from `TROTEC_PROTOCOL.md` §7.5 and the bed map) and `vision.js` (the workflows). `npm test` runs them all end to end on the simulated camera with `--sim`.
 
 ## Layout
 
@@ -110,5 +125,6 @@ Sources: the Trotec protocol comes from our own decompile and captures (`TROTEC_
 - `src/machine.js`: link, status, manual control with the safety rules, and the job runner
 - `src/job/`: package checks and the controller-neutral plan
 - `src/ctrl/trotec`, `src/ctrl/ruida`: converters, links and decoders. `src/ctrl/sim.js`: simulated link
+- `src/vision/`: the Trotec's head camera (print and cut, calibration, checkerboard bed map)
 - `electron/`: the app window and updates (`electron-updater`, as in Pathline). `src/changelog.js`: What's new
 - `ui/`: touchscreen page (plain JS). `tools/`: convert, decode, self-test. `deploy/pi/install-pi.sh`: Raspberry Pi install

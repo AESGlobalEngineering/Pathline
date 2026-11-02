@@ -5,6 +5,15 @@
 
 module.exports = [
   {
+    version: '0.7.0', date: '2 Nov 2026',
+    added: [
+      'Trotec head camera (Allied Vision Alvium, through Vimba X): Setup → Camera, and a live picture on the Jog page with "Camera to the laser\'s spot" and "Laser to the crosshair".',
+      'Print and cut: jobs with registration marks have them read by the camera (re-centring on each, predicting the next), then are moved onto them: shift + rotation, affine or a triangle map, as Pathline asks. The marks found show on the bed view.',
+      'Camera calibration: pixel size and rotation from any dot under the camera; the camera offset from a small mark the laser makes on scrap.',
+      'Checkerboard (50 mm squares, laid anywhere at any angle): Calibrate bed measures the machine\'s accuracy across the bed and saves a bed map used for every job; Check bed measures again with it on. Shows the worst error, X/Y length and squareness, with an arrow for each corner.'
+    ]
+  },
+  {
     version: '0.6.3', date: '2 Nov 2026',
     added: ['Queue → Select (replaces Run all): tick the jobs you want, then Start runs them one after another, in queue order. Stopping, or a job that doesn\'t complete, ends the run.'],
     fixed: ['Start runs the job selected in the queue.']

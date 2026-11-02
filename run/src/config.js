@@ -46,6 +46,7 @@ const BASE = {
   removeDone: true,              // completed jobs leave the queue for History
   manual: [],                    // settings typed in Setup over the controller's own ('bed.0', 'speed' …)
   knifeHome: null,               // RDD6584: where the head homes and parks, controller mm (learnt)
+  vision: { enabled: false },    // the Trotec's head camera (vision/vision.js DEFAULTS for the rest)
   trotec: { unit: 0.010125, offset: [14.833125, 9.527625], laserSource: 5, travelSpeed: 700, maxSpeed: 2000, airOutput: 4, overscan: 10, cutPowerCorrection: 15, engravePowerCorrection: 20 },
   type: 'laser',                 // 'laser' or 'plotter' (Trotec: always laser; Ruida: from the model)
   ruida: { model: 'RDC6442G', magic: 0x88, origin: 'tr' },
@@ -111,9 +112,14 @@ function machineView(cfg) {
       f: { conveyor: !!cfg.f.conveyor, vacuum: !!cfg.f.vacuum, pointer: !!cfg.f.pointer, camera: false, detect: false }
     };
   }
+  // the Trotec's head camera: Pathline offers print and cut (registration marks) when it's on
+  const v = cfg.vision || {};
+  const cam = cfg.controller === 'trotec' && !!v.enabled;
+  const off = v.offset || [41.437, 12.731];
   return {
     ...base, source: cfg.source, power: cfg.power, lens: cfg.lens, minPower: cfg.minPower,
-    f: { camera: false, autofocus: false, rotary: false, air: !!cfg.f.air, pointer: !!cfg.f.pointer, pass: false, interlock: !!cfg.f.interlock, conveyor: false, vacuum: false }
+    ...(cam ? { markType: 'Dot', camX: off[0].toFixed(2), camY: off[1].toFixed(2), calibrated: v.calibrated ? new Date(v.calibrated).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '' } : {}),
+    f: { camera: cam, autofocus: false, rotary: false, air: !!cfg.f.air, pointer: !!cfg.f.pointer, pass: false, interlock: !!cfg.f.interlock, conveyor: false, vacuum: false }
   };
 }
 

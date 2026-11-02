@@ -7,15 +7,19 @@
 const { makeLink, controller } = require('./ctrl');
 const plan = require('./job/plan');
 const validate = require('./job/validate');
+const fitting = require('./vision/fit');
+const { Vision } = require('./vision/vision');
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const busyErr = (msg) => Object.assign(new Error(msg), { code: 409 });
 
 class Machine {
-  constructor(cfg, store, log) {
+  // opts.vision: options for the head camera (sim: the simulated camera's scene, for --sim)
+  constructor(cfg, store, log, opts = {}) {
     this.cfg = cfg;
     this.store = store;
     this.log = log;
+    this.vision = new Vision(this, opts.vision || {});
     this.st = {
       state: 'idle', pos: { x: 0, y: 0, z: 0 }, progress: 0, job: null, message: 'Connecting…',
       io: { air: false, pointer: false, vacuum: false, exhaust: true }, link: 'connecting', interlock: false
@@ -107,7 +111,8 @@ class Machine {
     if (p.pos && Number.isFinite(p.pos.x)) { this.st.pos = p.pos; this.posAt = Date.now(); }
     if (p.mpos) this.st.mpos = p.mpos;
     this.st.interlock = !!p.interlock;
-    if (!this.run && this.st.state !== 'alarm') {
+    // (camera work keeps its own progress message)
+    if (!this.run && this.st.state !== 'alarm' && !this.camBusy) {
       this.st.state = this.framing ? 'framing' : 'idle';
       this.st.message = p.interlock ? 'Lid open' : this.st.link === 'online' ? 'Ready' : this.st.message;
     }
@@ -123,7 +128,7 @@ class Machine {
   }
 
   // ------------------------------------------------------------ manual control
-  busy() { return !!this.run || this.st.state === 'framing' || !!this.framing || !!this.hold; }
+  busy() { return !!this.run || this.st.state === 'framing' || !!this.framing || !!this.hold || !!this.camBusy; }
 
   // opts.lidOpenOk: moves with the beam off (jog, hold, home) are allowed with the lid open
   guard(opts = {}) {
@@ -131,6 +136,7 @@ class Machine {
     if (this.st.link !== 'online') throw busyErr('The machine isn\'t connected: ' + this.st.message);
     if (this.run) throw busyErr('A job is running');
     if (this.hold) throw busyErr('The head is being jogged');
+    if (this.camBusy) throw busyErr('The camera is busy: ' + this.camBusy);
     if (this.busy()) throw busyErr('The machine is framing');
     if (this.st.state === 'alarm') throw busyErr('Alarm: ' + this.st.message + '. Clear it on the HMI first.');
     if (this.st.interlock && !opts.lidOpenOk) throw busyErr('Lid is open');
@@ -292,7 +298,8 @@ class Machine {
       try {
         for (const [x, y] of [[x0, y0], [x1, y0], [x1, y1], [x0, y1], [x0, y0]]) {
           if (!this.framing) break;
-          await this.link.moveTo(x, y, { light: true });
+          const [cx, cy] = this.corrected([x, y]);
+          await this.link.moveTo(cx, cy, { light: true });
           await this.waitIdle(30000, 150);
         }
         // then back to where the head was
@@ -338,8 +345,57 @@ class Machine {
 
   // ------------------------------------------------------------ jobs
   compile(pkg, opts) {
+    // the Trotec's bed correction map (Setup → Camera → checkerboard): every point goes where
+    // the head really needs to be sent
+    const v = this.cfg.vision;
+    if (this.cfg.controller === 'trotec' && v && v.enabled && v.mapOn !== false && v.map) pkg = fitting.transformPkg(pkg, (q) => fitting.correct(v.map, q));
     const p = plan.build(pkg);
     return controller(this.cfg.controller).compile(p, this.cfg, opts);
+  }
+
+  // a bed point through the Trotec's bed correction map (where to send the head to reach it)
+  corrected(p) {
+    const v = this.cfg.vision;
+    return this.cfg.controller === 'trotec' && v && v.enabled && v.mapOn !== false && v.map ? fitting.correct(v.map, p) : p;
+  }
+
+  // Camera calibration: the laser marks a small dark disc (tight circles, r 0.3 … 1.5 mm) at
+  // `at` with the given power and speed, as an ordinary job outside the queue
+  async fireMark(at, mark, ctl = {}) {
+    const p = [];
+    for (let r = 0.3; r <= 1.5001; r += 0.3) {
+      const pts = [];
+      for (let k = 0; k <= 24; k++) pts.push([at[0] + r * Math.cos((k * Math.PI) / 12), at[1] + r * Math.sin((k * Math.PI) / 12)]);
+      p.push({ type: 'cut', process: 0, name: 'Calibration mark', p: pts, closed: true, seconds: 0.5 });
+    }
+    const pkg = {
+      format: 'lrc-job-package', version: 1, job: { name: 'Camera calibration mark' },
+      processes: [{ index: 0, name: 'Calibration mark', proc: 'Cut', power: Number(mark.power) || 20, speed: Number(mark.speed) || 50, f: 5000, passes: 1, aci: [1] }],
+      toolpath: p, entities: []
+    };
+    const program = this.compile(pkg);
+    this.log('camera: laser mark at ' + at.map((v) => v.toFixed(2)).join(', ') + ' mm (' + mark.power + ' %, ' + mark.speed + ' mm/s)');
+    for (const seg of program.segments) {
+      if (ctl.aborted) return;
+      if (seg.kind !== 'stream') continue;
+      await this.link.send(seg, ctl);
+      await this.waitIdle(60000, 500);
+    }
+  }
+
+  // Camera work (calibration, checkerboard) as one job at a time: blocks the other controls
+  // while it runs, Stop ends it
+  async cameraTask(what, fn) {
+    if (this.cfg.controller !== 'trotec') throw busyErr('The head camera is on the Trotec');
+    this.guard({ lidOpenOk: true });
+    const ctl = { aborted: false };
+    this.camBusy = what;
+    this.camCtl = ctl;
+    this.st.message = what;
+    try { return await fn(ctl, (msg) => { this.st.message = msg; }); } finally {
+      this.camBusy = null; this.camCtl = null;
+      if (this.st.state !== 'alarm') this.st.message = this.st.link === 'online' ? 'Ready' : this.st.message;
+    }
   }
 
   // b.id: run that job; b.ids: run those jobs one after another (Queue → Select), in queue
@@ -373,23 +429,36 @@ class Machine {
     // RDD6584: jobs run relative to home (the controller's origin, where the head parks): the
     // job's coordinates are Pathline's, measured from the bed's top right corner, as they are
     try { program = this.compile(pkg, opts); } catch (e) { throw Object.assign(new Error('Couldn\'t convert "' + job.name + '": ' + e.message), { code: 409 }); }
-    if (program.segments.some((s) => s.kind === 'inspect') && this.cfg.regMarks !== 'ignore') {
-      throw busyErr('"' + job.name + '" uses registration marks, and Pathline Run has no camera yet. Set Registration marks to "Skip" in Setup to run it uncorrected.');
+    // print and cut: the Trotec's head camera reads the marks first, then the job is moved onto them
+    const marks = program.segments.some((s) => s.kind === 'inspect');
+    const camera = marks && this.cfg.controller === 'trotec' && this.cfg.vision && this.cfg.vision.enabled;
+    if (marks && !camera && this.cfg.regMarks !== 'ignore') {
+      throw busyErr('"' + job.name + '" uses registration marks. Turn the camera on in Setup → Camera, or set Registration marks to "Skip" in Setup to run it uncorrected.');
+    }
+    if (camera) {
+      this.execute(job, null, async (ctl, status) => {
+        const r = await this.vision.readMarks(pkg, ctl, status);
+        this.st.marks = r.found;
+        try { return this.compile(Vision.corrected(pkg, r.f), opts); } catch (e) { throw new Error('Couldn\'t convert "' + job.name + '" after reading its marks: ' + e.message); }
+      });
+      return { state: 'running', job: job.id };
     }
     this.execute(job, program);
     return { state: 'running', job: job.id };
   }
 
-  execute(job, program) {
+  // prepare(ctl, status): work done before the job is sent (reading registration marks), giving
+  // the program to send
+  execute(job, program, prepare) {
     const ctl = { aborted: false, paused: false };
     const startedAt = new Date().toISOString();
     this.run = { job, program, ctl };
     job.status = 'running';
     job.progress = 0;
     this.store.flush();
-    Object.assign(this.st, { state: 'running', job: job.id, progress: 0, message: 'Running ' + job.name });
-    this.log('run ' + job.name + ' (' + program.ctrl + ', ' + program.segments.length + ' segments, ' + Math.round(program.seconds) + ' s estimated)');
-    const total = Math.max(0.001, program.seconds);
+    this.st.marks = null;
+    Object.assign(this.st, { state: 'running', job: job.id, progress: 0, message: prepare ? 'Reading registration marks' : 'Running ' + job.name });
+    let total = 1;
     let doneSec = 0;
     const setProgress = (sec) => {
       this.st.progress = Math.max(this.st.progress, Math.min(0.999, sec / total));
@@ -399,6 +468,13 @@ class Machine {
     (async () => {
       let result = 'Completed';
       try {
+        if (prepare) {
+          program = await prepare(ctl, (msg) => { this.st.message = msg; });
+          this.run.program = program;
+          this.st.message = 'Running ' + job.name;
+        }
+        this.log('run ' + job.name + ' (' + program.ctrl + ', ' + program.segments.length + ' segments, ' + Math.round(program.seconds) + ' s estimated)');
+        total = Math.max(0.001, program.seconds);
         for (const seg of program.segments) {
           if (ctl.aborted) break;
           if (seg.kind === 'inspect') { doneSec += seg.seconds; continue; } // only reached with regMarks = ignore
@@ -452,7 +528,7 @@ class Machine {
         this.st.message = e.message;
       }
       // RDD6584: after a job the head parks at home, so measure from there
-      if (result === 'Completed' && program.knife && this.link.learnHome) await this.link.learnHome().catch(() => {});
+      if (result === 'Completed' && program && program.knife && this.link.learnHome) await this.link.learnHome().catch(() => {});
       this.store.finish(job, result, startedAt, this.cfg.removeDone);
       this.run = null;
       this.st.job = null;
@@ -499,6 +575,7 @@ class Machine {
     this.jogRelease();
     this.framing = false;
     this.batch = []; // Stop also ends a run of chosen jobs
+    if (this.camCtl) this.camCtl.aborted = true; // and camera work
     if (this.run) this.run.ctl.aborted = true;
     try { if (this.link) await this.link.abort(); } catch (e) { this.log('stop: ' + e.message); }
     if (!this.run && this.st.state !== 'alarm') { this.st.state = 'idle'; this.st.message = 'Stopped'; }

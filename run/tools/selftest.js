@@ -581,7 +581,69 @@ async function linkTests() {
   ok(JSON.stringify(na.suggest) === '{"bed":[1450,1520]}' && na.rows.some((r) => r.value === '0x6910'), 'Read from controller: "not available" settings left out, card shown as 0x6910', JSON.stringify(na));
 }
 
-jogTests().then(linkTests).then(serverTests).then(() => {
+// ---------------------------------------------------------------- head camera, simulated
+// The server's --sim camera hides its own truth (offset 41.2 / 12.9 mm, 80 µm pixels turned 90°,
+// a machine 1.5 mm/m long in X and 0.03° out of square, a checkerboard at 1.5°, the example's
+// marks on a sheet shifted 0.8 / −0.5 mm and turned 0.3°): calibration has to find it.
+async function visionTests() {
+  console.log('Head camera (simulated)');
+  {
+    // a checkerboard corner at an angle the board needn't be square: found, and its angle read
+    const { SimCamera } = require('../src/vision/camera');
+    const detect = require('../src/vision/detect');
+    const sc = new SimCamera({ truth: { offset: [0, 0], pixel: 0.08, rotation: 0 }, scene: { board: { x: 500, y: 400, angle: 25, square: 50, nx: 6, ny: 6 } }, headAt: () => ({ x: 502, y: 399 }) });
+    const c = detect.findCorner(await sc.grab());
+    // the corner is 2 mm left of and 1 mm below the picture's middle: 25 px, 12.5 px at 80 µm
+    // (the angle only aims the scan at the next corner; the board's angle comes from the corners found)
+    ok(c && Math.abs(c.x - (239.5 - 25)) < 0.5 && Math.abs(c.y - (239.5 + 12.5)) < 0.5 && Math.abs(c.angle - 25) < 3, 'checkerboard corner at 25°: found to a fraction of a pixel, angle ' + (c && c.angle.toFixed(1)) + '° (a hint, within 3°)', JSON.stringify(c));
+  }
+  const data = fs.mkdtempSync(path.join(os.tmpdir(), 'pathline-run-cam-'));
+  fs.writeFileSync(path.join(data, 'config.json'), JSON.stringify({ controller: 'trotec', configured: true, name: 'Sim', bed: [1300, 900], sim: { speedup: 2000 },
+    vision: { enabled: true, source: 'sim', matrix: [0, 0.07, 0.07, 0], board: { square: 50, across: 19, down: 9, every: 3 } } }));
+  const port = 19100 + Math.floor(Math.random() * 500);
+  const srv = spawn(process.execPath, [path.join(__dirname, '..', 'src', 'server.js'), '--sim', '--port', String(port), '--data', data], { stdio: ['ignore', 'pipe', 'pipe'] });
+  let out = '';
+  srv.stdout.on('data', (d) => { out += d; });
+  srv.stderr.on('data', (d) => { out += d; });
+  const call = async (m, r, b) => {
+    const res = await fetch('http://127.0.0.1:' + port + '/api/' + r, { method: m, headers: { 'content-type': 'application/json' }, body: b ? JSON.stringify(b) : undefined });
+    return { status: res.status, data: await res.json().catch(() => null) };
+  };
+  const jogTo = async (x, y) => { await call('POST', 'v1/jog', { x, y }); await new Promise((r) => setTimeout(r, 400)); };
+  try {
+    for (let i = 0; i < 50; i++) { try { await call('GET', 'v1/info'); break; } catch (e) { await new Promise((r) => setTimeout(r, 100)); } }
+    // pixel size: the camera over the first mark (sheet ≈ 40.7, 24.7), head = camera + offset
+    await jogTo(40.7 + 41.4, 24.7 + 12.7);
+    const px = await call('POST', 'local/camera/pixels');
+    ok(px.status === 200 && Math.abs(px.data.pixel - 0.08) < 0.0005 && Math.abs(Math.abs(px.data.rotation) - 90) < 0.5, 'pixel size and rotation: ' + (px.data && (px.data.pixel * 1000).toFixed(2)) + ' µm, ' + (px.data && px.data.rotation.toFixed(2)) + '° (80 µm, 90°)', JSON.stringify(px.data));
+    // offset: the laser marks scrap at a clear spot, the camera finds it
+    await jogTo(900, 150);
+    const of = await call('POST', 'local/camera/offset', { power: 20, speed: 50 });
+    ok(of.status === 200 && Math.abs(of.data.offset[0] - 41.2) < 0.2 && Math.abs(of.data.offset[1] - 12.9) < 0.2, 'camera offset from a laser mark: ' + (of.data && of.data.offset.join(', ')) + ' mm (41.2, 12.9)', JSON.stringify(of.data));
+    // checkerboard: camera over its first corner (100, 300); calibrate, then check with the map on
+    const off = of.data.offset;
+    await jogTo(100 + off[0], 300 + off[1]);
+    const cal = await call('POST', 'local/camera/board', { mode: 'calibrate' });
+    ok(cal.status === 200 && cal.data.points.length >= 15 && Math.abs(cal.data.boardAngle - 1.5) < 0.1 && Math.abs(cal.data.scaleX + 1.5) < 0.3,
+      'checkerboard at 1.5°: ' + (cal.data.points && cal.data.points.length) + ' corners, board at ' + (cal.data.boardAngle || 0).toFixed(2) + '°, machine X ' + (cal.data.scaleX || 0).toFixed(2) + ' mm/m (−1.5), worst ' + (cal.data.worst || 0).toFixed(3) + ' mm', JSON.stringify(cal.data).slice(0, 300));
+    await jogTo(100 + off[0], 300 + off[1]);
+    const chk = await call('POST', 'local/camera/board', { mode: 'check' });
+    ok(chk.status === 200 && chk.data.worst < cal.data.worst / 3, 'with the bed map on: worst ' + (chk.data.worst || 0).toFixed(3) + ' mm (was ' + (cal.data.worst || 0).toFixed(3) + ')', JSON.stringify(chk.data).slice(0, 200));
+    // print and cut: the example job's marks read, the job moved onto them and run
+    const q = await call('POST', 'v1/jobs', example);
+    await new Promise((r) => setTimeout(r, 500));
+    const st = await call('POST', 'v1/start', { id: q.data.id });
+    let s;
+    for (let i = 0; i < 200; i++) { await new Promise((r) => setTimeout(r, 250)); s = (await call('GET', 'v1/status')).data; if (s.state === 'idle' || s.state === 'alarm') break; }
+    const log = (await call('GET', 'local/log')).data.join('\n');
+    const fitLine = (log.match(/print and cut: .*/) || [''])[0];
+    const rot = Number((fitLine.match(/rotation (-?[\d.]+)°/) || [])[1]);
+    ok(st.status === 200 && s.state === 'idle' && s.progress === 1 && Math.abs(rot - 0.3) < 0.1, 'print and cut: 3 marks read, sheet turned ' + rot + '° (0.3), job run', fitLine + ' / ' + JSON.stringify(s));
+  } catch (e) { ok(false, 'head camera', e.stack + '\n' + out.slice(-1500)); }
+  srv.kill();
+}
+
+jogTests().then(linkTests).then(serverTests).then(visionTests).then(() => {
   console.log(failed ? '\n' + failed + ' FAILED' : '\nAll passed');
   process.exit(failed ? 1 : 0);
 });

@@ -21,6 +21,8 @@ const changelog = require('./changelog');
 const network = require('./network');
 const ruidaModels = require('./ctrl/ruida/models');
 const anchor = require('./job/anchor');
+const fitting = require('./vision/fit');
+const { DEFAULTS: VisionDefaults } = require('./vision/vision');
 const { controller, CONTROLLERS } = require('./ctrl');
 const pkgJson = require('../package.json');
 
@@ -48,6 +50,8 @@ function start(opts = {}) {
   const DATA = opts.dataDir || config.dataDir();
   fs.mkdirSync(DATA, { recursive: true });
   let cfg = config.load(DATA, opts.controller ? { controller: opts.controller } : undefined);
+  // the head camera's settings, every one present (Setup → Camera shows them all)
+  cfg.vision = { ...VisionDefaults, ...(cfg.vision || {}), mark: { ...VisionDefaults.mark, ...((cfg.vision || {}).mark || {}) }, board: { ...VisionDefaults.board, ...((cfg.vision || {}).board || {}) } };
   if (opts.sim) {
     cfg.connection = { ...cfg.connection, mode: 'sim' };
     if (!cfg.configured) Object.assign(cfg, { configured: true, name: cfg.name || 'Simulated laser' });
@@ -66,7 +70,18 @@ function start(opts = {}) {
   }
 
   const store = new Store(DATA);
-  const machine = new Machine(cfg, store, log);
+  // --sim: the head camera is simulated too, over a made-up bed: a 50 mm checkerboard laid at
+  // 1.5° and the example job's three registration marks printed on a sheet that's shifted and
+  // turned a little; the machine itself is 1.5 mm/m long in X and 0.03° out of square
+  const sheet = (p) => { const a = (0.3 * Math.PI) / 180; return [0.8 + p[0] * Math.cos(a) - p[1] * Math.sin(a), -0.5 + p[0] * Math.sin(a) + p[1] * Math.cos(a)]; };
+  const simVision = opts.sim ? {
+    forceSim: true,
+    sim: {
+      truth: { offset: [41.2, 12.9], pixel: 0.08, rotation: 90, error: (p) => [p[0] * 1.0015 + p[1] * 0.0005236, p[1]] },
+      scene: { dots: [[40, 25], [340, 25], [40, 215]].map((p) => { const q = sheet(p); return { x: q[0], y: q[1], d: 5 }; }), board: { x: 100, y: 300, angle: 1.5, square: 50, nx: 20, ny: 10 } }
+    }
+  } : {};
+  const machine = new Machine(cfg, store, log, { vision: simVision });
 
   // settings the machine finds out for itself: saved like Setup's, without a restart
   async function learnt(patch, why) {
@@ -207,6 +222,7 @@ function start(opts = {}) {
     'GET /state': (b, req) => ({
       app: pkgJson.version, update: updates.status(), here: isLocalReq(req), config: cfg, status: machine.status(), info: machine.info, ruidaModels: ruidaModels.MODELS,
       fromController: machine.ctrl || null,
+      camera: { open: !!machine.vision.camera, info: machine.vision.camera ? machine.vision.camera.info || null : null, busy: machine.camBusy || null, defaults: VisionDefaults },
       jobs: store.jobs.filter((j) => !j.hidden), history: store.history.slice(0, 100), controllers: Object.keys(CONTROLLERS)
     }),
     'GET /log': () => logLines,
@@ -231,7 +247,10 @@ function start(opts = {}) {
       }
       if (next.configured && !cfg.configured) log('machine added: ' + next.name + ' (' + next.controller + ', ' + next.connection.mode + ')');
       next.manual = manualOf(next);
+      // camera turned off, or another source: let go of it (it opens again when next needed)
+      const camChanged = JSON.stringify([next.vision && next.vision.enabled, next.vision && next.vision.source]) !== JSON.stringify([cfg.vision && cfg.vision.enabled, cfg.vision && cfg.vision.source]);
       await machine.reconfigure(next);
+      if (camChanged) await machine.vision.close();
       cfg = next;
       config.save(DATA, cfg);
       log('setup saved (' + cfg.controller + ', ' + cfg.connection.mode + ')');
@@ -254,6 +273,38 @@ function start(opts = {}) {
       }
       log('read settings from the controller');
       return { raw, ...require('./ctrl/ruida/readback').interpret(raw) };
+    },
+    // ---- the Trotec's head camera (Setup → Camera, Jog → Camera)
+    // pixel size and rotation: a dot or checkerboard corner under the camera, the head moves a little
+    'POST /camera/pixels': async () => {
+      const r = await machine.cameraTask('Calibrating the camera\'s pixel size', () => machine.vision.calibratePixels());
+      await learnt({ vision: { ...(cfg.vision || {}), matrix: r.matrix, calibrated: new Date().toISOString() } }, 'camera: pixel size ' + (r.pixel * 1000).toFixed(3) + ' µm, turned ' + r.rotation.toFixed(2) + '° saved');
+      return r;
+    },
+    // camera offset: the laser marks scrap where the head is, the camera finds the mark
+    'POST /camera/offset': async (b) => {
+      if (machine.st.interlock) throw err(409, 'Close the lid: the laser fires to make the mark');
+      const r = await machine.cameraTask('Calibrating the camera offset', (ctl) => machine.vision.calibrateOffset(b || {}, ctl));
+      await learnt({ vision: { ...(cfg.vision || {}), offset: r.offset, calibrated: new Date().toISOString() } }, 'camera: offset ' + r.offset.join(', ') + ' mm saved');
+      return r;
+    },
+    // checkerboard: check (with the bed map on) or calibrate (measure as it is, save the map)
+    'POST /camera/board': async (b) => {
+      const calibrate = b && b.mode === 'calibrate';
+      const r = await machine.cameraTask(calibrate ? 'Calibrating the bed with the checkerboard' : 'Checking the bed with the checkerboard', (ctl, status) => machine.vision.scanBoard({ raw: calibrate, board: b && b.board }, ctl, status));
+      if (calibrate) {
+        const map = fitting.bedMap(r.points, r.step, cfg.bed);
+        await learnt({ vision: { ...(cfg.vision || {}), map, mapOn: true, mapAt: r.at } }, 'camera: bed map saved (' + r.points.length + ' corners, worst ' + r.worst.toFixed(3) + ' mm before correcting)');
+      }
+      return r;
+    },
+    'GET /camera/board': () => machine.vision.lastDrift || {},
+    // put the camera where the laser is (to look at it), or the laser where the camera looks
+    'POST /camera/goto': async (b) => {
+      const o = machine.vision.cfg.offset;
+      const p = machine.st.pos;
+      const to = b && b.to === 'laser' ? [p.x - o[0], p.y - o[1]] : [p.x + o[0], p.y + o[1]];
+      return machine.jog({ x: to[0], y: to[1] });
     },
     // Setup → Find on network: Ruida controllers that answer, with their IP, magic and card ID
     'POST /ruida/find': async () => {
@@ -354,6 +405,15 @@ function start(opts = {}) {
           return res.end(f.data);
         }
         if (isLocal && (m = route.match(/^POST \/jobs\/([^/]+)\/requeue$/))) return send(res, 200, store.requeue(decodeURIComponent(m[1])));
+        // the head camera's picture for the screen: 4 bytes (width, height as 16-bit), then grey bytes
+        if (isLocal && route === 'GET /camera/frame') {
+          if (machine.camBusy || machine.run) return send(res, 409, { error: 'The camera is busy' });
+          const f = await machine.vision.preview(Math.min(960, Number(url.searchParams.get('size')) || 480));
+          const head = Buffer.alloc(4);
+          head.writeUInt16BE(f.w, 0); head.writeUInt16BE(f.h, 2);
+          res.writeHead(200, { 'content-type': 'application/octet-stream', 'cache-control': 'no-store' });
+          return res.end(Buffer.concat([head, Buffer.from(f.data)]));
+        }
         const fn = (isLocal ? local : api)[route];
         if (!fn) return send(res, 404, { error: 'No route ' + route });
         const b = req.method === 'POST' || req.method === 'PUT' ? await body(req, 200 * 1024 * 1024) : {};

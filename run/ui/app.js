@@ -115,6 +115,10 @@ function bedSvg(pkg, opts = {}) {
   if (opts.big && pkg && pkg.anchor) {
     body += '<circle cx="' + pkg.anchor.x + '" cy="' + pkg.anchor.y + '" r="' + r * 0.6 + '" fill="var(--bed)" stroke="#30A46C" stroke-width="' + r / 4 + '"/>';
   }
+  // print and cut: where the camera found the registration marks (green rings)
+  if (opts.head && Array.isArray(S.status.marks)) {
+    for (const m of S.status.marks) body += '<circle cx="' + m[0] + '" cy="' + m[1] + '" r="' + r * 0.7 + '" fill="none" stroke="#30A46C" vector-effect="non-scaling-stroke" style="stroke-width:2px"/><circle cx="' + m[0] + '" cy="' + m[1] + '" r="' + r * 0.12 + '" fill="#30A46C"/>';
+  }
   // the path the head has travelled in this job
   if (opts.head && ui.trail.pts.length > 1) {
     body += '<polyline points="' + ui.trail.pts.map((p) => p[0].toFixed(1) + ',' + p[1].toFixed(1)).join(' ') + '" fill="none" stroke="var(--accent)" stroke-opacity="0.45" vector-effect="non-scaling-stroke" style="stroke-width:1.5px" stroke-linejoin="round"/>';
@@ -469,7 +473,8 @@ function jogView() {
     '<span></span>' + arrow('y+', ICON.down, 'Jog Y plus') + '<span></span></div>' +
     '<div style="display:flex;flex-direction:column;gap:6px"><span class="lbl">Tap: step in mm · Hold: speed in mm/s</span><div role="radiogroup" aria-label="Step size, or speed while held" class="seg">' +
     ['0.1', '1', '10', '100'].map((v) => '<button role="radio" class="mono" style="min-width:56px" aria-checked="' + (ui.step === v) + '" data-a="step" data-v="' + v + '">' + v + '</button>').join('') + '</div>' +
-    '<span class="lbl" style="min-height:18px">' + (ui.hold && ui.hold.held ? 'Moving ' + ui.hold.axis.toUpperCase() + (ui.hold.dir < 0 ? '−' : '+') + ' at ' + ui.step + ' mm/s' : 'Hold an arrow to keep moving') + '</span></div></div></section>' +
+    '<span class="lbl" style="min-height:18px">' + (ui.hold && ui.hold.held ? 'Moving ' + ui.hold.axis.toUpperCase() + (ui.hold.dir < 0 ? '−' : '+') + ' at ' + ui.step + ' mm/s' : 'Hold an arrow to keep moving') + '</span></div></div>' +
+    camCard(c, st) + '</section>' +
     '<section aria-label="Machine" class="card" style="flex:0 1 360px;min-width:260px;min-height:0;overflow-y:auto;padding:20px;display:flex;flex-direction:column;gap:12px"><h2 class="h-sec">Machine</h2>' +
     '<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px">' +
     '<button class="tb" style="height:52px" data-a="home">Home</button><button class="tb" style="height:52px" data-a="frame">Frame job</button>' +
@@ -483,6 +488,22 @@ function jogView() {
       : pill('Lid', st.interlock ? 'Open' : c.f.interlock ? 'Closed' : 'Not monitored', !st.interlock)) +
     (c.f.air && c.controller === 'trotec' ? tog('Air assist', 'air') : '') +
     pill('State', st.state, st.state !== 'alarm') + '</div></section></div>';
+}
+
+// Jog → Camera (Trotec with the head camera on): the live picture, and camera ↔ laser moves
+function camCard(c, st) {
+  if (c.controller !== 'trotec' || !c.vision || !c.vision.enabled) return '';
+  const busy = S.camera.busy;
+  return '<div class="hr"></div><div style="display:flex;flex-wrap:wrap;gap:16px;align-items:flex-start">' +
+    '<div style="position:relative;width:min(320px,100%);aspect-ratio:1;border-radius:10px;overflow:hidden;background:var(--sunken);box-shadow:inset 0 0 0 1px var(--line)">' +
+    (ui.live && ui.cam ? '<canvas id="camview" style="display:block;width:100%;height:100%"></canvas>'
+      : '<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:16px;text-align:center" class="lbl">' + esc(busy ? busy : ui.camErr ? ui.camErr : ui.live ? 'Opening the camera…' : 'Camera picture off') + '</div>') + '</div>' +
+    '<div style="display:flex;flex-direction:column;gap:8px;min-width:200px">' +
+    '<h2 class="h-sec">Camera</h2>' +
+    '<div style="display:flex;align-items:center;gap:10px"><button role="switch" class="sw" aria-checked="' + !!ui.live + '" data-a="camLive" aria-label="Camera picture"></button><span>Live picture</span></div>' +
+    '<button class="tb" data-a="camGoto" data-v="camera"' + (busy ? ' disabled' : '') + ' title="Moves the head so the camera looks where the laser is now">Camera to the laser\'s spot</button>' +
+    '<button class="tb" data-a="camGoto" data-v="laser"' + (busy ? ' disabled' : '') + ' title="Moves the head so the laser is where the camera\'s crosshair is">Laser to the crosshair</button>' +
+    '<span class="lbl">' + esc(S.camera.info ? S.camera.info.model + (S.camera.info.serial ? ' · ' + S.camera.info.serial : '') : 'Allied Vision head camera') + '</span></div></div>';
 }
 
 // ---------------------------------------------------------------- history view
@@ -632,8 +653,38 @@ function setupView() {
       (S.info && S.info.cardId ? '<div class="row"><span>Connected controller</span><span class="mono">card 0x' + S.info.cardId.toString(16).toUpperCase() + ' · magic 0x' + S.info.magic.toString(16) + '</span></div>' : ''),
     'Origin is the corner the head homes to. Pathline\'s top-left coordinates are mirrored to match.'));
   }
-  tabs.Jobs.push(card('Job defaults', (isPlotter ? '' : seg('Registration marks', 'regMarks', [['refuse', 'Don\'t run'], ['ignore', 'Skip']])) + tog('Remove completed job from queue', 'removeDone') + text('File name prefix', 'prefix'),
-    isPlotter ? '' : 'Pathline Run has no camera yet: jobs with registration marks either wait, or run without print-and-cut correction.'));
+  tabs.Jobs.push(card('Job defaults', (isPlotter ? '' : seg('Registration marks without the camera', 'regMarks', [['refuse', 'Don\'t run'], ['ignore', 'Skip']])) + tog('Remove completed job from queue', 'removeDone') + text('File name prefix', 'prefix'),
+    isPlotter ? '' : 'With the head camera on (Setup → Camera), jobs with registration marks are read and corrected. Without it they either wait, or run without print-and-cut correction.'));
+  if (trotec) {
+    tabs.Camera = [];
+    const v = d.vision || {};
+    const saved = !dirty && !!(cfg().vision || {}).enabled;
+    const busy = S.camera.busy;
+    const need = !saved ? ' disabled title="Turn the camera on and save first"' : busy ? ' disabled' : '';
+    const [ma, mb, mc, md] = v.matrix || [0, 0.02, 0.02, 0];
+    const pixel = Math.sqrt(Math.abs(ma * md - mb * mc));
+    const turned = (Math.atan2(mc, ma) * 180) / Math.PI;
+    const ro = (l, val) => '<div class="row"><span>' + l + '</span><span class="mono">' + val + '</span></div>';
+    tabs.Camera.push(card('Head camera', tog('Camera on', 'vision.enabled') + seg('Camera', 'vision.source', [['vimba', 'Allied Vision (Vimba X)'], ['sim', 'Simulated']]) +
+      num('Exposure', 'vision.exposure', 'µs') + tog('Camera light (laser parameter 186)', 'vision.light') + num('Re-centre a mark further than', 'vision.tolerance', 'mm', 'From the middle of the picture') +
+      ro('Camera', S.camera.info ? esc(S.camera.info.model + ' · ' + S.camera.info.serial) : 'not opened yet'),
+    'The Alvium on the head plugs into this computer by USB (not into the laser). It needs Allied Vision\'s Vimba X installed, and Ruby / JobDispatcher closed: only one program can use it.'));
+    tabs.Camera.push(card('Calibration', ro('Pixel size', (pixel * 1000).toFixed(2) + ' µm') + ro('Picture turned', turned.toFixed(2) + '°') +
+      num('Camera offset X', 'vision.offset.0', 'mm', 'Laser − camera') + num('Camera offset Y', 'vision.offset.1', 'mm') +
+      num('Mark power', 'vision.mark.power', '%', 'For the offset mark') + num('Mark speed', 'vision.mark.speed', 'mm/s') +
+      ro('Calibrated', v.calibrated ? new Date(v.calibrated).toLocaleString() : 'not yet') +
+      '<div style="display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end"><button class="tb" data-a="camPixels"' + need + '>Calibrate pixel size</button><button class="btn-primary" data-a="camOffsetAsk"' + need + '>Calibrate offset (fires the laser)</button></div>',
+    '1. Pixel size: put any dark printed dot (or a checkerboard corner) under the camera; the head moves a few mm while the camera watches. 2. Offset: jog the laser over scrap; it marks a 3 mm dot there and the camera finds it.'));
+    const b = ui.board;
+    const map = v.map;
+    tabs.Camera.push(card('Checkerboard: bed accuracy', num('Square size', 'vision.board.square', 'mm') + num('Corners across', 'vision.board.across', '', 'Inner corners (squares − 1)') + num('Corners down', 'vision.board.down') +
+      num('Measure every', 'vision.board.every', '', '1 = every corner; 2, 3… for a quicker check') + tog('Correct jobs with the bed map', 'vision.mapOn') +
+      ro('Bed map', map ? map.nx + ' × ' + map.ny + ' points every ' + map.step + ' mm' + (v.mapAt ? ' · ' + new Date(v.mapAt).toLocaleString() : '') : 'none yet') +
+      '<div style="display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end"><button class="tb" data-a="camBoard" data-v="check"' + need + '>Check bed</button><button class="btn-primary" data-a="camBoard" data-v="calibrate"' + need + '>Calibrate bed</button></div>' +
+      (busy ? '<div class="warnbox">' + esc(S.status.message || busy) + '</div>' : '') +
+      (b && b.points ? boardResult(b) : ''),
+    'Lay the checkerboard anywhere on the bed, at any angle, and jog the camera over its top-left inner corner (Jog → Camera). Check measures with the bed map on; Calibrate measures the machine as it is and saves a new map. The board\'s own position and angle are taken out: what\'s left is the machine.'));
+  }
 
   const tab = tabs[ui.setTab] ? ui.setTab : 'Machine';
   // no machine yet: this page adds one (name, controller and connection on the Machine tab)
@@ -650,6 +701,25 @@ function setupView() {
         readBtn + '<button class="btn-primary" data-a="save"' + (dirty ? '' : ' disabled') + '>Save to machine</button></section>') +
     '<div role="tablist" aria-label="Setup sections" class="tabs">' + Object.keys(tabs).map((t) => '<button role="tab" aria-selected="' + (t === tab) + '" data-a="setTab" data-v="' + t + '">' + t + '</button>').join('') + '</div>' +
     '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));gap:12px;align-items:start">' + tabs[tab].join('') + '</div></div>';
+}
+
+// the last checkerboard result: numbers, and each corner's error as an arrow over the bed
+// (drawn 200× life size: a 0.5 mm error is a 100 mm arrow)
+function boardResult(b) {
+  const [W, H] = cfg().bed;
+  const k = 200;
+  const col = (e) => (e < 0.1 ? 'var(--ok-dot)' : e < 0.3 ? 'var(--warn-dot)' : 'var(--err-dot)');
+  const arrows = b.points.map((p) => {
+    const e = Math.hypot(p.res[0], p.res[1]);
+    return '<circle cx="' + p.at[0] + '" cy="' + p.at[1] + '" r="' + W / 150 + '" fill="' + col(e) + '"/><line x1="' + p.at[0] + '" y1="' + p.at[1] + '" x2="' + (p.at[0] + p.res[0] * k) + '" y2="' + (p.at[1] + p.res[1] * k) + '" stroke="' + col(e) + '" vector-effect="non-scaling-stroke" style="stroke-width:2px"/>';
+  }).join('');
+  const n = (x, d) => Number(x).toFixed(d);
+  return '<div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;font-size:13px">' +
+    [['Worst', n(b.worst, 3) + ' mm'], ['RMS', n(b.rms, 3) + ' mm'], ['Corners', b.points.length + (b.missed ? ' (' + b.missed + ' missed)' : '')],
+      ['X length', n(b.scaleX, 2) + ' mm/m'], ['Y length', n(b.scaleY, 2) + ' mm/m'], ['Squareness', n(b.squareness, 3) + '°']]
+      .map(([l, val]) => '<div style="display:flex;flex-direction:column;gap:2px;padding:8px;border-radius:8px;background:var(--surface-2)"><span class="lbl">' + l + '</span><span class="mono">' + val + '</span></div>').join('') + '</div>' +
+    '<span class="lbl">' + (b.raw ? 'Machine as it is' : 'With the bed map on') + ' · board laid at ' + n(b.boardAngle, 2) + '° · ' + new Date(b.at).toLocaleString() + '</span>' +
+    '<svg viewBox="' + [-20, -20, W + 40, H + 40].join(' ') + '" style="width:100%;aspect-ratio:' + (W + 40) + '/' + (H + 40) + ';background:var(--sunken);border-radius:8px" aria-label="Error at each corner, 200 times life size"><rect x="0" y="0" width="' + W + '" height="' + H + '" fill="var(--bed)" stroke="var(--bed-line)" vector-effect="non-scaling-stroke"/>' + arrows + '</svg>';
 }
 
 // ---------------------------------------------------------------- dialogs
@@ -693,6 +763,13 @@ function dialog() {
       '<span class="lbl">' + (uses.length ? 'Use these values fills in the ' + uses.join(', ') + '. Nothing is saved until you save the setup.' : 'Nothing here can be filled in automatically.') + '</span>' +
       '<div style="display:flex;justify-content:flex-end;gap:8px"><button class="tb" data-a="close">Close</button>' + (uses.length ? '<button class="btn-primary" data-a="useRead">Use these values</button>' : '') + '</div></div></div>';
   }
+  // Setup → Camera → Calibrate offset: the laser fires, so say where and how hard first
+  if (ui.dlg.kind === 'camOffset') {
+    const v = cfg().vision, p = S.status.pos;
+    return '<div class="scrim"><div role="dialog" aria-label="Calibrate the camera offset" class="dlg"><span class="h-sec" style="font-size:18px">Fire the laser to calibrate?</span>' +
+      '<span style="color:var(--text-2);line-height:1.5">The laser marks a 3 mm dot where the head is now (X ' + p.x.toFixed(1) + ', Y ' + p.y.toFixed(1) + ' mm) at <b>' + v.mark.power + ' %</b> and <b>' + v.mark.speed + ' mm/s</b>, then the camera finds it. Put scrap card or board under the head, focus, and close the lid.</span>' +
+      '<div style="display:flex;justify-content:flex-end;gap:8px"><button class="tb" data-a="close">Cancel</button><button class="btn-primary" data-a="camOffset">Fire and calibrate</button></div></div></div>';
+  }
   if (ui.dlg.kind === 'found') {
     const l = ui.dlg.list;
     return '<div class="scrim"><div role="dialog" aria-label="Ruida controllers found" class="dlg" style="max-width:600px"><span class="h-sec" style="font-size:18px">Ruida controllers on the network</span>' +
@@ -724,7 +801,38 @@ function render() {
     (t.action ? '<button class="tb sm" data-a="toastAction">' + esc(t.action) + '</button>' : '') + '</div>' : '');
   const nv = $app.querySelector('.view');
   if (nv) nv.scrollTop = scroll;
+  drawCam();
 }
+
+// ---------------------------------------------------------------- head camera picture
+// Jog → Camera: the latest frame (grey bytes from /camera/frame), redrawn after every render,
+// fetched again about twice a second while it's showing
+function drawCam() {
+  const cv = document.getElementById('camview');
+  if (!cv || !ui.cam) return;
+  const { w, h, data } = ui.cam;
+  cv.width = w; cv.height = h;
+  const ctx = cv.getContext('2d');
+  const im = ctx.createImageData(w, h);
+  for (let i = 0; i < w * h; i++) { im.data[i * 4] = im.data[i * 4 + 1] = im.data[i * 4 + 2] = data[i]; im.data[i * 4 + 3] = 255; }
+  ctx.putImageData(im, 0, 0);
+  // the centre crosshair: what the camera reads marks against
+  ctx.strokeStyle = 'rgba(214,40,40,0.9)'; ctx.lineWidth = Math.max(1, w / 240);
+  ctx.beginPath(); ctx.moveTo(w / 2, 0); ctx.lineTo(w / 2, h); ctx.moveTo(0, h / 2); ctx.lineTo(w, h / 2); ctx.stroke();
+  ctx.beginPath(); ctx.arc(w / 2, h / 2, w / 12, 0, Math.PI * 2); ctx.stroke();
+}
+async function camLoop() {
+  const on = S && S.config.controller === 'trotec' && S.config.vision && S.config.vision.enabled && ui.view === 'jog' && ui.live && !S.camera.busy && S.status.state !== 'running';
+  if (on) {
+    try {
+      const r = await fetch(LOCAL('/camera/frame') + '?size=480', { cache: 'no-store' });
+      if (r.ok) { const b = new Uint8Array(await r.arrayBuffer()); ui.cam = { w: (b[0] << 8) | b[1], h: (b[2] << 8) | b[3], data: b.subarray(4) }; ui.camErr = null; drawCam(); }
+      else { ui.camErr = ((await r.json().catch(() => ({}))).error) || 'No picture'; ui.live = false; render(); }
+    } catch (e) { ui.camErr = e.message; }
+  }
+  setTimeout(camLoop, on ? 400 : 800);
+}
+setTimeout(camLoop, 1000);
 
 const H = {
   nav: () => { ui.navOpen = !ui.navOpen; ui.machOpen = false; render(); },
@@ -763,6 +871,27 @@ const H = {
   }),
   removeDone: act(async () => call('PUT', LOCAL('/config'), { removeDone: !cfg().removeDone })),
   multi: () => { ui.multi = !ui.multi; ui.picked = []; render(); },
+  // head camera
+  camLive: () => { ui.live = !ui.live; ui.camErr = null; if (!ui.live) ui.cam = null; render(); },
+  camGoto: act(async (v) => call('POST', LOCAL('/camera/goto'), { to: v })),
+  camPixels: act(async () => {
+    const r = await call('POST', LOCAL('/camera/pixels'), {});
+    toast('Pixel size ' + (r.pixel * 1000).toFixed(2) + ' µm, picture turned ' + r.rotation.toFixed(2) + '°: saved', { ms: 8000 });
+    ui.draft = null;
+  }),
+  camOffsetAsk: () => { ui.dlg = { kind: 'camOffset' }; render(); },
+  camOffset: act(async () => {
+    ui.dlg = null; render();
+    const r = await call('POST', LOCAL('/camera/offset'), { power: cfg().vision.mark.power, speed: cfg().vision.mark.speed });
+    toast('Camera offset X ' + r.offset[0].toFixed(3) + ', Y ' + r.offset[1].toFixed(3) + ' mm: saved', { ms: 8000 });
+    ui.draft = null;
+  }),
+  camBoard: act(async (v) => {
+    ui.board = await call('POST', LOCAL('/camera/board'), { mode: v });
+    const b = ui.board;
+    toast((v === 'calibrate' ? 'Bed map saved. ' : '') + b.points.length + ' corners: worst ' + b.worst.toFixed(3) + ' mm, X ' + b.scaleX.toFixed(2) + ' / Y ' + b.scaleY.toFixed(2) + ' mm/m', { ms: 10000 });
+    ui.draft = null;
+  }),
   pick: (id) => { ui.picked = ui.picked.includes(id) ? ui.picked.filter((x) => x !== id) : ui.picked.concat(id); ui.sel = id; refresh(); },
   // Setup: put a setting back to the controller's own value
   resetCtl: (p) => { set(ui.draft, p, S.fromController[p]); render(); },
