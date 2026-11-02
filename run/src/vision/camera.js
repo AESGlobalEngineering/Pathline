@@ -59,12 +59,15 @@ class VimbaCamera {
     this.vmb = {
       startup: f('int32 VmbStartup(void *path)'),
       shutdown: f('void VmbShutdown()'),
-      list: f('int32 VmbCamerasList(_Out_ VmbCameraInfo_t *info, uint32 len, _Out_ uint32 *found, uint32 size)'),
+      list: f('int32 VmbCamerasList(void *info, uint32 len, _Out_ uint32 *found, uint32 size)'),
       open: f('int32 VmbCameraOpen(const char *id, uint32 mode, _Out_ void **handle)'),
       close: f('int32 VmbCameraClose(void *handle)'),
       enumSet: f('int32 VmbFeatureEnumSet(void *handle, const char *name, const char *value)'),
       floatSet: f('int32 VmbFeatureFloatSet(void *handle, const char *name, double value)'),
       floatGet: f('int32 VmbFeatureFloatGet(void *handle, const char *name, _Out_ double *value)'),
+      intGet: f('int32 VmbFeatureIntGet(void *handle, const char *name, _Out_ int64 *value)'),
+      intSet: f('int32 VmbFeatureIntSet(void *handle, const char *name, int64 value)'),
+      enumGet: f('int32 VmbFeatureEnumGet(void *handle, const char *name, _Out_ const char **value)'),
       command: f('int32 VmbFeatureCommandRun(void *handle, const char *name)'),
       payload: f('int32 VmbPayloadSizeGet(void *handle, _Out_ uint32 *size)'),
       announce: f('int32 VmbFrameAnnounce(void *handle, void *frame, uint32 size)'),
@@ -80,14 +83,35 @@ class VimbaCamera {
     const found = [0];
     this.vmb.list(null, 0, found, koffi.sizeof(CameraInfo));
     if (!found[0]) throw new Error('No Allied Vision camera found. Check its USB cable, and that Ruby / JobDispatcher are closed.');
-    const info = {};
-    this.check(this.vmb.list(info, 1, found, koffi.sizeof(CameraInfo)), 'list cameras');
+    // the same camera can be listed once per USB driver (Vimba X's own, and Ruby's VimbaUSBTL):
+    // read the whole list, then open the first entry that lets us in
+    const n = found[0];
+    const mem = koffi.alloc(CameraInfo, n);
+    this.check(this.vmb.list(mem, n, found, koffi.sizeof(CameraInfo)), 'list cameras');
+    const list = koffi.decode(mem, koffi.array(CameraInfo, Math.min(n, found[0])));
+    this.log('camera: ' + list.map((c) => c.modelName + ' ' + c.serialString + ' (' + c.cameraIdString + ')').join(', '));
     const h = [null];
-    this.check(this.vmb.open(info.cameraIdString, 1 /* full access */, h), 'open the camera (is Ruby using it?)');
+    let info = null, last = 0;
+    // Vimba X also lists its own "Camera Simulator" devices: real cameras first, never those
+    const real = list.filter((c) => !/simulator/i.test(String(c.cameraName) + ' ' + String(c.modelName)));
+    if (!real.length) throw new Error('No Allied Vision camera found (only Vimba X\'s simulators). Check its USB cable, and that Ruby / JobDispatcher are closed.');
+    for (const c of real) {
+      last = this.vmb.open(c.cameraIdString, 1 /* full access */, h);
+      if (last === 0) { info = c; break; }
+    }
+    if (!info) this.check(last, 'open the camera (is Ruby / JobDispatcher using it?)');
     this.h = h[0];
     // grey frames: Mono8 where the camera has it (Alvium colour models do), else colour → grey here
     if (this.vmb.enumSet(this.h, 'PixelFormat', 'Mono8') !== 0) this.vmb.enumSet(this.h, 'PixelFormat', 'BayerRG8');
     this.vmb.enumSet(this.h, 'AcquisitionMode', 'SingleFrame');
+    // On a USB 2 link (or a slow cable / hub) the camera's default throughput limit is far more
+    // than the link carries, and every frame arrives incomplete: keep to 80 % of the link speed
+    const speed = [0];
+    if (this.vmb.intGet(this.h, 'DeviceLinkSpeed', speed) === 0 && Number(speed[0]) > 0) {
+      const limit = Math.floor(Number(speed[0]) * 0.8);
+      this.vmb.enumSet(this.h, 'DeviceLinkThroughputLimitMode', 'On');
+      if (this.vmb.intSet(this.h, 'DeviceLinkThroughputLimit', limit) === 0) this.log('camera: USB link ' + Math.round(Number(speed[0]) / 1e6) + ' MB/s' + (Number(speed[0]) < 100e6 ? ' (USB 2: a USB 3 port and cable are faster)' : '') + ', streaming at ' + Math.round(limit / 1e6) + ' MB/s');
+    }
     if (this.opts.exposure) await this.setExposure(this.opts.exposure);
     const size = [0];
     this.check(this.vmb.payload(this.h, size), 'read the frame size');
@@ -108,8 +132,17 @@ class VimbaCamera {
     this.check(this.vmb.floatSet(this.h, 'ExposureTime', Number(us)), 'set the exposure');
   }
 
-  // one frame: announce, queue, start, wait (on a worker thread), stop
+  // one frame; an incomplete one (USB hiccup, or the first after starting) is grabbed again
   async grab(timeout = 2000) {
+    let last;
+    for (let k = 0; k < 3; k++) {
+      try { return await this.grabOnce(timeout); } catch (e) { last = e; if (!/incomplete/.test(e.message)) throw e; }
+    }
+    throw last;
+  }
+
+  // announce, queue, start, wait (on a worker thread), stop
+  async grabOnce(timeout) {
     const { k, vmb, h } = this;
     k.encode(this.frame, this.Frame, { buffer: this.buf, bufferSize: this.size, context: [null, null, null, null] });
     this.check(vmb.announce(h, this.frame, k.sizeof(this.Frame)), 'prepare a frame');
@@ -121,6 +154,7 @@ class VimbaCamera {
       vmb.command(h, 'AcquisitionStop');
       this.check(code, 'get a frame (timed out?)');
       const fr = k.decode(this.frame, this.Frame);
+      if (process.env.PLR_CAMERA_DEBUG) console.log('frame record', JSON.stringify(fr, (key, v) => (typeof v === 'bigint' ? v.toString() : v)), 'payload', this.size);
       if (fr.receiveStatus !== 0) throw new Error('Camera: the frame was incomplete (status ' + fr.receiveStatus + ')');
       const raw = new Uint8Array(k.view(fr.imageData, fr.width * fr.height * (fr.pixelFormat === PIX.RGB8 || fr.pixelFormat === PIX.BGR8 ? 3 : 1)));
       return toGrey(raw, fr.width, fr.height, fr.pixelFormat);

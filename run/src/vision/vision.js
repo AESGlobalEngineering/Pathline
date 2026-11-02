@@ -20,7 +20,7 @@ const err = (msg, code) => Object.assign(new Error(msg), { code: code || 409 });
 
 // the camera settings, with their defaults (Setup → Camera)
 const DEFAULTS = {
-  enabled: false, source: 'vimba', exposure: 20000, light: false,
+  enabled: false, source: 'vimba', exposure: 100000, light: false, // µs: 20 ms was nearly black with the light off
   offset: [41.437, 12.731],            // laser − camera, mm (this machine's, from Ruby)
   matrix: [0, 0.02, 0.02, 0],          // mm per pixel; frames come rotated 90° (§7.8)
   tolerance: 1.0, recentre: 3,         // Ruby's AcceptableDistanceToCenterMm, MaxRepositionCount

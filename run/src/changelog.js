@@ -5,6 +5,14 @@
 
 module.exports = [
   {
+    version: '0.7.1', date: '2 Nov 2026',
+    fixed: [
+      'Head camera: opens the Alvium when Vimba X lists it more than once, and never one of Vimba X\'s own camera simulators.',
+      'Head camera: on a USB 2 link every frame arrived incomplete; the camera now streams at what the link carries (it says so in the log). A USB 3 port and cable are faster.',
+      'Head camera: default exposure 100 ms (20 ms was nearly black with the light off).'
+    ]
+  },
+  {
     version: '0.7.0', date: '2 Nov 2026',
     added: [
       'Trotec head camera (Allied Vision Alvium, through Vimba X): Setup → Camera, and a live picture on the Jog page with "Camera to the laser\'s spot" and "Laser to the crosshair".',
