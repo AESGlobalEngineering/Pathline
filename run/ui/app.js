@@ -676,13 +676,13 @@ function setupView() {
       ro('Pixel size', (pixel * 1000).toFixed(2) + ' µm') + ro('Picture turned', turned.toFixed(2) + '°' + (ma * md - mb * mc < 0 ? ' (mirrored)' : '')) +
       ro('Lens bends lines', v.cameraLens !== undefined ? (v.cameraLens * 1000).toFixed(0) + ' µm at most' : '—') + ro('Calibrated', when(v.cameraAt)) +
       '<div style="display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end"><button class="btn-primary" data-a="camCalibrate"' + need + '>Calibrate camera</button></div>',
-    'Lay the ' + (get(d, 'vision.camBoard.square') || 10) + ' mm checkerboard flat under the camera, at any angle, so it fills the picture (Jog → Camera). Its squares give the pixel size; then the head moves a few mm along X and Y so Pathline Run knows which way the picture is turned.'));
+    'Lay the ' + (get(d, 'vision.camBoard.square') || 10) + ' mm checkerboard flat, at any angle, and jog the laser head over its middle. Pathline Run brings the camera over that spot; the squares give the pixel size, then the head moves a few mm along X and Y so it knows which way the picture is turned. The head goes back where it was.'));
     const stage2 = !v.cameraAt ? ' disabled title="Calibrate the camera (stage 1) first"' : need;
     tabs.Camera.push(card('2 · Offset calibration (cut check)', num('Camera offset X', 'vision.offset.0', 'mm', 'Laser − camera') + num('Camera offset Y', 'vision.offset.1', 'mm') +
       num('Cut power', 'vision.mark.power', '%', 'For the check mark') + num('Cut speed', 'vision.mark.speed', 'mm/s') +
       ro('Last cut check', v.offsetCheck !== undefined && v.offsetCheck !== null ? (v.offsetCheck * 1000).toFixed(0) + ' µm off · ' + when(v.offsetAt) : 'not yet') +
       '<div style="display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end"><button class="btn-primary" data-a="camOffsetAsk"' + stage2 + '>Cut check: calibrate offset</button></div>',
-    'Jog the laser over scrap card or board. The laser cuts a small 3 mm mark there, the camera finds it and sets the offset, then looks again to check: the cut check says how far off it still is.'));
+    'Jog the laser head over scrap card or board. The laser cuts a small 3 mm mark right there, the camera finds it and sets the offset, then looks again to check: the cut check says how far off it still is. The head goes back where it was.'));
     const b = ui.board;
     const map = v.map;
     tabs.Camera.push(card('Checkerboard: bed accuracy', num('Square size', 'vision.board.square', 'mm') + num('Corners across', 'vision.board.across', '', 'Inner corners (squares − 1)') + num('Corners down', 'vision.board.down') +
@@ -693,7 +693,7 @@ function setupView() {
       '<div style="display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end"><button class="tb" data-a="camBoard" data-v="check"' + need + '>Check bed</button><button class="btn-primary" data-a="camBoard" data-v="calibrate"' + need + '>Calibrate bed</button></div>' +
       (busy ? '<div class="warnbox">' + esc(S.status.message || busy) + '</div>' : '') +
       (b && b.points ? boardResult(b) : ''),
-    'Lay the checkerboard anywhere on the bed, at any angle, and jog the camera over its top-left inner corner (Jog → Camera). Check measures with the bed map on; Calibrate measures the machine as it is and saves a new map. The board\'s own position and angle are taken out: what\'s left is the machine. A board that isn\'t flat moves some corners: those are left out. Scale and squareness is the safe choice for a board that isn\'t flat; Every corner only for one that is.'));
+    'Lay the checkerboard anywhere on the bed, at any angle, and jog the laser head over its top-left inner corner: the scan starts there, as an anchored job would, and the head comes back there. Check measures with the bed map on; Calibrate measures the machine as it is and saves a new map. The board\'s own position and angle are taken out: what\'s left is the machine. A board that isn\'t flat moves some corners: those are left out. Scale and squareness is the safe choice for a board that isn\'t flat; Every corner only for one that is.'));
   }
 
   const tab = tabs[ui.setTab] ? ui.setTab : 'Machine';

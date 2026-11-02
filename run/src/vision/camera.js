@@ -216,6 +216,8 @@ class SimCamera {
   // grey level of the bed at p (mm)
   shade(p) {
     for (const m of this.scene.dots.concat(this.scene.marks)) if (Math.hypot(p[0] - m.x, p[1] - m.y) <= m.d / 2) return 25;
+    // printed artwork: dark rectangles { x0, y0, x1, y1 }
+    for (const r of this.scene.rects || []) if (p[0] >= r.x0 && p[0] <= r.x1 && p[1] >= r.y0 && p[1] <= r.y1) return 40;
     // the bed checkerboard, and any others (scene.boards: e.g. the small 10 mm one for stage 1)
     for (const b of [this.scene.board].concat(this.scene.boards || [])) {
       if (!b) continue;
@@ -254,8 +256,61 @@ class SimCamera {
   }
 }
 
-function makeCamera(vision, opts = {}) {
-  return vision.source === 'sim' ? new SimCamera(opts.sim || {}) : new VimbaCamera({ exposure: Number(vision.exposure) > 0 ? Number(vision.exposure) : null }, opts.log);
+// ---------------------------------------------------------------- the camera's own thread
+// VimbaCamera run in a worker thread (camera-worker.js), with a time limit on every call: the
+// app's main thread (screen, laser link) never waits on Vimba X. A call that runs out of time
+// gives an error, and the thread is thrown away; the next use starts a fresh one.
+class ThreadedCamera {
+  constructor(opts = {}, log) { this.opts = opts; this.log = log || (() => {}); this.seq = 0; this.wait = new Map(); }
+
+  start() {
+    const { Worker } = require('worker_threads');
+    this.w = new Worker(path.join(__dirname, 'camera-worker.js'));
+    this.w.on('message', (m) => {
+      if (m.log) return this.log(m.log);
+      const p = this.wait.get(m.id);
+      if (!p) return;
+      this.wait.delete(m.id);
+      clearTimeout(p.t);
+      if (m.ok) p.resolve(m.r); else p.reject(new Error(m.error));
+    });
+    this.w.on('error', (e) => this.fail(new Error('Camera thread: ' + e.message)));
+    this.w.on('exit', () => { this.w = null; this.fail(new Error('The camera thread stopped')); });
+  }
+
+  fail(e) { for (const p of this.wait.values()) { clearTimeout(p.t); p.reject(e); } this.wait.clear(); }
+
+  call(cmd, args, ms, what) {
+    if (!this.w) this.start();
+    const id = ++this.seq;
+    return new Promise((resolve, reject) => {
+      const t = setTimeout(() => {
+        this.wait.delete(id);
+        reject(new Error('The camera didn\'t answer (' + what + ', ' + Math.round(ms / 1000) + ' s). Check its USB cable, close Ruby / JobDispatcher, then try again.'));
+        // a stuck thread is no use: throw it away (the next call starts a fresh one)
+        const w = this.w; this.w = null;
+        if (w) w.terminate().catch(() => {});
+      }, ms);
+      this.wait.set(id, { resolve, reject, t });
+      this.w.postMessage({ id, cmd, args });
+    });
+  }
+
+  async open() { this.info = await this.call('open', [this.opts], 30000, 'opening it'); return this.info; }
+  // after a thread was thrown away, open the camera again in a fresh one first
+  async again() { if (!this.w && this.info) await this.open(); }
+  async grab(timeout = 2000) { await this.again(); const r = await this.call('grab', [timeout], timeout * 3 + 8000, 'taking a picture'); return { w: r.w, h: r.h, half: r.half, data: new Uint8Array(r.data) }; }
+  async setExposure(us) { await this.again(); this.opts.exposure = us; return this.call('exposure', [us], 5000, 'setting the exposure'); }
+  async close() {
+    if (!this.w) return;
+    await this.call('close', [], 5000, 'closing it').catch(() => {});
+    const w = this.w; this.w = null;
+    if (w) await w.terminate().catch(() => {});
+  }
 }
 
-module.exports = { VimbaCamera, SimCamera, makeCamera, vmbLibrary, toGrey };
+function makeCamera(vision, opts = {}) {
+  return vision.source === 'sim' ? new SimCamera(opts.sim || {}) : new ThreadedCamera({ exposure: Number(vision.exposure) > 0 ? Number(vision.exposure) : null }, opts.log);
+}
+
+module.exports = { VimbaCamera, ThreadedCamera, SimCamera, makeCamera, vmbLibrary, toGrey };

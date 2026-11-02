@@ -174,7 +174,15 @@ class Machine {
       if (b.axis === 'x') x = to; else y = to;
       if (Math.abs(to - this.st.pos[b.axis]) < 0.001) return { pos: this.st.pos };
     }
+    const before = { ...this.st.pos };
     await this.link.moveTo(x, y, b.axis ? { axis: b.axis } : {});
+    // A Trotec may refuse to move with its lid open: then say so, rather than silently not moving
+    if (this.cfg.controller === 'trotec' && this.st.interlock && Math.hypot(x - before.x, y - before.y) > 0.05) {
+      await sleep(700);
+      const p = this.apply(await this.link.poll());
+      if (Math.hypot(p.pos.x - before.x, p.pos.y - before.y) < 0.01) throw busyErr('The laser didn\'t move: the Trotec ignores moves while its lid is open. Close the lid to jog.');
+      return { pos: this.st.pos };
+    }
     this.st.pos = { ...this.st.pos, x: +x.toFixed(3), y: +y.toFixed(3) };
     return { pos: this.st.pos };
   }
@@ -192,13 +200,19 @@ class Machine {
     const until = Date.now() + 450;
     if (this.hold && this.hold.axis === axis && this.hold.dir === dir) {
       Object.assign(this.hold, { until, speed });
+      // a Trotec with its lid open may not move at all: after a second, say so and stop trying
+      const h = this.hold;
+      if (this.cfg.controller === 'trotec' && this.st.interlock && h.moved && Date.now() - h.t0 > 1000 && Math.abs(this.st.pos[axis] - h.start) < 0.01) {
+        await this.jogRelease();
+        throw busyErr('The laser didn\'t move: the Trotec ignores moves while its lid is open. Close the lid to jog.');
+      }
       return { holding: true };
     }
     if (this.hold) await this.jogRelease(); // another arrow: stop this move first
     this.guard({ lidOpenOk: true });
     if (!Number.isFinite(this.st.pos.x) || !Number.isFinite(this.st.pos.y)) throw busyErr('The head position isn\'t known yet');
     const at = { x: this.st.pos.x, y: this.st.pos.y };
-    const h = { axis, dir, speed, until, at, range: this.jogRange(axis), ideal: at[axis], last: Date.now(), busy: false, moved: false };
+    const h = { axis, dir, speed, until, at, range: this.jogRange(axis), ideal: at[axis], last: Date.now(), busy: false, moved: false, t0: Date.now(), start: at[axis] };
     this.hold = h;
     if (!this.holdTimer) this.holdTimer = setInterval(() => this.holdTick(), 100);
     // one move to the edge of the bed at this speed, stopped when the arrow is let go

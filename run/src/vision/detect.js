@@ -90,10 +90,31 @@ function findDots(img, opts = {}) {
     out.push({ x: sx / sw, y: sy / sw, d, round, area });
   }
   const cx = (w - 1) / 2, cy = (h - 1) / 2;
-  out.sort((a, b) => Math.hypot(a.x - cx, a.y - cy) - Math.hypot(b.x - cx, b.y - cy));
+  // printed registration marks always sit in plain white: keep only dots whose surroundings are
+  // clean paper (anything dark next to a candidate, artwork or an edge, rules it out)
+  const keep = opts.whiteRing ? out.filter((dot) => whiteRound(img, dot)) : out;
+  keep.sort((a, b) => Math.hypot(a.x - cx, a.y - cy) - Math.hypot(b.x - cx, b.y - cy));
   // the one that will be used, refined so uneven light doesn't pull its centre
-  if (out.length && !opts.global) out[0] = refineDot(img, out[0]);
-  return out;
+  if (keep.length && !opts.global) keep[0] = refineDot(img, keep[0]);
+  return keep;
+}
+
+// Is the ring just outside a dot (1.3 … 1.9 × its radius) plain white? Its darkest tenth must be
+// close to its brightest tenth (light may slope across it, a little), and the dot well darker.
+function whiteRound(img, dot) {
+  const { w, h, data } = img;
+  const R = dot.d / 2, r1 = R * 1.3, r2 = R * 1.9;
+  const ring = [], inner = [];
+  const x0 = Math.floor(dot.x - r2), x1 = Math.ceil(dot.x + r2), y0 = Math.floor(dot.y - r2), y1 = Math.ceil(dot.y + r2);
+  if (x0 < 0 || y0 < 0 || x1 >= w || y1 >= h) return false; // the ring must be in the picture
+  const step = Math.max(1, Math.round(R / 40));
+  for (let y = y0; y <= y1; y += step) for (let x = x0; x <= x1; x += step) {
+    const r = Math.hypot(x - dot.x, y - dot.y), v = data[y * w + x];
+    if (r >= r1 && r <= r2) ring.push(v); else if (r <= R * 0.6) inner.push(v);
+  }
+  const q = (a, f) => a.sort((m, n) => m - n)[Math.min(a.length - 1, Math.floor(a.length * f))];
+  const lo = q(ring, 0.1), hi = q(ring, 0.9), mid = q(ring, 0.5), dark = q(inner, 0.5);
+  return lo >= hi * 0.7 && dark <= mid * 0.55;
 }
 
 // A dot's centre without the light's slope: fit the paper round it as a tilted plane

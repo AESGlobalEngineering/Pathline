@@ -118,10 +118,12 @@ class Vision {
   }
 
   // the thing nearest the middle of the frame: kind 'dot' (d mm across) or 'corner'
-  find(img, kind, d) {
+  find(img, kind, d, opts = {}) {
     if (kind === 'corner') return detect.findCorner(img);
     const px = this.pixelSize();
-    const dots = detect.findDots(img, d ? { minD: (d * 0.5) / px, maxD: (d * 1.6) / px } : {});
+    // registration marks (d given) sit in plain white: only those count; calibration targets
+    // (the cut mark on scrap, a dot under the camera) may have darker surroundings
+    const dots = detect.findDots(img, d ? { minD: (d * 0.5) / px, maxD: (d * 1.6) / px, whiteRing: !!opts.whiteRing } : {});
     return dots[0] || null;
   }
 
@@ -133,7 +135,7 @@ class Vision {
       if (opts.ctl && opts.ctl.aborted) throw err('Stopped');
       await this.moveCamera(at, opts);
       const img = await this.grab();
-      const hit = this.find(img, kind, opts.d);
+      const hit = this.find(img, kind, opts.d, opts);
       if (!hit) return null;
       const off = this.toBed(img, hit);
       const found = [at[0] + off[0], at[1] + off[1]];
@@ -152,7 +154,7 @@ class Vision {
       // predict from the marks found so far (shift with one, + rotation and scale with more)
       const pred = E.length ? fitting.fit(E, D, E.length === 1 ? 'shift' : 'similar')(s.at) : s.at;
       status('Reading mark ' + s.mark + ' of ' + s.of);
-      const r = await this.measure(pred, 'dot', { d: s.d, ctl });
+      const r = await this.measure(pred, 'dot', { d: s.d, ctl, whiteRing: true });
       if (!r) throw err('Registration mark ' + s.mark + ' not found near ' + pred.map((v) => v.toFixed(1)).join(', ') + ' mm. Check the sheet, the light and Setup → Camera.');
       E.push(s.at); D.push(r.found);
       this.log('mark ' + s.mark + ': expected ' + s.at.map((v) => v.toFixed(2)).join(', ') + ', found ' + r.found.map((v) => v.toFixed(3)).join(', ') + ' (' + r.tries + ' frame' + (r.tries > 1 ? 's' : '') + ')');
@@ -178,14 +180,27 @@ class Vision {
   // square, so the corner followed can't be mistaken for its neighbour): that gives which way the
   // picture is turned and whether it's mirrored, relative to the machine. The board itself can
   // lie at any angle.
+  // The board goes under the laser head, where it is now: the camera is brought over that spot
+  // first, and the head goes back there at the end.
   async calibrateCamera(opts = {}) {
     await this.m.waitIdle(30000, 150);
     const square = Number(opts.square || (this.cfg.camBoard || {}).square || 10);
+    const laser = { x: this.m.st.pos.x, y: this.m.st.pos.y };
+    try {
+      await this.moveCamera([laser.x, laser.y], { raw: true });
+      return await this.cameraOnBoard(square);
+    } finally {
+      await this.m.link.moveTo(laser.x, laser.y);
+      await this.m.waitIdle(30000, 150);
+    }
+  }
+
+  async cameraOnBoard(square) {
     const start = { x: this.m.st.pos.x, y: this.m.st.pos.y };
     const img0 = await this.grab();
     const cs0 = detect.findCorners(img0);
     const L = detect.fitLattice(cs0);
-    if (!L) throw err('Put the ' + square + ' mm checkerboard under the camera so it fills the picture (' + cs0.length + ' corners seen)');
+    if (!L) throw err('Put the ' + square + ' mm checkerboard under the laser head, flat, a few squares each way (' + cs0.length + ' corners seen)');
     const spacing = Math.sqrt(Math.abs(L.a[0] * L.b[1] - L.a[1] * L.b[0])); // px per square
     const pixel = square / spacing;
     const c0 = cs0[0];
@@ -258,8 +273,17 @@ class Vision {
   // Stage 2, offset (cut check): the laser cuts a small dark disc on scrap where the head is
   // now, the camera looks for it, and the offset is corrected by how far from where it should be
   // it shows up; then one more picture checks it (`check`: how far off the cut still is, mm).
-  async calibrateOffset({ power, speed } = {}, ctl = {}) {
+  async calibrateOffset(o = {}, ctl = {}) {
     await this.m.waitIdle(30000, 150);
+    const laser = { x: this.m.st.pos.x, y: this.m.st.pos.y };
+    // the cut goes where the laser head is; the head goes back there at the end
+    try { return await this.cutCheck(o, ctl); } finally {
+      await this.m.link.moveTo(laser.x, laser.y).catch(() => {});
+      await this.m.waitIdle(30000, 150).catch(() => {});
+    }
+  }
+
+  async cutCheck({ power, speed } = {}, ctl = {}) {
     const at = [this.m.st.pos.x, this.m.st.pos.y];
     const mark = { ...this.cfg.mark, ...(power !== undefined ? { power } : {}), ...(speed !== undefined ? { speed } : {}) };
     await this.m.fireMark(at, mark, ctl);
@@ -292,9 +316,18 @@ class Vision {
     const step = b.square * b.every;
     const ni = Math.floor((b.across - 1) / b.every) + 1, nj = Math.floor((b.down - 1) / b.every) + 1;
     await this.m.waitIdle(30000, 150);
-    const cam0 = [this.m.st.pos.x - this.cfg.offset[0], this.m.st.pos.y - this.cfg.offset[1]];
+    // the board's first corner is where the laser head is now: the camera goes there to start,
+    // and the head comes back there at the end
+    const laser = { x: this.m.st.pos.x, y: this.m.st.pos.y };
+    try { return await this.scanFrom([laser.x, laser.y], { b, raw, step, ni, nj }, ctl, status); } finally {
+      await this.m.link.moveTo(laser.x, laser.y).catch(() => {});
+      await this.m.waitIdle(30000, 150).catch(() => {});
+    }
+  }
+
+  async scanFrom(cam0, { b, raw, step, ni, nj }, ctl, status) {
     const first = await this.measure(cam0, 'corner', { raw, ctl });
-    if (!first) throw err('No checkerboard corner under the camera. Jog the camera over the board\'s top-left corner, then start again.');
+    if (!first) throw err('No checkerboard corner under the laser head. Jog the laser head over the board\'s top-left corner, then start again.');
     // which way the board's lines run: the corner's angle in the frame, turned onto the bed
     const [a, bm, c, dm] = this.cfg.matrix;
     const ai = ((first.hit.angle || 0) * Math.PI) / 180;

@@ -5,6 +5,15 @@
 
 module.exports = [
   {
+    version: '0.7.4', date: '2 Nov 2026',
+    fixed: [
+      'Head camera: Pathline Run froze ("stopped interacting with Windows") while the camera opened or took a picture. The camera now works in a thread of its own: the screen and the laser never wait on it, and a camera that stalls gives a message after a time limit instead.',
+      'Camera calibration, the cut check and the checkerboard all start from where the laser head is, like an anchored job, and bring the head back there afterwards: put the laser head over the board or the scrap, not the camera.',
+      'Trotec: a jog that doesn\'t move the head with the lid open now says so (the laser ignores moves while its lid is open) instead of doing nothing.',
+      'Print and cut: a registration mark only counts with plain white round it, so dark artwork next to a dot can\'t be mistaken for a mark.'
+    ]
+  },
+  {
     version: '0.7.3', date: '2 Nov 2026',
     added: [
       'Camera calibration in two stages (Setup → Camera). 1 · Camera: a small checkerboard (10 mm squares) under the camera, at any angle; its corners give the pixel size, independent of how accurately the machine moves, and how much the lens bends lines; a few mm of head movement gives which way the picture is turned. 2 · Offset (cut check): the laser cuts a small mark on scrap, the camera finds it and sets the offset, then checks it and says how far off it still is. Stage 2 waits for stage 1.'

@@ -594,6 +594,13 @@ async function visionTests() {
     const sc = new SimCamera({ truth: { offset: [0, 0], pixel: 0.08, rotation: 0 }, scene: { board: { x: 500, y: 400, angle: 25, square: 50, nx: 6, ny: 6 } }, headAt: () => ({ x: 502, y: 399 }) });
     const c = detect.findCorner(await sc.grab());
     // the corner is 2 mm left of and 1 mm below the picture's middle: 25 px, 12.5 px at 80 µm
+    // registration marks sit in plain white: a dot against dark artwork, nearer the middle, is
+    // passed over for the clean one
+    const art = new SimCamera({ truth: { offset: [0, 0], pixel: 0.08, rotation: 0 }, scene: { dots: [{ x: 100, y: 80, d: 5 }, { x: 107, y: 80, d: 5 }], rects: [{ x0: 88, y0: 74, x1: 96.4, y1: 86 }] }, headAt: () => ({ x: 100.5, y: 80 }) });
+    const ai = await art.grab();
+    const plain = detect.findDots(ai, { minD: 30, maxD: 100 })[0], clean = detect.findDots(ai, { minD: 30, maxD: 100, whiteRing: true })[0];
+    // the clean dot (107, 80) is 6.5 mm right of the middle: 81 px
+    ok(plain && clean && Math.abs(clean.x - (239.5 + 81.25)) < 1 && Math.abs(plain.x - (239.5 + 81.25)) > 20, 'marks sit in white: a dot against dark artwork is passed over for the clean one', JSON.stringify({ plain, clean }));
     // (the angle only aims the scan at the next corner; the board's angle comes from the corners found)
     ok(c && Math.abs(c.x - (239.5 - 25)) < 0.5 && Math.abs(c.y - (239.5 + 12.5)) < 0.5 && Math.abs(c.angle - 25) < 3, 'checkerboard corner at 25°: found to a fraction of a pixel, angle ' + (c && c.angle.toFixed(1)) + '° (a hint, within 3°)', JSON.stringify(c));
   }
@@ -612,23 +619,25 @@ async function visionTests() {
   const jogTo = async (x, y) => { await call('POST', 'v1/jog', { x, y }); await new Promise((r) => setTimeout(r, 400)); };
   try {
     for (let i = 0; i < 50; i++) { try { await call('GET', 'v1/info'); break; } catch (e) { await new Promise((r) => setTimeout(r, 100)); } }
-    // stage 1, camera: over the small 10 mm board (laid at 7°, unevenly lit), head = camera + offset
-    await jogTo(745 + 41.4, 145 + 12.7);
+    // stage 1, camera: the laser head over the small 10 mm board (laid at 7°, unevenly lit)
+    await jogTo(745, 145);
     const px = await call('POST', 'local/camera/calibrate');
     ok(px.status === 200 && Math.abs(px.data.pixel - 0.08) < 0.0002 && Math.abs(Math.abs(px.data.rotation) - 90) < 0.2 && !px.data.mirrored,
       'stage 1, camera on the 10 mm board: ' + (px.data && px.data.corners) + ' corners, ' + (px.data && (px.data.pixel * 1000).toFixed(2)) + ' µm, picture turned ' + (px.data && px.data.rotation.toFixed(2)) + '° (80 µm, 90°)', JSON.stringify(px.data));
+    await new Promise((r) => setTimeout(r, 400));
+    const back = (await call('GET', 'v1/status')).data.pos;
+    ok(Math.hypot(back.x - 745, back.y - 145) < 0.01, 'the laser head over the board to start with, and back there afterwards', JSON.stringify(back));
     // stage 2, offset: the laser cuts its mark on scrap at a clear spot, the camera finds it, then checks
     await jogTo(900, 150);
     const of = await call('POST', 'local/camera/offset', { power: 20, speed: 50 });
     ok(of.status === 200 && Math.abs(of.data.offset[0] - 41.2) < 0.2 && Math.abs(of.data.offset[1] - 12.9) < 0.2 && of.data.check < 0.05,
       'stage 2, offset from the cut: ' + (of.data && of.data.offset.join(', ')) + ' mm (41.2, 12.9), cut check ' + (of.data && (of.data.check * 1000).toFixed(0)) + ' µm off', JSON.stringify(of.data));
-    // checkerboard: camera over its first corner (100, 300); calibrate, then check with the map on
-    const off = of.data.offset;
-    await jogTo(100 + off[0], 300 + off[1]);
+    // checkerboard: the laser head over its first corner (100, 300); calibrate, then check with the map on
+    await jogTo(100, 300);
     const cal = await call('POST', 'local/camera/board', { mode: 'calibrate', board: { model: 'linear' } });
     ok(cal.status === 200 && cal.data.points.length >= 15 && Math.abs(cal.data.boardAngle - 1.5) < 0.1 && Math.abs(cal.data.scaleX - 1.5) < 0.15 && Math.abs(cal.data.squareness - 0.03) < 0.015,
       'bumpy checkerboard at 1.5°, uneven light: ' + (cal.data.points && cal.data.points.length) + ' corners, ' + cal.data.bumps + ' left out as bumps; X travel ' + (cal.data.scaleX || 0).toFixed(2) + ' mm/m (+1.5), Y leans ' + (cal.data.squareness || 0).toFixed(3) + '° (0.03)', JSON.stringify(cal.data).slice(0, 300));
-    await jogTo(100 + off[0], 300 + off[1]);
+    await jogTo(100, 300);
     const chk = await call('POST', 'local/camera/board', { mode: 'check', board: { model: 'linear' } });
     // (corners on the bump stay where the bump put them: the machine error is what's checked)
     const worstIn = (r) => Math.max(...r.points.filter((p) => !p.out).map((p) => Math.hypot(p.res[0], p.res[1])));
