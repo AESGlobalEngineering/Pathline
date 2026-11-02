@@ -66,7 +66,9 @@ function bedFile(cuts, opts) {
   f.push(0xe7, 0x03, ...abs(x0), ...abs(y0), 0xe7, 0x07, ...abs(x1), ...abs(y1));
   f.push(0xe7, 0x50, ...abs(x0 - 20000), ...abs(y0 - 20000), 0xe7, 0x51, ...abs(x1 + 20000), ...abs(y1 + 20000));
   f.push(0xe7, 0x04, ...two(1), ...two(1), ...abs(0), ...abs(0), 0xe7, 0x05, 0x00);
-  f.push(0xf3, 0x0a, ...abs(0), 0x01, 0xf3, 0x09, ...abs(0), 0x01);
+  // two on/off switches VCutWorks always sends on; their meaning is being worked out
+  const sw = (v) => (v === 0 ? 0x00 : 0x01);
+  f.push(0xf3, 0x0a, ...abs(0), sw(opts.f30a), 0xf3, 0x09, ...abs(0), sw(opts.f309));
   f.push(...RD.partSpeed(0, speed), 0xca, 0x06, 0x00, ...abs(0), 0xca, 0x41, 0x00, 0x00);
   f.push(0xe7, 0x52, 0x00, ...abs(x0), ...abs(y0), 0xe7, 0x53, 0x00, ...abs(x1), ...abs(y1));
   f.push(0xca, 0x22, 0x00, 0xe7, 0x66, 0x02, 0xea, 0x01, 0xe7, 0x60, 0x01);
@@ -85,17 +87,20 @@ function bedFile(cuts, opts) {
 // Pathline's bed (origin top left, Y to the front) → the machine's job coordinates. A YC-1610
 // counts from the top right, X to the left (Setup → Ruida origin "top right"): a shape at the
 // right of the bed has a small X. Knife angles follow from the mapped points.
-function mapPts(cfg) {
+// The job then runs relative to the origin set on the machine's panel (the head starts and
+// ends there): o = that origin in the machine's coordinates (link.readOrigin), subtracted.
+function mapPts(cfg, o) {
   const r = cfg.ruida || {};
   const [W, H] = cfg.bed || [0, 0];
   const fx = r.origin === 'tr' || r.origin === 'br', fy = r.origin === 'bl' || r.origin === 'br';
-  return (pts) => pts.map(([x, y]) => [fx ? W - x : x, fy ? H - y : y]);
+  const ox = (o && o.x) || 0, oy = (o && o.y) || 0;
+  return (pts) => pts.map(([x, y]) => [(fx ? W - x : x) - ox, (fy ? H - y : y) - oy]);
 }
 
-// opts.card: the controller's card ID (from link.info), for CA 30
+// opts.card: the controller's card ID (from link.info), for CA 30; opts.origin: the panel's origin
 function compile(plan, cfg, opts = {}) {
   const warnings = plan.warnings.slice();
-  const map = mapPts(cfg);
+  const map = mapPts(cfg, opts.origin);
   const feedLen = cfg.feedLen || 1000;
   const segments = [];
   let bed = null;

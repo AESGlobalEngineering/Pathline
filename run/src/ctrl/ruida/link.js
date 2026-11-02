@@ -277,6 +277,13 @@ class RuidaLink {
   // plotter conveyor on the U axis: where it is (mm), and advance it by hand
   async readU() { return (await this.query(MEM.u)) / 1000; }
 
+  // RDD6584: the origin set on the panel (Origin key), mm in the controller's own coordinates.
+  // Knife jobs run relative to it, and the head goes back to it after a job.
+  async readOrigin() {
+    const x = await this.query(MEM.originX), y = await this.query(MEM.originY);
+    return { x: x / 1000, y: y / 1000 };
+  }
+
   // The controller's own settings (read only), for Setup → Read from controller.
   // Addresses from the EduTech wiki (two 7-bit bytes); lengths in µm, speeds in µm/s.
   async readSettings() {

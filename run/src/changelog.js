@@ -5,6 +5,12 @@
 
 module.exports = [
   {
+    version: '0.5.9', date: '2 Nov 2026',
+    fixed: [
+      'RDD6584 jobs no longer land offset by the origin set on the machine\'s panel: the controller runs a job relative to that origin, so Pathline Run reads it before each job and allows for it. The Diagnostics log shows the origin it read.'
+    ]
+  },
+  {
     version: '0.5.8', date: '2 Nov 2026',
     fixed: [
       'RDD6584 jobs land where they are on Pathline\'s bed: the machine counts from its top right corner (Setup → origin), and jobs now do too. A shape at the top right was cut at the top middle.',
