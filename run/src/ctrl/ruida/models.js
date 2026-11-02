@@ -21,9 +21,10 @@ const MODELS = [
   { id: 'RDL9635', kind: 'laser', label: 'RDL9635', magic: 0x38, outputs: 1, note: 'Uses swizzle magic 0x38.' },
   // ---- plotters and cutters
   { id: 'RD-PLOTTER', kind: 'plotter', label: 'Ruida laser-family controller driving tools', magic: 0x88, outputs: 4, note: 'Tools on outputs 1–4 (knife, V-cut, crease, pen…), conveyor on the U axis. Built from the laser command set: check on the machine before production.' },
-  { id: 'RDD6584G', kind: 'plotter', label: 'RDD6584G (oscillating knife)', magic: 0x88, outputs: 4, note: 'Ruida knife-cutting controller. Its protocol isn\'t documented publicly: Pathline Run sends the laser-family commands. Needs a capture to confirm.' },
-  { id: 'RDD6584V', kind: 'plotter', label: 'RDD6584V-NET (knife, camera marks)', magic: 0x88, outputs: 4, note: 'Ruida knife-cutting controller. Its protocol isn\'t documented publicly: Pathline Run sends the laser-family commands. Needs a capture to confirm.' },
-  { id: 'RDD6584U', kind: 'plotter', label: 'RDD6584U-DFM (dual head)', magic: 0x88, outputs: 4, note: 'Ruida knife-cutting controller. Its protocol isn\'t documented publicly: Pathline Run sends the laser-family commands. Needs a capture to confirm.' },
+  // RDD6584: card 0x6910, swizzle magic 0xA1, answers on UDP 50200 → 40200 (seen on a YC-1610 cutter)
+  { id: 'RDD6584G', kind: 'plotter', label: 'RDD6584G (oscillating knife)', magic: 0xa1, outputs: 4, note: 'Ruida knife-cutting controller (card 0x6910, magic 0xA1). Reading and moving use the same commands as the lasers; cutting is still to be confirmed on the machine.' },
+  { id: 'RDD6584V', kind: 'plotter', label: 'RDD6584V-NET (knife, camera marks)', magic: 0xa1, outputs: 4, note: 'Ruida knife-cutting controller (magic 0xA1 expected). Cutting is still to be confirmed on the machine.' },
+  { id: 'RDD6584U', kind: 'plotter', label: 'RDD6584U-DFM (dual head)', magic: 0xa1, outputs: 4, note: 'Ruida knife-cutting controller (magic 0xA1 expected). Cutting is still to be confirmed on the machine.' },
   { id: 'OTHER', kind: 'laser', label: 'Other / not sure', magic: 0x88, outputs: 2, note: 'Pathline Run works out the swizzle magic from the controller\'s first reply.' }
 ];
 

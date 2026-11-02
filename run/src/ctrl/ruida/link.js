@@ -10,6 +10,7 @@ const dgram = require('dgram');
 const { swizzle, unswizzle, swizzleByte, commands, dec, RD, MEM } = require('./rd');
 const { settings, mapper } = require('./compile');
 const MODELS = require('./models');
+const { cardText } = require('./readback');
 
 // which swizzle magic turns 0xCC (ACK) into this byte?
 function magicFromAck(b) {
@@ -44,14 +45,18 @@ class RuidaLink {
     this.sock = dgram.createSocket('udp4');
     this.sock.on('message', (m) => this.onMessage(m));
     this.sock.on('error', (e) => this.log('ruida link error: ' + e.message));
-    await new Promise((resolve) => {
-      this.sock.once('error', () => this.sock.bind(0, resolve)); // 40200 taken (e.g. LightBurn running): any port
+    // Ruida controllers answer to port 40200 only (seen on an RDD6584), whatever port we send
+    // from, so we must have that port: no falling back to another one
+    await new Promise((resolve, reject) => {
+      this.sock.once('error', (e) => reject(new Error(e.code === 'EADDRINUSE'
+        ? 'UDP port 40200 is in use by another program (LightBurn, RDWorks or RDCutting?). Close it, then Reconnect.'
+        : 'Can\'t open UDP port 40200: ' + e.message)));
       this.sock.bind(PORT_IN, resolve);
     });
     const id = await this.query(MEM.cardId).catch(() => { throw new Error('No answer from the Ruida controller at ' + this.host); });
     const model = MODELS.byId((this.cfg.ruida || {}).model);
     this.info = {
-      model: 'Ruida card ' + id.toString(16).toUpperCase() + (model.id !== 'OTHER' ? ' · set up as ' + model.label : ''),
+      model: 'Ruida card ' + cardText(id) + (model.id !== 'OTHER' ? ' · set up as ' + model.label : ''),
       firmware: 'swizzle magic 0x' + this.magic.toString(16) + (this.magicFixed ? ' (detected)' : ''),
       cardId: id, magic: this.magic
     };
@@ -59,7 +64,11 @@ class RuidaLink {
     return this.info;
   }
 
-  async close() { try { this.sock.close(); } catch (e) { /* already closed */ } }
+  async close() {
+    if (!this.sock) return;
+    await new Promise((r) => { try { this.sock.close(r); } catch (e) { r(); } });
+    this.sock = null;
+  }
 
   onMessage(m) {
     if (m.length === 1) {
@@ -202,4 +211,57 @@ class RuidaLink {
   async abort() { await this.sendRaw(Buffer.from(RD.stop())); await sleep(50); }
 }
 
+// Setup → Find on network: ask every network this computer is on "which Ruida is there?"
+// (a card ID query, broadcast). Any controller ACKs, and its ACK byte gives away its swizzle
+// magic, whatever magic the question was sent with. Then each one is asked its card ID.
+// Needs UDP port 40200 free (the caller closes the machine's link first).
+// targets: addresses to ask instead of the networks' broadcast addresses (the self-test uses it)
+async function find(log, targets) {
+  const os = require('os');
+  const sock = dgram.createSocket('udp4');
+  await new Promise((resolve, reject) => {
+    sock.once('error', (e) => reject(new Error(e.code === 'EADDRINUSE' ? 'UDP port 40200 is in use by another program (LightBurn, RDWorks or RDCutting?)' : e.message)));
+    sock.bind(PORT_IN, resolve);
+  });
+  sock.setBroadcast(true);
+  const found = new Map(); // ip → { ip, magic, cardId, via }
+  const nets = [];
+  for (const [name, addrs] of Object.entries(os.networkInterfaces())) {
+    for (const a of addrs) {
+      if (a.family !== 'IPv4' || a.internal) continue;
+      const ip = a.address.split('.').map(Number), mask = a.netmask.split('.').map(Number);
+      nets.push({ name, address: a.address, broadcast: ip.map((o, i) => (o | (~mask[i] & 255))).join('.') });
+    }
+  }
+  const viaFor = (ip) => {
+    const n = nets.find((x) => x.broadcast.split('.').slice(0, 3).join('.') === ip.split('.').slice(0, 3).join('.'));
+    return n ? n.name + ' (' + n.address + ')' : '';
+  };
+  sock.on('message', (m, r) => {
+    const f = found.get(r.address) || { ip: r.address, magic: null, cardId: null, via: viaFor(r.address) };
+    if (m.length === 1 && f.magic === null) f.magic = magicFromAck(m[0]);
+    else if (m.length > 1 && f.magic !== null) {
+      const d = unswizzle(m, f.magic);
+      if (d.length >= 9 && d[0] === 0xda && d[1] === 0x01 && ((d[2] << 8) | d[3]) === MEM.cardId) f.cardId = dec(d.subarray(4, 9));
+    }
+    found.set(r.address, f);
+  });
+  const ask = (ip, magic) => {
+    const sw = swizzle(Buffer.from(RD.getSetting(MEM.cardId)), magic);
+    let sum = 0;
+    for (const b of sw) sum += b;
+    sock.send(Buffer.concat([Buffer.from([(sum >> 8) & 0xff, sum & 0xff]), sw]), PORT_OUT, ip);
+  };
+  for (const ip of targets || [...nets.map((n) => n.broadcast), '255.255.255.255']) ask(ip, 0x88);
+  await sleep(1500);
+  // now ask each one again in its own magic, for its card ID
+  for (const f of found.values()) if (f.magic !== null) ask(f.ip, f.magic);
+  await sleep(1000);
+  await new Promise((r) => sock.close(r));
+  const list = [...found.values()].filter((f) => f.magic !== null).map((f) => ({ ...f, card: f.cardId !== null ? cardText(f.cardId) : '' }));
+  if (log) log('find: ' + (list.length ? list.map((f) => f.ip + ' (magic 0x' + f.magic.toString(16) + (f.card ? ', card ' + f.card : '') + ')').join(', ') : 'no Ruida controller answered'));
+  return list;
+}
+
 module.exports = RuidaLink;
+module.exports.find = find;

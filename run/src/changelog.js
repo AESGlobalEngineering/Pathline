@@ -5,6 +5,16 @@
 
 module.exports = [
   {
+    version: '0.5.2', date: '2 Nov 2026',
+    added: ['Setup → Machine → Find on network (Ruida): lists the Ruida controllers that answer, with their IP address and card ID. Tap Use to fill it in.'],
+    fixed: [
+      'Ruida controllers only answer on UDP port 40200: Pathline Run no longer falls back to another port (it never got a reply). If LightBurn, RDWorks or RDCutting holds the port, it says so.',
+      'Read from controller works while the machine is connected (it shares the connection instead of opening a second one).',
+      'RDD6584 knife controllers (card 0x6910) use swizzle magic 0xA1.',
+      'Settings the controller doesn\'t have no longer show as huge numbers in Read from controller.'
+    ]
+  },
+  {
     version: '0.5.1', date: '29 Oct 2026',
     added: [
       'Setup → Read from controller (Ruida): reads the controller\'s own settings (work area, speeds, acceleration, conveyor axis, outputs, card ID) and fills them in for you to check. Works while adding a machine too.',

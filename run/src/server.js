@@ -154,6 +154,30 @@ function start(opts = {}) {
     return format === 'txt' ? { name: base + out.ext + '.txt', type: 'text/plain; charset=utf-8', data: Buffer.from(out.txt, 'utf8') } : { name: base + out.ext, type: 'application/octet-stream', data: out.bin };
   }
 
+  // A Ruida only answers to UDP port 40200, so only one link can talk to it at a time. Use the
+  // machine's own link when it's connected to this controller; otherwise borrow the port: close
+  // the machine's link, use a link for `draft`, then reconnect the machine.
+  async function withRuidaPort(draft, fn) {
+    const RuidaLink = require('./ctrl/ruida/link');
+    const live = machine.link instanceof RuidaLink && machine.st.link === 'online' && cfg.connection.ip === draft.connection.ip;
+    if (live) return fn(machine.link);
+    const hadLink = machine.link instanceof RuidaLink;
+    if (hadLink) {
+      // pause the machine's link (no polling, no reconnect attempts) while we borrow the port
+      clearTimeout(machine.retry);
+      machine.st.link = 'connecting';
+      await machine.link.close().catch(() => {});
+    }
+    const link = new RuidaLink(draft, log);
+    try {
+      await link.connect();
+      return await fn(link);
+    } finally {
+      await link.close();
+      if (hadLink) machine.connect();
+    }
+  }
+
   // updates are only for the machine's own screen, not for browsers elsewhere on the network
   const onlyHere = (req) => { if (!isLocalReq(req)) throw err(403, 'Updates can only be installed on the machine\'s own screen'); };
 
@@ -202,16 +226,18 @@ function start(opts = {}) {
           maxAccX: draft.acc * 1000, maxAccY: draft.acc * 1000, g0Vel: draft.speed * 1000, uWorkVel: 200000, out1Min: 0, out1Max: 16383, out2Min: 0, out2Max: 16383,
           out3Min: null, out3Max: null, out4Min: null, out4Max: null, machineType: 0x1155, mainboard: 0, cardId: 0x6445 };
       } else {
-        const same = machine.link && machine.st.link === 'online' && cfg.controller === 'ruida' && cfg.connection.ip === draft.connection.ip;
-        const RuidaLink = require('./ctrl/ruida/link');
-        const link = same ? machine.link : new RuidaLink(draft, log);
-        try {
-          if (!same) await link.connect();
-          raw = await link.readSettings();
-        } finally { if (!same) await link.close(); }
+        raw = await withRuidaPort(draft, async (link) => link.readSettings());
       }
       log('read settings from the controller');
       return { raw, ...require('./ctrl/ruida/readback').interpret(raw) };
+    },
+    // Setup → Find on network: Ruida controllers that answer, with their IP, magic and card ID
+    'POST /ruida/find': async () => {
+      const RuidaLink = require('./ctrl/ruida/link');
+      if (machine.run) throw err(409, 'Wait until the job has finished');
+      const hadLink = machine.link instanceof RuidaLink;
+      if (hadLink) { clearTimeout(machine.retry); machine.st.link = 'connecting'; await machine.link.close().catch(() => {}); }
+      try { return { found: await RuidaLink.find(log) }; } finally { if (hadLink) machine.connect(); }
     },
     // ☰ → Remove machine (the screen asks twice first): forgets the machine's setup.
     // Queued jobs and history stay.

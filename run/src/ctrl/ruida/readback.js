@@ -2,11 +2,19 @@
 // raw: values from link.readSettings() (µm, µm/s, µm/s², or null when it didn't answer).
 'use strict';
 
+// the card ID comes back twice in one number (0x69106910): show it once
+const cardText = (id) => { const h = Number(id).toString(16).toUpperCase(); return '0x' + (h.length === 8 && h.slice(0, 4) === h.slice(4) ? h.slice(4) : h); };
 const mm = (v) => (v === null || v === undefined ? null : v / 1000);
 // a value we'd trust for a machine: positive and not absurd
 const sane = (v, lo, hi) => v !== null && Number.isFinite(v) && v >= lo && v <= hi;
 
-function interpret(raw) {
+// Settings a controller doesn't have come back as 0xF2390000 (seen on an RDD6584); anything
+// that large isn't a real length, speed or power, so treat it as "not available".
+const NOT_AVAILABLE = 0x80000000;
+
+function interpret(input) {
+  const raw = {};
+  for (const [k, v] of Object.entries(input)) raw[k] = v === null || v === undefined || (k !== 'cardId' && v >= NOT_AVAILABLE) ? null : v;
   const out = { rows: [], suggest: {} };
   const row = (label, value, unit, note) => out.rows.push({ label, value, unit: unit || '', note: note || '' });
   const rx = mm(raw.rangeX), ry = mm(raw.rangeY);
@@ -25,7 +33,7 @@ function interpret(raw) {
     row('Max acceleration', 'X ' + ax.toFixed(0) + ', Y ' + ay.toFixed(0), 'mm/s²');
   }
   if (sane(mm(raw.g0Vel), 1, 5000)) row('Travel speed (G0)', mm(raw.g0Vel).toFixed(0), 'mm/s');
-  const ru = mm(raw.rangeU), vu = mm(raw.uWorkVel) || mm(raw.maxVelU);
+  const ru = mm(raw.rangeU), vu = sane(mm(raw.uWorkVel), 1, 5000) ? mm(raw.uWorkVel) : mm(raw.maxVelU);
   if (sane(ru, 1, 100000)) row('U axis (conveyor) range', ru.toFixed(1), 'mm');
   if (sane(vu, 1, 5000)) {
     out.suggest.feedSpeed = Math.round(vu);
@@ -36,10 +44,10 @@ function interpret(raw) {
     const lo = raw['out' + k + 'Min'], hi = raw['out' + k + 'Max'];
     if (lo !== null || hi !== null) row('Output ' + k + ' power', (lo === null ? '?' : lo) + ' – ' + (hi === null ? '?' : hi), 'raw');
   }
-  if (raw.cardId !== null) row('Card ID', '0x' + Number(raw.cardId).toString(16).toUpperCase());
+  if (raw.cardId !== null) row('Card ID', cardText(raw.cardId));
   if (raw.mainboard !== null) row('Mainboard version', '0x' + Number(raw.mainboard).toString(16).toUpperCase());
   if (raw.machineType !== null) row('Machine type', '0x' + Number(raw.machineType).toString(16).toUpperCase());
   return out;
 }
 
-module.exports = { interpret };
+module.exports = { interpret, cardText };

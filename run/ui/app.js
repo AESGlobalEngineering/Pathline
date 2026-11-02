@@ -521,7 +521,8 @@ function setupView() {
     seg('Connection', 'connection.mode', modes) +
     (d.connection.mode === 'serial' ? portSelect : '') +
     (d.connection.mode === 'tcp' ? text('Host', 'connection.host') + num('TCP port', 'connection.tcpPort') : '') +
-    (d.connection.mode === 'udp' ? text('Controller IP address', 'connection.ip', '', 'UDP 50200') : '') +
+    (d.connection.mode === 'udp' ? text('Controller IP address', 'connection.ip', '', 'UDP 50200') +
+      '<div style="display:flex;justify-content:flex-end"><button class="tb" data-a="findRuida"' + (ui.finding ? ' disabled' : '') + '>' + (ui.finding ? 'Searching…' : 'Find on network') + '</button></div>' : '') +
     (d.connection.mode === 'sim' ? num('Simulation speed', 'sim.speedup', '×', 'Jobs run this many times faster') : ''),
   trotec ? 'Trotec classic controllers (Electronics 2000/2015) over USB. Close Ruby/JobDispatcher first: only one program can hold the port.' : 'Ruida controllers over Ethernet (UDP). Close LightBurn or RDWorks while Pathline Run is connected.'));
   if (isPlotter) {
@@ -609,6 +610,14 @@ function dialog() {
       '<div>' + r.rows.map((x) => '<div style="display:grid;grid-template-columns:200px minmax(0,1fr);gap:10px;padding:7px 0;border-bottom:1px solid var(--line-soft)"><span class="lbl">' + esc(x.label) + '</span><span><span class="mono">' + esc(x.value) + '</span> <span class="lbl">' + esc(x.unit) + (x.note ? ' · ' + esc(x.note) : '') + '</span></span></div>').join('') + '</div>' +
       '<span class="lbl">' + (uses.length ? 'Use these values fills in the ' + uses.join(', ') + '. Nothing is saved until you save the setup.' : 'Nothing here can be filled in automatically.') + '</span>' +
       '<div style="display:flex;justify-content:flex-end;gap:8px"><button class="tb" data-a="close">Close</button>' + (uses.length ? '<button class="btn-primary" data-a="useRead">Use these values</button>' : '') + '</div></div></div>';
+  }
+  if (ui.dlg.kind === 'found') {
+    const l = ui.dlg.list;
+    return '<div class="scrim"><div role="dialog" aria-label="Ruida controllers found" class="dlg" style="max-width:600px"><span class="h-sec" style="font-size:18px">Ruida controllers on the network</span>' +
+      (l.length
+        ? '<div>' + l.map((f, i) => '<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--line-soft)"><span style="flex:1;min-width:0"><span class="mono">' + esc(f.ip) + '</span> <span class="lbl">' + (f.card ? 'card ' + esc(f.card) + ' · ' : '') + 'magic 0x' + f.magic.toString(16).toUpperCase() + (f.via ? ' · via ' + esc(f.via) : '') + '</span></span><button class="btn-primary" data-a="useFound" data-v="' + i + '">Use</button></div>').join('') + '</div>'
+        : '<span class="lbl">No Ruida controller answered. Check it is switched on and cabled to this computer, that this computer\'s Ethernet has an address on the same network as the controller (Setup → Network), and that LightBurn, RDWorks and RDCutting are closed.</span>') +
+      '<div style="display:flex;justify-content:flex-end;gap:8px"><button class="tb" data-a="close">Close</button></div></div></div>';
   }
   if (ui.dlg.kind === 'update') return updateWindow();
   if (ui.dlg.kind === 'changelog') return changelogWindow(ui.dlg.entries, ui.dlg.title);
@@ -737,6 +746,19 @@ const H = {
     ui.reading = true; render();
     try { ui.dlg = { kind: 'readback', r: await call('POST', LOCAL('/machine/read'), ui.draft) }; } catch (e) { toast('Couldn\'t read the controller: ' + e.message, { ms: 8000 }); }
     ui.reading = false; render();
+  },
+  // Setup → Find on network: Ruida controllers that answer; pick one to fill in its IP
+  findRuida: async () => {
+    ui.finding = true; render();
+    try { ui.dlg = { kind: 'found', list: (await call('POST', LOCAL('/ruida/find'))).found }; } catch (e) { toast('Couldn\'t search: ' + e.message, { ms: 8000 }); }
+    ui.finding = false; render();
+  },
+  useFound: (v) => {
+    const f = ui.dlg.list[Number(v)];
+    set(ui.draft, 'connection.ip', f.ip);
+    set(ui.draft, 'ruida.magic', f.magic);
+    ui.dlg = null;
+    toast('Controller ' + f.ip + ' filled in. ' + (cfg().configured ? 'Save to machine' : 'Add machine') + ' to connect.', { ms: 6000 });
   },
   useRead: () => {
     const s = (ui.dlg && ui.dlg.r && ui.dlg.r.suggest) || {};

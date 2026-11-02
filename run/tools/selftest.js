@@ -370,7 +370,26 @@ async function linkTests() {
     ok(rl2.magic === 0x11 && /detected/.test(info2.firmware), 'wrong swizzle magic in Setup: detected 0x11 from the first reply and connected', info2.firmware);
   } catch (e) { ok(false, 'magic detection', e.message); }
   await rl2.close();
+
+  // Setup → Find on network: the controller answers and gives away its magic and card ID
+  magic = 0xa1;
+  try {
+    const found = await RuidaLink.find(null, ['127.0.0.1']);
+    ok(found.length === 1 && found[0].magic === 0xa1 && found[0].card === '0x6445', 'Find on network: controller at 127.0.0.1, magic 0xA1, card 0x6445', JSON.stringify(found));
+  } catch (e) { ok(false, 'Find on network', e.message); }
+
+  // another program holding UDP 40200 (LightBurn, RDWorks…): a clear message, no fallback port
+  const squatter = dgram.createSocket('udp4');
+  await new Promise((r) => squatter.bind(40200, r));
+  const rl3 = new RuidaLink(cfgR, () => {});
+  try { await rl3.connect(); ok(false, 'UDP 40200 in use', 'connected anyway'); } catch (e) { ok(/40200 is in use/.test(e.message), 'UDP 40200 in use by another program: says so', e.message); }
+  await rl3.close().catch(() => {});
+  squatter.close();
   sock.close();
+
+  // settings a controller doesn't have come back as 0xF2390000 (RDD6584): not shown as values
+  const na = require('../src/ctrl/ruida/readback').interpret({ rangeX: 1450000, rangeY: 1520000, maxVelX: 0xf2390000, maxVelY: 0xf2390000, cardId: 0x69106910 });
+  ok(JSON.stringify(na.suggest) === '{"bed":[1450,1520]}' && na.rows.some((r) => r.value === '0x6910'), 'Read from controller: "not available" settings left out, card shown as 0x6910', JSON.stringify(na));
 }
 
 linkTests().then(serverTests).then(() => {
