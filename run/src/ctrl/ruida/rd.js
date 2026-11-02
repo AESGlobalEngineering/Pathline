@@ -94,8 +94,13 @@ const RD = {
   // realtime
   start: () => [0xd8, 0x00], stop: () => [0xd8, 0x01], pause: () => [0xd8, 0x02], resume: () => [0xd8, 0x03],
   homeXY: () => [0xd8, 0x2a],
-  // rapid move XY; option 0x02 = plain move, 0x03 = with the red light
+  // rapid move XY; option 0x02 = plain move, 0x03 = with the red light. Not used by hand on
+  // a knife controller: some references list D9 10 as Home XY, and an RDD6584 ran on for
+  // seconds, deaf to the network and its own panel, after one.
   rapidXY: (x, y, light) => [0xd9, 0x10, light ? 0x03 : 0x02, ...abs(x), ...abs(y)],
+  // rapid move along one axis (D9 00 = X, D9 01 = Y), the same in every reference
+  rapidX: (x, light) => [0xd9, 0x00, light ? 0x03 : 0x02, ...abs(x)],
+  rapidY: (y, light) => [0xd9, 0x01, light ? 0x03 : 0x02, ...abs(y)],
   getSetting: (addr) => [0xda, 0x00, addr >> 8, addr & 0xff]
 };
 const MEM = { cardId: 0x057e, status: 0x0400, x: 0x0421, y: 0x0431, z: 0x0441, u: 0x0451, bedX: 0x0026, bedY: 0x0036 };
@@ -107,7 +112,7 @@ const NAMES = {
   'c6 31': 'PART_MIN_POWER_1', 'c6 32': 'PART_MAX_POWER_1', 'c6 41': 'PART_MIN_POWER_2', 'c6 42': 'PART_MAX_POWER_2',
   'c6 05': 'MIN_POWER_3', 'c6 06': 'MAX_POWER_3', 'c6 07': 'MIN_POWER_4', 'c6 08': 'MAX_POWER_4',
   'c6 35': 'PART_MIN_POWER_3', 'c6 36': 'PART_MAX_POWER_3', 'c6 37': 'PART_MIN_POWER_4', 'c6 38': 'PART_MAX_POWER_4',
-  'a0 08': 'MOVE_U', 'd9 03': 'RAPID_U',
+  'a0 08': 'MOVE_U', 'd9 03': 'RAPID_U', 'd9 00': 'RAPID_X', 'd9 01': 'RAPID_Y',
   'c6 12': 'LASER_ON_DELAY', 'c6 13': 'LASER_OFF_DELAY', 'ca 06': 'PART_COLOR', 'ca 41': 'PART_WORK_MODE', 'ca 02': 'LAYER_NUMBER',
   'ca 01': 'LAYER_FLAG', 'ca 03': 'EN_LASER_TUBE_START', 'ca 22': 'MAX_LAYER_PART', 'd8 00': 'START_PROCESS', 'd8 01': 'STOP',
   'd8 02': 'PAUSE', 'd8 03': 'RESUME', 'd8 10': 'REF_POINT_MODE_2', 'd8 2a': 'HOME_XY', 0xd7: 'EOF', 0xf0: 'REF_POINT_SET',
@@ -138,7 +143,8 @@ function describe(c) {
   else if (key2 === 'c9 04') a = 'part ' + c[2] + ', ' + dec(c.subarray(3)) / 1000 + ' mm/s';
   else if (/^c6 0[1-8]|^c6 2[12]/.test(key2)) a = (dec(c.subarray(2)) * 100 / 16383).toFixed(1) + ' %';
   else if (/^c6 3[1-8]|^c6 4[12]/.test(key2)) a = 'part ' + c[2] + ', ' + (dec(c.subarray(3)) * 100 / 16383).toFixed(1) + ' %';
-  else if (key2 === 'a0 08') a = (dec(c.subarray(2, 7)) / 1000).toFixed(3) + ' mm';
+  else if (key2 === 'd9 00' || key2 === 'd9 01') a = 'opt ' + c[2] + ', ' + (dec(c.subarray(3, 8)) / 1000).toFixed(3) + ' mm';
+  else if (key2 === 'a0 08') a =(dec(c.subarray(2, 7)) / 1000).toFixed(3) + ' mm';
   else if (key2 === 'd9 10') a = 'opt ' + c[2] + ', ' + (dec(c.subarray(3, 8)) / 1000).toFixed(3) + ', ' + (dec(c.subarray(8, 13)) / 1000).toFixed(3) + ' mm';
   else if (c.length > 2) a = Buffer.from(c.subarray(key2 && NAMES[key2] ? 2 : 1)).toString('hex');
   return name + (a ? ' ' + a : '');

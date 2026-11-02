@@ -19,7 +19,8 @@ function magicFromAck(b) {
 }
 
 const PORT_OUT = 50200;
-const PORT_IN = 40200;
+// (the self-test uses another port, so it runs while Pathline Run is connected to a machine)
+const PORT_IN = Number(process.env.PATHLINE_RUN_RUIDA_PORT_IN) || 40200;
 const MAX_PACKET = 1000;
 const ACK_MS = 4000;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -49,8 +50,8 @@ class RuidaLink {
     // from, so we must have that port: no falling back to another one
     await new Promise((resolve, reject) => {
       this.sock.once('error', (e) => reject(new Error(e.code === 'EADDRINUSE'
-        ? 'UDP port 40200 is in use by another program (LightBurn, RDWorks or RDCutting?). Close it, then Reconnect.'
-        : 'Can\'t open UDP port 40200: ' + e.message)));
+        ? 'UDP port ' + PORT_IN + ' is in use by another program (LightBurn, RDWorks or RDCutting?). Close it, then Reconnect.'
+        : 'Can\'t open UDP port ' + PORT_IN + ': ' + e.message)));
       this.sock.bind(PORT_IN, resolve);
     });
     const id = await this.query(MEM.cardId).catch(() => { throw new Error('No answer from the Ruida controller at ' + this.host); });
@@ -177,7 +178,26 @@ class RuidaLink {
   }
 
   send(seg, ctl) { return this.sendRaw(seg.data, ctl); }
-  moveTo(x, y, o = {}) { return this.sendRaw(Buffer.from(RD.rapidXY(this.M.x(x), this.M.y(y), o.light))); }
+  // Moves by hand go one axis at a time (D9 00 / D9 01): the two-axis D9 10 isn't the same
+  // command on every controller (see rd.js). o.axis: only that axis moves (jogging).
+  async moveTo(x, y, o = {}) {
+    const mx = Buffer.from(RD.rapidX(this.M.x(x), o.light)), my = Buffer.from(RD.rapidY(this.M.y(y), o.light));
+    if (o.axis === 'x') return this.sendRaw(mx);
+    if (o.axis === 'y') return this.sendRaw(my);
+    await this.sendRaw(mx);
+    await this.waitStill();
+    return this.sendRaw(my);
+  }
+
+  // until the controller says it isn't moving (it may not answer while it moves)
+  async waitStill(ms = 60000) {
+    const t0 = Date.now();
+    await sleep(100);
+    while (Date.now() - t0 < ms) {
+      try { if (!(await this.query(MEM.status) & 0x01000000)) return; } catch (e) { /* busy: ask again */ }
+      await sleep(100);
+    }
+  }
   home() { return this.sendRaw(Buffer.from(RD.homeXY())); }
   // a jog arrow let go: every move is a rapid at the controller's own travel speed, which it
   // would otherwise finish, so stop it where it is
@@ -223,7 +243,7 @@ async function find(log, targets) {
   const os = require('os');
   const sock = dgram.createSocket('udp4');
   await new Promise((resolve, reject) => {
-    sock.once('error', (e) => reject(new Error(e.code === 'EADDRINUSE' ? 'UDP port 40200 is in use by another program (LightBurn, RDWorks or RDCutting?)' : e.message)));
+    sock.once('error', (e) => reject(new Error(e.code === 'EADDRINUSE' ? 'UDP port ' + PORT_IN + ' is in use by another program (LightBurn, RDWorks or RDCutting?)' : e.message)));
     sock.bind(PORT_IN, resolve);
   });
   sock.setBroadcast(true);

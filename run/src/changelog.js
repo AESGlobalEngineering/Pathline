@@ -5,6 +5,12 @@
 
 module.exports = [
   {
+    version: '0.5.4', date: '2 Nov 2026',
+    fixed: [
+      'Ruida: moves by hand (jog, go to 0, 0, frame) use the one-axis move commands. The two-axis command isn\'t the same on every controller: on an RDD6584 knife controller one jog ran on for seconds, with the controller deaf to Pathline Run and its own panel.'
+    ]
+  },
+  {
     version: '0.5.3', date: '2 Nov 2026',
     added: [
       'Pathline Run always fits the window: the bed view takes the space that\'s left, and the Start/Stop bar is always on screen.',

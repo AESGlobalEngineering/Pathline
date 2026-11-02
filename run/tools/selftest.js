@@ -5,6 +5,8 @@
 //   node tools/selftest.js
 'use strict';
 
+// the fake Ruida answers whatever port asked; the real 40200 may be held by Pathline Run itself
+process.env.PATHLINE_RUN_RUIDA_PORT_IN = process.env.PATHLINE_RUN_RUIDA_PORT_IN || '41200';
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -386,6 +388,7 @@ async function linkTests() {
     rdev.bytes += raw.length;
     for (const c of rd.commands(raw)) {
       rdev.cmds.push(c[0]);
+      rdev.keys = (rdev.keys || []).concat(hex(c.subarray(0, 2)));
       if (c[0] === 0xda && c[1] === 0x00) {
         const addr = (c[2] << 8) | c[3];
         const v = { 0x057e: 0x6445, 0x0400: 0, 0x0421: 850000, 0x0431: 20000, 0x0026: 900000, 0x0036: 600000, 0x0023: 400000, 0x0033: 300000, 0x0025: 3000000, 0x0035: 2500000 }[addr] || 0;
@@ -401,6 +404,11 @@ async function linkTests() {
     ok(/6445/.test(info.model), 'card id query answered (' + info.model + ')');
     const p = await rl.poll();
     ok(p.state === 'idle' && Math.abs(p.pos.x - 50) < 0.01 && Math.abs(p.pos.y - 20) < 0.01, 'poll: idle at 50, 20 mm (controller 850, 20 with origin top right)', JSON.stringify(p.pos));
+    // moves by hand: one axis at a time (D9 00 X, D9 01 Y), never the two-axis D9 10
+    rdev.keys = [];
+    await rl.moveTo(50, 30, { axis: 'y' });
+    await rl.moveTo(0, 0);
+    ok(rdev.keys.filter((k) => k.startsWith('d9')).join() === 'd901,d900,d901', 'jog Y sends D9 01 only; go to 0, 0 sends D9 00 then D9 01 (no D9 10)', rdev.keys.join());
     const prog = ruida.compile(plan.build(example), cfgR);
     const before = rdev.bytes;
     for (const s of prog.segments.filter((x) => x.kind === 'stream')) await rl.send(s, {});
@@ -431,9 +439,9 @@ async function linkTests() {
 
   // another program holding UDP 40200 (LightBurn, RDWorks…): a clear message, no fallback port
   const squatter = dgram.createSocket('udp4');
-  await new Promise((r) => squatter.bind(40200, r));
+  await new Promise((r) => squatter.bind(Number(process.env.PATHLINE_RUN_RUIDA_PORT_IN), r));
   const rl3 = new RuidaLink(cfgR, () => {});
-  try { await rl3.connect(); ok(false, 'UDP 40200 in use', 'connected anyway'); } catch (e) { ok(/40200 is in use/.test(e.message), 'UDP 40200 in use by another program: says so', e.message); }
+  try { await rl3.connect(); ok(false, 'UDP 40200 in use', 'connected anyway'); } catch (e) { ok(/UDP port \d+ is in use by another program/.test(e.message), 'UDP 40200 in use by another program: says so', e.message); }
   await rl3.close().catch(() => {});
   squatter.close();
   sock.close();

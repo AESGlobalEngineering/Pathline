@@ -146,7 +146,7 @@ class Machine {
       if (b.axis === 'x') x = to; else y = to;
       if (Math.abs(to - this.st.pos[b.axis]) < 0.001) return { pos: this.st.pos };
     }
-    await this.link.moveTo(x, y);
+    await this.link.moveTo(x, y, b.axis ? { axis: b.axis } : {});
     this.st.pos = { ...this.st.pos, x: +x.toFixed(3), y: +y.toFixed(3) };
     return { pos: this.st.pos };
   }
@@ -209,7 +209,7 @@ class Machine {
     h.busy = true;
     try {
       h.moved = true;
-      await this.link.moveTo(h.at.x, h.at.y, { speed: h.speed });
+      await this.link.moveTo(h.at.x, h.at.y, { speed: h.speed, axis: h.axis });
       if (this.hold !== h) return; // let go meanwhile
       this.apply(await this.link.poll());
     } catch (e) {
