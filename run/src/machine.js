@@ -321,8 +321,8 @@ class Machine {
     }
     let program;
     // a plotter's conveyor moves on from where it stopped last time
-    const opts = {};
-    if (pkg.toolpath.some((s) => s.type === 'feed') && this.link && this.link.readU) opts.uStart = await this.link.readU().catch(() => 0);
+    const opts = { card: this.info && this.info.cardId ? this.info.cardId & 0xffff : undefined };
+    if (pkg.toolpath.some((s) => s.type === 'feed') && this.link && this.link.readU && !this.link.relMoves) opts.uStart = await this.link.readU().catch(() => 0);
     try { program = this.compile(pkg, opts); } catch (e) { throw Object.assign(new Error('Couldn\'t convert "' + job.name + '": ' + e.message), { code: 409 }); }
     if (program.segments.some((s) => s.kind === 'inspect') && this.cfg.regMarks !== 'ignore') {
       throw busyErr('"' + job.name + '" uses registration marks, and Pathline Run has no camera yet. Set Registration marks to "Skip" in Setup to run it uncorrected.');

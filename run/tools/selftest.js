@@ -176,6 +176,35 @@ console.log('Ruida plotter');
   ok(cmds.some((c) => /^LASER_ON_DELAY/.test(c)), 'tool down/up times in the on/off delays');
 }
 
+console.log('RDD6584 knife job (compared with VCutWorks, recorded on a YC-1610)');
+{
+  const knife = require('../src/ctrl/ruida/knife');
+  // the 113.791 × 75.861 mm rectangle VCutWorks cut at 60 mm/s, then fed 500 mm
+  const pts = [[62.088, 74.263], [62.088, 150.124], [175.879, 150.124], [175.879, 74.263], [62.088, 74.263]];
+  const planK = { name: 'square', warnings: [], seconds: 10, steps: [{ op: 'cut', i: 0, proc: { speed: 60, slot: 'T1' }, runs: [pts], seconds: 9 }, { op: 'feed', i: 1, seconds: 1 }] };
+  const progK = knife.compile(planK, { feedLen: 500, timing: {} }, { card: 0x6910 });
+  ok(progK.segments.length === 1 && progK.segments[0].kind === 'file', 'one bed → one file to upload and start');
+  const h = progK.segments[0].data.toString('hex');
+  const recorded = 'ca0000ca0200c9020000035460' +
+    '80000003650800000444170000053f10e73a01e73500005231740000631d09ca080000053f10a00000036508000009146c0000053f10ca090000000000' +
+    '800000036508000009146c0000000000e73a01e735000052317400005e4c34ca080000000000a000000a5e07000009146c0000000000ca090000000000' +
+    '8000000a5e07000009146c0000103d30e73a01e73500005231740000631d09ca080000103d30a000000a5e0700000444170000103d30ca090000000000' +
+    '8000000a5e07000004441700000a7e20e73a01e73500005702490000631d09ca0800000a7e20a00000036508000004441700000a7e20ca090000000000' +
+    'e7180000000001ebe700da010620000000027b000000027bd7';
+  ok(h.endsWith(recorded), 'cuts, knife angles (90°, 0°, 270°, 180°), Y bands and cut length (379 mm) match VCutWorks byte for byte', h.slice(h.indexOf('ca0000ca02')));
+  ok(h.includes('e706000000000200001e4220') && h.startsWith('d81000000a5e07000009146c040ce601ca306910f10200d800'), 'feed 500 mm after the job; header as VCutWorks writes it');
+  // a Pathline job over two beds: two files, the first feeding the conveyor one bed
+  const twoBeds = JSON.parse(fs.readFileSync(path.join(FIX, 'plotter-two-beds.json'), 'utf8'));
+  const cfgK = { ...config.defaults('ruida'), configured: true, type: 'plotter', bed: [1600, 1000], feedLen: 1000, f: { ...config.defaults('ruida').f, conveyor: true }, ruida: { model: 'RDD6584G', magic: 0xa1, origin: 'tr' } };
+  const prog2 = ruida.compile(plan.build(twoBeds), cfgK, { card: 0x6910 });
+  const files = prog2.segments.filter((s) => s.kind === 'file');
+  const feeds = files.map((s) => s.data.toString('hex').match(/e706([0-9a-f]{20})/)[1]);
+  ok(files.length === 2 && feeds[0] === '0000000002' + Buffer.from(rd.abs(1000000)).toString('hex') && feeds[1] === '0'.repeat(20) && rd.commands(files[1].data).some((c) => c[0] === 0xa0),
+    'two-bed job on an RDD6584: two files, a 1000 mm feed after the first, none after the last', feeds.join(' / '));
+  const ff = knife.feedFile(300).toString('hex');
+  ok(ff.includes('e7060000000002' + '0000122760') && !rd.commands(knife.feedFile(300)).some((c) => c[0] === 0x80 || c[0] === 0xa0), 'Conveyor: a job with no cuts and a 300 mm feed');
+}
+
 console.log('Refusals');
 {
   const cfg = config.defaults('trotec');
@@ -399,12 +428,18 @@ async function linkTests() {
     const raw = rd.unswizzle(body, magic);
     rdev.bytes += raw.length;
     for (const c of rd.commands(raw)) {
+      // an RDD6584's file memory: E8 01 n name, E8 00 a b delete, E8 02 + E7 01 name add, E8 03 n run
+      rdev.files = rdev.files || ['L100R80', 'START', 'X1'];
+      if (c[0] === 0xe8 && c[1] === 0x01) { const n = (c[2] << 7) | c[3]; sock.send(rd.swizzle(Buffer.from([0xe8, 0x01, c[2], c[3], ...Buffer.from((rdev.files[n - 1] || '') + '\0', 'latin1')]), magic), from.port, from.address); }
+      if (c[0] === 0xe8 && c[1] === 0x00) { const a = (c[2] << 7) | c[3], b = (c[4] << 7) | c[5]; rdev.files.splice(a - 1, b - a + 1); }
+      if (c[0] === 0xe7 && c[1] === 0x01 && rdev.keys && rdev.keys[rdev.keys.length - 1] === 'e802') rdev.files.push(Buffer.from(c.subarray(2, c.indexOf(0, 2))).toString('latin1'));
+      if (c[0] === 0xe8 && c[1] === 0x03) rdev.ran = (c[2] << 7) | c[3];
       rdev.cmds.push(c[0]);
       rdev.keys = (rdev.keys || []).concat(hex(c.subarray(0, 2)));
       rdev.raw = (rdev.raw || []).concat(hex(c));
       if (c[0] === 0xda && c[1] === 0x00) {
         const addr = (c[2] << 8) | c[3];
-        const v = { 0x057e: rdev.card || 0x6445, 0x0400: 0, 0x0421: 850000, 0x0431: 20000, 0x0026: 900000, 0x0036: 600000, 0x0023: 400000, 0x0033: 300000, 0x0025: 3000000, 0x0035: 2500000 }[addr] || 0;
+        const v = { 0x0405: (rdev.files || []).length, 0x057e: rdev.card || 0x6445, 0x0400: 0, 0x0421: 850000, 0x0431: 20000, 0x0026: 900000, 0x0036: 600000, 0x0023: 400000, 0x0033: 300000, 0x0025: 3000000, 0x0035: 2500000 }[addr] || 0;
         sock.send(rd.swizzle(Buffer.from([0xda, 0x01, c[2], c[3], ...rd.enc(v, 5), ...rd.enc(0, 5)]), magic), from.port, from.address);
       }
     }
@@ -454,11 +489,15 @@ async function linkTests() {
     await rk.moveTo(50, 30, { axis: 'y' });   // controller Y 20 mm → 30 mm: +10
     await rk.moveTo(40, 10, { axis: 'x' });   // controller X 850 mm → 860 mm (origin top right): +10
     await rk.moveTo(50, 10, { axis: 'y' });   // controller Y 20 mm → 10 mm: −10
-    await rk.feed(100);
     const moves = rdev.raw.filter((h) => /^(c902|d90)/.test(h));
-    const want = ['speed', 'd901020000004e10', 'speed', 'd900020000004e10', 'speed', 'd901027f7f7f3170', 'speed', 'd903020000060d20'];
+    const want = ['speed', 'd901020000004e10', 'speed', 'd900020000004e10', 'speed', 'd901027f7f7f3170'];
     ok(moves.length === want.length && want.every((w, i) => (w === 'speed' ? moves[i].startsWith('c902') : moves[i] === w)) && !rdev.keys.includes('d910'),
-    'RDD6584: jog Y +10, X +10, Y −10 and feed 100 mm sent as speed + move-by, as VCutWorks does', moves.join(' '));
+    'RDD6584: jog Y +10, X +10, Y −10 sent as speed + move-by, as VCutWorks does', moves.join(' '));
+    // Conveyor: the old START file is replaced (only that one), the feed job uploaded and started
+    rdev.raw = []; rdev.files = ['L100R80', 'START', 'X1']; rdev.ran = null;
+    await rk.feed(100);
+    ok(rdev.files.join() === 'L100R80,X1,START' && rdev.ran === 3 && rdev.raw.some((h) => h === 'e70600000000020000060d20'),
+      'RDD6584 Conveyor: START replaced (other files kept), feed-only job with 100 mm uploaded and started', rdev.files.join() + ' ran ' + rdev.ran);
     ok(rk.continuousJog, 'RDD6584: a held arrow is one long move (no judder between steps)');
   } catch (e) { ok(false, 'RDD6584 moves', e.stack); }
   await rk.close();

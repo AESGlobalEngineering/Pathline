@@ -30,8 +30,12 @@ function mapper(S) {
   };
 }
 
+// knife controllers (RDD6584…) take a different job format, uploaded as a file: knife.js
+const isKnife = (cfg) => /^RDD/.test((cfg.ruida || {}).model || '');
+
 // opts.file: one stream for a file on disk (dwells and marks dropped)
 function compile(plan, cfg, opts = {}) {
+  if (isKnife(cfg)) return require('./knife').compile(plan, cfg, opts);
   const S = settings(cfg);
   const M = mapper(S);
   const warnings = plan.warnings.slice();
@@ -216,4 +220,4 @@ function exportFiles(plan, cfg) {
   return { bin: swizzle(raw, program.magic), txt: txt.join('\n'), ext: '.rd', notes };
 }
 
-module.exports = { compile, exportFiles, mapper, settings };
+module.exports = { compile, exportFiles, mapper, settings, isKnife };

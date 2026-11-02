@@ -5,6 +5,14 @@
 
 module.exports = [
   {
+    version: '0.5.7', date: '2 Nov 2026',
+    added: [
+      'RDD6584 knife controllers: jobs in the knife\'s own format, as VCutWorks sends them. Each bed is uploaded to the controller as a file (START, replacing the last one) and started; every cut carries the knife\'s angle, and the knife lifts and turns at sharp corners.',
+      'RDD6584: jobs over several beds feed between beds. The controller does the feed itself (clamps and pulls along Y), and runs its vacuum zones as it does for VCutWorks.',
+      'RDD6584: the Conveyor button runs a job with no cuts and one feed.'
+    ]
+  },
+  {
     version: '0.5.6', date: '2 Nov 2026',
     added: ['Jog page: the conveyor button is called Conveyor.'],
     fixed: [

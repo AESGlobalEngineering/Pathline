@@ -106,7 +106,8 @@ const RD = {
   moveByU: (du) => [0xd9, 0x03, 0x02, ...abs(du)],
   getSetting: (addr) => [0xda, 0x00, addr >> 8, addr & 0xff]
 };
-const MEM = { cardId: 0x057e, status: 0x0400, x: 0x0421, y: 0x0431, z: 0x0441, u: 0x0451, bedX: 0x0026, bedY: 0x0036 };
+// files: how many files the controller holds in memory (RDD6584)
+const MEM = { files: 0x0405, cardId: 0x057e, status: 0x0400, x: 0x0421, y: 0x0431, z: 0x0441, u: 0x0451, bedX: 0x0026, bedY: 0x0036 };
 
 // ---------------------------------------------------------------- decoding (listings and tests)
 const NAMES = {

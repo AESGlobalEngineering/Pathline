@@ -37,6 +37,7 @@ class RuidaLink {
     this.chain = Promise.resolve();
     this.pending = null;   // waiting for an ACK
     this.answers = [];     // waiting for DA 01 replies
+    this.names = [];       // waiting for E8 01 replies (file names)
     this.supports = { air: false, pointer: false };
   }
 
@@ -80,6 +81,14 @@ class RuidaLink {
       return;
     }
     const d = unswizzle(m, this.magic);
+    // E8 01 n → the name of file n in the controller's memory
+    if (d[0] === 0xe8 && d[1] === 0x01 && d.length >= 4) {
+      const n = (d[2] << 7) | d[3];
+      const end = d.indexOf(0, 4);
+      const i = this.names.findIndex((a) => a.n === n);
+      if (i >= 0) this.names.splice(i, 1)[0].resolve(d.subarray(4, end < 0 ? d.length : end).toString('latin1'));
+      return;
+    }
     if (d[0] === 0xda && d[1] === 0x01 && d.length >= 9) {
       const addr = (d[2] << 8) | d[3];
       const value = dec(d.subarray(4, 9));
@@ -180,7 +189,46 @@ class RuidaLink {
     return { state: busy ? 'busy' : 'idle', pos: { x: +mx.toFixed(3), y: +my.toFixed(3), z: 0 }, interlock: false, raw: st.toString(16) };
   }
 
-  send(seg, ctl) { return this.sendRaw(seg.data, ctl); }
+  send(seg, ctl) { return seg.kind === 'file' ? this.runFile(seg.data, ctl) : this.sendRaw(seg.data, ctl); }
+
+  // name of file n in the controller's memory (E8 01 n)
+  fileName(n) {
+    return this.serial(async () => {
+      const answer = new Promise((resolve, reject) => {
+        const a = { n, resolve };
+        this.names.push(a);
+        setTimeout(() => { const i = this.names.indexOf(a); if (i >= 0) { this.names.splice(i, 1); reject(new Error('No answer')); } }, 4000);
+      });
+      await this.packetNow(Buffer.from([0xe8, 0x01, (n >> 7) & 0x7f, n & 0x7f]));
+      return answer;
+    });
+  }
+
+  // RDD6584 knife job (knife.js): as VCutWorks does it, replace the file called START in the
+  // controller's memory with this one, then start it. Only a file named exactly START is
+  // ever deleted: the operator's own stored files are left alone.
+  async runFile(body, ctl = {}) {
+    const NAME = 'START';
+    const idx = (n) => [(n >> 7) & 0x7f, n & 0x7f];
+    await this.sendRaw(Buffer.from([0xd8, 0x6b]));
+    await this.sendRaw(Buffer.from([0xd8, 0x6a]));
+    const count = await this.query(MEM.files);
+    for (let n = count; n >= 1; n--) {
+      if ((await this.fileName(n)) !== NAME) continue;
+      await this.sendRaw(Buffer.from([0xe8, 0x00, ...idx(n), ...idx(n)]));
+      this.log('ruida: replaced file ' + n + ' (' + NAME + ')');
+      break;
+    }
+    if (ctl.aborted) return;
+    await this.sendRaw(Buffer.from([0xe8, 0x02, 0xe7, 0x01, ...Buffer.from(NAME + '\0', 'latin1')]));
+    await this.sendRaw(body, ctl);
+    await this.sendRaw(Buffer.from([0xe7, 0x00, 0xda, 0x01, 0x06, 0x20, ...new Array(10).fill(0), 0xd7]));
+    // it's the last file now: check its name before starting it
+    const n = await this.query(MEM.files);
+    if ((await this.fileName(n)) !== NAME) throw new Error('The job didn\'t arrive in the controller\'s memory (file ' + n + ' isn\'t ' + NAME + ')');
+    if (ctl.aborted) return;
+    await this.sendRaw(Buffer.from([0xe8, 0x03, ...idx(n)]));
+  }
   // Moves by hand go one axis at a time (D9 00 / D9 01): the two-axis D9 10 isn't the same
   // command on every controller (see rd.js). o.axis: only that axis moves (jogging).
   async moveTo(x, y, o = {}) {
@@ -247,8 +295,9 @@ class RuidaLink {
     return raw;
   }
   async feed(mm) {
-    // RDD6584: D9 03 moves the conveyor BY the value (as D9 00 / D9 01 do X and Y)
-    if (this.relMoves) return this.sendRaw(Buffer.from([...RD.speed(Math.max(1, (this.cfg.timing && this.cfg.timing.feedSpeed) || 100)), ...RD.moveByU(Math.round(mm * 1000))]));
+    // RDD6584: the controller feeds itself (clamp, pull along Y, release) after a job with a
+    // feed in it, so the button runs a job with no cuts and that feed
+    if (this.relMoves) return this.runFile(require('./knife').feedFile(mm, { card: this.info.cardId & 0xffff }));
     const u = await this.readU();
     await this.sendRaw(Buffer.from(RD.rapidU(Math.round((u + mm) * 1000))));
   }
