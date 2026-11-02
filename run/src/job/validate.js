@@ -63,7 +63,16 @@ function check(pkg, cfg) {
   }
   const blocked = (pkg.checks || []).find((c) => c && c.block);
   if (blocked) throw bad('Pathline blocked this job: ' + blocked.l);
+  if (!pkg.toolpath.some((s) => s.type === 'cut' || s.type === 'engrave')) throw bad(nothingToRun(pkg));
   return warnings;
+}
+
+// A job with nothing to cut (e.g. its drawing is on a colour no process uses): say why,
+// from Pathline's own checks where it gave them
+function nothingToRun(pkg) {
+  const why = (pkg.checks || []).filter((c) => c && c.ok === false).map((c) => c.l);
+  return 'Nothing to ' + (pkg.machine && pkg.machine.type === 'plotter' ? 'cut' : 'run') + ' in this job: no path has a process' +
+    (why.length ? ' (Pathline: ' + why.join('; ') + ')' : '') + '. In Pathline, give the drawing\'s colours a process, then send it again.';
 }
 
 // A .cjob file holds the editable job at the top level and the package in `run`.
@@ -73,4 +82,4 @@ function fromCjob(cjob) {
   return { ...cjob.run, entities: cjob.run.entities || cjob.entities || [], files: { cjob } };
 }
 
-module.exports = { check, fromCjob, bad };
+module.exports = { check, fromCjob, bad, nothingToRun };

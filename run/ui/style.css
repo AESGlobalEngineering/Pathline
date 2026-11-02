@@ -169,5 +169,22 @@ body{background:#0E0F11}
 @media (max-width:700px){.hmi .tabs.views > button{min-width:0;padding:0 10px}.hmi .tabs.views span.lab{display:none}.hmi .row{grid-template-columns:1fr}}
 .hmi[data-theme="dark"]{--bed:#3B3E44;--sheet:#44474E}
 .hmi .row .seg{flex-wrap:wrap;flex:initial;max-width:100%}
+/* the app always fits the window: nothing scrolls the page; long lists scroll inside */
+body{overflow:hidden}
+.hmi{height:100vh;overflow:hidden}
+.hmi .view.fit{overflow:hidden}
+.hmi .qview{display:flex;gap:12px;padding:12px;box-sizing:border-box}
+.hmi .qlist{flex:0 1 300px;min-width:220px;max-width:380px;min-height:0;display:flex;flex-direction:column}
+.hmi .qlist .bedsvg{width:auto;max-width:100%;height:110px;align-self:center}
+.hmi .qmain{flex:1 1 auto;min-width:0;min-height:0;display:flex;flex-direction:column}
+.hmi .qtop{flex:1;min-height:0;display:flex;gap:18px;padding:16px}
+.hmi .qinfo{flex:0 1 360px;min-width:240px;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:12px}
+.hmi .qbed{flex:1 1 400px;min-width:0;min-height:0;display:flex;flex-direction:column;gap:8px}
+.hmi .qrun{flex:none;display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px;padding:12px 16px;border-top:1px solid var(--line)}
+.hmi #bedview:active{cursor:grabbing}
+.hmi .jview{display:flex;gap:12px;padding:12px;box-sizing:border-box}
+/* narrow: the job's details above a shorter bed view */
+@media (max-width:1100px){.hmi .qtop{flex-direction:column}.hmi .qinfo{flex:0 1 auto;max-height:38%}.hmi .qbed{flex:1 1 0}.hmi .qremain{display:none !important}}
+@media (max-width:760px){.hmi .qlist{min-width:170px}.hmi .qinfo{min-width:0}}
 @keyframes plr-pulse{0%,100%{box-shadow:0 0 0 3px var(--accent-ring)}50%{box-shadow:0 0 0 7px var(--accent-ring)}}
 @keyframes plr-pulse-blue{0%,100%{box-shadow:0 0 0 2px rgba(62,99,221,.25)}50%{box-shadow:0 0 0 6px rgba(62,99,221,.25)}}

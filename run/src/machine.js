@@ -73,7 +73,8 @@ class Machine {
 
   startPolling() {
     const loop = async () => {
-      if (this.st.link === 'online' && !this.run) {
+      // (while an arrow is held, the jog reads the position itself)
+      if (this.st.link === 'online' && !this.run && !this.hold) {
         try { this.apply(await this.link.poll()); } catch (e) { this.lost(e); }
       }
       this.pollTimer = setTimeout(loop, this.run ? 1000 : 500);
@@ -116,22 +117,35 @@ class Machine {
   clampX(x) { return Math.max(0, Math.min(this.cfg.bed[0], x)); }
   clampY(y) { return Math.max(0, Math.min(this.cfg.bed[1], y)); }
 
+  // How far a jog may go along an axis: the bed, widened to wherever the head is now. A head
+  // outside the bed set in Setup (bed set smaller than the machine) is never pulled back
+  // across to the bed edge: that was a long rapid, in whichever direction was pressed.
+  jogRange(axis) {
+    const max = axis === 'x' ? this.cfg.bed[0] : this.cfg.bed[1];
+    const cur = this.st.pos[axis];
+    return Number.isFinite(cur) ? [Math.min(0, cur), Math.max(max, cur)] : [0, max];
+  }
+
   async jog(b) {
     this.guard({ lidOpenOk: true }); // beam off: the head may move with the lid open
     let x = this.st.pos.x, y = this.st.pos.y;
     if (b.x !== undefined || b.y !== undefined) {
       if (b.x !== undefined) x = Number(b.x);
       if (b.y !== undefined) y = Number(b.y);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) throw Object.assign(new Error('x and y must be numbers'), { code: 400 });
+      x = this.clampX(x); y = this.clampY(y);
     } else {
       const d = Number(b.distance);
       if (!Number.isFinite(d)) throw Object.assign(new Error('distance must be a number'), { code: 400 });
-      if (b.axis === 'x') x += d;
-      else if (b.axis === 'y') y += d;
-      else if (b.axis === 'z') throw busyErr('This machine has no Z axis');
-      else throw Object.assign(new Error('axis must be x, y or z'), { code: 400 });
+      if (b.axis === 'z') throw busyErr('This machine has no Z axis');
+      if (b.axis !== 'x' && b.axis !== 'y') throw Object.assign(new Error('axis must be x, y or z'), { code: 400 });
+      if (!Number.isFinite(x) || !Number.isFinite(y)) throw busyErr('The head position isn\'t known yet');
+      // a step along one axis: only that axis moves, and never the other way from the arrow
+      const [lo, hi] = this.jogRange(b.axis);
+      const to = Math.max(lo, Math.min(hi, this.st.pos[b.axis] + d));
+      if (b.axis === 'x') x = to; else y = to;
+      if (Math.abs(to - this.st.pos[b.axis]) < 0.001) return { pos: this.st.pos };
     }
-    if (!Number.isFinite(x) || !Number.isFinite(y)) throw Object.assign(new Error('x and y must be numbers'), { code: 400 });
-    x = this.clampX(x); y = this.clampY(y);
     await this.link.moveTo(x, y);
     this.st.pos = { ...this.st.pos, x: +x.toFixed(3), y: +y.toFixed(3) };
     return { pos: this.st.pos };
@@ -152,17 +166,25 @@ class Machine {
       Object.assign(this.hold, { until, speed });
       return { holding: true };
     }
-    if (!this.hold) this.guard({ lidOpenOk: true });
+    if (this.hold) await this.jogRelease(); // another arrow: stop this move first
+    this.guard({ lidOpenOk: true });
+    if (!Number.isFinite(this.st.pos.x) || !Number.isFinite(this.st.pos.y)) throw busyErr('The head position isn\'t known yet');
     const at = { x: this.st.pos.x, y: this.st.pos.y };
-    this.hold = { axis, dir, speed, until, at, ideal: at[axis], last: Date.now(), busy: false };
+    this.hold = { axis, dir, speed, until, at, range: this.jogRange(axis), ideal: at[axis], last: Date.now(), busy: false, moved: false };
     if (!this.holdTimer) this.holdTimer = setInterval(() => this.holdTick(), 100);
     return { holding: true };
   }
 
-  jogRelease() {
+  // Let go: no more steps, and a controller that finishes the move it has (Ruida: every
+  // move is a full-speed rapid) is told to stop where it is.
+  async jogRelease() {
+    const h = this.hold;
     this.hold = null;
     clearInterval(this.holdTimer);
     this.holdTimer = null;
+    if (h && h.moved && this.link && this.link.stopMove) {
+      try { await this.link.stopMove(); } catch (e) { this.log('jog stop: ' + e.message); }
+    }
     return { holding: false };
   }
 
@@ -173,20 +195,22 @@ class Machine {
     // where the head should be by now at this speed, but never more than ~0.15 s ahead of
     // where it is, so it stops close to where the arrow was let go
     const now = Date.now();
-    const max = h.axis === 'x' ? this.cfg.bed[0] : this.cfg.bed[1];
+    const [min, max] = h.range;
     h.ideal += h.dir * h.speed * ((now - h.last) / 1000);
     h.last = now;
     const lead = h.speed * 0.15 + 0.05;
     // the reported position is a moment old: allow for how far the head has moved since
     const age = Math.min(0.3, (now - (this.posAt || now)) / 1000);
     const cur = this.st.pos[h.axis] + h.dir * h.speed * age;
-    const target = Math.max(0, Math.min(max, h.dir > 0 ? Math.min(h.ideal, cur + lead) : Math.max(h.ideal, cur - lead)));
+    const target = Math.max(min, Math.min(max, h.dir > 0 ? Math.min(h.ideal, cur + lead) : Math.max(h.ideal, cur - lead)));
     h.ideal = target;
     if (h.dir * (target - h.at[h.axis]) < 0.005) return; // nothing new to send (or at the bed edge)
     h.at[h.axis] = target;
     h.busy = true;
     try {
+      h.moved = true;
       await this.link.moveTo(h.at.x, h.at.y, { speed: h.speed });
+      if (this.hold !== h) return; // let go meanwhile
       this.apply(await this.link.poll());
     } catch (e) {
       this.log('jog: ' + e.message);
@@ -267,6 +291,8 @@ class Machine {
     if (!job) return { state: this.st.state, message: 'Nothing queued' };
     // as placed: moved to the head if the operator anchored it there
     const pkg = this.store.runPkg(job.id);
+    // queued before Pathline Run checked for this: don't "complete" a job that does nothing
+    if (!(pkg.toolpath || []).some((s) => s.type === 'cut' || s.type === 'engrave')) throw busyErr('"' + job.name + '": ' + validate.nothingToRun(pkg));
     if (job.anchor) {
       try { validate.check(pkg, this.cfg); } catch (e) { throw busyErr('"' + job.name + '" anchored at the head: ' + e.message); }
     }

@@ -29,7 +29,7 @@ const aciFg = (n) => ([2, 3, 4, 9].includes(n) ? '#15181E' : '#FFFFFF');
 const ui = {
   view: 'queue', sel: null, dark: matchMedia('(prefers-color-scheme: dark)').matches, themeSet: false,
   step: '10', navOpen: false, dlg: null, toast: null, setTab: 'Machine', draft: null, ports: [], pkgs: {}, histFilter: 'All',
-  trail: { job: null, pts: [] }, net: null, netDraft: null
+  trail: { job: null, pts: [] }, net: null, netDraft: null, zoom: { k: 1, cx: NaN, cy: NaN }
 };
 try { const t = localStorage.getItem('plr-theme'); if (t) { ui.dark = t === 'dark'; ui.themeSet = true; } } catch (e) { /* private mode */ }
 let S = null; // last /api/local/state
@@ -105,7 +105,8 @@ function bedSvg(pkg, opts = {}) {
       }
     }
   }
-  const r = Math.max(W, H) / 70;
+  // zoomed in, the head ring and markers keep their size on screen
+  const r = Math.max(W, H) / 70 / (opts.head ? ui.zoom.k : 1);
   // where an anchored job's top-left corner was pinned (green, as in the design)
   if (opts.big && pkg && pkg.anchor) {
     body += '<circle cx="' + pkg.anchor.x + '" cy="' + pkg.anchor.y + '" r="' + r * 0.6 + '" fill="var(--bed)" stroke="#30A46C" stroke-width="' + r / 4 + '"/>';
@@ -122,11 +123,60 @@ function bedSvg(pkg, opts = {}) {
       '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="var(--accent-ring)" stroke="var(--accent)" stroke-width="' + r / 4 + '"/><circle cx="' + x + '" cy="' + y + '" r="' + r / 4 + '" fill="var(--accent)"/>';
   }
   if (!opts.head) return '<svg class="bedsvg" viewBox="0 0 ' + W + ' ' + H + '" style="aspect-ratio:' + W + '/' + H + '" preserveAspectRatio="xMidYMid meet" aria-hidden="true">' + body + '</svg>';
-  // with the head shown: a margin around the bed, so the whole circle shows at the edges and corners
-  const m = r * 1.25 + r / 8;
-  const vb = [-m, -m, W + 2 * m, H + 2 * m].map((v) => +v.toFixed(2));
-  return '<svg viewBox="' + vb.join(' ') + '" style="display:block;width:100%;aspect-ratio:' + vb[2] + '/' + vb[3] + '" preserveAspectRatio="xMidYMid meet" aria-hidden="true">' +
+  // with the head shown: the whole viewport, zoomed and panned (bedViewBox)
+  return '<svg id="bedview" viewBox="' + bedViewBox().join(' ') + '" style="display:block;width:100%;height:100%;touch-action:none;cursor:grab" preserveAspectRatio="xMidYMid meet" aria-hidden="true">' +
     '<rect x="0" y="0" width="' + W + '" height="' + H + '" rx="' + (W / 200).toFixed(2) + '" fill="var(--bed)" stroke="var(--bed-line)" vector-effect="non-scaling-stroke" style="stroke-width:1px"/>' + body + '</svg>';
+}
+
+// ---------------------------------------------------------------- bed view: zoom and pan
+// ui.zoom: k (1 = whole bed) and the centre (bed mm) of what's shown. Wheel or pinch to
+// zoom, drag to pan, the +/−/Fit buttons, or double-click to fit again.
+function bedViewBox() {
+  const [W, H] = cfg().bed;
+  // at 1×, a margin round the bed so the whole head ring shows at the edges and corners
+  const m = (Math.max(W, H) / 70) * 1.4;
+  const z = ui.zoom;
+  const w = (W + 2 * m) / z.k, h = (H + 2 * m) / z.k;
+  const cx = z.k === 1 || !Number.isFinite(z.cx) ? W / 2 : z.cx, cy = z.k === 1 || !Number.isFinite(z.cy) ? H / 2 : z.cy;
+  return [cx - w / 2, cy - h / 2, w, h].map((v) => +v.toFixed(2));
+}
+function zoomBed(f, at) {
+  const [W, H] = cfg().bed;
+  const z = ui.zoom;
+  const k = Math.max(1, Math.min(40, z.k * f));
+  const vb = bedViewBox();
+  const c = [vb[0] + vb[2] / 2, vb[1] + vb[3] / 2];
+  const p = at || c;
+  const g = k / z.k;
+  // the point under the pointer stays put
+  z.cx = Math.max(0, Math.min(W, p[0] + (c[0] - p[0]) / g));
+  z.cy = Math.max(0, Math.min(H, p[1] + (c[1] - p[1]) / g));
+  z.k = k;
+  applyBedView();
+}
+// moves the viewport without redrawing the page (smooth while dragging)
+function applyBedView() {
+  const svg = document.getElementById('bedview');
+  if (!svg) return;
+  svg.setAttribute('viewBox', bedViewBox().join(' '));
+  const pct = document.getElementById('bedzoom');
+  if (pct) pct.textContent = Math.round(ui.zoom.k * 100) + ' %';
+  clearTimeout(applyBedView.t);
+  applyBedView.t = setTimeout(render, 250); // then redraw, so the head ring keeps its size
+}
+// screen point → bed mm
+function bedPoint(svg, e) {
+  const m = svg.getScreenCTM();
+  if (!m) return null;
+  const p = new DOMPoint(e.clientX, e.clientY).matrixTransform(m.inverse());
+  return [p.x, p.y];
+}
+function bedTools() {
+  return '<div style="position:absolute;right:10px;bottom:10px;display:flex;align-items:center;gap:2px;padding:3px;border-radius:10px;background:var(--surface);box-shadow:var(--shadow-1)">' +
+    '<button class="ib" data-a="zoomOut" aria-label="Zoom out" style="width:38px;height:38px;font-size:20px">−</button>' +
+    '<span id="bedzoom" class="mono lbl" style="min-width:48px;text-align:center">' + Math.round(ui.zoom.k * 100) + ' %</span>' +
+    '<button class="ib" data-a="zoomIn" aria-label="Zoom in" style="width:38px;height:38px;font-size:20px">+</button>' +
+    '<button class="tb sm" data-a="zoomFit" style="height:38px">Fit</button></div>';
 }
 
 function jobBox(pkg) {
@@ -333,17 +383,17 @@ function queueView() {
   const warn = shown && shown.warnings && shown.warnings.length ? '<div class="warnbox">' + shown.warnings.map(esc).join('<br>') + '</div>' : '';
   const ctrlName = cfg().controller === 'ruida' ? 'Ruida' : 'Trotec';
 
-  return '<div class="view" style="display:flex;gap:12px;padding:12px">' +
-    '<aside aria-label="Job queue" class="card" style="flex:1 1 300px;min-width:0;max-width:420px;min-height:0;display:flex;flex-direction:column">' +
+  return '<div class="view fit qview">' +
+    '<aside aria-label="Job queue" class="card qlist">' +
     '<div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:14px 14px 10px"><span class="h-sec">Queue</span><span class="lbl">' + q.length + (q.length === 1 ? ' job' : ' jobs') + '</span><span style="flex:1"></span>' +
     '<button class="tb sm" data-a="import">' + ic(ICON.upload, 16) + 'Import</button></div>' +
     '<div style="flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:8px;padding:0 12px 12px">' + (list || '<div style="padding:28px 8px;text-align:center;color:var(--text-3)">Queue empty. Send a job from Pathline, or import a .cjob file.</div>') + '</div>' +
     '<div style="display:flex;gap:8px;padding:12px;border-top:1px solid var(--line)"><button class="tb" data-a="remove"' + (!job || job.status === 'running' ? ' disabled' : '') + '>' + ic(ICON.trash, 18) + 'Remove</button></div></aside>' +
 
-    '<main class="card" style="flex:999 1 720px;min-width:0;display:flex;flex-direction:column">' +
-    '<div style="flex:1;display:flex;flex-wrap:wrap;gap:24px;padding:22px">' +
-    '<div style="flex:1 1 380px;min-width:0;display:flex;flex-direction:column;gap:14px">' +
-    '<div style="display:flex;flex-direction:column;gap:4px"><h1 style="margin:0;font-size:28px;font-weight:600;line-height:1.2">' + esc(shown ? shown.name : 'No job selected') + '</h1>' +
+    '<main class="card qmain">' +
+    '<div class="qtop">' +
+    '<div class="qinfo">' +
+    '<div style="display:flex;flex-direction:column;gap:4px"><h1 style="margin:0;font-size:24px;font-weight:600;line-height:1.2">' + esc(shown ? shown.name : 'No job selected') + '</h1>' +
     '<span style="color:var(--text-2)">' + esc(shown ? (shown.material || 'No material') + (cfg().configured ? ' · ' + cfg().name + ' · ' + ctrlName : '') : 'Choose a job from the queue') + '</span></div>' +
     (shownPkg && shownPkg !== 'loading' ? '<div style="display:flex;flex-direction:column;gap:6px">' + procRows(shownPkg) + '</div>' : '') + warn +
     '<div style="display:flex;align-items:center;gap:12px;min-height:44px"><button role="switch" class="sw" aria-checked="' + !!cfg().removeDone + '" data-a="removeDone" aria-label="Remove completed job from queue"></button><span style="font-size:16px">Remove completed job from queue</span></div>' +
@@ -357,13 +407,13 @@ function queueView() {
         '<span class="lbl">' + (on ? 'The job\'s top-left corner starts at X ' + job.anchor.x.toFixed(1) + ', Y ' + job.anchor.y.toFixed(1) + ' mm' : 'Moves the job so its top-left corner starts at the head') + '</span></span></div>';
     })() +
     '</div>' +
-    '<div style="flex:1 1 440px;min-width:0;display:flex;flex-direction:column;gap:10px"><div class="viewport" style="position:relative;min-height:320px;display:flex;align-items:center;justify-content:center;padding:52px 18px 18px;border:1px solid var(--line);border-radius:10px">' +
-    headReadout(st, isRun) +
-    '<div style="width:100%">' + bedSvg(shownPkg, { big: true, head: true }) + '</div></div>' +
+    '<div class="qbed"><div class="viewport" style="position:relative;flex:1;min-height:0;border:1px solid var(--line);border-radius:10px;overflow:hidden">' +
+    '<div style="position:absolute;inset:50px 8px 8px">' + bedSvg(shownPkg, { big: true, head: true }) + '</div>' +
+    headReadout(st, isRun) + bedTools() + '</div>' +
     (shown && shownPkg && shownPkg.anchor ? '<span class="lbl" style="display:flex;align-items:center;gap:8px"><span style="width:10px;height:10px;border-radius:50%;border:2px solid #30A46C;background:var(--bed);flex:none"></span>Anchored: the job\'s top-left corner is at the toolhead position X ' + shownPkg.anchor.x.toFixed(1) + ', Y ' + shownPkg.anchor.y.toFixed(1) + ' mm</span>' : '') +
     '</div></div>' +
 
-    '<div style="display:flex;flex-wrap:wrap;align-items:center;gap:14px 18px;padding:16px 22px;border-top:1px solid var(--line)">' +
+    '<div class="qrun">' +
     '<button class="run-btn" data-a="startPause" aria-label="' + (st.state === 'running' ? 'Pause' : st.state === 'paused' ? 'Resume' : 'Start') + '"' + (!isRun && cantStart ? ' disabled' : '') + ' style="background:' + (st.state === 'running' ? 'var(--pause)' : 'var(--go)') + ';cursor:pointer">' + ic(st.state === 'running' ? ICON.pause : ICON.play, 28) + '</button>' +
     '<button class="run-btn stop" data-a="stop" aria-label="Stop" style="color:var(--err)">' + ic(ICON.stop, 24) + '</button>' +
     '<button class="tb" data-a="frame" style="height:64px;padding:0 18px"' + (!shown || isRun ? ' disabled' : '') + '>' + ic(ICON.frame) + 'Frame</button>' +
@@ -372,7 +422,7 @@ function queueView() {
     '<div style="display:flex;align-items:center;gap:12px"><div role="progressbar" aria-label="Job progress" aria-valuenow="' + Math.round(frac * 100) + '" aria-valuemin="0" aria-valuemax="100" style="flex:1;height:14px;border-radius:7px;background:var(--sunken);box-shadow:inset 0 0 0 1px var(--line);overflow:hidden"><div style="height:100%;width:' + (frac * 100).toFixed(1) + '%;background:var(--accent)"></div></div>' +
     '<span class="mono" style="min-width:52px;text-align:right;font-size:18px;font-weight:500;color:' + (isRun ? 'var(--text)' : 'var(--text-3)') + '">' + Math.floor(frac * 100) + ' %</span></div>' +
     '<div style="display:flex;justify-content:space-between;gap:8px"><span style="color:var(--text-2)">' + esc(isRun ? (st.state === 'paused' ? 'Paused' : 'Running') + ' · ' + st.message : /^(Finished|Stopped)/.test(st.message) ? st.message : 'Not started') + '</span><span class="mono" style="color:var(--text-2)">' + (isRun ? hms(frac * total) + ' / ' + hms(total) : 'Estimated ' + hms(total)) + '</span></div></div>' +
-    '<div style="display:flex;flex-direction:column;align-items:flex-end"><span class="lbl">' + (isRun ? 'Remaining' : 'Estimated time') + '</span><span class="mono" style="font-size:60px;font-weight:500;line-height:1">' + hms(isRun ? total * (1 - frac) : total) + '</span></div>' +
+    '<div class="qremain" style="display:flex;flex-direction:column;align-items:flex-end"><span class="lbl">' + (isRun ? 'Remaining' : 'Estimated time') + '</span><span class="mono" style="font-size:44px;font-weight:500;line-height:1">' + hms(isRun ? total * (1 - frac) : total) + '</span></div>' +
     '</div></main></div>';
 }
 
@@ -389,8 +439,12 @@ function jogView() {
     const on = ui.hold && ui.hold.held && ui.hold.axis + (ui.hold.dir < 0 ? '-' : '+') === v;
     return '<button class="tb" data-hold="' + v + '" aria-label="' + label + '" style="height:76px;padding:0;touch-action:none;user-select:none' + (on ? ';border-color:var(--accent);background:var(--accent-soft);color:var(--accent-fg)' : '') + '">' + ic(d, 26) + '</button>';
   };
-  return '<div class="view" style="display:flex;flex-wrap:wrap;gap:12px;padding:12px;align-content:flex-start">' +
-    '<section aria-label="Jog" class="card" style="flex:2 1 560px;min-width:0;padding:22px;display:flex;flex-direction:column;gap:20px"><h2 class="h-sec">Position</h2>' +
+  // the head outside the bed set in Setup: usually the bed is set smaller than the machine
+  const [bw, bh] = c.bed;
+  const outside = st.link === 'online' && Number.isFinite(st.pos.x) && (st.pos.x < -0.5 || st.pos.y < -0.5 || st.pos.x > bw + 0.5 || st.pos.y > bh + 0.5);
+  return '<div class="view fit jview">' +
+    '<section aria-label="Jog" class="card" style="flex:1 1 auto;min-width:0;min-height:0;overflow-y:auto;padding:20px;display:flex;flex-direction:column;gap:16px"><h2 class="h-sec">Position</h2>' +
+    (outside ? '<div class="warnbox">The head is outside the ' + bw + ' × ' + bh + ' mm bed set in Setup. If the machine is bigger than that, set its work area in Setup → Work area (Read from controller fills it in).</div>' : '') +
     '<div style="display:flex;flex-wrap:wrap;gap:36px">' + [['X', st.pos.x], ['Y', st.pos.y]].map(([l, v]) => '<div style="display:flex;flex-direction:column;gap:2px"><span class="lbl">' + l + ' <span class="mono">mm</span></span><span class="mono" style="font-size:36px;font-weight:500">' + (Number.isFinite(v) ? v.toFixed(1) : '—') + '</span></div>').join('') + '</div>' +
     '<div style="display:flex;flex-wrap:wrap;align-items:center;gap:28px"><div style="display:grid;grid-template-columns:repeat(3,76px);grid-template-rows:repeat(3,76px);gap:8px">' +
     '<span></span>' + arrow('y-', ICON.up, 'Jog Y minus') + '<span></span>' +
@@ -399,7 +453,7 @@ function jogView() {
     '<div style="display:flex;flex-direction:column;gap:6px"><span class="lbl">Tap: step in mm · Hold: speed in mm/s</span><div role="radiogroup" aria-label="Step size, or speed while held" class="seg">' +
     ['0.1', '1', '10', '100'].map((v) => '<button role="radio" class="mono" style="min-width:56px" aria-checked="' + (ui.step === v) + '" data-a="step" data-v="' + v + '">' + v + '</button>').join('') + '</div>' +
     '<span class="lbl" style="min-height:18px">' + (ui.hold && ui.hold.held ? 'Moving ' + ui.hold.axis.toUpperCase() + (ui.hold.dir < 0 ? '−' : '+') + ' at ' + ui.step + ' mm/s' : 'Hold an arrow to keep moving') + '</span></div></div></section>' +
-    '<section aria-label="Machine" class="card" style="flex:1 1 360px;min-width:0;padding:22px;display:flex;flex-direction:column;gap:14px"><h2 class="h-sec">Machine</h2>' +
+    '<section aria-label="Machine" class="card" style="flex:0 1 360px;min-width:260px;min-height:0;overflow-y:auto;padding:20px;display:flex;flex-direction:column;gap:12px"><h2 class="h-sec">Machine</h2>' +
     '<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px">' +
     '<button class="tb" style="height:52px" data-a="home">Home</button><button class="tb" style="height:52px" data-a="frame">Frame job</button>' +
     '<button class="tb" style="height:52px" data-a="goto0">Go to 0, 0</button><button class="tb" style="height:52px" data-a="stop">Stop</button>' +
@@ -681,6 +735,9 @@ const H = {
   }),
   jog: act(async (v) => call('POST', API('/jog'), { axis: v[0], distance: (v[1] === '-' ? -1 : 1) * Number(ui.step) })),
   step: (v) => { ui.step = v; render(); },
+  zoomIn: () => zoomBed(1.5),
+  zoomOut: () => zoomBed(1 / 1.5),
+  zoomFit: () => { ui.zoom = { k: 1, cx: NaN, cy: NaN }; render(); },
   home: act(async () => call('POST', API('/home'), {})),
   goto0: act(async () => call('POST', API('/jog'), { x: 0, y: 0 })),
   feed: act(async () => { const r = await call('POST', API('/feed'), {}); toast('Conveyor fed ' + r.fed + ' mm'); }),
@@ -851,6 +908,53 @@ document.addEventListener('pointerup', () => endHold(true));
 document.addEventListener('pointercancel', () => endHold(false));
 window.addEventListener('blur', () => endHold(false));
 $app.addEventListener('contextmenu', (e) => { if (e.target.closest('[data-hold]')) e.preventDefault(); }); // long press on a touch screen
+
+// bed view: one finger or the mouse drags, two fingers pinch, the wheel zooms at the pointer
+const pan = { pts: new Map(), start: null };
+$app.addEventListener('pointerdown', (e) => {
+  const svg = e.target.closest('#bedview');
+  if (!svg || e.button > 0) return;
+  e.preventDefault();
+  pan.pts.set(e.pointerId, [e.clientX, e.clientY]);
+  pan.start = null; // restarts with the new set of fingers on the next move
+});
+document.addEventListener('pointermove', (e) => {
+  if (!pan.pts.has(e.pointerId)) return;
+  const svg = document.getElementById('bedview');
+  if (!svg) { pan.pts.clear(); return; }
+  pan.pts.set(e.pointerId, [e.clientX, e.clientY]);
+  const pts = [...pan.pts.values()];
+  const mid = pts.length > 1 ? [(pts[0][0] + pts[1][0]) / 2, (pts[0][1] + pts[1][1]) / 2] : pts[0];
+  const dist = pts.length > 1 ? Math.hypot(pts[0][0] - pts[1][0], pts[0][1] - pts[1][1]) : 0;
+  if (!pan.start || pan.start.n !== pts.length) {
+    const vb = bedViewBox();
+    pan.start = { n: pts.length, mid, dist, k: ui.zoom.k, c: [vb[0] + vb[2] / 2, vb[1] + vb[3] / 2], scale: svg.getScreenCTM().a };
+    return;
+  }
+  const s = pan.start;
+  if (pts.length > 1 && s.dist > 0) {
+    const f = (dist / s.dist) * s.k / ui.zoom.k;
+    if (Math.abs(f - 1) > 0.01) zoomBed(f, bedPoint(svg, { clientX: mid[0], clientY: mid[1] }));
+    const vb = bedViewBox();
+    pan.start = { ...s, mid, dist, k: ui.zoom.k, c: [vb[0] + vb[2] / 2, vb[1] + vb[3] / 2], scale: svg.getScreenCTM().a };
+    return;
+  }
+  if (ui.zoom.k === 1) return; // the whole bed is showing: nothing to pan to
+  const [W, H] = cfg().bed;
+  ui.zoom.cx = Math.max(0, Math.min(W, s.c[0] - (mid[0] - s.mid[0]) / s.scale));
+  ui.zoom.cy = Math.max(0, Math.min(H, s.c[1] - (mid[1] - s.mid[1]) / s.scale));
+  applyBedView();
+});
+const panEnd = (e) => { if (pan.pts.delete(e.pointerId)) pan.start = null; };
+document.addEventListener('pointerup', panEnd);
+document.addEventListener('pointercancel', panEnd);
+$app.addEventListener('wheel', (e) => {
+  const svg = e.target.closest('#bedview');
+  if (!svg) return;
+  e.preventDefault();
+  zoomBed(Math.exp(-e.deltaY / 400), bedPoint(svg, e));
+}, { passive: false });
+$app.addEventListener('dblclick', (e) => { if (e.target.closest('#bedview')) H.zoomFit(); });
 
 $app.addEventListener('click', (e) => {
   // keyboard (Enter/Space) on a jog arrow: one step

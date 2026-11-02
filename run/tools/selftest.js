@@ -184,6 +184,57 @@ console.log('Refusals');
   big.toolpath.find((s) => s.type === 'cut').p.push([5000, 10]);
   let e2 = null; try { validate.check(big, cfg); } catch (e) { e2 = e; }
   ok(e2 && /leaves the bed/.test(e2.message), 'path outside the bed refused', e2 && e2.message);
+  // the drawing on a colour no process uses: Pathline sends an empty toolpath
+  const empty = { ...JSON.parse(JSON.stringify(example)), toolpath: [], checks: [{ ok: false, l: 'No process for ACI 7' }] };
+  let e3 = null; try { validate.check(empty, cfg); } catch (e) { e3 = e; }
+  ok(e3 && e3.code === 400 && /Nothing to run.*No process for ACI 7/.test(e3.message), 'job with nothing to cut refused, with Pathline\'s reason', e3 && e3.message);
+}
+
+console.log('Jog (machine with a stand-in link)');
+async function jogTests() {
+  const Machine = require('../src/machine');
+  const sent = [];
+  let pos = { x: -450, y: 31 };
+  const link = {
+    moveTo: async (x, y) => { sent.push(['move', +x.toFixed(2), +y.toFixed(2)]); pos = { x, y }; },
+    poll: async () => ({ state: 'idle', pos: { ...pos, z: 0 } }),
+    stopMove: async () => { sent.push(['stop']); }
+  };
+  const cfgJ = { ...config.defaults('ruida'), configured: true, bed: [1000, 1600] };
+  const store = { jobs: [], next: () => null };
+  const m = new Machine(cfgJ, store, () => {});
+  m.link = link;
+  Object.assign(m.st, { link: 'online', pos: { x: -450, y: 31, z: 0 } });
+  // head outside the bed set in Setup (bed set smaller than the machine)
+  await m.jog({ axis: 'x', distance: 10 });
+  ok(sent[0][1] === -440, 'jog X+ 10 from outside the bed (X −450) goes to −440, not across to the bed edge', JSON.stringify(sent[0]));
+  m.st.pos = { x: -440, y: 31, z: 0 };
+  await m.jog({ axis: 'x', distance: -10 });
+  ok(sent.length === 1, 'jog X− (further out of the bed) doesn\'t move, and never the other way', JSON.stringify(sent));
+  m.st.pos = { x: 500, y: 31, z: 0 };
+  await m.jog({ axis: 'x', distance: -10 });
+  ok(sent[1] && sent[1][1] === 490, 'jog X− inside the bed goes the way pressed', JSON.stringify(sent[1]));
+  // hold, then let go: the controller is told to stop
+  sent.length = 0;
+  m.st.pos = { x: 100, y: 100, z: 0 }; pos = { x: 100, y: 100 }; m.posAt = Date.now();
+  await m.jogHold({ axis: 'y', dir: 1, speed: 50 });
+  await new Promise((r) => setTimeout(r, 350));
+  await m.jogHold({ axis: 'y', dir: 1, speed: 50 });
+  await new Promise((r) => setTimeout(r, 200));
+  const moves = sent.filter((s) => s[0] === 'move');
+  ok(moves.length > 1 && moves.every((s, i) => s[1] === 100 && (i === 0 || s[2] > moves[i - 1][2])), 'hold Y+: steps forward in Y only (' + moves.length + ' moves)', JSON.stringify(moves));
+  await m.jogRelease();
+  ok(sent[sent.length - 1][0] === 'stop', 'let go: stop sent to the controller');
+  // another arrow while holding: stop first, then the other way
+  sent.length = 0;
+  await m.jogHold({ axis: 'x', dir: 1, speed: 50 });
+  await new Promise((r) => setTimeout(r, 250));
+  await m.jogHold({ axis: 'x', dir: -1, speed: 50 });
+  await new Promise((r) => setTimeout(r, 250));
+  await m.jogRelease();
+  const stopAt = sent.findIndex((s) => s[0] === 'stop');
+  const after = sent.slice(stopAt + 1).filter((s) => s[0] === 'move');
+  ok(stopAt > 0 && after.length > 0 && after[after.length - 1][1] < after[0][1] + 0.001, 'change of direction: stop, then moves the other way', JSON.stringify(sent));
 }
 
 // ---------------------------------------------------------------- server, simulated machine
@@ -392,7 +443,7 @@ async function linkTests() {
   ok(JSON.stringify(na.suggest) === '{"bed":[1450,1520]}' && na.rows.some((r) => r.value === '0x6910'), 'Read from controller: "not available" settings left out, card shown as 0x6910', JSON.stringify(na));
 }
 
-linkTests().then(serverTests).then(() => {
+jogTests().then(linkTests).then(serverTests).then(() => {
   console.log(failed ? '\n' + failed + ' FAILED' : '\nAll passed');
   process.exit(failed ? 1 : 0);
 });

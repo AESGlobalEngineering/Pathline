@@ -5,6 +5,18 @@
 
 module.exports = [
   {
+    version: '0.5.3', date: '2 Nov 2026',
+    added: [
+      'Pathline Run always fits the window: the bed view takes the space that\'s left, and the Start/Stop bar is always on screen.',
+      'Bed view: zoom with the wheel, a pinch or the + / − buttons, drag to pan, Fit (or double-click) to see the whole bed again.'
+    ],
+    fixed: [
+      'Jogging: letting go of an arrow stops the head (Ruida finished its last move at full travel speed). Pressing another arrow stops first, then goes the new way.',
+      'Jogging with the head outside the bed set in Setup no longer sends it across to the bed edge, whichever arrow was pressed. The Jog page says when the head is outside the bed.',
+      'A job with nothing to cut (its drawing on a colour no process uses) is refused with the reason, instead of "completing" at once without moving.'
+    ]
+  },
+  {
     version: '0.5.2', date: '2 Nov 2026',
     added: ['Setup → Machine → Find on network (Ruida): lists the Ruida controllers that answer, with their IP address and card ID. Tap Use to fill it in.'],
     fixed: [

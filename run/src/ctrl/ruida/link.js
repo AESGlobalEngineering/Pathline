@@ -179,6 +179,9 @@ class RuidaLink {
   send(seg, ctl) { return this.sendRaw(seg.data, ctl); }
   moveTo(x, y, o = {}) { return this.sendRaw(Buffer.from(RD.rapidXY(this.M.x(x), this.M.y(y), o.light))); }
   home() { return this.sendRaw(Buffer.from(RD.homeXY())); }
+  // a jog arrow let go: every move is a rapid at the controller's own travel speed, which it
+  // would otherwise finish, so stop it where it is
+  stopMove() { return this.sendRaw(Buffer.from(RD.stop())); }
 
   // plotter conveyor on the U axis: where it is (mm), and advance it by hand
   async readU() { return (await this.query(MEM.u)) / 1000; }
