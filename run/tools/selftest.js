@@ -469,7 +469,7 @@ async function linkTests() {
       rdev.raw = (rdev.raw || []).concat(hex(c));
       if (c[0] === 0xda && c[1] === 0x00) {
         const addr = (c[2] << 8) | c[3];
-        const v = { 0x0405: (rdev.files || []).length, 0x0424: rdev.homeX || 0, 0x0434: rdev.homeY || 0, 0x057e: rdev.card || 0x6445, 0x0400: 0, 0x0421: 850000, 0x0431: 20000, 0x0026: 900000, 0x0036: 600000, 0x0023: 400000, 0x0033: 300000, 0x0025: 3000000, 0x0035: 2500000 }[addr] || 0;
+        const v = { 0x0405: (rdev.files || []).length, 0x057e: rdev.card || 0x6445, 0x0400: 0, 0x0421: 850000, 0x0431: 20000, 0x0026: 900000, 0x0036: 600000, 0x0023: 400000, 0x0033: 300000, 0x0025: 3000000, 0x0035: 2500000 }[addr] || 0;
         sock.send(rd.swizzle(Buffer.from([0xda, 0x01, c[2], c[3], ...rd.enc(v, 5), ...rd.enc(0, 5)]), magic), from.port, from.address);
       }
     }
@@ -512,7 +512,7 @@ async function linkTests() {
   // speed (C9 02) then the distance, two's complement for minus (captured on a YC-1610)
   magic = 0xa1;
   rdev.card = 0x6910;
-  const rk = new RuidaLink({ ...cfgR, ruida: { ...cfgR.ruida, model: 'RDD6584G', magic: 0xa1 } }, () => {});
+  const rk = new RuidaLink({ ...cfgR, knifeHome: { x: 0, y: 0 }, ruida: { ...cfgR.ruida, model: 'RDD6584G', magic: 0xa1 } }, () => {});
   try {
     await rk.connect();
     rdev.keys = []; rdev.raw = [];
@@ -529,17 +529,17 @@ async function linkTests() {
     ok(rdev.files.join() === 'L100R80,X1,START' && rdev.ran === 3 && rdev.raw.some((h) => h === 'e70600000000020000060d20'),
       'RDD6584 Conveyor: START replaced (other files kept), feed-only job with 100 mm uploaded and started', rdev.files.join() + ' ran ' + rdev.ran);
     ok(rk.continuousJog, 'RDD6584: a held arrow is one long move (no judder between steps)');
-    // home at controller X 250, Y 20: the head at controller X 850, Y 20 reads X 600, Y 0
-    // from home, and moving to bed X 100 (origin top right, 900 mm bed) goes to controller X 1050
-    rdev.homeX = 250000; rdev.homeY = 20000;
-    await rk.readHome();
+    // the head parked at home (controller X 850, Y 20): it reads 0, 0, the bed's top right
+    // corner; then going to bed X 100 (origin top right, 900 mm bed) is 800 mm to the left
+    const homes = [];
+    rk.onHome = (h) => homes.push(h);
+    await rk.learnHome();
     const ph = await rk.poll();
     rdev.raw = [];
     await rk.moveTo(100, 0, { axis: 'x' });
     const dx = rdev.raw.find((h) => h.startsWith('d900'));
-    ok(ph.mpos.x === 600 && ph.mpos.y === 0 && ph.pos.x === 300 && dx && rd.dec(Buffer.from(dx.slice(6), 'hex'), true) === 200000,
-      'RDD6584: positions from home (X 250, Y 20): head reads X 600, Y 0; going to bed X 100 moves +200 mm', JSON.stringify(ph.mpos) + ' ' + dx);
-    rdev.homeX = 0; rdev.homeY = 0;
+    ok(ph.mpos.x === 0 && ph.mpos.y === 0 && ph.pos.x === 900 && ph.pos.y === 0 && dx && rd.dec(Buffer.from(dx.slice(6), 'hex'), true) === 800000 && JSON.stringify(homes) === '[{"x":850,"y":20}]',
+      'RDD6584: parked at home reads 0, 0 (and home is kept); going to bed X 100 moves 800 mm', JSON.stringify(ph.mpos) + ' ' + dx + ' ' + JSON.stringify(homes));
   } catch (e) { ok(false, 'RDD6584 moves', e.stack); }
   await rk.close();
   rdev.card = 0;

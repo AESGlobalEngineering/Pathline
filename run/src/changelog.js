@@ -5,6 +5,17 @@
 
 module.exports = [
   {
+    version: '0.6.2', date: '2 Nov 2026',
+    added: [
+      'Queue → Run all: when a job completes, the next one in the queue starts by itself (it stops at a job that is stopped or can\'t start).',
+      'Setup fills in the work area, max speed, acceleration and conveyor speed from the controller each time it connects. Type over any of them to use your own value; Reset puts the controller\'s back.'
+    ],
+    fixed: [
+      'RDD6584: the head parked at home reads 0, 0. Home is where the head homes and parks: Pathline Run learns it after Home and after each job and keeps it (the controller address it used read Y 1404 mm).',
+      'RDD6584: framing goes round the job only (it ran the whole length of Y), then back to where the head started.'
+    ]
+  },
+  {
     version: '0.6.1', date: '2 Nov 2026',
     fixed: [
       'RDD6584: "frame slop" on the controller. Home is 0, 0: jobs go in measured from home, as the controller expects (0.5.9 took home off again, which put parts of jobs past home).',

@@ -44,6 +44,9 @@ const BASE = {
   origin: 'tl', units: 'mm', home: true, prefix: '',
   regMarks: 'refuse',            // 'refuse' or 'ignore' (run without print-and-cut correction)
   removeDone: true,              // completed jobs leave the queue for History
+  runAll: false,                 // when a job completes, start the next one in the queue
+  manual: [],                    // settings typed in Setup over the controller's own ('bed.0', 'speed' …)
+  knifeHome: null,               // RDD6584: where the head homes and parks, controller mm (learnt)
   trotec: { unit: 0.010125, offset: [14.833125, 9.527625], laserSource: 5, travelSpeed: 700, maxSpeed: 2000, airOutput: 4, overscan: 10, cutPowerCorrection: 15, engravePowerCorrection: 20 },
   type: 'laser',                 // 'laser' or 'plotter' (Trotec: always laser; Ruida: from the model)
   ruida: { model: 'RDC6442G', magic: 0x88, origin: 'tr' },
@@ -55,7 +58,7 @@ const BASE = {
 };
 
 // settings that belong to Pathline Run, not to the machine (kept when a machine is removed)
-const APP_PREFS = ['httpPort', 'regMarks', 'removeDone', 'prefix', 'sim'];
+const APP_PREFS = ['httpPort', 'regMarks', 'removeDone', 'runAll', 'prefix', 'sim'];
 
 // the setup with the machine removed
 function withoutMachine(cfg) {

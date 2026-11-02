@@ -63,6 +63,9 @@ async function refresh() {
     if (S && next.app !== S.app) { location.reload(); return; }
     // first look and no machine yet: open Setup to add one
     if (!S && !next.config.configured) { ui.view = 'setup'; setTimeout(() => { loadPorts(); loadNetwork(); }, 0); }
+    // settings changed underneath an untouched Setup page (e.g. filled in from the controller):
+    // show the new ones rather than calling them unsaved changes
+    if (S && ui.draft && JSON.stringify(ui.draft) === JSON.stringify(S.config) && JSON.stringify(next.config) !== JSON.stringify(S.config)) ui.draft = null;
     S = next;
     S.offline = false;
     followUpdate(S.update);
@@ -390,6 +393,8 @@ function queueView() {
   return '<div class="view fit qview">' +
     '<aside aria-label="Job queue" class="card qlist">' +
     '<div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:14px 14px 10px"><span class="h-sec">Queue</span><span class="lbl">' + q.length + (q.length === 1 ? ' job' : ' jobs') + '</span><span style="flex:1"></span>' +
+    // run the queue back to back: when a job completes, the next one starts
+    '<label style="display:inline-flex;align-items:center;gap:8px;cursor:pointer" title="When a job completes, start the next one"><span class="lbl" style="font-size:13px;color:var(--text-2)">Run all</span><button role="switch" class="sw" aria-checked="' + !!cfg().runAll + '" data-a="runAll" aria-label="Run all jobs back to back"></button></label>' +
     '<button class="tb sm" data-a="import">' + ic(ICON.upload, 16) + 'Import</button></div>' +
     '<div style="flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:8px;padding:0 12px 12px">' + (list || '<div style="padding:28px 8px;text-align:center;color:var(--text-3)">Queue empty. Send a job from Pathline, or import a .cjob file.</div>') + '</div>' +
     '<div style="display:flex;gap:8px;padding:12px;border-top:1px solid var(--line)"><button class="tb" data-a="remove"' + (!job || job.status === 'running' ? ' disabled' : '') + '>' + ic(ICON.trash, 18) + 'Remove</button></div></aside>' +
@@ -544,6 +549,15 @@ function setupView() {
   const dirty = JSON.stringify(d) !== JSON.stringify(cfg());
   const text = (l, path, unit, hint) => '<label class="row"><span>' + l + (hint ? '<span class="hint">' + hint + '</span>' : '') + '</span><span class="fld"><input class="mono" data-f="' + path + '" value="' + esc(get(d, path)) + '"><span class="lbl mono">' + (unit || '') + '</span></span></label>';
   const num = (l, path, unit, hint) => text(l, path, unit, hint).replace('data-f=', 'data-num="1" data-f=');
+  // a setting the controller reports: shows its value, and Reset puts it back after typing over it
+  const fc = S.fromController || {};
+  const ctl = (l, path, unit, hint) => {
+    const v = fc[path];
+    if (v === undefined) return num(l, path, unit, hint);
+    const own = Number(get(d, path)) === v;
+    const note = own ? 'From the controller' : 'Typed over · controller: ' + v + ' ' + unit;
+    return num(l, path, unit, (hint ? hint + ' · ' : '') + note).replace('</span></span></label>', '</span></span>' + (own ? '' : '<button class="tb sm" style="grid-column:2;justify-self:end;height:32px" data-a="resetCtl" data-v="' + path + '">Reset to ' + v + ' ' + unit + '</button>') + '</label>');
+  };
   const seg = (l, path, opts) => '<div class="row"><span>' + l + '</span><div role="radiogroup" aria-label="' + l + '" class="seg" style="justify-self:start">' + opts.map(([v, t]) => '<button role="radio" aria-checked="' + (get(d, path) === v) + '" data-a="setv" data-f="' + path + '" data-v="' + esc(JSON.stringify(v)) + '">' + t + '</button>').join('') + '</div></div>';
   const tog = (l, path) => '<div class="row"><span>' + l + '</span><button role="switch" class="sw" style="justify-self:start" aria-checked="' + !!get(d, path) + '" data-a="setv" data-f="' + path + '" data-v="' + !get(d, path) + '"></button></div>';
   const card = (title, inner, note) => '<section class="card" style="padding:18px;display:flex;flex-direction:column;gap:10px"><h2 class="h-sec">' + title + '</h2>' + (note ? '<span class="lbl">' + note + '</span>' : '') + inner + '</section>';
@@ -593,7 +607,7 @@ function setupView() {
     tabs.Machine.push(card('Laser source', text('Type', 'source') + num('Rated power', 'power', 'W') + text('Lens', 'lens') + num('Minimum power', 'minPower', '%') +
       tog('Air assist', 'f.air') + tog('Lid interlock', 'f.interlock')));
   }
-  tabs['Work area'].push(card('Bed', num('Width', 'bed.0', 'mm') + num('Height', 'bed.1', 'mm') + num('Max speed', 'speed', 'mm/s', 'Used by Pathline\'s time estimate') + num('Acceleration', 'acc', 'mm/s²')));
+  tabs['Work area'].push(card('Bed', ctl('Width', 'bed.0', 'mm') + ctl('Height', 'bed.1', 'mm') + ctl('Max speed', 'speed', 'mm/s', 'Used by Pathline\'s time estimate') + ctl('Acceleration', 'acc', 'mm/s²')));
   if (isPlotter) {
     tabs['Work area'].push(card('Conveyor and vacuum', tog('Conveyor', 'f.conveyor') + (d.f.conveyor ? num('Feed length', 'feedLen', 'mm', 'Material advanced per bed (U axis)') + num('Feed time', 'timing.feedSettle', 's', 'For Pathline\'s estimate') : '') + tog('Vacuum', 'f.vacuum'),
       'Jobs over several beds feed the conveyor between beds. The Jog page has Conveyor (one feed length).'));
@@ -732,6 +746,9 @@ const H = {
     await call('POST', API('/frame'), { box: b });
   }),
   removeDone: act(async () => call('PUT', LOCAL('/config'), { removeDone: !cfg().removeDone })),
+  runAll: act(async () => call('PUT', LOCAL('/config'), { runAll: !cfg().runAll })),
+  // Setup: put a setting back to the controller's own value
+  resetCtl: (p) => { set(ui.draft, p, S.fromController[p]); render(); },
   // pin the selected job's top-left corner to where the head is now (or put it back)
   anchor: act(async (v) => {
     if (!ui.sel) return;

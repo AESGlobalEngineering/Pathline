@@ -68,6 +68,28 @@ function start(opts = {}) {
   const store = new Store(DATA);
   const machine = new Machine(cfg, store, log);
 
+  // settings the machine finds out for itself: saved like Setup's, without a restart
+  async function learnt(patch, why) {
+    const next = config.merge(cfg, patch);
+    if (JSON.stringify(next) === JSON.stringify(cfg)) return;
+    try { await machine.reconfigure(next); cfg = next; config.save(DATA, cfg); log(why); } catch (e) { log('not saved (' + why + '): ' + e.message); }
+  }
+  machine.onHome = (h) => learnt({ knifeHome: { x: +h.x.toFixed(3), y: +h.y.toFixed(3) } }, 'home kept: X ' + h.x.toFixed(3) + ', Y ' + h.y.toFixed(3) + ' mm (controller)');
+  // the controller's own settings fill in Setup, except where they've been typed over
+  machine.onController = (vals) => {
+    const manual = cfg.manual || [];
+    const use = (p) => vals[p] !== undefined && !manual.includes(p);
+    const patch = {};
+    if (use('bed.0') || use('bed.1')) patch.bed = [use('bed.0') ? vals['bed.0'] : cfg.bed[0], use('bed.1') ? vals['bed.1'] : cfg.bed[1]];
+    if (use('speed')) patch.speed = vals.speed;
+    if (use('acc')) patch.acc = vals.acc;
+    if (use('timing.feedSpeed')) patch.timing = { feedSpeed: vals['timing.feedSpeed'] };
+    return learnt(patch, 'setup filled in from the controller: ' + Object.entries(vals).filter(([p]) => use(p)).map(([p, v]) => p + ' ' + v).join(', '));
+  };
+  // which of the controller's settings a Setup save types over
+  const valueAt = (c, p) => p.split('.').reduce((o, k) => (o === undefined || o === null ? undefined : o[k]), c);
+  const manualOf = (next) => (machine.ctrl ? Object.keys(machine.ctrl).filter((p) => Number(valueAt(next, p)) !== machine.ctrl[p]) : next.manual || []);
+
   // after an update: the changes since the version that last ran (shown once by the screen)
   let whatsNew = [];
   {
@@ -184,6 +206,7 @@ function start(opts = {}) {
   const local = {
     'GET /state': (b, req) => ({
       app: pkgJson.version, update: updates.status(), here: isLocalReq(req), config: cfg, status: machine.status(), info: machine.info, ruidaModels: ruidaModels.MODELS,
+      fromController: machine.ctrl || null,
       jobs: store.jobs.filter((j) => !j.hidden), history: store.history.slice(0, 100), controllers: Object.keys(CONTROLLERS)
     }),
     'GET /log': () => logLines,
@@ -207,6 +230,7 @@ function start(opts = {}) {
         if (c.mode === 'udp' && !/^\d{1,3}(\.\d{1,3}){3}$/.test(String(c.ip || '').trim())) throw err(400, 'Enter the Ruida controller\'s IP address, for example 192.168.1.100');
       }
       if (next.configured && !cfg.configured) log('machine added: ' + next.name + ' (' + next.controller + ', ' + next.connection.mode + ')');
+      next.manual = manualOf(next);
       await machine.reconfigure(next);
       cfg = next;
       config.save(DATA, cfg);

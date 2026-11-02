@@ -37,10 +37,13 @@ class Machine {
     }
     this.st.link = 'connecting';
     this.st.message = 'Connecting…';
+    this.ctrl = null; // the controller's settings: read again once connected
     const link = makeLink(this.cfg, this.log);
     this.link = link;
     // status the link reads on its own (e.g. while a Trotec's buffer is full during a job)
     link.onPoll = (p) => { if (this.link === link) this.apply(p); };
+    // where an RDD6584's head homes and parks: the server keeps it in the setup
+    link.onHome = (h) => { if (this.onHome) this.onHome(h); };
     try {
       this.info = await link.connect();
       if (this.link !== link) return;
@@ -48,6 +51,7 @@ class Machine {
       this.st.message = 'Ready';
       this.lastConnectError = null;
       if (this.st.state === 'alarm') this.st.state = 'idle';
+      this.readController(link);
     } catch (e) {
       // let go of the port, or the next attempt finds it "in use" by this failed one
       await link.close().catch(() => {});
@@ -60,6 +64,23 @@ class Machine {
       clearTimeout(this.retry);
       this.retry = setTimeout(() => { if (this.link === link) this.connect(); }, 10000);
     }
+  }
+
+  // The controller's own settings (Ruida), read once per connection: Setup shows them, and
+  // uses them wherever they haven't been typed over (server: onController)
+  async readController(link) {
+    if (!link.readSettings) return;
+    try {
+      const s = require('./ctrl/ruida/readback').interpret(await link.readSettings()).suggest;
+      const vals = {};
+      if (s.bed) { vals['bed.0'] = s.bed[0]; vals['bed.1'] = s.bed[1]; }
+      if (s.speed) vals.speed = s.speed;
+      if (s.acc) vals.acc = s.acc;
+      if (s.feedSpeed) vals['timing.feedSpeed'] = s.feedSpeed;
+      if (this.link !== link) return;
+      this.ctrl = vals;
+      if (this.onController) await this.onController(vals);
+    } catch (e) { this.log('controller settings not read: ' + e.message); }
   }
 
   // reconnects only when something the link depends on changed
@@ -249,6 +270,13 @@ class Machine {
   async home() {
     this.guard({ lidOpenOk: true });
     await this.link.home();
+    // RDD6584: once it has homed, the head is at home: measure from there
+    if (this.link.learnHome) {
+      const link = this.link;
+      (async () => {
+        try { await this.waitIdle(180000, 1000); if (this.link === link && !this.run) await link.learnHome(); } catch (e) { this.log('home: ' + e.message); }
+      })();
+    }
     return { ok: true };
   }
 
@@ -256,6 +284,7 @@ class Machine {
     this.guard();
     if (!Array.isArray(box) || box.length !== 4 || !box.every(Number.isFinite)) throw Object.assign(new Error('box must be [x0, y0, x1, y1]'), { code: 400 });
     const [x0, y0, x1, y1] = [this.clampX(box[0]), this.clampY(box[1]), this.clampX(box[2]), this.clampY(box[3])];
+    const start = { x: this.st.pos.x, y: this.st.pos.y };
     this.framing = true;
     this.st.state = 'framing';
     this.st.message = 'Framing';
@@ -264,6 +293,11 @@ class Machine {
         for (const [x, y] of [[x0, y0], [x1, y0], [x1, y1], [x0, y1], [x0, y0]]) {
           if (!this.framing) break;
           await this.link.moveTo(x, y, { light: true });
+          await this.waitIdle(30000, 150);
+        }
+        // then back to where the head was
+        if (this.framing && Number.isFinite(start.x) && Number.isFinite(start.y)) {
+          await this.link.moveTo(start.x, start.y);
           await this.waitIdle(30000, 150);
         }
       } catch (e) { this.log('frame: ' + e.message); }
@@ -405,6 +439,8 @@ class Machine {
         this.st.state = 'alarm';
         this.st.message = e.message;
       }
+      // RDD6584: after a job the head parks at home, so measure from there
+      if (result === 'Completed' && program.knife && this.link.learnHome) await this.link.learnHome().catch(() => {});
       this.store.finish(job, result, startedAt, this.cfg.removeDone);
       this.run = null;
       this.st.job = null;
@@ -414,6 +450,13 @@ class Machine {
         if (result === 'Completed') this.st.progress = 1;
       }
       this.log((result === 'Completed' ? 'done ' : 'stopped ') + job.name);
+      // Queue → Run all: the next job follows a completed one
+      if (result === 'Completed' && this.cfg.runAll && this.store.next()) {
+        setTimeout(() => {
+          if (this.run || !this.cfg.runAll) return;
+          this.start().then((r) => { if (r.job) this.log('Run all: next job'); }).catch((e) => { this.log('Run all stopped: ' + e.message); this.st.message = 'Run all stopped: ' + e.message; });
+        }, 2000);
+      }
     })();
   }
 

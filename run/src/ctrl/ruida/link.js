@@ -60,11 +60,17 @@ class RuidaLink {
     // knife controllers (RDD6584, card 0x69xx) move BY the D9 value, not TO it (see moveTo)
     this.relMoves = /^RDD/.test(model.id) || ((id & 0xff00) === 0x6900);
     this.cmd = null;
-    // knife controllers: positions are measured from home (where the head homes and parks,
-    // the controller's origin), as its jobs are; laser controllers from their own zero
+    // Knife controllers: positions are measured from home, as their jobs are. Home is where the
+    // head homes and parks (it goes back there after every job): the setup keeps it (knifeHome,
+    // controller mm), learnt after homing and after jobs. Until then: where the head is now.
+    // (Its origin registers 0x0424/0x0434 aren't it: Y read 1404 mm with the head parked at 20.)
+    // Laser controllers count from their own zero.
     this.zero = { x: 0, y: 0 };
-    this.polls = 0;
-    if (this.relMoves) await this.readHome();
+    if (this.relMoves) {
+      const h = this.cfg.knifeHome;
+      if (h && Number.isFinite(h.x) && Number.isFinite(h.y)) this.zero = { x: Math.round(h.x * 1000), y: Math.round(h.y * 1000) };
+      else await this.learnHome();
+    }
     this.info = {
       model: 'Ruida card ' + cardText(id) + (model.id !== 'OTHER' ? ' · set up as ' + model.label : ''),
       firmware: 'swizzle magic 0x' + this.magic.toString(16) + (this.magicFixed ? ' (detected)' : ''),
@@ -185,8 +191,6 @@ class RuidaLink {
   }
 
   async poll() {
-    // home can be moved on the panel: look again every ~10 s
-    if (this.relMoves && ++this.polls % 20 === 0) await this.readHome().catch(() => {});
     const st = await this.query(MEM.status);
     const x = await this.query(MEM.x) - this.zero.x;
     const y = await this.query(MEM.y) - this.zero.y;
@@ -197,10 +201,14 @@ class RuidaLink {
     return { state: busy ? 'busy' : 'idle', pos: { x: +mx.toFixed(3), y: +my.toFixed(3), z: 0 }, mpos: { x: x / 1000, y: y / 1000 }, interlock: false, raw: st.toString(16) };
   }
 
-  // home in the controller's own coordinates (µm): its origin registers
-  async readHome() {
-    const h = { x: await this.query(MEM.originX), y: await this.query(MEM.originY) };
-    if (h.x !== this.zero.x || h.y !== this.zero.y) this.log('ruida: home at X ' + (h.x / 1000).toFixed(3) + ', Y ' + (h.y / 1000).toFixed(3) + ' mm (controller coordinates): positions are measured from there');
+  // the head is at home (just homed, or parked after a job): measure from here. onHome keeps
+  // it in Setup (controller mm) for the next start.
+  async learnHome() {
+    const h = { x: await this.query(MEM.x), y: await this.query(MEM.y) };
+    if (Math.abs(h.x - this.zero.x) > 50 || Math.abs(h.y - this.zero.y) > 50) {
+      this.log('ruida: home at X ' + (h.x / 1000).toFixed(3) + ', Y ' + (h.y / 1000).toFixed(3) + ' mm (controller coordinates): positions are measured from there');
+      if (this.onHome) this.onHome({ x: h.x / 1000, y: h.y / 1000 });
+    }
     this.zero = h;
   }
 
