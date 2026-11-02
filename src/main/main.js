@@ -252,7 +252,10 @@ async function syncMachine(id) {
   if (m.conn !== 'Ethernet') throw new Error(m.name + ' uses ' + m.conn + ' transfer — settings can only be read over Ethernet');
   const info = await device.machineSettings(m);
   let { name, type, ctrl, ...settings } = info || {};
-  if (!name) { try { name = ((await device.test(m)).info || {}).name; } catch (e) { /* keep the current name */ } }
+  // the name and type can also come from GET /info (which always has the type)
+  if (!name || !type) {
+    try { const i = (await device.test(m)).info || {}; name = name || i.name; type = type || i.type; } catch (e) { /* keep the current name and type */ }
+  }
   name = name && String(name).trim();
   // build on the stored copy: it may have been saved while the machine answered
   const cur = store.find('machines', m.id) || m;

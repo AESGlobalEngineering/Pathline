@@ -141,13 +141,18 @@
   <div role="toolbar" aria-label="Tools" class="subbar">
     <div class="grp" style="gap: 6px; position: relative">
       <button class="tb" onClick="{{importFiles}}" title="Import DXF, PDF, SVG or PLT (Ctrl+I)"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.import}}"></path></svg>Import</button>
-      <button class="tb v-bd" onClick="{{toggleFill}}" aria-haspopup="dialog" aria-expanded="{{fillOpen}}" style="--v-bd: {{fillBd}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.array}}"></path></svg>{{fill.button}}</button>
+      <button class="tb v-bd" onClick="{{toggleFill}}" aria-haspopup="dialog" aria-expanded="{{fillOpen}}" style="--v-bd: {{fillBd}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.nest}}"></path></svg>{{fill.button}}</button>
       <sc-if value="{{fillOpen}}" hint-placeholder-val="{{false}}">
-        <div role="dialog" aria-label="Fill" class="pop popover" style="left: 0; width: 340px">
+        <div role="dialog" aria-label="Nest and fill" class="pop popover" style="left: 0; width: 340px">
           <span class="h-sec">{{fill.title}}</span>
+          <div role="radiogroup" aria-label="Nest or fill" class="seg fill">
+            <sc-for list="{{fill.kinds}}" as="k" hint-placeholder-count="2">
+              <button role="radio" aria-checked="{{k.on}}" onClick="{{k.pick}}" style="background: {{k.bg}}; box-shadow: {{k.sh}}; color: {{k.fg}}">{{k.l}}</button>
+            </sc-for>
+          </div>
           <div class="fcol">
-            <span class="lbl">Fill area</span>
-            <div role="radiogroup" aria-label="Fill area" class="seg fill">
+            <span class="lbl">Area</span>
+            <div role="radiogroup" aria-label="Area" class="seg fill">
               <sc-for list="{{fill.areas}}" as="a" hint-placeholder-count="3">
                 <button role="radio" aria-checked="{{a.on}}" aria-disabled="{{a.off}}" onClick="{{a.pick}}" style="background: {{a.bg}}; box-shadow: {{a.sh}}; color: {{a.fg}}; opacity: {{a.op}}; cursor: {{a.cur}}">{{a.l}}</button>
               </sc-for>
@@ -165,11 +170,23 @@
               </div>
             </sc-if>
           </div>
-          <div role="radiogroup" aria-label="Copies" class="seg fill">
-            <sc-for list="{{fill.modes}}" as="f" hint-placeholder-count="2">
-              <button role="radio" aria-checked="{{f.on}}" onClick="{{f.pick}}" style="background: {{f.bg}}; box-shadow: {{f.sh}}; color: {{f.fg}}">{{f.l}}</button>
-            </sc-for>
-          </div>
+          <sc-if value="{{fill.isFill}}" hint-placeholder-val="{{true}}">
+            <div role="radiogroup" aria-label="Copies" class="seg fill">
+              <sc-for list="{{fill.modes}}" as="f" hint-placeholder-count="2">
+                <button role="radio" aria-checked="{{f.on}}" onClick="{{f.pick}}" style="background: {{f.bg}}; box-shadow: {{f.sh}}; color: {{f.fg}}">{{f.l}}</button>
+              </sc-for>
+            </div>
+          </sc-if>
+          <sc-if value="{{fill.isNest}}" hint-placeholder-val="{{false}}">
+            <div class="fcol">
+              <span class="lbl">Turn parts 90° where it fits better</span>
+              <div role="radiogroup" aria-label="Turn parts" class="seg fill">
+                <sc-for list="{{fill.rots}}" as="o" hint-placeholder-count="2">
+                  <button role="radio" aria-checked="{{o.on}}" onClick="{{o.pick}}" style="background: {{o.bg}}; box-shadow: {{o.sh}}; color: {{o.fg}}">{{o.l}}</button>
+                </sc-for>
+              </div>
+            </div>
+          </sc-if>
           <div class="grid2">
             <sc-if value="{{fill.isCount}}" hint-placeholder-val="{{false}}">
               <label class="fcol" style="grid-column: 1 / -1">
@@ -192,7 +209,7 @@
           </div>
           <div style="display: flex; justify-content: flex-end; gap: 8px">
             <button class="tb" onClick="{{toggleFill}}">Cancel</button>
-            <button class="btn-primary" onClick="{{fill.apply}}" disabled="{{fill.cant}}" style="opacity: {{fill.op}}">Fill</button>
+            <button class="btn-primary" onClick="{{fill.apply}}" disabled="{{fill.cant}}" style="opacity: {{fill.op}}">{{fill.go}}</button>
           </div>
         </div>
       </sc-if>
@@ -716,7 +733,7 @@ class Component extends DCLogic {
     ready: false, job: null, machines: [], materials: [], recent: [], hist: { undo: 0, redo: 0 },
     dev: null, devErr: null, devJobs: null, devJobsErr: null,
     sel: [], tool: 'select', zoom: '—', snap: { grid: true, objects: true, centre: false },
-    menu: false, reg: false, fill: false, fillMode: 'max', fillArea: 'sheet', fillCustom: { w: '300', h: '200' },
+    menu: false, reg: false, fill: false, fillKind: 'nest', nestRot: true, fillMode: 'max', fillArea: 'sheet', fillCustom: { w: '300', h: '200' },
     fillCount: '12', fillSpacing: '5.0', fillMargin: '10.0',
     sheetOpen: false,
     procSel: 0, procPanel: true, edit: {}, picker: false, adv: false, procOpen: false, openPick: null, matOpen: false,
@@ -891,7 +908,7 @@ class Component extends DCLogic {
       notes.push(r.name + ': ' + r.entities.length + ' shape' + (r.entities.length === 1 ? '' : 's') + ' · ' + r.width.toFixed(1) + ' × ' + r.height.toFixed(1) + ' mm' + (isPlot && bedNo ? ' · bed ' + (bedNo + 1) : '') + (skipped.length ? ' · skipped ' + skipped.map(([k, v]) => v + ' ' + k).join(', ') : ''));
     }
     if (isPlot && beds > (job.beds || 1)) job = { ...job, beds };
-    if (outside) notes.push(outside + ' drawing' + (outside === 1 ? " didn't" : " didn't") + ' fit on the ' + (sh ? 'sheet' : 'bed') + ' and ' + (outside === 1 ? 'was' : 'were') + ' placed beside it. Use Arrange → Nest parts to fit what you can.');
+    if (outside) notes.push(outside + ' drawing' + (outside === 1 ? " didn't" : " didn't") + ' fit on the ' + (sh ? 'sheet' : 'bed') + ' and ' + (outside === 1 ? 'was' : 'were') + ' placed beside it. Use Nest & fill to fit what you can.');
     this.commit(job, { record: true }, newIds);
     notes.forEach((n) => LRC.toast(n, { ms: 6000 }));
     if (this.canvas && newIds.length) setTimeout(() => this.canvas.fit(), 50);
@@ -987,33 +1004,6 @@ class Component extends DCLogic {
     if (!this.needSel()) return;
     const r = await LRC.dialog({ title: 'Rotate', fields: [{ key: 'a', label: 'Angle (clockwise)', value: '90', unit: '°', type: 'number' }], buttons: [{ label: 'Cancel', value: null }, { label: 'Rotate', value: 'ok', primary: true }] });
     if (r && Number.isFinite(r.values.a)) this.op((j, s) => LRC.ops.rotate(j, s, r.values.a));
-  }
-  // Nest parts to use as little material as possible: on the sheet or bed
-  // (laser), or onto beds, adding beds as needed (plotter).
-  async nestDlg() {
-    const job = this.state.job, m = this.machine();
-    const isLaser = m.type === 'laser';
-    const sheetOn = isLaser && job.sheet && job.sheet.on;
-    const what = this.state.sel.length ? 'the selected parts' : 'all parts';
-    const r = await LRC.dialog({
-      title: 'Nest parts',
-      message: 'Packs ' + what + (isLaser ? ' as tightly as possible' : ' onto as few beds as possible, adding beds as needed') + '. Several layouts are tried and the one that uses the least material is kept. Grouped parts stay together.',
-      fields: [
-        { key: 's', label: 'Spacing', value: '5', unit: 'mm', type: 'number' },
-        { key: 'm', label: 'Edge margin', value: '10', unit: 'mm', type: 'number' },
-        { key: 'rot', label: 'Turn parts 90° where it fits better', type: 'seg', value: 'yes', options: [{ value: 'yes', label: 'Yes' }, { value: 'no', label: 'No' }], full: true }
-      ].concat(sheetOn ? [{ key: 'on', label: 'Nest on', type: 'seg', value: 'sheet', options: [{ value: 'sheet', label: 'Sheet' }, { value: 'bed', label: 'Whole bed' }], full: true }] : []),
-      buttons: [{ label: 'Cancel', value: null }, { label: 'Nest', value: 'ok', primary: true }]
-    });
-    if (!r) return;
-    const bed = CC.bedOf(m);
-    const area = sheetOn && r.values.on !== 'bed' ? { x: job.sheet.x, y: job.sheet.y, w: job.sheet.w, h: job.sheet.h } : { x: 0, y: 0, w: bed[0], h: bed[1] };
-    const res = LRC.ops.nest(job, this.state.sel, { area, spacing: r.values.s || 0, margin: r.values.m || 0, rotate: r.values.rot !== 'no', beds: !isLaser });
-    if (!res.nested) return LRC.toast('Nothing fits in that area — try a smaller spacing or margin');
-    this.commit(res.job, { record: true }, res.sel);
-    const where = isLaser ? (area.w === bed[0] && area.h === bed[1] ? 'the bed' : 'the sheet') : res.areas + ' bed' + (res.areas === 1 ? '' : 's');
-    LRC.toast('Nested ' + res.nested + ' part' + (res.nested === 1 ? '' : 's') + ' on ' + where + ' · ' + Math.round(res.util * 100) + ' % of the used material' +
-      (res.unplaced ? ' · ' + res.unplaced + " didn't fit and stayed where they were" : ''), { ms: 6000 });
   }
   async textAt(x, y, bed) {
     const r = await LRC.dialog({ title: 'Text', message: 'Text is converted to outlines in IBM Plex Sans.', fields: [{ key: 't', label: 'Text', value: '', full: true }, { key: 's', label: 'Height', value: '10', unit: 'mm', type: 'number' }], buttons: [{ label: 'Cancel', value: null }, { label: 'Add', value: 'ok', primary: true }] });
@@ -1732,18 +1722,40 @@ class Component extends DCLogic {
       this.commit({ ...r.job, beds: nb }, { record: true }, r.sel);
       LRC.toast('Placed ' + r.placed + ' cop' + (r.placed === 1 ? 'y' : 'ies'));
     };
+    // Nest & fill: nest packs the parts already in the job (the selection, or
+    // all of them); fill places copies of the selection. Both use the same
+    // area, spacing and margin.
+    const nesting = S.fillKind === 'nest';
+    const segOpt = (on, l, pick) => ({ l, on, bg: on ? 'var(--seg-on)' : 'transparent', sh: on ? 'var(--shadow-1)' : 'none', fg: on ? 'var(--text)' : 'var(--text-3)', pick });
+    const nestCount = selEnts.length || LRC.ops.pickableIds(job).length;
+    const applyNest = () => {
+      const res = LRC.ops.nest(job, selIds, { area: areaRect, spacing, margin, rotate: S.nestRot, beds: !isLaser });
+      if (!res.nested) return LRC.toast('Nothing fits in that area — try a smaller spacing or margin');
+      this.setState({ fill: false });
+      this.commit(res.job, { record: true }, res.sel);
+      const where = isLaser ? 'the ' + areaName : res.areas + ' bed' + (res.areas === 1 ? '' : 's');
+      LRC.toast('Nested ' + res.nested + ' part' + (res.nested === 1 ? '' : 's') + ' on ' + where + ' · ' + Math.round(res.util * 100) + ' % of the used material' +
+        (res.unplaced ? ' · ' + res.unplaced + " didn't fit and stayed where they were" : ''), { ms: 6000 });
+    };
+    if (nesting) {
+      fillOk = nestCount > 0 && areaRect.w > 0 && areaRect.h > 0;
+      fillResult = !nestCount ? 'Nothing to nest yet' : 'Packs ' + (selEnts.length ? selEnts.length + ' selected part' + (selEnts.length === 1 ? '' : 's') : 'all ' + nestCount + ' part' + (nestCount === 1 ? '' : 's')) + (isLaser ? ' on the ' + areaName : ' onto as few beds as possible');
+    }
     const fill = {
-      button: 'Fill', title: 'Fill' + (selEnts.length ? ' · ' + (selEnts.length === 1 ? selEnts[0].name : selEnts.length + ' objects') : ''),
+      button: 'Nest & fill', title: nesting ? 'Nest & fill' : 'Fill' + (selEnts.length ? ' · ' + (selEnts.length === 1 ? selEnts[0].name : selEnts.length + ' objects') : ''),
+      kinds: [segOpt(nesting, 'Nest parts', () => this.setState({ fillKind: 'nest' })), segOpt(!nesting, 'Fill copies', () => this.setState({ fillKind: 'fill' }))],
+      isNest: nesting, isFill: !nesting, go: nesting ? 'Nest' : 'Fill',
+      rots: [segOpt(S.nestRot, 'Yes', () => this.setState({ nestRot: true })), segOpt(!S.nestRot, 'No', () => this.setState({ nestRot: false }))],
       areas: [fillAreaOpt('bed', 'Bed'), fillAreaOpt('sheet', 'Sheet'), fillAreaOpt('custom', 'Custom')],
       isCustom: area === 'custom', cw: S.fillCustom.w, ch: S.fillCustom.h,
       setCw: (e) => { const v = e.target.value; this.setState((s) => ({ fillCustom: { ...s.fillCustom, w: v } })); },
       setCh: (e) => { const v = e.target.value; this.setState((s) => ({ fillCustom: { ...s.fillCustom, h: v } })); },
       modes: [fillOpt('max', 'As many as fit'), fillOpt('count', 'Set a number')],
-      isCount: S.fillMode === 'count', count: S.fillCount, setCount: (e) => this.setState({ fillCount: e.target.value }),
+      isCount: !nesting && S.fillMode === 'count', count: S.fillCount, setCount: (e) => this.setState({ fillCount: e.target.value }),
       spacing: S.fillSpacing, setSpacing: (e) => this.setState({ fillSpacing: e.target.value }),
       margin: S.fillMargin, setMargin: (e) => this.setState({ fillMargin: e.target.value }),
       result: fillResult, resBg: fillOk ? 'var(--ok-soft)' : 'var(--warn-soft)', resFg: fillOk ? 'var(--ok)' : 'var(--warn)', resIcon: fillOk ? icons.check : icons.warn,
-      cant: !fillOk, op: fillOk ? 1 : 0.45, apply: applyFill
+      cant: !fillOk, op: fillOk ? 1 : 0.45, apply: nesting ? applyNest : applyFill
     };
 
     // ---- menu bar
@@ -1776,8 +1788,7 @@ class Component extends DCLogic {
         ['Mirror', null, [{ l: 'Horizontal', run: act(() => this.op((j, s) => LRC.ops.mirror(j, s, 'h'))) }, { l: 'Vertical', run: act(() => this.op((j, s) => LRC.ops.mirror(j, s, 'v'))) }]],
         ['Rotate', null, [{ l: '90° clockwise', run: act(() => this.op((j, s) => LRC.ops.rotate(j, s, 90))) }, { l: '90° anticlockwise', run: act(() => this.op((j, s) => LRC.ops.rotate(j, s, -90))) }, { l: '180°', run: act(() => this.op((j, s) => LRC.ops.rotate(j, s, 180))) }, { l: 'Custom angle…', run: act(() => this.rotateDlg()) }]], '-',
         ['Weld shapes', null, null, () => this.op((j, s) => LRC.ops.weld(j, s)), null, selIds.length < 2], ['Offset path…', null, null, () => this.offsetDlg(), null, noSel], ['Array…', null, null, () => this.arrayDlg(), null, noSel],
-        ['Fill…', null, null, () => this.setState({ fill: true })],
-        ['Nest parts…', null, null, () => this.nestDlg()]
+        ['Nest & fill…', null, null, () => this.setState({ fill: true, fillKind: 'nest' })]
       ]],
       ['Setup', [
         ['Machines…', null, null, null, 'MachineSetupDetailed.dc.html'], ['Materials…', 'Ctrl+M', null, null, 'MaterialsDetailed.dc.html'], '-',
@@ -2034,12 +2045,10 @@ class Component extends DCLogic {
         ? [
           feat('autofocus') && { l: 'Auto-focus', d: icons.focus, run: () => this.dev('autofocus', {}, 'Auto-focus'), tip: 'Run auto-focus on the machine', bd: 'var(--line-strong)' },
           feat('rotary') && { l: 'Rotary' + (job.rotary ? ' on' : ''), d: icons.rotary, run: () => this.rotaryDlg(), tip: 'Rotary attachment settings for this job', bd: job.rotary ? accent : 'var(--line-strong)' },
-          { l: 'Nest parts', d: icons.nest, run: () => this.nestDlg(), tip: 'Pack parts to use as little material as possible', bd: 'var(--line-strong)' }
         ].filter(Boolean)
         : [
           { l: 'Tool heads', d: icons.heads, run: () => this.headsDlg(), tip: 'Loaded tool heads', bd: 'var(--line-strong)' },
           feat('conveyor') && { l: 'Conveyor', d: icons.conveyor, run: () => this.conveyorDlg(), tip: 'Beds and conveyor feeds', bd: 'var(--line-strong)' },
-          { l: 'Nest parts', d: icons.nest, run: () => this.nestDlg(), tip: 'Pack parts onto as few beds as possible', bd: 'var(--line-strong)' },
           { l: 'Bridges', d: icons.bridges, run: () => this.bridgesDlg(), tip: 'Hold-in bridges for the selected process', bd: 'var(--line-strong)' }
         ].filter(Boolean),
       tools: [

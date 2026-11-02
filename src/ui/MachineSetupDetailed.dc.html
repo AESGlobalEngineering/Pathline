@@ -335,16 +335,17 @@ class Component extends DCLogic {
   }
   async addMachine() {
     // the IP field only applies to a real machine; only a simulated one is
-    // named here (a real machine takes its name from its HMI)
+    // named and given a type here (a real machine reports both from its HMI)
     const realOnly = (box, on) => {
       box.querySelectorAll('[data-real]').forEach((el) => { el.style.opacity = on ? '' : '0.45'; el.querySelectorAll('input, select').forEach((i) => { i.disabled = !on; }); });
       box.querySelectorAll('[data-sim]').forEach((el) => { el.style.display = on ? 'none' : ''; });
     };
+    const typeField = { key: 'type', label: 'Type', type: 'seg', value: 'laser', options: [{ value: 'laser', label: 'Laser' }, { value: 'plotter', label: 'Plotter' }] };
     const r = await LRC.dialog({
       title: 'Add machine',
       fields: [
         { key: 'kind', label: 'Machine', type: 'seg', value: 'real', options: [{ value: 'real', label: 'Real' }, { value: 'sim', label: 'Simulated' }], onChange: (v, _vals, box) => realOnly(box, v === 'real') },
-        { key: 'type', label: 'Type', type: 'seg', value: 'laser', options: [{ value: 'laser', label: 'Laser' }, { value: 'plotter', label: 'Plotter' }] },
+        { ...typeField, sim: true, hidden: true },
         { key: 'name', label: 'Name', value: '', full: true, sim: true, hidden: true },
         { key: 'ip', label: 'IP address', value: '', full: false, real: true },
         { key: 'ctrl', label: 'Controller', type: 'select', value: 'Ruida', options: CONTROLLERS, full: false }
@@ -352,11 +353,33 @@ class Component extends DCLogic {
       buttons: [{ label: 'Cancel', value: null }, { label: 'Add', value: 'ok', primary: true }]
     });
     if (!r) return;
-    const base = await window.api.machines.create(r.values.type);
-    const isPlot = r.values.type === 'plotter';
+    let type = r.values.type, ctrl = r.values.ctrl, found = null;
+    if (r.values.kind !== 'sim') {
+      // ask the machine whether it is a laser or a plotter (GET /info)
+      const ip = String(r.values.ip || '').trim();
+      const info = ip ? await window.api.device.test({ ip, port: 8470, timeout: 3000, conn: 'Ethernet' }).then((t) => t.info || {}, () => null) : null;
+      if (info && (info.type === 'laser' || info.type === 'plotter')) {
+        type = info.type;
+        found = info;
+        if (CONTROLLERS.includes(info.ctrl)) ctrl = info.ctrl;
+        LRC.toast('Found a ' + (type === 'laser' ? 'laser' : 'plotter') + (info.name ? ': ' + info.name : '') + ' at ' + ip, { kind: 'ok' });
+      } else {
+        // not reachable (yet): the operator says which it is
+        const t = await LRC.dialog({
+          title: ip ? 'No answer from ' + ip : 'No IP address yet',
+          message: 'Pathline couldn\'t ask the machine what it is. Choose the type; it\'s checked again once the machine is connected.',
+          fields: [typeField],
+          buttons: [{ label: 'Cancel', value: null }, { label: 'Add', value: 'ok', primary: true }]
+        });
+        if (!t) return;
+        type = t.values.type;
+      }
+    }
+    const base = await window.api.machines.create(type);
+    const isPlot = type === 'plotter';
     const m = r.values.kind === 'sim'
-      ? { ...base, sim: true, conn: 'Local', ip: '', ctrl: r.values.ctrl, kind: isPlot ? 'Plotter' : 'Laser · CO2', name: r.values.name || (isPlot ? 'Simulated plotter' : 'Simulated laser') }
-      : { ...base, ip: r.values.ip || '', ctrl: r.values.ctrl };
+      ? { ...base, sim: true, conn: 'Local', ip: '', ctrl, kind: isPlot ? 'Plotter' : 'Laser · CO2', name: r.values.name || (isPlot ? 'Simulated plotter' : 'Simulated laser') }
+      : { ...base, ip: String(r.values.ip || '').trim(), ctrl, ...(found && found.name ? { name: String(found.name).trim(), hmiName: true } : {}) };
     // created on disk already; keep the working copy in step
     this.setState((s) => ({ list: s.list.concat(m), saved: s.saved.concat(base), mid: m.id, tab: null }));
   }

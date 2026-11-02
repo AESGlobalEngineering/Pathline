@@ -15,6 +15,14 @@ Latest round (28 Oct, final):
 - **Dark mode bed is grey** (`--bed`, `--sheet`, `--bed-grid*` in theme.css). **ACI 7 shows as white in dark mode** (black in light), as in CAD, and so do the marks drawn on the bed (registration marks, engrave hatching, arrows, start points): see the `--aci7*` and `--ink` tokens, and `LRC.aci.hex/fg/stroke` in app.js. Exports (DXF/SVG/PDF) still use real black.
 - **Sample machines and materials from earlier builds are removed on first start** (main.js, tracked by `settings.samplesRemoved`). This is by exact id (trotec, flatbed, laser2, acr-print-3 … brass-1); anything the operator created stays.
 
+Version 1.3.1 (2 Nov):
+- **Nest & fill** (Job page toolbar, plus Arrange → Nest & fill) replaces the separate Fill popover, the Nest parts dialog and the Nest parts machine-tool buttons. The popover has a Nest parts / Fill copies switch (`fillKind`), with shared Area (Bed / Sheet / Custom), Spacing and Edge margin.
+  - Nest also has "Turn parts 90°" (`nestRot`) and works on the selection, or on all parts when nothing is selected.
+  - Fill keeps As many as fit / Set a number.
+  - `nestDlg` was removed.
+- **Add machine detects the type.** For a Real machine the Type choice is hidden. On Add, Pathline calls `device.test` (GET /info) on the IP and takes `type`, `name` (with `hmiName`) and, if it's a known controller, `ctrl`. If the machine doesn't answer, a second dialog asks for the type.
+  - `syncMachine` now also takes `type` from /info when /machine doesn't report it, so the type corrects itself once the machine connects.
+
 Version 1.3.0 (29 Oct):
 - **Common lines** (`commonLines(paths, eps = 0.05)` in core.js). Where a path runs along part of an earlier path in the same process, and on the same bed, that stretch is dropped, so the line is cut once. A closed path that loses a stretch becomes open pieces; a full duplicate disappears. This happens in `estimateIn` (`commonOf(pi, bed)`, worked out once per run), so the Simulation, the cut length and the job package all use the merged paths. The DXF export still holds the drawing as it is.
   - Merged pieces carry `orig`. `arrangePaths` nests by the original shape, so an outline opened by a shared edge is still that part's outline for inside-first.

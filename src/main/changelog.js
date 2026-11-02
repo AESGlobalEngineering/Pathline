@@ -5,6 +5,14 @@
 
 module.exports = [
   {
+    version: '1.3.1', date: '2 Nov 2026',
+    added: [
+      'Nest and Fill are one tool: Nest & fill in the toolbar (and Arrange → Nest & fill). Choose Nest parts or Fill copies; both use the same area, spacing and margin.',
+      'Adding a real machine asks it whether it is a laser or a plotter, and takes its name from it. If it can\'t be reached, you choose the type.'
+    ],
+    fixed: []
+  },
+  {
     version: '1.3.0', date: '29 Oct 2026',
     added: [
       'Overlapping lines are merged automatically: where parts share an edge, or a line is drawn twice, it is cut once (within one process).',
