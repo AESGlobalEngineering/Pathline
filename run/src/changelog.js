@@ -5,6 +5,17 @@
 
 module.exports = [
   {
+    version: '0.7.2', date: '2 Nov 2026',
+    added: [
+      'Head camera: auto exposure (the default). It aims the brightest part of the view (the paper) at a set brightness, whatever the light does elsewhere, and keeps the exposure for the next picture. Setup → Camera shows the exposure in use; Fixed is still there.',
+      'Checkerboard: choose the correction. Scale and squareness (the default, safe on a board that isn\'t flat), Smooth, or Every corner (a flat board). Corners a bump in the board moved are found and left out (shown hollow), and the board\'s misfit is reported.'
+    ],
+    fixed: [
+      'Registration marks and checkerboard corners are found in uneven light: each mark is judged against the paper round it (with the light\'s slope taken out), and the board\'s picture is evened out before looking for corners.',
+      'The bed map is anchored at home and to the X axis, so it can\'t move jobs as a whole; it now covers the whole bed, beyond the board too. X / Y travel are reported as the machine\'s own error (+ = goes further than told), squareness as how far Y leans.'
+    ]
+  },
+  {
     version: '0.7.1', date: '2 Nov 2026',
     fixed: [
       'Head camera: opens the Alvium when Vimba X lists it more than once, and never one of Vimba X\'s own camera simulators.',

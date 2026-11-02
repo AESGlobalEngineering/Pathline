@@ -623,12 +623,14 @@ async function visionTests() {
     // checkerboard: camera over its first corner (100, 300); calibrate, then check with the map on
     const off = of.data.offset;
     await jogTo(100 + off[0], 300 + off[1]);
-    const cal = await call('POST', 'local/camera/board', { mode: 'calibrate' });
-    ok(cal.status === 200 && cal.data.points.length >= 15 && Math.abs(cal.data.boardAngle - 1.5) < 0.1 && Math.abs(cal.data.scaleX + 1.5) < 0.3,
-      'checkerboard at 1.5°: ' + (cal.data.points && cal.data.points.length) + ' corners, board at ' + (cal.data.boardAngle || 0).toFixed(2) + '°, machine X ' + (cal.data.scaleX || 0).toFixed(2) + ' mm/m (−1.5), worst ' + (cal.data.worst || 0).toFixed(3) + ' mm', JSON.stringify(cal.data).slice(0, 300));
+    const cal = await call('POST', 'local/camera/board', { mode: 'calibrate', board: { model: 'linear' } });
+    ok(cal.status === 200 && cal.data.points.length >= 15 && Math.abs(cal.data.boardAngle - 1.5) < 0.1 && Math.abs(cal.data.scaleX - 1.5) < 0.15 && Math.abs(cal.data.squareness - 0.03) < 0.015,
+      'bumpy checkerboard at 1.5°, uneven light: ' + (cal.data.points && cal.data.points.length) + ' corners, ' + cal.data.bumps + ' left out as bumps; X travel ' + (cal.data.scaleX || 0).toFixed(2) + ' mm/m (+1.5), Y leans ' + (cal.data.squareness || 0).toFixed(3) + '° (0.03)', JSON.stringify(cal.data).slice(0, 300));
     await jogTo(100 + off[0], 300 + off[1]);
-    const chk = await call('POST', 'local/camera/board', { mode: 'check' });
-    ok(chk.status === 200 && chk.data.worst < cal.data.worst / 3, 'with the bed map on: worst ' + (chk.data.worst || 0).toFixed(3) + ' mm (was ' + (cal.data.worst || 0).toFixed(3) + ')', JSON.stringify(chk.data).slice(0, 200));
+    const chk = await call('POST', 'local/camera/board', { mode: 'check', board: { model: 'linear' } });
+    // (corners on the bump stay where the bump put them: the machine error is what's checked)
+    const worstIn = (r) => Math.max(...r.points.filter((p) => !p.out).map((p) => Math.hypot(p.res[0], p.res[1])));
+    ok(chk.status === 200 && worstIn(chk.data) < worstIn(cal.data) / 3 && Math.abs(chk.data.scaleX) < 0.2, 'with the bed map on: worst ' + worstIn(chk.data).toFixed(3) + ' mm off the bump (was ' + worstIn(cal.data).toFixed(3) + '), X travel ' + (chk.data.scaleX || 0).toFixed(2) + ' mm/m', JSON.stringify(chk.data).slice(0, 200));
     // print and cut: the example job's marks read, the job moved onto them and run
     const q = await call('POST', 'v1/jobs', example);
     await new Promise((r) => setTimeout(r, 500));

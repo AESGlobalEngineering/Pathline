@@ -132,6 +132,55 @@ function typeFor(mode, n) {
   return { pos: 'rigid', linear: 'affine', nonlinear: 'nonlinear' }[mode] || 'similar';
 }
 
+// least squares: coefficients c with Σ c_k · row_k ≈ y (Gaussian elimination on the normal equations)
+function lsq(rows, ys) {
+  const k = rows[0].length;
+  const A = Array.from({ length: k }, () => new Array(k + 1).fill(0));
+  rows.forEach((r, i) => { for (let a = 0; a < k; a++) { for (let b = 0; b < k; b++) A[a][b] += r[a] * r[b]; A[a][k] += r[a] * ys[i]; } });
+  for (let c = 0; c < k; c++) {
+    let p = c;
+    for (let r = c + 1; r < k; r++) if (Math.abs(A[r][c]) > Math.abs(A[p][c])) p = r;
+    [A[c], A[p]] = [A[p], A[c]];
+    if (Math.abs(A[c][c]) < 1e-12) return null;
+    for (let r = 0; r < k; r++) if (r !== c) { const f = A[r][c] / A[c][c]; for (let j = c; j <= k; j++) A[r][j] -= f * A[c][j]; }
+  }
+  return A.map((row, i) => row[k] / row[i]);
+}
+
+// The machine's error across the bed, as a model fitted to the checkerboard residuals (what's
+// left once the board's own position and angle are taken out):
+//   'linear'  scale and squareness (an affine error): belts, steps/mm, gantry out of square
+//   'smooth'  a gentle curve (2nd order) on top
+//   'full'    every corner as measured (for a board that's truly flat)
+// A board that isn't flat moves corners locally; those don't fit a smooth machine and are
+// thrown out (more than 3 × the typical misfit, at least 0.05 mm), and the fit is done again.
+// pts: [{ p: [x, y] machine mm, r: [rx, ry] residual mm }] → { f(p) → [ex, ey], out: [indices], noise (mm rms misfit) }
+function errorModel(pts, model) {
+  const terms = model === 'smooth' && pts.length >= 10 ? (x, y) => [1, x, y, x * x, x * y, y * y] : (x, y) => [1, x, y];
+  // scale positions to ~1 so the solve is well conditioned
+  const cx = pts.reduce((a, q) => a + q.p[0], 0) / pts.length, cy = pts.reduce((a, q) => a + q.p[1], 0) / pts.length;
+  const sc = Math.max(1, ...pts.map((q) => Math.max(Math.abs(q.p[0] - cx), Math.abs(q.p[1] - cy))));
+  const row = (p) => terms((p[0] - cx) / sc, (p[1] - cy) / sc);
+  let use = pts.map((_, i) => i);
+  let f = () => [0, 0];
+  let noise = 0;
+  for (let it = 0; it < 3; it++) {
+    const rows = use.map((i) => row(pts[i].p));
+    const cxs = lsq(rows, use.map((i) => pts[i].r[0])), cys = lsq(rows, use.map((i) => pts[i].r[1]));
+    if (!cxs || !cys) break;
+    f = (p) => { const r = row(p); return [r.reduce((a, v, k) => a + v * cxs[k], 0), r.reduce((a, v, k) => a + v * cys[k], 0)]; };
+    const d = pts.map((q) => { const m = f(q.p); return Math.hypot(q.r[0] - m[0], q.r[1] - m[1]); });
+    const med = d.slice().sort((a, b) => a - b)[Math.floor(d.length / 2)];
+    const limit = Math.max(0.05, 3 * 1.4826 * med);
+    const keep = pts.map((_, i) => i).filter((i) => d[i] <= limit);
+    noise = Math.sqrt(keep.reduce((a, i) => a + d[i] * d[i], 0) / Math.max(1, keep.length));
+    if (keep.length === use.length || keep.length < Math.max(4, pts.length / 2)) break;
+    use = keep;
+  }
+  const out = pts.map((_, i) => i).filter((i) => !use.includes(i));
+  return { f, out, noise };
+}
+
 // ---------------------------------------------------------------- bed map
 // The checkerboard result: on a regular grid over the bed (x0, y0, step, nx × ny), how far the
 // head really is from where it was sent (ex, ey mm). correct(p): where to send the head so it
@@ -153,6 +202,34 @@ function bedMap(points, step, bed) {
     }
   }
   return { x0, y0, step, nx, ny, ex, ey };
+}
+
+// A checkerboard can't show where the whole machine sits or which way it's turned (the board
+// could be anywhere), only how it stretches and skews. So the error field is anchored the way
+// the machine is: none at home (0, 0), and none across the X axis (the X axis is the reference;
+// out of square shows as the Y axis leaning). Returns the anchored err(p), and the numbers:
+// X / Y length error (mm per m, + = the head goes further than told) and Y's lean (°).
+function anchorError(errAt, bed) {
+  const pts = [], ys = [];
+  const n = 8;
+  for (let j = 0; j <= n; j++) for (let i = 0; i <= n; i++) { const p = [(bed[0] * i) / n, (bed[1] * j) / n]; pts.push(p); ys.push(errAt(p)[1]); }
+  // e_y = c + ω·x + β·y: ω is a turn of the whole machine frame, taken out
+  const c = lsq(pts.map((p) => [1, p[0], p[1]]), ys) || [0, 0, 0];
+  const w = c[1];
+  const e0 = errAt([0, 0]);
+  const f = (p) => { const e = errAt(p); return [e[0] - e0[0] + w * p[1], e[1] - e0[1] - w * p[0]]; };
+  // slopes across the middle of the bed
+  const m = [bed[0] / 2, bed[1] / 2], d = Math.min(bed[0], bed[1]) / 4;
+  const dx = (k) => (f([m[0] + d, m[1]])[k] - f([m[0] - d, m[1]])[k]) / (2 * d), dy = (k) => (f([m[0], m[1] + d])[k] - f([m[0], m[1] - d])[k]) / (2 * d);
+  return { f, scaleX: dx(0) * 1000, scaleY: dy(1) * 1000, lean: (Math.atan(dy(0)) * 180) / Math.PI };
+}
+
+// a bed map straight from an error model: err(p) at every grid point of the whole bed
+function gridMap(errAt, step, bed) {
+  const nx = Math.floor(bed[0] / step) + 1, ny = Math.floor(bed[1] / step) + 1;
+  const ex = new Array(nx * ny), ey = new Array(nx * ny);
+  for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) { const e = errAt([i * step, j * step]); ex[j * nx + i] = +e[0].toFixed(4); ey[j * nx + i] = +e[1].toFixed(4); }
+  return { x0: 0, y0: 0, step, nx, ny, ex, ey };
 }
 
 // error at p (bilinear between grid points; held at the edges)
@@ -191,4 +268,4 @@ function transformPkg(pkg, f) {
   return out;
 }
 
-module.exports = { fit, typeFor, similarity, affine, delaunay, bedMap, mapError, correct, transformPkg };
+module.exports = { fit, typeFor, similarity, affine, delaunay, lsq, errorModel, anchorError, bedMap, gridMap, mapError, correct, transformPkg };

@@ -193,17 +193,22 @@ function toGrey(raw, w, h, fmt) {
 //   degrees, square size mm, squares across × down), marks: [{ x, y, d }] laser marks }
 // opts.headAt(): where the machine says the head (laser) is.
 class SimCamera {
+  // opts.light(ix, iy): how much light reaches a spot (mm from the picture's middle), 0 … 1:
+  // uneven light; opts.scene.board.bump(u, v): how far a bumpy board moves its pattern at board
+  // point (u, v) mm, as [du, dv] mm. Brightness follows the exposure (50 ms = as drawn).
   constructor(opts = {}) {
     this.size = opts.size || 480;
     this.truth = { offset: [41.437, 12.731], pixel: 0.08, rotation: 90, error: (p) => p, ...(opts.truth || {}) };
     this.scene = { dots: [], board: null, marks: [], ...(opts.scene || {}) };
     this.headAt = opts.headAt || (() => ({ x: 0, y: 0 }));
     this.noise = opts.noise === undefined ? 4 : opts.noise;
+    this.light = opts.light || null;
+    this.exp = 50000;
   }
 
   async open() { return { model: 'Simulated head camera', serial: 'sim' }; }
   async close() {}
-  async setExposure() {}
+  async setExposure(us) { if (Number(us) > 0) this.exp = Number(us); }
 
   // the laser fired here (calibration marks); where it really landed follows the machine error
   laserMark(x, y, d) { const p = this.truth.error([x, y]); this.scene.marks.push({ x: p[0], y: p[1], d }); }
@@ -214,7 +219,9 @@ class SimCamera {
     const b = this.scene.board;
     if (b) {
       const a = (-b.angle * Math.PI) / 180, dx = p[0] - b.x, dy = p[1] - b.y;
-      const u = (dx * Math.cos(a) - dy * Math.sin(a)) / b.square, v = (dx * Math.sin(a) + dy * Math.cos(a)) / b.square;
+      let bu = dx * Math.cos(a) - dy * Math.sin(a), bv = dx * Math.sin(a) + dy * Math.cos(a);
+      if (b.bump) { const d = b.bump(bu, bv); bu -= d[0]; bv -= d[1]; }
+      const u = bu / b.square, v = bv / b.square;
       if (u >= -1 && v >= -1 && u < (b.nx || 30) - 1 && v < (b.ny || 20) - 1) return (Math.floor(u) + Math.floor(v)) % 2 === 0 ? 30 : 220;
     }
     return 225;
@@ -229,6 +236,7 @@ class SimCamera {
     const data = new Uint8Array(n * n);
     let seed = 12345;
     const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff - 0.5; };
+    const gain = this.exp / 50000;
     for (let y = 0; y < n; y++) {
       for (let x = 0; x < n; x++) {
         // 2×2 samples per pixel: soft edges, like a real lens
@@ -237,7 +245,8 @@ class SimCamera {
           const ix = (x + ox - c) * s, iy = (y + oy - c) * s;
           v += this.shade([cam[0] + ca * ix - sa * iy, cam[1] + sa * ix + ca * iy]);
         }
-        data[y * n + x] = Math.max(0, Math.min(255, Math.round(v / 4 + this.noise * rnd())));
+        const lit = this.light ? this.light((x - c) * s, (y - c) * s) : 1;
+        data[y * n + x] = Math.max(0, Math.min(255, Math.round((v / 4) * lit * gain + this.noise * rnd())));
       }
     }
     return { w: n, h: n, data };
@@ -245,7 +254,7 @@ class SimCamera {
 }
 
 function makeCamera(vision, opts = {}) {
-  return vision.source === 'sim' ? new SimCamera(opts.sim || {}) : new VimbaCamera({ exposure: vision.exposure }, opts.log);
+  return vision.source === 'sim' ? new SimCamera(opts.sim || {}) : new VimbaCamera({ exposure: Number(vision.exposure) > 0 ? Number(vision.exposure) : null }, opts.log);
 }
 
 module.exports = { VimbaCamera, SimCamera, makeCamera, vmbLibrary, toGrey };

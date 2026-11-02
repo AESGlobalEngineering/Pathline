@@ -666,7 +666,9 @@ function setupView() {
     const turned = (Math.atan2(mc, ma) * 180) / Math.PI;
     const ro = (l, val) => '<div class="row"><span>' + l + '</span><span class="mono">' + val + '</span></div>';
     tabs.Camera.push(card('Head camera', tog('Camera on', 'vision.enabled') + seg('Camera', 'vision.source', [['vimba', 'Allied Vision (Vimba X)'], ['sim', 'Simulated']]) +
-      num('Exposure', 'vision.exposure', 'µs') + tog('Camera light (laser parameter 186)', 'vision.light') + num('Re-centre a mark further than', 'vision.tolerance', 'mm', 'From the middle of the picture') +
+      seg('Exposure', 'vision.exposure', [['auto', 'Auto'], [Number(v.exposure) > 0 ? Number(v.exposure) : 100000, 'Fixed']]) +
+      (v.exposure === 'auto' ? ro('Exposure now', S.camera.exposure ? (S.camera.exposure / 1000).toFixed(1) + ' ms' : '—') : num('Exposure time', 'vision.exposure', 'µs')) +
+      tog('Camera light (laser parameter 186)', 'vision.light') + num('Re-centre a mark further than', 'vision.tolerance', 'mm', 'From the middle of the picture') +
       ro('Camera', S.camera.info ? esc(S.camera.info.model + ' · ' + S.camera.info.serial) : 'not opened yet'),
     'The Alvium on the head plugs into this computer by USB (not into the laser). It needs Allied Vision\'s Vimba X installed, and Ruby / JobDispatcher closed: only one program can use it.'));
     tabs.Camera.push(card('Calibration', ro('Pixel size', (pixel * 1000).toFixed(2) + ' µm') + ro('Picture turned', turned.toFixed(2) + '°') +
@@ -678,12 +680,14 @@ function setupView() {
     const b = ui.board;
     const map = v.map;
     tabs.Camera.push(card('Checkerboard: bed accuracy', num('Square size', 'vision.board.square', 'mm') + num('Corners across', 'vision.board.across', '', 'Inner corners (squares − 1)') + num('Corners down', 'vision.board.down') +
-      num('Measure every', 'vision.board.every', '', '1 = every corner; 2, 3… for a quicker check') + tog('Correct jobs with the bed map', 'vision.mapOn') +
+      num('Measure every', 'vision.board.every', '', '1 = every corner; 2, 3… for a quicker check') +
+      seg('Correction', 'vision.board.model', [['linear', 'Scale and squareness'], ['smooth', 'Smooth'], ['full', 'Every corner']]) +
+      tog('Correct jobs with the bed map', 'vision.mapOn') +
       ro('Bed map', map ? map.nx + ' × ' + map.ny + ' points every ' + map.step + ' mm' + (v.mapAt ? ' · ' + new Date(v.mapAt).toLocaleString() : '') : 'none yet') +
       '<div style="display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end"><button class="tb" data-a="camBoard" data-v="check"' + need + '>Check bed</button><button class="btn-primary" data-a="camBoard" data-v="calibrate"' + need + '>Calibrate bed</button></div>' +
       (busy ? '<div class="warnbox">' + esc(S.status.message || busy) + '</div>' : '') +
       (b && b.points ? boardResult(b) : ''),
-    'Lay the checkerboard anywhere on the bed, at any angle, and jog the camera over its top-left inner corner (Jog → Camera). Check measures with the bed map on; Calibrate measures the machine as it is and saves a new map. The board\'s own position and angle are taken out: what\'s left is the machine.'));
+    'Lay the checkerboard anywhere on the bed, at any angle, and jog the camera over its top-left inner corner (Jog → Camera). Check measures with the bed map on; Calibrate measures the machine as it is and saves a new map. The board\'s own position and angle are taken out: what\'s left is the machine. A board that isn\'t flat moves some corners: those are left out. Scale and squareness is the safe choice for a board that isn\'t flat; Every corner only for one that is.'));
   }
 
   const tab = tabs[ui.setTab] ? ui.setTab : 'Machine';
@@ -711,12 +715,16 @@ function boardResult(b) {
   const col = (e) => (e < 0.1 ? 'var(--ok-dot)' : e < 0.3 ? 'var(--warn-dot)' : 'var(--err-dot)');
   const arrows = b.points.map((p) => {
     const e = Math.hypot(p.res[0], p.res[1]);
+    // corners a bump in the board moved: hollow and grey (left out of the map)
+    if (p.out) return '<circle cx="' + p.at[0] + '" cy="' + p.at[1] + '" r="' + W / 150 + '" fill="none" stroke="var(--text-3)" vector-effect="non-scaling-stroke" style="stroke-width:1.5px"/>';
     return '<circle cx="' + p.at[0] + '" cy="' + p.at[1] + '" r="' + W / 150 + '" fill="' + col(e) + '"/><line x1="' + p.at[0] + '" y1="' + p.at[1] + '" x2="' + (p.at[0] + p.res[0] * k) + '" y2="' + (p.at[1] + p.res[1] * k) + '" stroke="' + col(e) + '" vector-effect="non-scaling-stroke" style="stroke-width:2px"/>';
   }).join('');
   const n = (x, d) => Number(x).toFixed(d);
+  const sgn = (x, d) => (x > 0 ? '+' : '') + n(x, d);
   return '<div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;font-size:13px">' +
     [['Worst', n(b.worst, 3) + ' mm'], ['RMS', n(b.rms, 3) + ' mm'], ['Corners', b.points.length + (b.missed ? ' (' + b.missed + ' missed)' : '')],
-      ['X length', n(b.scaleX, 2) + ' mm/m'], ['Y length', n(b.scaleY, 2) + ' mm/m'], ['Squareness', n(b.squareness, 3) + '°']]
+      ['X travel', sgn(b.scaleX, 2) + ' mm/m'], ['Y travel', sgn(b.scaleY, 2) + ' mm/m'], ['Y leans', sgn(b.squareness, 3) + '°'],
+      ['Board bumps', (b.bumps || 0) + ' corner' + (b.bumps === 1 ? '' : 's') + ' left out'], ['Board misfit', b.noise !== undefined ? n(b.noise, 3) + ' mm' : '—'], ['Correction', { linear: 'Scale and squareness', smooth: 'Smooth', full: 'Every corner' }[b.model] || '—']]
       .map(([l, val]) => '<div style="display:flex;flex-direction:column;gap:2px;padding:8px;border-radius:8px;background:var(--surface-2)"><span class="lbl">' + l + '</span><span class="mono">' + val + '</span></div>').join('') + '</div>' +
     '<span class="lbl">' + (b.raw ? 'Machine as it is' : 'With the bed map on') + ' · board laid at ' + n(b.boardAngle, 2) + '° · ' + new Date(b.at).toLocaleString() + '</span>' +
     '<svg viewBox="' + [-20, -20, W + 40, H + 40].join(' ') + '" style="width:100%;aspect-ratio:' + (W + 40) + '/' + (H + 40) + ';background:var(--sunken);border-radius:8px" aria-label="Error at each corner, 200 times life size"><rect x="0" y="0" width="' + W + '" height="' + H + '" fill="var(--bed)" stroke="var(--bed-line)" vector-effect="non-scaling-stroke"/>' + arrows + '</svg>';

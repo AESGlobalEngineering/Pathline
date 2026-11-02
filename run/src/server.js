@@ -71,14 +71,23 @@ function start(opts = {}) {
 
   const store = new Store(DATA);
   // --sim: the head camera is simulated too, over a made-up bed: a 50 mm checkerboard laid at
-  // 1.5° and the example job's three registration marks printed on a sheet that's shifted and
-  // turned a little; the machine itself is 1.5 mm/m long in X and 0.03° out of square
+  // 1.5° with a bump in it, and the example job's three registration marks printed on a sheet
+  // that's shifted and turned a little, all lit unevenly (25 … 100 % across the picture); the
+  // machine itself is 1.5 mm/m long in X and 0.03° out of square
   const sheet = (p) => { const a = (0.3 * Math.PI) / 180; return [0.8 + p[0] * Math.cos(a) - p[1] * Math.sin(a), -0.5 + p[0] * Math.sin(a) + p[1] * Math.cos(a)]; };
   const simVision = opts.sim ? {
     forceSim: true,
     sim: {
       truth: { offset: [41.2, 12.9], pixel: 0.08, rotation: 90, error: (p) => [p[0] * 1.0015 + p[1] * 0.0005236, p[1]] },
-      scene: { dots: [[40, 25], [340, 25], [40, 215]].map((p) => { const q = sheet(p); return { x: q[0], y: q[1], d: 5 }; }), board: { x: 100, y: 300, angle: 1.5, square: 50, nx: 20, ny: 10 } }
+      scene: {
+        dots: [[40, 25], [340, 25], [40, 215]].map((p) => { const q = sheet(p); return { x: q[0], y: q[1], d: 5 }; }),
+        board: {
+          x: 100, y: 300, angle: 1.5, square: 50, nx: 20, ny: 10,
+          // a bump round board point (450, 150): the pattern pushed outward up to 0.3 mm
+          bump: (u, v) => { const dx = u - 450, dy = v - 150, r = Math.hypot(dx, dy); if (r < 1) return [0, 0]; const k = 0.3 * Math.exp(-(r * r) / 4050); return [(k * dx) / r, (k * dy) / r]; }
+        }
+      },
+      light: (ix, iy) => 0.25 + 0.75 * Math.exp(-((ix - 14) ** 2 + (iy + 8) ** 2) / 648)
     }
   } : {};
   const machine = new Machine(cfg, store, log, { vision: simVision });
@@ -222,7 +231,7 @@ function start(opts = {}) {
     'GET /state': (b, req) => ({
       app: pkgJson.version, update: updates.status(), here: isLocalReq(req), config: cfg, status: machine.status(), info: machine.info, ruidaModels: ruidaModels.MODELS,
       fromController: machine.ctrl || null,
-      camera: { open: !!machine.vision.camera, info: machine.vision.camera ? machine.vision.camera.info || null : null, busy: machine.camBusy || null, defaults: VisionDefaults },
+      camera: { open: !!machine.vision.camera, info: machine.vision.camera ? machine.vision.camera.info || null : null, busy: machine.camBusy || null, exposure: machine.vision.exposureNow(), defaults: VisionDefaults },
       jobs: store.jobs.filter((j) => !j.hidden), history: store.history.slice(0, 100), controllers: Object.keys(CONTROLLERS)
     }),
     'GET /log': () => logLines,
@@ -293,7 +302,7 @@ function start(opts = {}) {
       const calibrate = b && b.mode === 'calibrate';
       const r = await machine.cameraTask(calibrate ? 'Calibrating the bed with the checkerboard' : 'Checking the bed with the checkerboard', (ctl, status) => machine.vision.scanBoard({ raw: calibrate, board: b && b.board }, ctl, status));
       if (calibrate) {
-        const map = fitting.bedMap(r.points, r.step, cfg.bed);
+        const map = r.map || fitting.bedMap(r.points, r.step, cfg.bed);
         await learnt({ vision: { ...(cfg.vision || {}), map, mapOn: true, mapAt: r.at } }, 'camera: bed map saved (' + r.points.length + ' corners, worst ' + r.worst.toFixed(3) + ' mm before correcting)');
       }
       return r;

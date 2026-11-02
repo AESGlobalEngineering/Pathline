@@ -20,12 +20,12 @@ const err = (msg, code) => Object.assign(new Error(msg), { code: code || 409 });
 
 // the camera settings, with their defaults (Setup → Camera)
 const DEFAULTS = {
-  enabled: false, source: 'vimba', exposure: 100000, light: false, // µs: 20 ms was nearly black with the light off
+  enabled: false, source: 'vimba', exposure: 'auto', light: false, // or µs (20 ms was nearly black with the light off)
   offset: [41.437, 12.731],            // laser − camera, mm (this machine's, from Ruby)
   matrix: [0, 0.02, 0.02, 0],          // mm per pixel; frames come rotated 90° (§7.8)
   tolerance: 1.0, recentre: 3,         // Ruby's AcceptableDistanceToCenterMm, MaxRepositionCount
   mark: { power: 20, speed: 50 },      // calibration mark: a small dark disc of tight circles
-  board: { square: 50, across: 25, down: 17, every: 2 },
+  board: { square: 50, across: 25, down: 17, every: 2, model: 'linear' }, // model: linear / smooth / full
   map: null, mapOn: true, calibrated: ''
 };
 
@@ -57,13 +57,34 @@ class Vision {
 
   async close() { if (this.camera) { await this.camera.close().catch(() => {}); this.camera = null; } }
 
+  // One frame. Exposure 'auto': aim the brightest part of the view (the 95th percentile: the white
+  // paper or board, whatever the light does elsewhere) at about 190 of 255, a few tries at most,
+  // and keep the exposure found for the next frame (so usually one grab).
   async grab() {
     const c = await this.cam();
     await sleep(50); // Ruby's CameraTriggerDelayMs: let the head settle
-    const img = await c.grab();
+    const v = this.cfg;
+    let img;
+    if (v.exposure !== 'auto' && Number(v.exposure) > 0) {
+      if (this.expSet !== Number(v.exposure)) { await c.setExposure(Number(v.exposure)); this.expSet = Number(v.exposure); }
+      img = await c.grab();
+    } else {
+      if (!this.exp) this.exp = 50000;
+      for (let k = 0; k < 6; k++) {
+        if (this.expSet !== this.exp) { await c.setExposure(this.exp); this.expSet = this.exp; }
+        img = await c.grab();
+        const b = brightest(img);
+        if (b >= 150 && b <= 230) break;
+        const next = Math.max(100, Math.min(1000000, Math.round(b >= 250 ? this.exp * 0.4 : this.exp * Math.max(0.3, Math.min(4, 190 / Math.max(1, b))))));
+        if (next === this.exp) break; // at the limit: the best there is
+        this.exp = next;
+      }
+    }
     this.last = { img, at: { ...this.m.st.pos }, t: Date.now() };
     return img;
   }
+
+  exposureNow() { return this.cfg.exposure === 'auto' ? this.exp || null : Number(this.cfg.exposure); }
 
   // a frame for the screen (grey bytes), about `size` px across
   async preview(size) {
@@ -239,26 +260,85 @@ class Vision {
       grid.push(g); found.push(r.found);
     }
     if (grid.length < 4) throw err('Only ' + grid.length + ' corners found: check the board size in Setup → Camera');
-    const T = fitting.fit(grid, found, 'rigid');
-    const A = fitting.fit(grid, found, 'affine');
+    // The board's own position and angle (rigid: the board is the length reference) come out
+    // first; what's left is the machine's error, plus wherever the board isn't flat. The
+    // machine's part is the smooth model (Setup: scale and squareness / smooth / every corner);
+    // corners a bump moved don't fit it and are left out, then the board is fitted again.
+    const model = b.model || 'linear';
+    const resid = (T) => grid.map((g, k) => { const i = T(g); return [found[k][0] - i[0], found[k][1] - i[1]]; });
+    let T = fitting.fit(grid, found, 'rigid');
+    let res = resid(T);
+    let em = fitting.errorModel(found.map((f, k) => ({ p: f, r: res[k] })), model);
+    if (em.out.length) {
+      const keep = (a) => a.filter((_, k) => !em.out.includes(k));
+      T = fitting.fit(keep(grid), keep(found), 'rigid');
+      res = resid(T);
+      const out = em.out;
+      em = fitting.errorModel(found.map((f, k) => ({ p: f, r: res[k] })), model);
+      em.out = [...new Set(out.concat(em.out))];
+    }
+    const inG = grid.filter((_, k) => !em.out.includes(k)), inF = found.filter((_, k) => !em.out.includes(k));
+    const A = fitting.fit(inG, inF, 'affine');
     const points = grid.map((g, k) => {
-      const ideal = T(g);
-      const r = [found[k][0] - ideal[0], found[k][1] - ideal[1]];
+      const m = em.f(found[k]);
+      const out = em.out.includes(k);
+      // the correction: the model, or (every corner, on a flat board) the corner itself
+      const use = model === 'full' && !out ? res[k] : m;
       // where the head was (laser coordinates), and how far off it really was
-      return { grid: g, at: [found[k][0] + this.cfg.offset[0], found[k][1] + this.cfg.offset[1]], res: r, err: [-r[0], -r[1]] };
+      return { grid: g, at: [found[k][0] + this.cfg.offset[0], found[k][1] + this.cfg.offset[1]], res: res[k], model: m, out, err: [-use[0], -use[1]] };
     });
     const d = points.map((p) => Math.hypot(p.res[0], p.res[1]));
     // squareness: the angle between the board's X and Y lines as the machine draws them
-    const sq = squareness(grid, found);
+    const sq = squareness(inG, inF);
+    // (scaleX, scaleY, squareness are replaced below by the anchored machine numbers)
     const result = {
-      at: new Date().toISOString(), raw, step, points, missed,
+      at: new Date().toISOString(), raw, step, points, missed, model,
       worst: Math.max(...d), rms: Math.sqrt(d.reduce((s, x) => s + x * x, 0) / d.length),
+      // how much the board itself wanders off the machine's model (bumps, and reading noise)
+      noise: em.noise, bumps: em.out.length,
       boardAngle: T.info.rotation, scaleX: (A.info.scaleX - 1) * 1000, scaleY: (A.info.scaleY - 1) * 1000, squareness: sq
     };
+    // the bed map this would save: the model over the whole bed (a straight-line model carries on
+    // past the board; a curve is held at the board's edge), or every corner as measured. Anchored
+    // at home and to the X axis (fit.anchorError): the board can't show where the machine as a
+    // whole sits, and it mustn't move jobs.
+    const off = this.cfg.offset;
+    const bed = this.m.cfg.bed;
+    // Everywhere: the straight-line model (scale and squareness carry on across the bed). Where
+    // the board was: plus the smooth model's curve, or each corner's own difference (every
+    // corner), fading out within one step past the board's edge.
+    const bx = [Math.min(...inF.map((p) => p[0])), Math.max(...inF.map((p) => p[0]))], by = [Math.min(...inF.map((p) => p[1])), Math.max(...inF.map((p) => p[1]))];
+    const clampP = (p) => [Math.max(bx[0], Math.min(bx[1], p[0])), Math.max(by[0], Math.min(by[1], p[1]))];
+    const lin = model === 'linear' ? em : fitting.errorModel(found.map((f, k) => ({ p: f, r: res[k] })).filter((_, k) => !em.out.includes(k)), 'linear');
+    const inside = points.filter((p) => !p.out).map((p) => { const q = [p.at[0] - off[0], p.at[1] - off[1]], l = lin.f(q); return { q, d: [p.res[0] - l[0], p.res[1] - l[1]] }; });
+    const extra = (p) => {
+      if (model === 'smooth') { const c = clampP(p), s = em.f(c), l = lin.f(c); return [s[0] - l[0], s[1] - l[1]]; }
+      if (model !== 'full') return [0, 0];
+      const near = inside.map((o) => ({ o, d: Math.hypot(o.q[0] - p[0], o.q[1] - p[1]) })).sort((a, b) => a.d - b.d).slice(0, 4);
+      let sw = 0, sx = 0, sy = 0;
+      for (const { o, d } of near) { const wgt = 1 / Math.max(1e-6, d) ** 2; sw += wgt; sx += wgt * o.d[0]; sy += wgt * o.d[1]; }
+      const fade = Math.min(1, (step / Math.max(step, near[0].d)) ** 2);
+      return [(fade * sx) / sw, (fade * sy) / sw];
+    };
+    const errAt = (L) => { const p = [L[0] - off[0], L[1] - off[1]], b0 = lin.f(p), x = extra(p); return [-(b0[0] + x[0]), -(b0[1] + x[1])]; };
+    const anchored = fitting.anchorError(errAt, bed);
+    result.map = fitting.gridMap(anchored.f, Math.min(step, 50), bed);
+    // the machine's own numbers (+ = the head goes further than told; Y's lean from square)
+    result.scaleX = anchored.scaleX; result.scaleY = anchored.scaleY; result.squareness = anchored.lean;
     this.lastDrift = result;
-    this.log('checkerboard: ' + points.length + ' corners (' + missed + ' missed), worst ' + result.worst.toFixed(3) + ' mm, rms ' + result.rms.toFixed(3) + ' mm, scale X ' + result.scaleX.toFixed(2) + ' / Y ' + result.scaleY.toFixed(2) + ' mm/m, squareness ' + sq.toFixed(3) + '°, board at ' + result.boardAngle.toFixed(2) + '°');
+    this.log('checkerboard: ' + points.length + ' corners (' + missed + ' missed, ' + em.out.length + ' left out as bumps), worst ' + result.worst.toFixed(3) + ' mm, rms ' + result.rms.toFixed(3) + ' mm, X ' + result.scaleX.toFixed(2) + ' / Y ' + result.scaleY.toFixed(2) + ' mm/m, Y leans ' + result.squareness.toFixed(3) + '°, board at ' + result.boardAngle.toFixed(2) + '°, board misfit ' + em.noise.toFixed(3) + ' mm (' + model + ')');
     return result;
   }
+}
+
+// the grey level the brightest 5 % of the picture reaches (sampled)
+function brightest(img) {
+  const hist = new Uint32Array(256);
+  let n = 0;
+  for (let i = 0; i < img.data.length; i += 7) { hist[img.data[i]]++; n++; }
+  let acc = 0;
+  for (let v = 255; v >= 0; v--) { acc += hist[v]; if (acc >= n * 0.05) return v; }
+  return 0;
 }
 
 // angle (deg) between the machine's images of the board's X and Y lines, minus 90°

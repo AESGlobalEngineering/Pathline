@@ -25,18 +25,47 @@ function otsu(data) {
   return t;
 }
 
+// Which pixels are dark, judged against their own neighbourhood (a win × win box): the light
+// across the bed needn't be even. Dark = more than `t` (as a fraction) below the local mean and
+// at least `minDiff` grey levels below it.
+function darkMask(img, win, t = 0.25, minDiff = 12) {
+  const { w, h, data } = img;
+  const W = w + 1;
+  const I = new Uint32Array(W * (h + 1)); // integral image (fits: 255 × 5 Mpx < 2³²)
+  for (let y = 0; y < h; y++) { let row = 0; for (let x = 0; x < w; x++) { row += data[y * w + x]; I[(y + 1) * W + x + 1] = I[y * W + x + 1] + row; } }
+  const r = Math.max(2, win >> 1);
+  const mask = new Uint8Array(w * h);
+  for (let y = 0; y < h; y++) {
+    const y0 = Math.max(0, y - r), y1 = Math.min(h, y + r + 1);
+    for (let x = 0; x < w; x++) {
+      const x0 = Math.max(0, x - r), x1 = Math.min(w, x + r + 1);
+      const n = (x1 - x0) * (y1 - y0);
+      const mean = (I[y1 * W + x1] - I[y0 * W + x1] - I[y1 * W + x0] + I[y0 * W + x0]) / n;
+      const v = data[y * w + x];
+      if (v <= mean * (1 - t) && mean - v >= minDiff) mask[y * w + x] = 1;
+    }
+  }
+  return mask;
+}
+
 // Dark blobs whose size fits a dot of diameter minD … maxD px, round enough, not cut off by the
-// frame edge. Centre = darkness-weighted centroid (sub-pixel).
+// frame edge. Dark is judged locally (darkMask), so uneven light doesn't matter; opts.global
+// uses one threshold for the whole picture instead. Centre = darkness-weighted centroid.
 function findDots(img, opts = {}) {
   const { w, h, data } = img;
-  const t = opts.threshold || otsu(data);
   const minD = opts.minD || 8, maxD = opts.maxD || Math.min(w, h) * 0.8;
+  // the box must be well bigger than a dot, so a dot's middle is compared with paper round it
+  const win = opts.window || Math.max(15, Math.min(Math.min(w, h), Math.round(opts.maxD ? maxD * 2.5 : Math.min(w, h) / 3)));
+  let dark;
+  if (opts.global) { const t = opts.threshold || otsu(data); dark = new Uint8Array(w * h); for (let i = 0; i < w * h; i++) dark[i] = data[i] < t ? 1 : 0; }
+  else dark = darkMask(img, win);
   const label = new Int32Array(w * h);
   const stack = new Int32Array(w * h);
   const out = [];
   let next = 1;
+  const t = 256;
   for (let start = 0; start < w * h; start++) {
-    if (label[start] || data[start] >= t) continue;
+    if (label[start] || !dark[start]) continue;
     let sp = 0, area = 0, sw = 0, sx = 0, sy = 0, x0 = w, y0 = h, x1 = 0, y1 = 0;
     stack[sp++] = start;
     label[start] = next;
@@ -46,10 +75,10 @@ function findDots(img, opts = {}) {
       const wt = t - data[i];
       area++; sw += wt; sx += wt * x; sy += wt * y;
       if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
-      if (x > 0 && !label[i - 1] && data[i - 1] < t) { label[i - 1] = next; stack[sp++] = i - 1; }
-      if (x < w - 1 && !label[i + 1] && data[i + 1] < t) { label[i + 1] = next; stack[sp++] = i + 1; }
-      if (y > 0 && !label[i - w] && data[i - w] < t) { label[i - w] = next; stack[sp++] = i - w; }
-      if (y < h - 1 && !label[i + w] && data[i + w] < t) { label[i + w] = next; stack[sp++] = i + w; }
+      if (x > 0 && !label[i - 1] && dark[i - 1]) { label[i - 1] = next; stack[sp++] = i - 1; }
+      if (x < w - 1 && !label[i + 1] && dark[i + 1]) { label[i + 1] = next; stack[sp++] = i + 1; }
+      if (y > 0 && !label[i - w] && dark[i - w]) { label[i - w] = next; stack[sp++] = i - w; }
+      if (y < h - 1 && !label[i + w] && dark[i + w]) { label[i + w] = next; stack[sp++] = i + w; }
     }
     next++;
     if (x0 === 0 || y0 === 0 || x1 === w - 1 || y1 === h - 1) continue; // cut off by the edge
@@ -61,7 +90,45 @@ function findDots(img, opts = {}) {
     out.push({ x: sx / sw, y: sy / sw, d, round, area });
   }
   const cx = (w - 1) / 2, cy = (h - 1) / 2;
-  return out.sort((a, b) => Math.hypot(a.x - cx, a.y - cy) - Math.hypot(b.x - cx, b.y - cy));
+  out.sort((a, b) => Math.hypot(a.x - cx, a.y - cy) - Math.hypot(b.x - cx, b.y - cy));
+  // the one that will be used, refined so uneven light doesn't pull its centre
+  if (out.length && !opts.global) out[0] = refineDot(img, out[0]);
+  return out;
+}
+
+// A dot's centre without the light's slope: fit the paper round it as a tilted plane
+// (brightness a + b·x + c·y on a ring outside the dot), divide it out, and take the plain
+// centre of what's under half the paper's brightness. Twice, as the centre moves.
+function refineDot(img, dot) {
+  const { w, h, data } = img;
+  let { x: cx, y: cy, d } = dot;
+  for (let it = 0; it < 2; it++) {
+    const R = d / 2;
+    const r1 = R * 1.35, r2 = R * 1.9, r3 = R * 1.6;
+    const x0 = Math.max(0, Math.floor(cx - r2)), x1 = Math.min(w - 1, Math.ceil(cx + r2));
+    const y0 = Math.max(0, Math.floor(cy - r2)), y1 = Math.min(h - 1, Math.ceil(cy + r2));
+    // plane through the ring: normal equations for [1, x, y]
+    const N = [[0, 0, 0], [0, 0, 0], [0, 0, 0]], B = [0, 0, 0];
+    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+      const r = Math.hypot(x - cx, y - cy);
+      if (r < r1 || r > r2) continue;
+      const row = [1, x - cx, y - cy], v = data[y * w + x];
+      for (let a = 0; a < 3; a++) { for (let b = 0; b < 3; b++) N[a][b] += row[a] * row[b]; B[a] += row[a] * v; }
+    }
+    const det = (m) => m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0]) + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
+    const D = det(N);
+    if (Math.abs(D) < 1e-9) break;
+    const p = [0, 1, 2].map((k) => det(N.map((row, i) => row.map((v, j) => (j === k ? B[i] : v)))) / D);
+    let n = 0, sx = 0, sy = 0;
+    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+      if (Math.hypot(x - cx, y - cy) > r3) continue;
+      const bg = p[0] + p[1] * (x - cx) + p[2] * (y - cy);
+      if (bg > 4 && data[y * w + x] < bg * 0.5) { n++; sx += x; sy += y; }
+    }
+    if (n < 10) break;
+    cx = sx / n; cy = sy / n; d = 2 * Math.sqrt(n / Math.PI);
+  }
+  return { ...dot, x: cx, y: cy, d };
 }
 
 // box-average down to about `size` px across
@@ -88,7 +155,10 @@ function shrink(img, size) {
 // of one of the board's lines through the corner, in the image.
 function findCorner(img, opts = {}) {
   const s = shrink(img, opts.work || 400);
-  const { w, h, data } = s;
+  // even out the light: each pixel against the darkest and lightest round it (a quarter of
+  // the picture), so a dim side and a bright side both read as black and white squares
+  const data = evenOut(s, Math.round(Math.min(s.w, s.h) / 4));
+  const { w, h } = s;
   const r = Math.max(4, Math.round(Math.min(w, h) * (opts.ring || 0.04)));
   const ring = [];
   for (let k = 0; k < 16; k++) { const a = (k * Math.PI) / 8; ring.push(Math.round(Math.cos(a) * r) + Math.round(Math.sin(a) * r) * w); }
@@ -155,6 +225,27 @@ function findCorner(img, opts = {}) {
   let angle = (Math.atan2(s4, c4) / 4) * (180 / Math.PI);
   if (angle < 0) angle += 90;
   return { x: qx, y: qy, contrast: best.contrast, angle };
+}
+
+// local min / max over a (2r+1)² box, then stretched to 0 … 255 (flat areas stay mid grey)
+function evenOut(s, r) {
+  const { w, h, data } = s;
+  const pass = (src, horizontal, pick) => {
+    const out = new Float32Array(w * h);
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        let m = src[y * w + x];
+        const lo = horizontal ? Math.max(0, x - r) : Math.max(0, y - r), hi = horizontal ? Math.min(w - 1, x + r) : Math.min(h - 1, y + r);
+        for (let k = lo; k <= hi; k++) { const v = horizontal ? src[y * w + k] : src[k * w + x]; m = pick(m, v); }
+        out[y * w + x] = m;
+      }
+    }
+    return out;
+  };
+  const mn = pass(pass(data, true, Math.min), false, Math.min), mx = pass(pass(data, true, Math.max), false, Math.max);
+  const out = new Float32Array(w * h);
+  for (let i = 0; i < w * h; i++) { const span = mx[i] - mn[i]; out[i] = span < 20 ? 128 : ((data[i] - mn[i]) / span) * 255; }
+  return out;
 }
 
 // a smaller copy for the screen (grey bytes), about `size` px across
