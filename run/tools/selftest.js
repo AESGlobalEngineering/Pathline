@@ -217,12 +217,12 @@ console.log('RDD6584 knife job (compared with VCutWorks, recorded on a YC-1610)'
   const hr = knife.compile(planR, { bed: [1000, 1600], ruida: { origin: 'tr' }, timing: {} }).segments[0].data;
   const mv = rd.commands(hr).filter((c) => c[0] === 0x80 || c[0] === 0xa0).map((c) => [rd.dec(c.subarray(1, 6)) / 1000, rd.dec(c.subarray(6, 11)) / 1000, rd.dec(c.subarray(11, 16)) / 1000]);
   ok(JSON.stringify(mv) === '[[100,50,180],[50,50,180]]', 'origin top right: Pathline X 900 → 950 cuts at machine X 100 → 50, knife at 180°', JSON.stringify(mv));
-  // jobs run relative to the panel's origin: J0005's square (bed X 850–950, Y 50–150) was cut
-  // 250 mm left and 20 mm down with the origin at machine X 250, Y 20
+  // jobs run relative to home, by the controller itself: J0005's square (bed X 850–950,
+  // Y 50–150) goes in as X 50–150, Y 50–150 from home (taking home off again gave "frame slop")
   const planO = { name: 'sq', warnings: [], seconds: 1, steps: [{ op: 'cut', i: 0, proc: { speed: 60 }, runs: [[[850, 50], [950, 50], [950, 150], [850, 150], [850, 50]]], seconds: 1 }] };
-  const ho = knife.compile(planO, { bed: [1000, 1600], ruida: { origin: 'tr' }, timing: {} }, { origin: { x: 250, y: 20 } }).segments[0].data;
+  const ho = knife.compile(planO, { bed: [1000, 1600], ruida: { origin: 'tr' }, timing: {} }).segments[0].data;
   const xy = rd.commands(ho).filter((c) => c[0] === 0xa0).map((c) => [rd.dec(c.subarray(1, 6), true) / 1000, rd.dec(c.subarray(6, 11), true) / 1000]);
-  ok(JSON.stringify(xy) === '[[-200,30],[-200,130],[-100,130],[-100,30]]', 'origin X 250, Y 20 on the panel: the square goes in at X −200…−100, Y 30…130 from it', JSON.stringify(xy));
+  ok(JSON.stringify(xy) === '[[50,50],[50,150],[150,150],[150,50]]', 'top right of the bed → X 50–150, Y 50–150 from home, never past it', JSON.stringify(xy));
   // a Pathline job over two beds: two files, the first feeding the conveyor one bed
   const twoBeds = JSON.parse(fs.readFileSync(path.join(FIX, 'plotter-two-beds.json'), 'utf8'));
   const cfgK = { ...config.defaults('ruida'), configured: true, type: 'plotter', bed: [1600, 1000], feedLen: 1000, f: { ...config.defaults('ruida').f, conveyor: true }, ruida: { model: 'RDD6584G', magic: 0xa1, origin: 'tr' } };
@@ -469,7 +469,7 @@ async function linkTests() {
       rdev.raw = (rdev.raw || []).concat(hex(c));
       if (c[0] === 0xda && c[1] === 0x00) {
         const addr = (c[2] << 8) | c[3];
-        const v = { 0x0405: (rdev.files || []).length, 0x057e: rdev.card || 0x6445, 0x0400: 0, 0x0421: 850000, 0x0431: 20000, 0x0026: 900000, 0x0036: 600000, 0x0023: 400000, 0x0033: 300000, 0x0025: 3000000, 0x0035: 2500000 }[addr] || 0;
+        const v = { 0x0405: (rdev.files || []).length, 0x0424: rdev.homeX || 0, 0x0434: rdev.homeY || 0, 0x057e: rdev.card || 0x6445, 0x0400: 0, 0x0421: 850000, 0x0431: 20000, 0x0026: 900000, 0x0036: 600000, 0x0023: 400000, 0x0033: 300000, 0x0025: 3000000, 0x0035: 2500000 }[addr] || 0;
         sock.send(rd.swizzle(Buffer.from([0xda, 0x01, c[2], c[3], ...rd.enc(v, 5), ...rd.enc(0, 5)]), magic), from.port, from.address);
       }
     }
@@ -529,6 +529,17 @@ async function linkTests() {
     ok(rdev.files.join() === 'L100R80,X1,START' && rdev.ran === 3 && rdev.raw.some((h) => h === 'e70600000000020000060d20'),
       'RDD6584 Conveyor: START replaced (other files kept), feed-only job with 100 mm uploaded and started', rdev.files.join() + ' ran ' + rdev.ran);
     ok(rk.continuousJog, 'RDD6584: a held arrow is one long move (no judder between steps)');
+    // home at controller X 250, Y 20: the head at controller X 850, Y 20 reads X 600, Y 0
+    // from home, and moving to bed X 100 (origin top right, 900 mm bed) goes to controller X 1050
+    rdev.homeX = 250000; rdev.homeY = 20000;
+    await rk.readHome();
+    const ph = await rk.poll();
+    rdev.raw = [];
+    await rk.moveTo(100, 0, { axis: 'x' });
+    const dx = rdev.raw.find((h) => h.startsWith('d900'));
+    ok(ph.mpos.x === 600 && ph.mpos.y === 0 && ph.pos.x === 300 && dx && rd.dec(Buffer.from(dx.slice(6), 'hex'), true) === 200000,
+      'RDD6584: positions from home (X 250, Y 20): head reads X 600, Y 0; going to bed X 100 moves +200 mm', JSON.stringify(ph.mpos) + ' ' + dx);
+    rdev.homeX = 0; rdev.homeY = 0;
   } catch (e) { ok(false, 'RDD6584 moves', e.stack); }
   await rk.close();
   rdev.card = 0;

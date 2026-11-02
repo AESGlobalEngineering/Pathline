@@ -60,6 +60,11 @@ class RuidaLink {
     // knife controllers (RDD6584, card 0x69xx) move BY the D9 value, not TO it (see moveTo)
     this.relMoves = /^RDD/.test(model.id) || ((id & 0xff00) === 0x6900);
     this.cmd = null;
+    // knife controllers: positions are measured from home (where the head homes and parks,
+    // the controller's origin), as its jobs are; laser controllers from their own zero
+    this.zero = { x: 0, y: 0 };
+    this.polls = 0;
+    if (this.relMoves) await this.readHome();
     this.info = {
       model: 'Ruida card ' + cardText(id) + (model.id !== 'OTHER' ? ' · set up as ' + model.label : ''),
       firmware: 'swizzle magic 0x' + this.magic.toString(16) + (this.magicFixed ? ' (detected)' : ''),
@@ -180,14 +185,23 @@ class RuidaLink {
   }
 
   async poll() {
+    // home can be moved on the panel: look again every ~10 s
+    if (this.relMoves && ++this.polls % 20 === 0) await this.readHome().catch(() => {});
     const st = await this.query(MEM.status);
-    const x = await this.query(MEM.x);
-    const y = await this.query(MEM.y);
+    const x = await this.query(MEM.x) - this.zero.x;
+    const y = await this.query(MEM.y) - this.zero.y;
     const [mx, my] = this.M.toMm(x, y);
     // status bits (MeerK40t): 0x01000000 moving, 0x01 job running
     const busy = !!(st & 0x01000000) || !!(st & 0x01);
-    // mpos: the controller's own coordinates, as its panel shows them (for the X/Y readouts)
+    // mpos: the machine's coordinates (from home on a knife controller), for the X/Y readouts
     return { state: busy ? 'busy' : 'idle', pos: { x: +mx.toFixed(3), y: +my.toFixed(3), z: 0 }, mpos: { x: x / 1000, y: y / 1000 }, interlock: false, raw: st.toString(16) };
+  }
+
+  // home in the controller's own coordinates (µm): its origin registers
+  async readHome() {
+    const h = { x: await this.query(MEM.originX), y: await this.query(MEM.originY) };
+    if (h.x !== this.zero.x || h.y !== this.zero.y) this.log('ruida: home at X ' + (h.x / 1000).toFixed(3) + ', Y ' + (h.y / 1000).toFixed(3) + ' mm (controller coordinates): positions are measured from there');
+    this.zero = h;
   }
 
   send(seg, ctl) { return seg.kind === 'file' ? this.runFile(seg.data, ctl) : this.sendRaw(seg.data, ctl); }
@@ -233,7 +247,7 @@ class RuidaLink {
   // Moves by hand go one axis at a time (D9 00 / D9 01): the two-axis D9 10 isn't the same
   // command on every controller (see rd.js). o.axis: only that axis moves (jogging).
   async moveTo(x, y, o = {}) {
-    const to = { x: this.M.x(x), y: this.M.y(y) }; // controller µm
+    const to = { x: this.M.x(x) + this.zero.x, y: this.M.y(y) + this.zero.y }; // controller µm
     const axes = o.axis ? [o.axis] : ['x', 'y'];
     for (const [i, a] of axes.entries()) {
       if (i > 0) await this.waitStill();
@@ -276,13 +290,6 @@ class RuidaLink {
 
   // plotter conveyor on the U axis: where it is (mm), and advance it by hand
   async readU() { return (await this.query(MEM.u)) / 1000; }
-
-  // RDD6584: the origin set on the panel (Origin key), mm in the controller's own coordinates.
-  // Knife jobs run relative to it, and the head goes back to it after a job.
-  async readOrigin() {
-    const x = await this.query(MEM.originX), y = await this.query(MEM.originY);
-    return { x: x / 1000, y: y / 1000 };
-  }
 
   // The controller's own settings (read only), for Setup → Read from controller.
   // Addresses from the EduTech wiki (two 7-bit bytes); lengths in µm, speeds in µm/s.

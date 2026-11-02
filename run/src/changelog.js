@@ -5,6 +5,13 @@
 
 module.exports = [
   {
+    version: '0.6.1', date: '2 Nov 2026',
+    fixed: [
+      'RDD6584: "frame slop" on the controller. Home is 0, 0: jobs go in measured from home, as the controller expects (0.5.9 took home off again, which put parts of jobs past home).',
+      'RDD6584: positions, X/Y readouts and jogging are measured from home too, so the bed view shows where the head really is relative to the job.'
+    ]
+  },
+  {
     version: '0.6.0', date: '2 Nov 2026',
     added: [
       'RDD6584: each Pathline process runs with its own tool, taken from its name (or Setup → Tools): knife, pen or punch. One layer per process, in Pathline\'s order, with the tool changes the controller expects.',

@@ -129,22 +129,21 @@ function bedFile(layers, opts = {}) {
 }
 
 // Pathline's bed (origin top left, Y to the front) → the machine's job coordinates. A YC-1610
-// counts from the top right, X to the left (Setup → Ruida origin "top right"): a shape at the
-// right of the bed has a small X. Knife angles follow from the mapped points.
-// The job then runs relative to the origin set on the machine's panel (the head starts and
-// ends there): o = that origin in the machine's coordinates (link.readOrigin), subtracted.
-function mapPts(cfg, o) {
+// counts from home, its top right corner, X to the left (Setup → Ruida origin "top right"): a
+// shape at the right of the bed has a small X. Knife angles follow from the mapped points.
+// The controller runs a job relative to home itself (it refuses one that reaches past home,
+// "frame slop"), so nothing is subtracted.
+function mapPts(cfg) {
   const r = cfg.ruida || {};
   const [W, H] = cfg.bed || [0, 0];
   const fx = r.origin === 'tr' || r.origin === 'br', fy = r.origin === 'bl' || r.origin === 'br';
-  const ox = (o && o.x) || 0, oy = (o && o.y) || 0;
-  return (pts) => pts.map(([x, y]) => [(fx ? W - x : x) - ox, (fy ? H - y : y) - oy]);
+  return (pts) => pts.map(([x, y]) => [fx ? W - x : x, fy ? H - y : y]);
 }
 
-// opts.card: the controller's card ID (from link.info), for CA 30; opts.origin: the panel's origin
+// opts.card: the controller's card ID (from link.info), for CA 30
 function compile(plan, cfg, opts = {}) {
   const warnings = plan.warnings.slice();
-  const map = mapPts(cfg, opts.origin);
+  const map = mapPts(cfg);
   const feedLen = cfg.feedLen || 1000;
   const segments = [];
   let bed = null;

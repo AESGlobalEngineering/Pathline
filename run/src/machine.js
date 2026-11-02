@@ -324,14 +324,8 @@ class Machine {
     // a plotter's conveyor moves on from where it stopped last time
     const opts = { card: this.info && this.info.cardId ? this.info.cardId & 0xffff : undefined };
     if (pkg.toolpath.some((s) => s.type === 'feed') && this.link && this.link.readU && !this.link.relMoves) opts.uStart = await this.link.readU().catch(() => 0);
-    // RDD6584: jobs run relative to the origin set on the machine's panel
-    if (this.link && this.link.relMoves && this.link.readOrigin) {
-      const o = await this.link.readOrigin().catch((e) => { throw busyErr('Couldn\'t read the machine\'s origin: ' + e.message); });
-      const [mx, my] = [Math.max(this.cfg.bed[0], 3000), Math.max(this.cfg.bed[1], 3000)];
-      if (!(o.x >= -1 && o.y >= -1 && o.x <= mx && o.y <= my)) throw busyErr('The machine\'s origin reads X ' + o.x + ', Y ' + o.y + ' mm, which can\'t be right. Set the origin on the machine\'s panel, then start again.');
-      opts.origin = o;
-      this.log('origin on the machine: X ' + o.x.toFixed(3) + ', Y ' + o.y.toFixed(3) + ' mm (head at X ' + (this.st.mpos ? this.st.mpos.x.toFixed(3) + ', Y ' + this.st.mpos.y.toFixed(3) : '?') + ')');
-    }
+    // RDD6584: jobs run relative to home (the controller's origin, where the head parks): the
+    // job's coordinates are Pathline's, measured from the bed's top right corner, as they are
     try { program = this.compile(pkg, opts); } catch (e) { throw Object.assign(new Error('Couldn\'t convert "' + job.name + '": ' + e.message), { code: 409 }); }
     if (program.segments.some((s) => s.kind === 'inspect') && this.cfg.regMarks !== 'ignore') {
       throw busyErr('"' + job.name + '" uses registration marks, and Pathline Run has no camera yet. Set Registration marks to "Skip" in Setup to run it uncorrected.');
