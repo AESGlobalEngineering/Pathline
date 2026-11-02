@@ -741,6 +741,38 @@
     void gmapFirst;
     return { job: { ...out, entities: out.entities.concat(add) }, placed: placed.length, sel: ids.concat(add.map((e) => e.id)) };
   };
+  // Fill by nesting: the copies are packed with CC.nestRects (turned 90° where
+  // that fits more, opts.rotate) instead of a straight grid. count null = as
+  // many as fit on one area; with opts.beds a count may add plotter beds.
+  // Returns { job, placed, sel, areas } (with opts.dry, just { placed, areas }).
+  ops.fillNest = (job, ids, area, count, opts) => {
+    const sel = ops.selected(job, ids), b = CC.boxOf(sel);
+    const w = CC.boxW(b), hh = CC.boxH(b);
+    const sp = Math.max(0, Number(opts.spacing) || 0), m = Math.max(0, Number(opts.margin) || 0);
+    const inner = { w: area.w - 2 * m, h: area.h - 2 * m };
+    if (!(w > 0 || hh > 0) || inner.w <= 0 || inner.h <= 0) return { placed: 0, areas: 0, job, sel: ids };
+    // as many as fit: no more than the area could hold
+    const cap = Math.max(1, Math.floor(((inner.w + sp) * (inner.h + sp)) / ((w + sp) * (hh + sp))));
+    const n = count === null ? cap : count;
+    const r = CC.nestRects(Array.from({ length: n }, (_, i) => ({ id: i, w, h: hh })), inner, { spacing: sp, rotate: opts.rotate, maxAreas: opts.beds && count !== null ? Infinity : 1 });
+    if (opts.dry) return { placed: r.placed.length, areas: r.areas };
+    const cx = (b.x0 + b.x1) / 2, cy = (b.y0 + b.y1) / 2;
+    const put = (ents, p) => {
+      const es = p.rot ? ents.map((e) => CC.rotateAbout(e, p.rot, cx, cy)) : ents;
+      const nb = CC.boxOf(es);
+      return es.map((e) => ({ ...CC.translate(e, area.x + m + p.x - nb.x0, area.y + m + p.y - nb.y0), bed: opts.beds ? p.area : area.bed || 0 }));
+    };
+    const placed = r.placed.slice().sort((a, c) => a.id - c.id);
+    if (!placed.length) return { placed: 0, areas: 0, job, sel: ids };
+    // the first copy is the original, moved into place
+    const first = new Map(put(sel, placed[0]).map((e) => [e.id, e]));
+    const nm = ops.copyNamer(job.entities), add = [];
+    placed.slice(1).forEach((p) => { const gmap = {}; add.push(...put(sel.map((e) => freshCopy(e, gmap, nm)), p)); });
+    return {
+      job: { ...job, beds: opts.beds ? Math.max(job.beds || 1, r.areas) : job.beds, entities: job.entities.map((e) => first.get(e.id) || e).concat(add) },
+      placed: placed.length, areas: r.areas, sel: ids.concat(add.map((e) => e.id))
+    };
+  };
   // Where a w × h drawing fits in an area without overlapping the occupied
   // boxes (kept `gap` apart): the topmost, then leftmost, free spot. The
   // candidates are the area's corner and the spots right of and below each

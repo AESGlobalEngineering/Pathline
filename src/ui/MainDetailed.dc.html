@@ -171,13 +171,21 @@
             </sc-if>
           </div>
           <sc-if value="{{fill.isFill}}" hint-placeholder-val="{{true}}">
+            <div class="fcol">
+              <span class="lbl">Layout</span>
+              <div role="radiogroup" aria-label="Layout" class="seg fill">
+                <sc-for list="{{fill.layouts}}" as="o" hint-placeholder-count="2">
+                  <button role="radio" aria-checked="{{o.on}}" onClick="{{o.pick}}" style="background: {{o.bg}}; box-shadow: {{o.sh}}; color: {{o.fg}}">{{o.l}}</button>
+                </sc-for>
+              </div>
+            </div>
             <div role="radiogroup" aria-label="Copies" class="seg fill">
               <sc-for list="{{fill.modes}}" as="f" hint-placeholder-count="2">
                 <button role="radio" aria-checked="{{f.on}}" onClick="{{f.pick}}" style="background: {{f.bg}}; box-shadow: {{f.sh}}; color: {{f.fg}}">{{f.l}}</button>
               </sc-for>
             </div>
           </sc-if>
-          <sc-if value="{{fill.isNest}}" hint-placeholder-val="{{false}}">
+          <sc-if value="{{fill.showRot}}" hint-placeholder-val="{{false}}">
             <div class="fcol">
               <span class="lbl">Turn parts 90° where it fits better</span>
               <div role="radiogroup" aria-label="Turn parts" class="seg fill">
@@ -733,7 +741,7 @@ class Component extends DCLogic {
     ready: false, job: null, machines: [], materials: [], recent: [], hist: { undo: 0, redo: 0 },
     dev: null, devErr: null, devJobs: null, devJobsErr: null,
     sel: [], tool: 'select', zoom: '—', snap: { grid: true, objects: true, centre: false },
-    menu: false, reg: false, fill: false, fillKind: 'nest', nestRot: true, fillMode: 'max', fillArea: 'sheet', fillCustom: { w: '300', h: '200' },
+    menu: false, reg: false, fill: false, fillKind: 'nest', nestRot: true, fillLayout: 'nest', fillMode: 'max', fillArea: 'sheet', fillCustom: { w: '300', h: '200' },
     fillCount: '12', fillSpacing: '5.0', fillMargin: '10.0',
     sheetOpen: false,
     procSel: 0, procPanel: true, edit: {}, picker: false, adv: false, procOpen: false, openPick: null, matOpen: false,
@@ -1722,6 +1730,28 @@ class Component extends DCLogic {
       this.commit({ ...r.job, beds: nb }, { record: true }, r.sel);
       LRC.toast('Placed ' + r.placed + ' cop' + (r.placed === 1 ? 'y' : 'ies'));
     };
+    // Fill, nested: the copies are packed (and turned 90° where that fits
+    // more) instead of a straight grid. The count shown is worked out once per
+    // set of inputs.
+    const fillNested = S.fillKind === 'fill' && S.fillLayout === 'nest' && S.fill && plan && plan.per > 0;
+    const nestOpts = { spacing, margin, rotate: S.nestRot, beds: !isLaser };
+    if (fillNested) {
+      const memoKey = JSON.stringify([plan.w, plan.h, areaRect, spacing, margin, S.nestRot, wantCount, isLaser]);
+      if (!this.fillMemo || this.fillMemo.k !== memoKey) this.fillMemo = { k: memoKey, r: LRC.ops.fillNest(job, selIds, areaRect, wantCount, { ...nestOpts, dry: true }) };
+      const fit = this.fillMemo.r.placed;
+      const more = fit > plan.per ? ' · ' + (fit - plan.per) + ' more than a grid' : '';
+      if (wantCount === null) fillResult = fit + ' cop' + (fit === 1 ? 'y fits' : 'ies fit') + ' on the ' + areaName + ', nested' + more;
+      else if (fit >= wantCount) fillResult = wantCount + ' copies fit' + (this.fillMemo.r.areas > 1 ? ' on ' + this.fillMemo.r.areas + ' beds' : ' on the ' + areaName) + ', nested';
+      else fillResult = wantCount + ' copies don\'t all fit the ' + areaName + ' — ' + fit + ' will be placed, nested';
+      fillOk = fit > 0;
+    }
+    const applyFillNested = () => {
+      const r = LRC.ops.fillNest(job, selIds, areaRect, wantCount, nestOpts);
+      if (!r.placed) return LRC.toast('The selection does not fit the ' + areaName);
+      this.setState({ fill: false });
+      this.commit(r.job, { record: true }, r.sel);
+      LRC.toast('Placed ' + r.placed + ' cop' + (r.placed === 1 ? 'y' : 'ies') + ', nested' + (r.areas > 1 ? ' on ' + r.areas + ' beds' : ''));
+    };
     // Nest & fill: nest packs the parts already in the job (the selection, or
     // all of them); fill places copies of the selection. Both use the same
     // area, spacing and margin.
@@ -1745,6 +1775,8 @@ class Component extends DCLogic {
       button: 'Nest & fill', title: nesting ? 'Nest & fill' : 'Fill' + (selEnts.length ? ' · ' + (selEnts.length === 1 ? selEnts[0].name : selEnts.length + ' objects') : ''),
       kinds: [segOpt(nesting, 'Nest parts', () => this.setState({ fillKind: 'nest' })), segOpt(!nesting, 'Fill copies', () => this.setState({ fillKind: 'fill' }))],
       isNest: nesting, isFill: !nesting, go: nesting ? 'Nest' : 'Fill',
+      layouts: [segOpt(S.fillLayout === 'grid', 'Grid', () => this.setState({ fillLayout: 'grid' })), segOpt(S.fillLayout === 'nest', 'Nested', () => this.setState({ fillLayout: 'nest' }))],
+      showRot: nesting || S.fillLayout === 'nest',
       rots: [segOpt(S.nestRot, 'Yes', () => this.setState({ nestRot: true })), segOpt(!S.nestRot, 'No', () => this.setState({ nestRot: false }))],
       areas: [fillAreaOpt('bed', 'Bed'), fillAreaOpt('sheet', 'Sheet'), fillAreaOpt('custom', 'Custom')],
       isCustom: area === 'custom', cw: S.fillCustom.w, ch: S.fillCustom.h,
@@ -1755,7 +1787,7 @@ class Component extends DCLogic {
       spacing: S.fillSpacing, setSpacing: (e) => this.setState({ fillSpacing: e.target.value }),
       margin: S.fillMargin, setMargin: (e) => this.setState({ fillMargin: e.target.value }),
       result: fillResult, resBg: fillOk ? 'var(--ok-soft)' : 'var(--warn-soft)', resFg: fillOk ? 'var(--ok)' : 'var(--warn)', resIcon: fillOk ? icons.check : icons.warn,
-      cant: !fillOk, op: fillOk ? 1 : 0.45, apply: nesting ? applyNest : applyFill
+      cant: !fillOk, op: fillOk ? 1 : 0.45, apply: nesting ? applyNest : S.fillLayout === 'nest' ? applyFillNested : applyFill
     };
 
     // ---- menu bar

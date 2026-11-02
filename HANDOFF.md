@@ -15,6 +15,10 @@ Latest round (28 Oct, final):
 - **Dark mode bed is grey** (`--bed`, `--sheet`, `--bed-grid*` in theme.css). **ACI 7 shows as white in dark mode** (black in light), as in CAD, and so do the marks drawn on the bed (registration marks, engrave hatching, arrows, start points): see the `--aci7*` and `--ink` tokens, and `LRC.aci.hex/fg/stroke` in app.js. Exports (DXF/SVG/PDF) still use real black.
 - **Sample machines and materials from earlier builds are removed on first start** (main.js, tracked by `settings.samplesRemoved`). This is by exact id (trotec, flatbed, laser2, acr-print-3 … brass-1); anything the operator created stays.
 
+Version 1.3.2 (2 Nov):
+- **Nested fill:** Fill copies has Layout **Grid / Nested** (`fillLayout`, default Nested), plus the Turn parts 90° switch. `LRC.ops.fillNest(job, ids, area, count, { spacing, margin, rotate, beds, dry })` packs `count` copies with `CC.nestRects`, or as many as fit when `count` is null (bounded by area). With `beds` (plotter) a count can add beds. The first copy is the original, moved into place.
+  - The popover's count comes from a `dry` run, cached in `this.fillMemo` by its inputs. It also says how many more than a grid fit.
+
 Version 1.3.1 (2 Nov):
 - **Nest & fill** (Job page toolbar, plus Arrange → Nest & fill) replaces the separate Fill popover, the Nest parts dialog and the Nest parts machine-tool buttons. The popover has a Nest parts / Fill copies switch (`fillKind`), with shared Area (Bed / Sheet / Custom), Spacing and Edge margin.
   - Nest also has "Turn parts 90°" (`nestRot`) and works on the selection, or on all parts when nothing is selected.

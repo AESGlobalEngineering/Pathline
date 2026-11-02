@@ -5,6 +5,11 @@
 
 module.exports = [
   {
+    version: '1.3.2', date: '2 Nov 2026',
+    added: ['Fill copies can be nested: Layout → Nested packs the copies, turning them 90° where that fits more than a straight grid. Grid is still there.'],
+    fixed: []
+  },
+  {
     version: '1.3.1', date: '2 Nov 2026',
     added: [
       'Nest and Fill are one tool: Nest & fill in the toolbar (and Arrange → Nest & fill). Choose Nest parts or Fill copies; both use the same area, spacing and margin.',
