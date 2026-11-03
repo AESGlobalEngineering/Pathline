@@ -111,7 +111,16 @@ class VimbaCamera {
   // unplugging would, then open it again once it's back
   async open() {
     if (!this.opts.reset) return this.openOnce();
-    await this.openOnce();
+    // the camera process left behind a moment ago can still hold it (busy, or Vimba X's -22):
+    // try again from a fresh start for up to 25 s before giving up on the reset
+    const until = Date.now() + 25000;
+    for (;;) {
+      try { await this.openOnce(); break; } catch (e) {
+        await this.close();
+        if (Date.now() > until) throw e;
+        await new Promise((r) => setTimeout(r, 2000));
+      }
+    }
     this.log('camera: resetting it (DeviceReset), as it got stuck');
     this.step('DeviceReset');
     this.vmb.command(this.h, 'DeviceReset');
