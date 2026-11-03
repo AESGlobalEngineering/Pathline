@@ -10,7 +10,11 @@ const { VimbaCamera } = require('./camera');
 const send = (m) => process.send(m);
 let cam = null;
 
-process.on('message', async ({ id, cmd, args }) => {
+// one request at a time, in order: two picture sequences at once on one camera would trip it up
+let queue = Promise.resolve();
+process.on('message', (m) => { queue = queue.then(() => handle(m)); });
+
+async function handle({ id, cmd, args }) {
   try {
     let r = null;
     if (cmd === 'open') {
@@ -34,7 +38,7 @@ process.on('message', async ({ id, cmd, args }) => {
   } catch (e) {
     send({ id, ok: false, error: e.message });
   }
-});
+}
 
 // the app went away: close the camera and go too
 process.on('disconnect', async () => { try { if (cam) await cam.close(); } catch (e) { /* gone */ } process.exit(0); });

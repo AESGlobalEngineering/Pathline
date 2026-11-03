@@ -13,7 +13,7 @@
 
 const detect = require('./detect');
 const fitting = require('./fit');
-const { makeCamera } = require('./camera');
+const { makeCamera, MAX_EXPOSURE } = require('./camera');
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const err = (msg, code) => Object.assign(new Error(msg), { code: code || 409 });
@@ -77,7 +77,7 @@ class Vision {
         img = await c.grab();
         const b = brightest(img);
         if (b >= 150 && b <= 230) break;
-        const next = Math.max(100, Math.min(1000000, Math.round(b >= 250 ? this.exp * 0.4 : this.exp * Math.max(0.3, Math.min(4, 190 / Math.max(1, b))))));
+        const next = Math.max(100, Math.min(MAX_EXPOSURE, Math.round(b >= 250 ? this.exp * 0.4 : this.exp * Math.max(0.3, Math.min(4, 190 / Math.max(1, b))))));
         if (next === this.exp) break; // at the limit: the best there is
         this.exp = next;
       }
@@ -97,9 +97,9 @@ class Vision {
     return out;
   }
 
-  // the same view at k times the exposure in use (1 s at most)
+  // the same view at k times the exposure in use (MAX_EXPOSURE at most)
   async grabTimes(k) {
-    const e = Math.min(1000000, Math.round((this.exposureNow() || 50000) * k)), c = await this.cam();
+    const e = Math.min(MAX_EXPOSURE, Math.round((this.exposureNow() || 50000) * k)), c = await this.cam();
     await c.setExposure(e);
     this.expSet = e;
     return c.grab();

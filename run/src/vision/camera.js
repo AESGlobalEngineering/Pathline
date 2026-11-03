@@ -53,6 +53,7 @@ function usbTransport(choice) {
 const PIX = { Mono8: 0x01080001, BayerGR8: 0x01080008, BayerRG8: 0x01080009, BayerGB8: 0x0108000a, BayerBG8: 0x0108000b, RGB8: 0x02180014, BGR8: 0x02180015 };
 
 const VMB_BUSY = -24; // VmbErrorBusy: another program (or one just ended) still holds the camera
+const MAX_EXPOSURE = 600000; // µs: the longest exposure used (auto and stepped)
 
 // Vimba X VmbC (VmbCTypeDefinitions.h): the structs and calls used here, once per process: koffi
 // takes a struct name only once, so opening the camera a second time in the same process failed
@@ -213,16 +214,19 @@ class VimbaCamera {
 
   async setExposure(us) {
     if (!this.h) return;
-    if (us === 'auto') { this.vmb.enumSet(this.h, 'ExposureAuto', 'Once'); return; }
+    if (us === 'auto') { this.vmb.enumSet(this.h, 'ExposureAuto', 'Once'); this.expUs = MAX_EXPOSURE; return; }
     this.vmb.enumSet(this.h, 'ExposureAuto', 'Off');
     this.check(this.vmb.floatSet(this.h, 'ExposureTime', Number(us)), 'set the exposure');
+    this.expUs = Number(us);
   }
 
-  // one frame; an incomplete one (USB hiccup, or the first after starting) is grabbed again
+  // one frame; an incomplete one (USB hiccup, or the first after starting) is grabbed again.
+  // timeout: on top of the exposure (a long one on a USB 2 link left little of a fixed 2 s)
   async grab(timeout = 2000) {
+    const t = timeout + Math.ceil((this.expUs || 0) / 1000);
     let last;
     for (let k = 0; k < 3; k++) {
-      try { return await this.grabOnce(timeout); } catch (e) { last = e; if (!/incomplete/.test(e.message)) throw e; }
+      try { return await this.grabOnce(t); } catch (e) { last = e; if (!/incomplete/.test(e.message)) throw e; }
     }
     throw last;
   }
@@ -242,9 +246,13 @@ class VimbaCamera {
       this.check(vmb.command(h, 'AcquisitionStart'), 'start the exposure');
       step('VmbCaptureFrameWait');
       const code = await new Promise((resolve, reject) => vmb.wait.async(h, this.frame, timeout, (err, r) => (err ? reject(err) : resolve(r))));
+      // a frame that didn't come: stopping the acquisition then is where the camera got stuck (no
+      // answer, then busy until it was reset). The frame is dropped instead (below), the camera
+      // process stays, and the camera is reset as it's opened again
+      if (code !== 0) throw new Error('Camera: couldn\'t get a frame (timed out?) (Vimba error ' + code + ')');
+      // (single frame: the camera has stopped by itself; this only makes sure)
       step('AcquisitionStop');
       vmb.command(h, 'AcquisitionStop');
-      this.check(code, 'get a frame (timed out?)');
       const fr = k.decode(this.frame, this.Frame);
       if (process.env.PLR_CAMERA_DEBUG) console.log('frame record', JSON.stringify(fr, (key, v) => (typeof v === 'bigint' ? v.toString() : v)), 'payload', this.size);
       if (fr.receiveStatus !== 0) throw new Error('Camera: the frame was incomplete (status ' + fr.receiveStatus + ')');
@@ -430,7 +438,9 @@ class ProcessCamera {
     for (let k = 0; ; k++) {
       await this.again();
       try {
-        const r = await this.call('grab', [timeout], timeout * 3 + 8000, 'taking a picture');
+        // the camera's own wait is the exposure plus `timeout`: the time limit here grows with it
+        const exp = this.opts.exposure === 'auto' ? MAX_EXPOSURE : Number(this.opts.exposure) || 0;
+        const r = await this.call('grab', [timeout], (timeout + exp / 1000) * 3 + 8000, 'taking a picture');
         return { w: r.w, h: r.h, half: r.half, data: new Uint8Array(r.data) };
       } catch (e) {
         if (k || !/didn't answer|couldn't get a frame|incomplete|camera process stopped/.test(e.message)) throw e;
@@ -452,4 +462,4 @@ function makeCamera(vision, opts = {}) {
   return vision.source === 'sim' ? new SimCamera(opts.sim || {}) : new ProcessCamera({ exposure: Number(vision.exposure) > 0 ? Number(vision.exposure) : null, transport: vision.transport || 'auto' }, opts.log);
 }
 
-module.exports = { VimbaCamera, ProcessCamera, SimCamera, makeCamera, vmbLibrary, usbTransport, toGrey, frameBytes };
+module.exports = { VimbaCamera, ProcessCamera, SimCamera, makeCamera, vmbLibrary, usbTransport, toGrey, frameBytes, MAX_EXPOSURE };
