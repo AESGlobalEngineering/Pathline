@@ -49,7 +49,8 @@ class Vision {
     if (this.camera && this.cameraKey === v.source) return this.camera;
     await this.close();
     const c = makeCamera(v, { log: (m) => this.m.log(m), sim: { ...(this.opts.sim || {}), headAt: () => this.m.st.pos } });
-    await c.open();
+    // one that didn't open is closed (its process ended), not left running beside the next try
+    try { await c.open(); } catch (e) { await c.close().catch(() => {}); throw e; }
     this.camera = c;
     this.cameraKey = v.source;
     if (v.light && this.m.link && this.m.link.setCameraLight) await this.m.link.setCameraLight(true).catch(() => {});

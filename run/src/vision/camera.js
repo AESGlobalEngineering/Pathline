@@ -52,57 +52,75 @@ function usbTransport(choice) {
 
 const PIX = { Mono8: 0x01080001, BayerGR8: 0x01080008, BayerRG8: 0x01080009, BayerGB8: 0x0108000a, BayerBG8: 0x0108000b, RGB8: 0x02180014, BGR8: 0x02180015 };
 
+const VMB_BUSY = -24; // VmbErrorBusy: another program (or one just ended) still holds the camera
+
+// Vimba X VmbC (VmbCTypeDefinitions.h): the structs and calls used here, once per process: koffi
+// takes a struct name only once, so opening the camera a second time in the same process failed
+// ("Duplicate type name 'VmbCameraInfo_t'")
+let api = null;
+function vmbApi(file) {
+  if (api) return api;
+  const koffi = require('koffi');
+  const lib = koffi.load(file);
+  const CameraInfo = koffi.struct('VmbCameraInfo_t', {
+    cameraIdString: 'const char *', cameraIdExtended: 'const char *', cameraName: 'const char *', modelName: 'const char *',
+    serialString: 'const char *', transportLayerHandle: 'void *', interfaceHandle: 'void *', localDeviceHandle: 'void *',
+    streamHandles: 'void *', streamCount: 'uint32', permittedAccess: 'uint32'
+  });
+  const Frame = koffi.struct('VmbFrame_t', {
+    buffer: 'void *', bufferSize: 'uint32', context: koffi.array('void *', 4),
+    receiveStatus: 'int32', frameID: 'uint64', timestamp: 'uint64', imageData: 'void *',
+    receiveFlags: 'uint32', pixelFormat: 'uint32', width: 'uint32', height: 'uint32',
+    offsetX: 'uint32', offsetY: 'uint32', payloadType: 'uint32', chunkDataPresent: 'uint8'
+  });
+  const f = (sig) => lib.func(sig);
+  // VmbStartup's path is wide characters on Windows
+  const pathType = process.platform === 'win32' ? 'const char16_t *' : 'const char *';
+  const vmb = {
+    startup: f('int32 VmbStartup(' + pathType + ' path)'),
+    shutdown: f('void VmbShutdown()'),
+    list: f('int32 VmbCamerasList(void *info, uint32 len, _Out_ uint32 *found, uint32 size)'),
+    open: f('int32 VmbCameraOpen(const char *id, uint32 mode, _Out_ void **handle)'),
+    close: f('int32 VmbCameraClose(void *handle)'),
+    enumSet: f('int32 VmbFeatureEnumSet(void *handle, const char *name, const char *value)'),
+    floatSet: f('int32 VmbFeatureFloatSet(void *handle, const char *name, double value)'),
+    floatGet: f('int32 VmbFeatureFloatGet(void *handle, const char *name, _Out_ double *value)'),
+    intGet: f('int32 VmbFeatureIntGet(void *handle, const char *name, _Out_ int64 *value)'),
+    intSet: f('int32 VmbFeatureIntSet(void *handle, const char *name, int64 value)'),
+    enumGet: f('int32 VmbFeatureEnumGet(void *handle, const char *name, _Out_ const char **value)'),
+    command: f('int32 VmbFeatureCommandRun(void *handle, const char *name)'),
+    payload: f('int32 VmbPayloadSizeGet(void *handle, _Out_ uint32 *size)'),
+    announce: f('int32 VmbFrameAnnounce(void *handle, void *frame, uint32 size)'),
+    revokeAll: f('int32 VmbFrameRevokeAll(void *handle)'),
+    captureStart: f('int32 VmbCaptureStart(void *handle)'),
+    captureEnd: f('int32 VmbCaptureEnd(void *handle)'),
+    queue: f('int32 VmbCaptureFrameQueue(void *handle, void *frame, void *callback)'),
+    wait: f('int32 VmbCaptureFrameWait(void *handle, void *frame, uint32 timeout)'),
+    flush: f('int32 VmbCaptureQueueFlush(void *handle)')
+  };
+  api = { koffi, CameraInfo, Frame, vmb };
+  return api;
+}
+
 class VimbaCamera {
-  constructor(opts = {}, log) { this.opts = opts; this.log = log || (() => {}); }
+  // step(name): called before each Vimba X call that can stall, so a stuck one can be named
+  constructor(opts = {}, log, step) { this.opts = opts; this.log = log || (() => {}); this.step = step || (() => {}); }
 
   async open() {
     const { file, tried } = vmbLibrary();
     if (!file) throw new Error('Vimba X isn\'t installed (looked for ' + tried.join(', ') + '). Install Allied Vision\'s Vimba X, then try again.');
-    const koffi = require('koffi');
-    const lib = koffi.load(file);
+    const api = vmbApi(file);
+    const { koffi, CameraInfo } = api;
     this.k = koffi;
-    // Vimba X VmbC (VmbCTypeDefinitions.h): structs and calls used here
-    const CameraInfo = koffi.struct('VmbCameraInfo_t', {
-      cameraIdString: 'const char *', cameraIdExtended: 'const char *', cameraName: 'const char *', modelName: 'const char *',
-      serialString: 'const char *', transportLayerHandle: 'void *', interfaceHandle: 'void *', localDeviceHandle: 'void *',
-      streamHandles: 'void *', streamCount: 'uint32', permittedAccess: 'uint32'
-    });
-    this.Frame = koffi.struct('VmbFrame_t', {
-      buffer: 'void *', bufferSize: 'uint32', context: koffi.array('void *', 4),
-      receiveStatus: 'int32', frameID: 'uint64', timestamp: 'uint64', imageData: 'void *',
-      receiveFlags: 'uint32', pixelFormat: 'uint32', width: 'uint32', height: 'uint32',
-      offsetX: 'uint32', offsetY: 'uint32', payloadType: 'uint32', chunkDataPresent: 'uint8'
-    });
-    const f = (sig) => lib.func(sig);
-    // VmbStartup's path is wide characters on Windows
-    const pathType = process.platform === 'win32' ? 'const char16_t *' : 'const char *';
-    this.vmb = {
-      startup: f('int32 VmbStartup(' + pathType + ' path)'),
-      shutdown: f('void VmbShutdown()'),
-      list: f('int32 VmbCamerasList(void *info, uint32 len, _Out_ uint32 *found, uint32 size)'),
-      open: f('int32 VmbCameraOpen(const char *id, uint32 mode, _Out_ void **handle)'),
-      close: f('int32 VmbCameraClose(void *handle)'),
-      enumSet: f('int32 VmbFeatureEnumSet(void *handle, const char *name, const char *value)'),
-      floatSet: f('int32 VmbFeatureFloatSet(void *handle, const char *name, double value)'),
-      floatGet: f('int32 VmbFeatureFloatGet(void *handle, const char *name, _Out_ double *value)'),
-      intGet: f('int32 VmbFeatureIntGet(void *handle, const char *name, _Out_ int64 *value)'),
-      intSet: f('int32 VmbFeatureIntSet(void *handle, const char *name, int64 value)'),
-      enumGet: f('int32 VmbFeatureEnumGet(void *handle, const char *name, _Out_ const char **value)'),
-      command: f('int32 VmbFeatureCommandRun(void *handle, const char *name)'),
-      payload: f('int32 VmbPayloadSizeGet(void *handle, _Out_ uint32 *size)'),
-      announce: f('int32 VmbFrameAnnounce(void *handle, void *frame, uint32 size)'),
-      revokeAll: f('int32 VmbFrameRevokeAll(void *handle)'),
-      captureStart: f('int32 VmbCaptureStart(void *handle)'),
-      captureEnd: f('int32 VmbCaptureEnd(void *handle)'),
-      queue: f('int32 VmbCaptureFrameQueue(void *handle, void *frame, void *callback)'),
-      wait: f('int32 VmbCaptureFrameWait(void *handle, void *frame, uint32 timeout)'),
-      flush: f('int32 VmbCaptureQueueFlush(void *handle)')
-    };
+    this.Frame = api.Frame;
+    this.vmb = api.vmb;
     const tl = usbTransport(this.opts.transport);
     this.log('camera: USB transport ' + (tl || 'Vimba X\'s defaults (none found)'));
+    this.step('VmbStartup');
     this.check(this.vmb.startup(tl), 'start Vimba X' + (tl ? ' with ' + tl : ''));
     this.started = true;
     const found = [0];
+    this.step('VmbCamerasList');
     this.vmb.list(null, 0, found, koffi.sizeof(CameraInfo));
     if (!found[0]) throw new Error('No Allied Vision camera found. Check its USB cable, and that Ruby / JobDispatcher are closed.');
     // the same camera can be listed once per USB driver (Vimba X's own, and Ruby's VimbaUSBTL):
@@ -117,11 +135,18 @@ class VimbaCamera {
     // Vimba X also lists its own "Camera Simulator" devices: real cameras first, never those
     const real = list.filter((c) => !/simulator/i.test(String(c.cameraName) + ' ' + String(c.modelName)));
     if (!real.length) throw new Error('No Allied Vision camera found (only Vimba X\'s simulators). Check its USB cable, and that Ruby / JobDispatcher are closed.');
-    for (const c of real) {
-      last = this.vmb.open(c.cameraIdString, 1 /* full access */, h);
-      if (last === 0) { info = c; break; }
+    // busy: a camera process that was just left behind (stuck) can hold it for a few seconds more
+    for (let k = 0; k < 10 && !info; k++) {
+      if (k) await new Promise((r) => setTimeout(r, 1000));
+      for (const c of real) {
+        this.step('VmbCameraOpen');
+        last = this.vmb.open(c.cameraIdString, 1 /* full access */, h);
+        if (last === 0) { info = c; break; }
+      }
+      if (last !== VMB_BUSY) break;
+      if (!k) this.log('camera: busy, trying again for 10 s');
     }
-    if (!info) this.check(last, 'open the camera (is Ruby / JobDispatcher using it?)');
+    if (!info) this.check(last, 'open the camera' + (last === VMB_BUSY ? ': it\'s still busy. Unplug the camera\'s USB cable for a few seconds, or close Ruby / JobDispatcher if they\'re open' : ' (is Ruby / JobDispatcher using it?)'));
     this.h = h[0];
     // grey frames: Mono8 where the camera has it (Alvium colour models do), else colour → grey here
     if (this.vmb.enumSet(this.h, 'PixelFormat', 'Mono8') !== 0) this.vmb.enumSet(this.h, 'PixelFormat', 'BayerRG8');
@@ -165,14 +190,20 @@ class VimbaCamera {
 
   // announce, queue, start, wait (on a worker thread), stop
   async grabOnce(timeout) {
-    const { k, vmb, h } = this;
+    const { k, vmb, h, step } = this;
     k.encode(this.frame, this.Frame, { buffer: this.buf, bufferSize: this.size, context: [null, null, null, null] });
+    step('VmbFrameAnnounce');
     this.check(vmb.announce(h, this.frame, k.sizeof(this.Frame)), 'prepare a frame');
     try {
+      step('VmbCaptureStart');
       this.check(vmb.captureStart(h), 'start capturing');
+      step('VmbCaptureFrameQueue');
       this.check(vmb.queue(h, this.frame, null), 'queue a frame');
+      step('AcquisitionStart');
       this.check(vmb.command(h, 'AcquisitionStart'), 'start the exposure');
+      step('VmbCaptureFrameWait');
       const code = await new Promise((resolve, reject) => vmb.wait.async(h, this.frame, timeout, (err, r) => (err ? reject(err) : resolve(r))));
+      step('AcquisitionStop');
       vmb.command(h, 'AcquisitionStop');
       this.check(code, 'get a frame (timed out?)');
       const fr = k.decode(this.frame, this.Frame);
@@ -181,7 +212,10 @@ class VimbaCamera {
       const raw = frameBytes(k, fr.imageData, fr.width * fr.height * (fr.pixelFormat === PIX.RGB8 || fr.pixelFormat === PIX.BGR8 ? 3 : 1));
       return toGrey(raw, fr.width, fr.height, fr.pixelFormat);
     } finally {
-      vmb.captureEnd(h); vmb.flush(h); vmb.revokeAll(h);
+      step('VmbCaptureEnd'); vmb.captureEnd(h);
+      step('VmbCaptureQueueFlush'); vmb.flush(h);
+      step('VmbFrameRevokeAll'); vmb.revokeAll(h);
+      step(null);
     }
   }
 
@@ -299,8 +333,10 @@ class ProcessCamera {
       env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }
     });
     this.w = w;
+    this.at = null;
     w.on('message', (m) => {
       if (m.log) return this.log(m.log);
+      if ('step' in m) { this.at = m.step; return; }
       const p = this.wait.get(m.id);
       if (!p) return;
       this.wait.delete(m.id);
@@ -315,6 +351,7 @@ class ProcessCamera {
   drop() {
     const w = this.w;
     this.w = null;
+    this.opened = false;
     if (!w) return;
     try { w.disconnect(); } catch (e) { /* gone */ }
     try { w.kill('SIGKILL'); } catch (e) { /* gone */ }
@@ -328,7 +365,7 @@ class ProcessCamera {
     return new Promise((resolve, reject) => {
       const t = setTimeout(() => {
         this.wait.delete(id);
-        reject(new Error('The camera didn\'t answer (' + what + ', ' + Math.round(ms / 1000) + ' s). If it keeps happening, unplug the camera\'s USB cable for a few seconds; close Ruby / JobDispatcher too.'));
+        reject(new Error('The camera didn\'t answer (' + what + ', ' + Math.round(ms / 1000) + ' s' + (this.at ? ', stuck in Vimba X\'s ' + this.at : '') + '). If it keeps happening, unplug the camera\'s USB cable for a few seconds; close Ruby / JobDispatcher too.'));
         // a stuck process is no use: leave it behind (the next call starts a fresh one)
         this.drop();
       }, ms);
@@ -337,9 +374,14 @@ class ProcessCamera {
     });
   }
 
-  async open() { this.info = await this.call('open', [this.opts], 30000, 'opening it'); return this.info; }
-  // after a thread was thrown away, open the camera again in a fresh one first
-  async again() { if (!this.w && this.info) await this.open(); }
+  async open() {
+    this.opened = false;
+    this.info = await this.call('open', [this.opts], 30000, 'opening it');
+    this.opened = true;
+    return this.info;
+  }
+  // after a process was left behind, or an open that failed (busy), open the camera again first
+  async again() { if (!this.opened && this.info) await this.open(); }
   async grab(timeout = 2000) { await this.again(); const r = await this.call('grab', [timeout], timeout * 3 + 8000, 'taking a picture'); return { w: r.w, h: r.h, half: r.half, data: new Uint8Array(r.data) }; }
   async setExposure(us) { await this.again(); this.opts.exposure = us; return this.call('exposure', [us], 5000, 'setting the exposure'); }
   async close() {

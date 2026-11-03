@@ -14,8 +14,11 @@ process.on('message', async ({ id, cmd, args }) => {
   try {
     let r = null;
     if (cmd === 'open') {
-      cam = new VimbaCamera(args[0] || {}, (m) => send({ log: m }));
-      r = await cam.open();
+      if (cam) { await cam.close().catch(() => {}); cam = null; }
+      const c = new VimbaCamera(args[0] || {}, (m) => send({ log: m }), (step) => send({ step }));
+      // a camera that didn't open is closed again (Vimba X shut down), never half kept
+      try { r = await c.open(); } catch (e) { await c.close().catch(() => {}); throw e; }
+      cam = c;
     } else if (!cam) {
       throw new Error('The camera isn\'t open');
     } else if (cmd === 'grab') {
