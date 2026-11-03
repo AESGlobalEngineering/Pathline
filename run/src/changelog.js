@@ -13,7 +13,8 @@ module.exports = [
       'When a camera task gives up, its message is also written to ☰ → Diagnostics log.',
       'Head camera: after a picture that got stuck, the camera opens again by itself. It waits up to 10 s while the camera is still busy, and never takes pictures with a camera that didn\'t open (before: "Unexpected Undefined value"). A stuck picture now says which Vimba X call it was stuck in.',
       'Head camera: a camera that gets stuck (no pictures until it was unplugged) is reset by Pathline Run itself, with the camera\'s own DeviceReset, and the picture taken again: about 10 s, no unplugging.',
-      'Head camera: always the whole sensor (2592 × 1944). A crop left on the camera by another program moved the picture\'s middle, and every position measured with it.'
+      'Head camera: always the whole sensor (2592 × 1944). A crop left on the camera by another program moved the picture\'s middle, and every position measured with it.',
+      'Offset calibration (stage 2): the mark is three circles (r 1, 1.5, 2 mm) the Trotec cuts reliably (of the five tight ones only the outer one burnt), and the camera takes rings as one disc. If the mark isn\'t where the stored offset puts it, the camera looks where the offset with the other sign would put it (Ruby\'s offset is the other way round), and saves the one that finds it.'
     ]
   },
   {

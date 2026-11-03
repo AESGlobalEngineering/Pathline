@@ -139,7 +139,7 @@ class Vision {
     const px = this.pixelSize();
     // registration marks (d given) sit in plain white: only those count; calibration targets
     // (the cut mark on scrap, a dot under the camera) may have darker surroundings
-    const dots = detect.findDots(img, d ? { minD: (d * 0.5) / px, maxD: (d * 1.6) / px, whiteRing: !!opts.whiteRing } : {});
+    const dots = detect.findDots(img, d ? { minD: (d * 0.5) / px, maxD: (d * 1.6) / px, whiteRing: !!opts.whiteRing, fillHoles: !!opts.fillHoles } : {});
     return dots[0] || null;
   }
 
@@ -297,19 +297,33 @@ class Vision {
   async cutCheck({ power, speed } = {}, ctl = {}) {
     const at = [this.m.st.pos.x, this.m.st.pos.y];
     const mark = { ...this.cfg.mark, ...(power !== undefined ? { power } : {}), ...(speed !== undefined ? { speed } : {}) };
-    await this.m.fireMark(at, mark, ctl);
-    if (this.camera && this.camera.laserMark) this.camera.laserMark(at[0], at[1], 3); // simulated laser
-    let o = this.cfg.offset.slice();
-    let r = null;
+    const d = (await this.m.fireMark(at, mark, ctl)) || 4;
+    if (this.camera && this.camera.laserMark) this.camera.laserMark(at[0], at[1], d); // simulated laser
+    const look = { d, ctl, fillHoles: true }; // the mark is rings: their holes count as the disc
+    // The stored offset (Ruby's) can have the other sign convention, camera − laser, on either axis:
+    // the head then goes the wrong way to look. Where the mark isn't, look where each other sign
+    // would put it; the one that sees it gives the offset
+    const o0 = this.cfg.offset.slice();
+    let o = o0, r = null;
+    for (const [sx, sy] of [[1, 1], [-1, -1], [-1, 1], [1, -1]]) {
+      o = [o0[0] * sx, o0[1] * sy];
+      this.m.cfg.vision = { ...this.m.cfg.vision, offset: o };
+      r = await this.measure(at, 'dot', look).catch((e) => { if (/Stopped/.test(e.message)) throw e; return null; }); // (off the bed: next)
+      if (r) { if (sx < 0 || sy < 0) this.log('the mark was where offset ' + o.map((v) => v.toFixed(3)).join(', ') + ' puts it: the stored one had the other sign' + (sx < 0 && sy < 0 ? '' : sx < 0 ? ' in X' : ' in Y')); break; }
+    }
+    if (!r) {
+      this.m.cfg.vision = { ...this.m.cfg.vision, offset: o0 };
+      throw err('Couldn\'t see the laser\'s mark (looked with the stored camera offset, and with it flipped). Check the mark is cut on the scrap, raise the power if it\'s faint, then try again.');
+    }
     for (let k = 0; k < 2; k++) {
-      r = await this.measure(at, 'dot', { d: 3, ctl });
-      if (!r) throw err('Couldn\'t see the laser\'s mark. Raise the power, or check the light, then try again.');
+      if (k) r = await this.measure(at, 'dot', look);
+      if (!r) throw err('Lost the laser\'s mark while measuring it: check the light, then try again.');
       // found = at + (true offset − assumed offset)
       o = [o[0] + (r.found[0] - at[0]), o[1] + (r.found[1] - at[1])];
       this.m.cfg.vision = { ...this.m.cfg.vision, offset: o };
     }
     // the check: with the new offset, the camera sent to the cut should see it in the middle
-    const c = await this.measure(at, 'dot', { d: 3, ctl });
+    const c = await this.measure(at, 'dot', look);
     const check = c ? Math.hypot(c.found[0] - at[0], c.found[1] - at[1]) : null;
     this.log('offset laser − camera: ' + o.map((v) => v.toFixed(3)).join(', ') + ' mm' + (check !== null ? '; cut check: ' + (check * 1000).toFixed(0) + ' µm off' : ''));
     return { offset: o.map((v) => +v.toFixed(4)), mark: at, check };

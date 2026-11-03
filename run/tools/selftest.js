@@ -640,6 +640,24 @@ async function visionTests() {
       'real camera, board half in shadow: ' + one.length + ' corners at one exposure, ' + (Ls ? Ls.n : 0) + ' on the grid with the exposure stepped 1×, 3×, 9×', JSON.stringify(Ls && Ls.points).slice(0, 300));
   }
   {
+    // the laser's calibration mark as the Trotec cuts it: three thin rings (r 1, 1.5, 2 mm at
+    // 13.6 µm a pixel), not a filled disc, on grey scrap in uneven light. As rings they're no dot;
+    // with their holes filled they're the 4 mm disc, centred on the rings
+    const detect = require('../src/vision/detect');
+    const W = 900, H = 700, px = 0.0136, cx = 431.3, cy = 377.8, img = { w: W, h: H, data: new Uint8Array(W * H) };
+    let seed = 3;
+    const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff - 0.5; };
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const r = Math.hypot(x - cx, y - cy) * px, ring = [1, 1.5, 2].some((R) => Math.abs(r - R) < 0.06);
+      img.data[y * W + x] = Math.round((ring ? 35 : 150) * (0.55 + (0.45 * x) / W) + 10 * rnd());
+    }
+    const opts = { minD: 2 / px, maxD: 6.4 / px };
+    const none = detect.findDots(img, opts), ring = detect.findDots(img, { ...opts, fillHoles: true })[0];
+    // (its centre is what's used; the size reported after refining counts only the dark rings)
+    ok(none.length === 0 && ring && Math.hypot(ring.x - cx, ring.y - cy) < 1,
+      'laser mark of three rings: ' + none.length + ' dots as rings, with the holes filled one, ' + (ring ? Math.hypot(ring.x - cx, ring.y - cy).toFixed(2) + ' px from the middle' : 'NOT FOUND'), JSON.stringify(ring));
+  }
+  {
     // the camera's process runs on Electron's own Node in the installed app, where some koffi calls
     // abort the process (koffi.view, Pathline Run 0.7.5): copy a frame out of native memory there
     let electron = null;
@@ -687,6 +705,13 @@ async function visionTests() {
     const of = await call('POST', 'local/camera/offset', { power: 20, speed: 50 });
     ok(of.status === 200 && Math.abs(of.data.offset[0] - 41.2) < 0.2 && Math.abs(of.data.offset[1] - 12.9) < 0.2 && of.data.check < 0.05,
       'stage 2, offset from the cut: ' + (of.data && of.data.offset.join(', ')) + ' mm (41.2, 12.9), cut check ' + (of.data && (of.data.check * 1000).toFixed(0)) + ' µm off', JSON.stringify(of.data));
+    // again with the stored offset's sign the other way (camera − laser, as Ruby's turned out to
+    // be on the Trotec): the head first goes the wrong way, then looks where the flipped one puts it
+    await call('PUT', 'local/config', { vision: { offset: [-41.437, -12.731] } });
+    await jogTo(960, 150);
+    const fl = await call('POST', 'local/camera/offset', { power: 20, speed: 50 });
+    ok(fl.status === 200 && Math.abs(fl.data.offset[0] - 41.2) < 0.2 && Math.abs(fl.data.offset[1] - 12.9) < 0.2 && fl.data.check < 0.05,
+      'stage 2 with the offset stored the other way round: found, ' + (fl.data && fl.data.offset && fl.data.offset.join(', ')) + ' mm (41.2, 12.9)', JSON.stringify(fl.data));
     // checkerboard: the laser head over its first corner (100, 300); calibrate, then check with the map on
     await jogTo(100, 300);
     const cal = await call('POST', 'local/camera/board', { mode: 'calibrate', board: { model: 'linear' } });

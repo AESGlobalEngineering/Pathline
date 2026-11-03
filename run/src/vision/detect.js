@@ -48,6 +48,26 @@ function darkMask(img, win, t = 0.25, minDiff = 12) {
   return mask;
 }
 
+// Light pixels enclosed by dark ones (not reachable from the frame's edge through light) made
+// dark too: a ring, or rings with light between, count as the disc they outline (the laser's
+// calibration mark)
+function fillHoles(mask, w, h) {
+  const seen = new Uint8Array(w * h), stack = new Int32Array(w * h);
+  let sp = 0;
+  const push = (i) => { if (!mask[i] && !seen[i]) { seen[i] = 1; stack[sp++] = i; } };
+  for (let x = 0; x < w; x++) { push(x); push((h - 1) * w + x); }
+  for (let y = 0; y < h; y++) { push(y * w); push(y * w + w - 1); }
+  while (sp) {
+    const i = stack[--sp], x = i % w;
+    if (x > 0) push(i - 1);
+    if (x < w - 1) push(i + 1);
+    if (i >= w) push(i - w);
+    if (i < w * (h - 1)) push(i + w);
+  }
+  for (let i = 0; i < w * h; i++) if (!mask[i] && !seen[i]) mask[i] = 1;
+  return mask;
+}
+
 // Dark blobs whose size fits a dot of diameter minD … maxD px, round enough, not cut off by the
 // frame edge. Dark is judged locally (darkMask), so uneven light doesn't matter; opts.global
 // uses one threshold for the whole picture instead. Centre = darkness-weighted centroid.
@@ -59,6 +79,7 @@ function findDots(img, opts = {}) {
   let dark;
   if (opts.global) { const t = opts.threshold || otsu(data); dark = new Uint8Array(w * h); for (let i = 0; i < w * h; i++) dark[i] = data[i] < t ? 1 : 0; }
   else dark = darkMask(img, win);
+  if (opts.fillHoles) fillHoles(dark, w, h);
   const label = new Int32Array(w * h);
   const stack = new Int32Array(w * h);
   const out = [];

@@ -373,13 +373,16 @@ class Machine {
     return this.cfg.controller === 'trotec' && v && v.enabled && v.mapOn !== false && v.map ? fitting.correct(v.map, p) : p;
   }
 
-  // Camera calibration: the laser marks a small dark disc (tight circles, r 0.3 … 1.5 mm) at
-  // `at` with the given power and speed, as an ordinary job outside the queue
+  // Camera calibration: the laser marks three circles (r 1, 1.5, 2 mm) round `at` with the given
+  // power and speed, as an ordinary job outside the queue; returns the mark's diameter (mm).
+  // Tighter circles (r 0.3 … 1.5) didn't burn on the Trotec, only the outer one: the camera looks
+  // for the rings as one disc (their holes filled)
   async fireMark(at, mark, ctl = {}) {
+    const rings = [1, 1.5, 2];
     const p = [];
-    for (let r = 0.3; r <= 1.5001; r += 0.3) {
+    for (const r of rings) {
       const pts = [];
-      for (let k = 0; k <= 24; k++) pts.push([at[0] + r * Math.cos((k * Math.PI) / 12), at[1] + r * Math.sin((k * Math.PI) / 12)]);
+      for (let k = 0; k <= 36; k++) pts.push([at[0] + r * Math.cos((k * Math.PI) / 18), at[1] + r * Math.sin((k * Math.PI) / 18)]);
       p.push({ type: 'cut', process: 0, name: 'Calibration mark', p: pts, closed: true, seconds: 0.5 });
     }
     const pkg = {
@@ -395,6 +398,7 @@ class Machine {
       await this.link.send(seg, ctl);
       await this.waitIdle(60000, 500);
     }
+    return 2 * Math.max(...rings);
   }
 
   // Camera work (calibration, checkerboard) as one job at a time: blocks the other controls
