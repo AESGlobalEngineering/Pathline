@@ -5,6 +5,13 @@
 
 module.exports = [
   {
+    version: '0.7.8', date: '3 Nov 2026',
+    fixed: [
+      'Camera calibration still didn\'t recognise the 10 mm checkerboard: in the camera\'s full-size picture the paper\'s texture pulled each corner off into a white square, so none counted. Corners are now placed on a lightly smoothed copy, the same at any picture size. The bed checkerboard uses the same.',
+      'Setup → Camera: the 10 mm board goes under the laser head (a hint said under the camera). When a camera task gives up, its message is also written to ☰ → Diagnostics log.'
+    ]
+  },
+  {
     version: '0.7.7', date: '3 Nov 2026',
     fixed: [
       'Camera calibration (stage 1) didn\'t recognise the 10 mm checkerboard on the real camera. The camera sees under 3 squares across, so only 2 × 2 corners, and soft edges and shadows looked like extra corners. A corner now only counts where two black and two white squares really meet, and 2 × 2 corners are enough.'

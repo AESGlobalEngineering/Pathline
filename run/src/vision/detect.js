@@ -219,9 +219,36 @@ function findCorner(img, opts = {}) {
     }
   }
   if (!best) return null;
-  const win = Math.max(6, Math.round(r * s.f * 0.8));
-  const q = refineCorner(img, best.x * s.f + s.f / 2, best.y * s.f + s.f / 2, win);
-  return q ? { ...q, contrast: best.contrast, angle: cornerAngle(img, q.x, q.y, win) } : null;
+  const fine = fineCopy(img);
+  const q = refineAt(fine, M, best.x * s.f + s.f / 2, best.y * s.f + s.f / 2);
+  return q ? { x: q.x, y: q.y, contrast: best.contrast, angle: cornerAngle(fine, q.fx, q.fy, q.win) } : null;
+}
+
+// The copy corners are refined on: about 800 px across, then each pixel the mean of the 5 × 5
+// round it (the same in every direction, so a corner stays where it is). At full size (the
+// Alvium's 1944 px) the paper's texture outweighs the squares' soft edges and pulled the corner
+// off into a white square (Pathline Run 0.7.7).
+function fineCopy(img) {
+  const s = shrink(img, 800), { w, h } = s, k = 2;
+  const I = new Float64Array((w + 1) * (h + 1));
+  for (let y = 0; y < h; y++) { let row = 0; for (let x = 0; x < w; x++) { row += s.data[y * w + x]; I[(y + 1) * (w + 1) + x + 1] = I[y * (w + 1) + x + 1] + row; } }
+  const data = new Float32Array(w * h);
+  for (let y = 0; y < h; y++) {
+    const y0 = Math.max(0, y - k), y1 = Math.min(h, y + k + 1);
+    for (let x = 0; x < w; x++) {
+      const x0 = Math.max(0, x - k), x1 = Math.min(w, x + k + 1);
+      data[y * w + x] = (I[y1 * (w + 1) + x1] - I[y0 * (w + 1) + x1] - I[y1 * (w + 1) + x0] + I[y0 * (w + 1) + x0]) / ((x1 - x0) * (y1 - y0));
+    }
+  }
+  return { w, h, data, f: s.f };
+}
+
+// A ChESS peak (full-size pixels) refined to sub-pixel on the fine copy. Returns full-size x, y,
+// and the copy's own fx, fy and window.
+function refineAt(fine, M, x, y) {
+  const g = fine.f, win = Math.max(6, Math.round((M.r * M.s.f * 0.8) / g));
+  const q = refineCorner(fine, (x + 0.5) / g - 0.5, (y + 0.5) / g - 0.5, win);
+  return q && { x: (q.x + 0.5) * g - 0.5, y: (q.y + 0.5) * g - 0.5, fx: q.x, fy: q.y, win };
 }
 
 // Every corner in the picture (a small checkerboard filling the view): the ChESS peaks, each
@@ -241,10 +268,14 @@ function findCorners(img, opts = {}) {
     }
   }
   const win = Math.max(6, Math.round(r * s.f * 0.8));
+  const fine = fineCopy(img);
   const out = [];
   for (const p of peaks.sort((a, b) => b.v - a.v)) {
-    const q = refineCorner(img, p.x * s.f + s.f / 2, p.y * s.f + s.f / 2, win);
-    if (!q || out.some((o) => Math.hypot(o.x - q.x, o.y - q.y) < win) || !crossing(img, q.x, q.y, win * 1.5)) continue;
+    const f = refineAt(fine, M, p.x * s.f + s.f / 2, p.y * s.f + s.f / 2);
+    const q = f && { x: f.x, y: f.y };
+    // (judged on the shrunk copy, as the corners were looked for: the same at any camera resolution,
+    // and the paper's texture at full size can't count as changes)
+    if (!q || out.some((o) => Math.hypot(o.x - q.x, o.y - q.y) < win) || !crossing(s, (q.x - s.f / 2) / s.f, (q.y - s.f / 2) / s.f, r * 1.2)) continue;
     out.push(q);
   }
   const cx = (img.w - 1) / 2, cy = (img.h - 1) / 2;
@@ -287,10 +318,14 @@ function refineCorner(img, qx, qy, win) {
     let a = 0, b = 0, c = 0, bx = 0, by = 0;
     const x0 = Math.max(1, Math.round(qx) - win), x1 = Math.min(img.w - 2, Math.round(qx) + win);
     const y0 = Math.max(1, Math.round(qy) - win), y1 = Math.min(img.h - 2, Math.round(qy) + win);
+    // only the squares' edges: gradients under a fifth of the strongest here are texture or noise
+    let top = 0;
+    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) { const gx = px(x + 1, y) - px(x - 1, y), gy = px(x, y + 1) - px(x, y - 1); top = Math.max(top, gx * gx + gy * gy); }
+    const floor = top * 0.04;
     for (let y = y0; y <= y1; y++) {
       for (let x = x0; x <= x1; x++) {
         const gx = (px(x + 1, y) - px(x - 1, y)) / 2, gy = (px(x, y + 1) - px(x, y - 1)) / 2;
-        if (!gx && !gy) continue;
+        if (4 * (gx * gx + gy * gy) <= floor) continue;
         a += gx * gx; b += gx * gy; c += gy * gy;
         bx += gx * gx * x + gx * gy * y; by += gx * gy * x + gy * gy * y;
       }

@@ -614,10 +614,20 @@ async function visionTests() {
     const img = { w: b.readUInt16BE(0), h: b.readUInt16BE(2), data: new Uint8Array(b.subarray(4)) };
     const cs = detect.findCorners(img);
     const L = detect.fitLattice(cs);
-    const real = [[651, 611], [291, 613], [654, 237], [279, 245]];
+    const real = [[652, 609], [287, 608], [657, 236], [287, 238]];
     const square = L && Math.sqrt(Math.abs(L.a[0] * L.b[1] - L.a[1] * L.b[0]));
     ok(cs.length === 4 && real.every(([x, y]) => cs.some((c) => Math.hypot(c.x - x, c.y - y) < 8)) && L && L.n === 4 && Math.abs(square - 369) < 10,
       'real camera, 10 mm board in uneven light: ' + cs.length + ' corners (4), a 2 × 2 grid, ' + (square || 0).toFixed(0) + ' px a square', JSON.stringify({ cs, L }).slice(0, 400));
+    // the same at full size (1944 px, as calibration sees it), with the paper's texture: ±30 % per
+    // pixel. Refined at full size, the texture pulled every corner off into a white square (0.7.7)
+    let seed = 7;
+    const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff - 0.5; };
+    const W = img.w * 2, H = img.h * 2, big = { w: W, h: H, data: new Uint8Array(W * H) };
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) big.data[y * W + x] = Math.max(0, Math.min(255, Math.round(img.data[(y >> 1) * img.w + (x >> 1)] * (1 + 0.6 * rnd()))));
+    const cb = detect.findCorners(big), Lb = detect.fitLattice(cb);
+    const sb = Lb && Math.sqrt(Math.abs(Lb.a[0] * Lb.b[1] - Lb.a[1] * Lb.b[0]));
+    ok(cb.length === 4 && real.every(([x, y]) => cb.some((c) => Math.hypot(c.x - 2 * x, c.y - 2 * y) < 16)) && Lb && Lb.n === 4 && Math.abs(sb - 738) < 20,
+      'the same at full size with the paper\'s texture: ' + cb.length + ' corners (4), ' + (sb || 0).toFixed(0) + ' px a square', JSON.stringify(cb).slice(0, 300));
   }
   {
     // the camera's process runs on Electron's own Node in the installed app, where some koffi calls
