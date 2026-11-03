@@ -604,6 +604,25 @@ async function visionTests() {
     // (the angle only aims the scan at the next corner; the board's angle comes from the corners found)
     ok(c && Math.abs(c.x - (239.5 - 25)) < 0.5 && Math.abs(c.y - (239.5 + 12.5)) < 0.5 && Math.abs(c.angle - 25) < 3, 'checkerboard corner at 25°: found to a fraction of a pixel, angle ' + (c && c.angle.toFixed(1)) + '° (a hint, within 3°)', JSON.stringify(c));
   }
+  {
+    // the camera's process runs on Electron's own Node in the installed app, where some koffi calls
+    // abort the process (koffi.view, Pathline Run 0.7.5): copy a frame out of native memory there
+    let electron = null;
+    try { electron = require('electron'); } catch (e) { /* not installed */ }
+    if (typeof electron === 'string' && fs.existsSync(electron)) {
+      const js = "const k = require('koffi'); const { frameBytes } = require(" + JSON.stringify(path.join(__dirname, '..', 'src', 'vision', 'camera.js')) + ");" +
+        "const p = k.alloc('uint8', 4096); k.encode(p, k.array('uint8', 4), [1, 2, 3, 4]); const b = frameBytes(k, p, 4096);" +
+        "console.log(b instanceof Uint8Array && b.length === 4096 && b[3] === 4 ? 'copied' : 'wrong')";
+      const r = await new Promise((resolve) => {
+        const ch = spawn(electron, ['-e', js], { cwd: path.join(__dirname, '..'), env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
+        let o = '';
+        ch.stdout.on('data', (d) => { o += d; });
+        ch.stderr.on('data', (d) => { o += d; });
+        ch.on('exit', (code) => resolve({ code, o }));
+      });
+      ok(r.code === 0 && /copied/.test(r.o), 'a camera frame copied out under Electron\'s own Node, as the installed app\'s camera process does', r.o.slice(0, 400));
+    } else console.log('  skip  frame copy under Electron (Electron isn\'t installed: npm install on Node 22)');
+  }
   const data = fs.mkdtempSync(path.join(os.tmpdir(), 'pathline-run-cam-'));
   fs.writeFileSync(path.join(data, 'config.json'), JSON.stringify({ controller: 'trotec', configured: true, name: 'Sim', bed: [1300, 900], sim: { speedup: 2000 },
     vision: { enabled: true, source: 'sim', matrix: [0, 0.07, 0.07, 0], board: { square: 50, across: 19, down: 9, every: 3 } } }));

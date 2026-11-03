@@ -5,6 +5,16 @@
 
 module.exports = [
   {
+    version: '0.7.6', date: '3 Nov 2026',
+    fixed: [
+      'Head camera: the camera process stopped at every picture ("The camera process stopped"), so the camera view and calibration couldn\'t get a picture. Pictures are now copied out of the camera\'s buffer in a way the installed app allows.',
+      'Checkerboard and camera calibration pictures are looked at about 20 times faster, with the same results.'
+    ],
+    added: [
+      'Updates: Pathline Run checks every minute (was every 5 minutes), and downloads only the parts of the installer that changed since the version it has.'
+    ]
+  },
+  {
     version: '0.7.5', date: '3 Nov 2026',
     fixed: [
       'Head camera: the camera now works in a process of its own. A camera stuck in its USB driver can\'t hold up Pathline Run any more: it gives a message after a time limit, and the next picture starts the camera afresh.',

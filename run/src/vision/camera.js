@@ -178,7 +178,7 @@ class VimbaCamera {
       const fr = k.decode(this.frame, this.Frame);
       if (process.env.PLR_CAMERA_DEBUG) console.log('frame record', JSON.stringify(fr, (key, v) => (typeof v === 'bigint' ? v.toString() : v)), 'payload', this.size);
       if (fr.receiveStatus !== 0) throw new Error('Camera: the frame was incomplete (status ' + fr.receiveStatus + ')');
-      const raw = new Uint8Array(k.view(fr.imageData, fr.width * fr.height * (fr.pixelFormat === PIX.RGB8 || fr.pixelFormat === PIX.BGR8 ? 3 : 1)));
+      const raw = frameBytes(k, fr.imageData, fr.width * fr.height * (fr.pixelFormat === PIX.RGB8 || fr.pixelFormat === PIX.BGR8 ? 3 : 1));
       return toGrey(raw, fr.width, fr.height, fr.pixelFormat);
     } finally {
       vmb.captureEnd(h); vmb.flush(h); vmb.revokeAll(h);
@@ -190,6 +190,11 @@ class VimbaCamera {
     if (this.started) { this.vmb.shutdown(); this.started = false; }
   }
 }
+
+// the frame's bytes, copied out of Vimba X's buffer. Not koffi.view: in the installed app this
+// process runs on Electron's own Node, which aborts on an ArrayBuffer over outside memory (V8's
+// memory cage) — every picture stopped the camera process (Pathline Run 0.7.5)
+function frameBytes(k, ptr, n) { return k.decode(ptr, k.array('uint8', n, 'Typed')); }
 
 // camera bytes → grey (Bayer: 2×2 average, half size)
 function toGrey(raw, w, h, fmt) {
@@ -348,4 +353,4 @@ function makeCamera(vision, opts = {}) {
   return vision.source === 'sim' ? new SimCamera(opts.sim || {}) : new ProcessCamera({ exposure: Number(vision.exposure) > 0 ? Number(vision.exposure) : null, transport: vision.transport || 'auto' }, opts.log);
 }
 
-module.exports = { VimbaCamera, ProcessCamera, SimCamera, makeCamera, vmbLibrary, usbTransport, toGrey };
+module.exports = { VimbaCamera, ProcessCamera, SimCamera, makeCamera, vmbLibrary, usbTransport, toGrey, frameBytes };
