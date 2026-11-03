@@ -34,9 +34,10 @@ function vmbLibrary() {
 
 // The USB transport layer (GenTL .cti) to load, one only. Vimba X otherwise loads its own and
 // every other one it's pointed at (GENICAM_GENTL64_PATH: Ruby's VimbaUSBTL 1.4), and two USB
-// transports driving one camera locked up the camera's driver (Pathline Run 0.7.4). Ruby's 1.4
-// matches the kernel driver it installed (vimba_usb_x64 1.0.0.0, 2014), so where it's present
-// it's the one; otherwise Vimba X's own (a PC or Pi without Ruby). opts: 'auto' or a file path.
+// transports driving one camera locked up the camera's driver (Pathline Run 0.7.4). Vimba X's own
+// is the one: on Ruby's PC it took 220 pictures in a row without a miss, as Ruby's 1.4 did, and
+// it reads the camera's serial (1.4 says N/A). Ruby's 1.4 only where Vimba X's own is missing.
+// opts: 'auto' or a file path.
 function usbTransport(choice) {
   if (choice && choice !== 'auto') return fs.existsSync(choice) ? choice : null;
   const found = [];
@@ -46,7 +47,7 @@ function usbTransport(choice) {
   const home = process.env.VIMBA_X_HOME;
   const own = [home && path.join(home, 'cti', 'VimbaUSBTL.cti'), 'C:\\Program Files\\Allied Vision\\Vimba X\\cti\\VimbaUSBTL.cti'];
   const ruby = found.find((f) => /VimbaUSBTL_1\.4/i.test(f));
-  return ruby || own.find((f) => f && fs.existsSync(f)) || found[0] || null;
+  return own.find((f) => f && fs.existsSync(f)) || ruby || found[0] || null;
 }
 
 const PIX = { Mono8: 0x01080001, BayerGR8: 0x01080008, BayerRG8: 0x01080009, BayerGB8: 0x0108000a, BayerBG8: 0x0108000b, RGB8: 0x02180014, BGR8: 0x02180015 };

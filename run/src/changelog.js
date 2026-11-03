@@ -5,6 +5,13 @@
 
 module.exports = [
   {
+    version: '0.7.5', date: '3 Nov 2026',
+    fixed: [
+      'Head camera: the camera now works in a process of its own. A camera stuck in its USB driver can\'t hold up Pathline Run any more: it gives a message after a time limit, and the next picture starts the camera afresh.',
+      'Head camera: only one USB transport is loaded, Vimba X\'s own (Ruby\'s VimbaUSBTL 1.4 only where Vimba X\'s is missing). With both loaded, the camera\'s driver could lock up.'
+    ]
+  },
+  {
     version: '0.7.4', date: '2 Nov 2026',
     fixed: [
       'Head camera: Pathline Run froze ("stopped interacting with Windows") while the camera opened or took a picture. The camera now works in a thread of its own: the screen and the laser never wait on it, and a camera that stalls gives a message after a time limit instead.',
