@@ -61,8 +61,13 @@ console.log('Trotec job stream');
   ok(lv && lv.v.join(',') === '0,0,45', 'power levels {0, 0, 45 %}');
   ok(cmds.some((c) => c.name === 'SET_PARAMETER16' && c.v[0] === 216 && c.v[1] === 1500), 'power correction 15 % → 1500');
   ok(cmds.some((c) => c.name === 'SET_NEW_PARAMETER64' && c.v[0] === 261 && c.v[1] === 100), 'Accuracy planner: tangential acceleration 100 while cutting');
-  const fires = cmds.filter((c, i) => c.name === 'SELECTPOWERLEVEL' && c.v[0] === 2 && cmds[i + 1].name === 'MOVEXY').length;
-  ok(fires === 4, 'beam on (level 2) for each of the 4 sides', fires);
+  // the beam on once for the whole square (level 2 before its first side), no power change between
+  // sides (off and on round each one made the Trotec stop at every segment), off after the last
+  const iMoves = cmds.map((c, i) => (c.name === 'MOVEXY' ? i : -1)).filter((i) => i >= 0);
+  const sides = iMoves.slice(1), lvl = (i) => cmds.slice(0, i).filter((c) => c.name === 'SELECTPOWERLEVEL').pop();
+  const between = cmds.slice(sides[0], sides[sides.length - 1]).filter((c) => c.name === 'SELECTPOWERLEVEL').length;
+  const after = cmds.slice(sides[sides.length - 1]).find((c) => c.name === 'SELECTPOWERLEVEL');
+  ok(sides.length === 4 && lvl(sides[0]).v[0] === 2 && between === 0 && after && after.v[0] === 0, 'beam on (level 2) once for the 4 sides, off after the last', JSON.stringify({ sides: sides.length, between, after: after && after.v }));
 }
 {
   // engrave: 20 × 20 mm box at 500 DPI (capture §4.7: 417 lines, 10 mm run-up, 1975 units on)

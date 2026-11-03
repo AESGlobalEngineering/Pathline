@@ -137,9 +137,12 @@ function compile(plan, cfg) {
       out(TT.moveXY(U.x(run[0][0]), U.y(run[0][1])), TT.commit());
       out(TT.setParam64(KEY.MaxTangentialAcc, P[6]), TT.commit());
       velocity(U.v(p.speed));
-      for (let k = 1; k < run.length; k++) {
-        out(TT.selectPowerLevel(2), TT.moveXY(U.x(run[k][0]), U.y(run[k][1])), TT.commit(), TT.selectPowerLevel(0), TT.commit());
-      }
+      // the beam on once for the whole run, off at its end (the next travel, or end()). Off and
+      // on again round every segment made the Trotec stop at each one: corners and curves (many
+      // short segments) crawled
+      out(TT.selectPowerLevel(2));
+      for (let k = 1; k < run.length; k++) out(TT.moveXY(U.x(run[k][0]), U.y(run[k][1])), TT.commit());
+      out(TT.selectPowerLevel(0), TT.commit());
     }
   };
 

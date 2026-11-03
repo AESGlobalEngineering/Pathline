@@ -340,8 +340,10 @@ function messageWindow(title, msg) {
 }
 
 // ---------------------------------------------------------------- queue view
+// the processes the job uses (a step of its toolpath names it): a material's others are left out
 function procRows(pkg) {
-  return (pkg.processes || []).map((p) => {
+  const used = new Set((pkg.toolpath || []).map((s) => s.process).filter((i) => i !== undefined));
+  return (pkg.processes || []).filter((p) => !used.size || used.has(p.index)).map((p) => {
     const pv = p.tool !== undefined && p.proc === undefined
       ? String(p.tool).split(' · ')[0] + ' · ' + p.speed + ' mm/s' + (p.passes > 1 ? '  ×' + p.passes : '') // plotter: tool and speed
       : p.proc === 'Engrave' ? 'P ' + p.power + ' %  V ' + p.speed + ' mm/s  ' + p.f + ' DPI' : 'P ' + p.power + ' %  V ' + p.speed + ' mm/s' + (p.passes > 1 ? '  ×' + p.passes : '');
@@ -377,6 +379,9 @@ function queueView() {
   const total = shown ? shown.seconds : 0;
   const frac = isRun ? st.progress : 0;
   ui.picked = ui.picked.filter((id) => q.some((j) => j.id === id && j.status === 'queued'));
+  // Select (several jobs back to back) is for plotters / routers only
+  const canMulti = cfg().type === 'plotter';
+  if (!canMulti && ui.multi) { ui.multi = false; ui.picked = []; }
   const cantStart = (ui.multi ? !ui.picked.length : !job) || st.link !== 'online' || st.interlock || st.state === 'alarm' || st.state === 'framing';
 
   const list = q.map((j, i) => {
@@ -405,8 +410,8 @@ function queueView() {
   return '<div class="view fit qview">' +
     '<aside aria-label="Job queue" class="card qlist">' +
     '<div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:14px 14px 10px"><span class="h-sec">Queue</span><span class="lbl">' + q.length + (q.length === 1 ? ' job' : ' jobs') + '</span><span style="flex:1"></span>' +
-    // Select: tick several jobs; Start runs them one after another
-    '<label style="display:inline-flex;align-items:center;gap:8px;cursor:pointer" title="Tick several jobs, then Start runs them one after another"><span class="lbl" style="font-size:13px;color:var(--text-2)">' + (ui.multi ? ui.picked.length + ' ticked' : 'Select') + '</span><button role="switch" class="sw" aria-checked="' + !!ui.multi + '" data-a="multi" aria-label="Select several jobs"></button></label>' +
+    // Select: tick several jobs; Start runs them one after another (plotters / routers)
+    (canMulti ? '<label style="display:inline-flex;align-items:center;gap:8px;cursor:pointer" title="Tick several jobs, then Start runs them one after another"><span class="lbl" style="font-size:13px;color:var(--text-2)">' + (ui.multi ? ui.picked.length + ' ticked' : 'Select') + '</span><button role="switch" class="sw" aria-checked="' + !!ui.multi + '" data-a="multi" aria-label="Select several jobs"></button></label>' : '') +
     '<button class="tb sm" data-a="import">' + ic(ICON.upload, 16) + 'Import</button></div>' +
     '<div style="flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:8px;padding:0 12px 12px">' + (list || '<div style="padding:28px 8px;text-align:center;color:var(--text-3)">Queue empty. Send a job from Pathline, or import a .cjob file.</div>') + '</div>' +
     '<div style="display:flex;gap:8px;padding:12px;border-top:1px solid var(--line)"><button class="tb" data-a="remove"' + (!job || job.status === 'running' ? ' disabled' : '') + '>' + ic(ICON.trash, 18) + 'Remove</button></div></aside>' +
