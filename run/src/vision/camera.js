@@ -32,6 +32,23 @@ function vmbLibrary() {
   return { file: tried.find((p) => fs.existsSync(p)), tried };
 }
 
+// The USB transport layer (GenTL .cti) to load, one only. Vimba X otherwise loads its own and
+// every other one it's pointed at (GENICAM_GENTL64_PATH: Ruby's VimbaUSBTL 1.4), and two USB
+// transports driving one camera locked up the camera's driver (Pathline Run 0.7.4). Ruby's 1.4
+// matches the kernel driver it installed (vimba_usb_x64 1.0.0.0, 2014), so where it's present
+// it's the one; otherwise Vimba X's own (a PC or Pi without Ruby). opts: 'auto' or a file path.
+function usbTransport(choice) {
+  if (choice && choice !== 'auto') return fs.existsSync(choice) ? choice : null;
+  const found = [];
+  for (const dir of String(process.env.GENICAM_GENTL64_PATH || '').split(path.delimiter).filter(Boolean)) {
+    try { for (const f of fs.readdirSync(dir)) if (/usb.*\.cti$/i.test(f)) found.push(path.join(dir, f)); } catch (e) { /* not there */ }
+  }
+  const home = process.env.VIMBA_X_HOME;
+  const own = [home && path.join(home, 'cti', 'VimbaUSBTL.cti'), 'C:\\Program Files\\Allied Vision\\Vimba X\\cti\\VimbaUSBTL.cti'];
+  const ruby = found.find((f) => /VimbaUSBTL_1\.4/i.test(f));
+  return ruby || own.find((f) => f && fs.existsSync(f)) || found[0] || null;
+}
+
 const PIX = { Mono8: 0x01080001, BayerGR8: 0x01080008, BayerRG8: 0x01080009, BayerGB8: 0x0108000a, BayerBG8: 0x0108000b, RGB8: 0x02180014, BGR8: 0x02180015 };
 
 class VimbaCamera {
@@ -56,8 +73,10 @@ class VimbaCamera {
       offsetX: 'uint32', offsetY: 'uint32', payloadType: 'uint32', chunkDataPresent: 'uint8'
     });
     const f = (sig) => lib.func(sig);
+    // VmbStartup's path is wide characters on Windows
+    const pathType = process.platform === 'win32' ? 'const char16_t *' : 'const char *';
     this.vmb = {
-      startup: f('int32 VmbStartup(void *path)'),
+      startup: f('int32 VmbStartup(' + pathType + ' path)'),
       shutdown: f('void VmbShutdown()'),
       list: f('int32 VmbCamerasList(void *info, uint32 len, _Out_ uint32 *found, uint32 size)'),
       open: f('int32 VmbCameraOpen(const char *id, uint32 mode, _Out_ void **handle)'),
@@ -78,7 +97,9 @@ class VimbaCamera {
       wait: f('int32 VmbCaptureFrameWait(void *handle, void *frame, uint32 timeout)'),
       flush: f('int32 VmbCaptureQueueFlush(void *handle)')
     };
-    this.check(this.vmb.startup(null), 'start Vimba X');
+    const tl = usbTransport(this.opts.transport);
+    this.log('camera: USB transport ' + (tl || 'Vimba X\'s defaults (none found)'));
+    this.check(this.vmb.startup(tl), 'start Vimba X' + (tl ? ' with ' + tl : ''));
     this.started = true;
     const found = [0];
     this.vmb.list(null, 0, found, koffi.sizeof(CameraInfo));
@@ -256,17 +277,23 @@ class SimCamera {
   }
 }
 
-// ---------------------------------------------------------------- the camera's own thread
-// VimbaCamera run in a worker thread (camera-worker.js), with a time limit on every call: the
-// app's main thread (screen, laser link) never waits on Vimba X. A call that runs out of time
-// gives an error, and the thread is thrown away; the next use starts a fresh one.
-class ThreadedCamera {
+// ---------------------------------------------------------------- the camera's own process
+// VimbaCamera run in a separate process (camera-worker.js; in the installed app, Electron's own
+// program as plain Node), with a time limit on every call: the app's main thread (screen, laser
+// link) never waits on Vimba X. A call that runs out of time gives an error and the process is
+// left behind (killed; if the USB driver holds it, Windows lets it go once the camera is
+// unplugged); the next use starts a fresh one.
+class ProcessCamera {
   constructor(opts = {}, log) { this.opts = opts; this.log = log || (() => {}); this.seq = 0; this.wait = new Map(); }
 
   start() {
-    const { Worker } = require('worker_threads');
-    this.w = new Worker(path.join(__dirname, 'camera-worker.js'));
-    this.w.on('message', (m) => {
+    const { fork } = require('child_process');
+    const w = fork(path.join(__dirname, 'camera-worker.js'), [], {
+      execPath: process.execPath, serialization: 'advanced', stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
+      env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }
+    });
+    this.w = w;
+    w.on('message', (m) => {
       if (m.log) return this.log(m.log);
       const p = this.wait.get(m.id);
       if (!p) return;
@@ -274,8 +301,17 @@ class ThreadedCamera {
       clearTimeout(p.t);
       if (m.ok) p.resolve(m.r); else p.reject(new Error(m.error));
     });
-    this.w.on('error', (e) => this.fail(new Error('Camera thread: ' + e.message)));
-    this.w.on('exit', () => { this.w = null; this.fail(new Error('The camera thread stopped')); });
+    w.on('error', (e) => { if (this.w === w) this.fail(new Error('Camera process: ' + e.message)); });
+    w.on('exit', () => { if (this.w === w) { this.w = null; this.fail(new Error('The camera process stopped')); } });
+  }
+
+  // leave the process behind: never wait for it
+  drop() {
+    const w = this.w;
+    this.w = null;
+    if (!w) return;
+    try { w.disconnect(); } catch (e) { /* gone */ }
+    try { w.kill('SIGKILL'); } catch (e) { /* gone */ }
   }
 
   fail(e) { for (const p of this.wait.values()) { clearTimeout(p.t); p.reject(e); } this.wait.clear(); }
@@ -286,13 +322,12 @@ class ThreadedCamera {
     return new Promise((resolve, reject) => {
       const t = setTimeout(() => {
         this.wait.delete(id);
-        reject(new Error('The camera didn\'t answer (' + what + ', ' + Math.round(ms / 1000) + ' s). Check its USB cable, close Ruby / JobDispatcher, then try again.'));
-        // a stuck thread is no use: throw it away (the next call starts a fresh one)
-        const w = this.w; this.w = null;
-        if (w) w.terminate().catch(() => {});
+        reject(new Error('The camera didn\'t answer (' + what + ', ' + Math.round(ms / 1000) + ' s). If it keeps happening, unplug the camera\'s USB cable for a few seconds; close Ruby / JobDispatcher too.'));
+        // a stuck process is no use: leave it behind (the next call starts a fresh one)
+        this.drop();
       }, ms);
       this.wait.set(id, { resolve, reject, t });
-      this.w.postMessage({ id, cmd, args });
+      this.w.send({ id, cmd, args });
     });
   }
 
@@ -304,13 +339,12 @@ class ThreadedCamera {
   async close() {
     if (!this.w) return;
     await this.call('close', [], 5000, 'closing it').catch(() => {});
-    const w = this.w; this.w = null;
-    if (w) await w.terminate().catch(() => {});
+    this.drop();
   }
 }
 
 function makeCamera(vision, opts = {}) {
-  return vision.source === 'sim' ? new SimCamera(opts.sim || {}) : new ThreadedCamera({ exposure: Number(vision.exposure) > 0 ? Number(vision.exposure) : null }, opts.log);
+  return vision.source === 'sim' ? new SimCamera(opts.sim || {}) : new ProcessCamera({ exposure: Number(vision.exposure) > 0 ? Number(vision.exposure) : null, transport: vision.transport || 'auto' }, opts.log);
 }
 
-module.exports = { VimbaCamera, ThreadedCamera, SimCamera, makeCamera, vmbLibrary, toGrey };
+module.exports = { VimbaCamera, ProcessCamera, SimCamera, makeCamera, vmbLibrary, usbTransport, toGrey };
