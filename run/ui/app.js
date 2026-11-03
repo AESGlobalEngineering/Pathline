@@ -672,7 +672,7 @@ function setupView() {
       ro('Camera', S.camera.info ? esc(S.camera.info.model + ' · ' + S.camera.info.serial) : 'not opened yet'),
     'The Alvium on the head plugs into this computer by USB (not into the laser). It needs Allied Vision\'s Vimba X installed, and Ruby / JobDispatcher closed: only one program can use it.'));
     const when = (t) => (t ? new Date(t).toLocaleString() : 'not yet');
-    tabs.Camera.push(card('1 · Camera calibration', num('Checkerboard squares', 'vision.camBoard.square', 'mm', 'The small board under the camera') +
+    tabs.Camera.push(card('1 · Camera calibration', num('Checkerboard squares', 'vision.camBoard.square', 'mm', 'The small board, under the laser head') +
       ro('Pixel size', (pixel * 1000).toFixed(2) + ' µm') + ro('Picture turned', turned.toFixed(2) + '°' + (ma * md - mb * mc < 0 ? ' (mirrored)' : '')) +
       ro('Lens bends lines', v.cameraLens !== undefined ? (v.cameraLens * 1000).toFixed(0) + ' µm at most' : '—') + ro('Calibrated', when(v.cameraAt)) +
       '<div style="display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end"><button class="btn-primary" data-a="camCalibrate"' + need + '>Calibrate camera</button></div>',
