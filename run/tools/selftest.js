@@ -10,6 +10,7 @@ process.env.PATHLINE_RUN_RUIDA_PORT_IN = process.env.PATHLINE_RUN_RUIDA_PORT_IN 
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const zlib = require('zlib');
 const { spawn } = require('child_process');
 const sf = require('../src/ctrl/trotec/sf');
 const rd = require('../src/ctrl/ruida/rd');
@@ -603,6 +604,20 @@ async function visionTests() {
     ok(plain && clean && Math.abs(clean.x - (239.5 + 81.25)) < 1 && Math.abs(plain.x - (239.5 + 81.25)) > 20, 'marks sit in white: a dot against dark artwork is passed over for the clean one', JSON.stringify({ plain, clean }));
     // (the angle only aims the scan at the next corner; the board's angle comes from the corners found)
     ok(c && Math.abs(c.x - (239.5 - 25)) < 0.5 && Math.abs(c.y - (239.5 + 12.5)) < 0.5 && Math.abs(c.angle - 25) < 3, 'checkerboard corner at 25°: found to a fraction of a pixel, angle ' + (c && c.angle.toFixed(1)) + '° (a hint, within 3°)', JSON.stringify(c));
+  }
+  {
+    // the real camera on Ruby's Trotec over the 10 mm board (972 px, as the camera view gets it): under
+    // 3 squares across, light from one side, soft edges. Only the 4 real corners, no false ones on
+    // the edges or the shadow, and a 2 × 2 grid from them
+    const detect = require('../src/vision/detect');
+    const b = zlib.gunzipSync(fs.readFileSync(path.join(__dirname, '..', 'test', 'fixtures', 'camera-10mm-board.bin.gz')));
+    const img = { w: b.readUInt16BE(0), h: b.readUInt16BE(2), data: new Uint8Array(b.subarray(4)) };
+    const cs = detect.findCorners(img);
+    const L = detect.fitLattice(cs);
+    const real = [[651, 611], [291, 613], [654, 237], [279, 245]];
+    const square = L && Math.sqrt(Math.abs(L.a[0] * L.b[1] - L.a[1] * L.b[0]));
+    ok(cs.length === 4 && real.every(([x, y]) => cs.some((c) => Math.hypot(c.x - x, c.y - y) < 8)) && L && L.n === 4 && Math.abs(square - 369) < 10,
+      'real camera, 10 mm board in uneven light: ' + cs.length + ' corners (4), a 2 × 2 grid, ' + (square || 0).toFixed(0) + ' px a square', JSON.stringify({ cs, L }).slice(0, 400));
   }
   {
     // the camera's process runs on Electron's own Node in the installed app, where some koffi calls

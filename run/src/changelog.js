@@ -5,6 +5,12 @@
 
 module.exports = [
   {
+    version: '0.7.7', date: '3 Nov 2026',
+    fixed: [
+      'Camera calibration (stage 1) didn\'t recognise the 10 mm checkerboard on the real camera. The camera sees under 3 squares across, so only 2 × 2 corners, and soft edges and shadows looked like extra corners. A corner now only counts where two black and two white squares really meet, and 2 × 2 corners are enough.'
+    ]
+  },
+  {
     version: '0.7.6', date: '3 Nov 2026',
     fixed: [
       'Head camera: the camera process stopped at every picture ("The camera process stopped"), so the camera view and calibration couldn\'t get a picture. Pictures are now copied out of the camera\'s buffer in a way the installed app allows.',

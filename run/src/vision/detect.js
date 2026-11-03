@@ -244,11 +244,40 @@ function findCorners(img, opts = {}) {
   const out = [];
   for (const p of peaks.sort((a, b) => b.v - a.v)) {
     const q = refineCorner(img, p.x * s.f + s.f / 2, p.y * s.f + s.f / 2, win);
-    if (!q || out.some((o) => Math.hypot(o.x - q.x, o.y - q.y) < win)) continue;
+    if (!q || out.some((o) => Math.hypot(o.x - q.x, o.y - q.y) < win) || !crossing(img, q.x, q.y, win * 1.5)) continue;
     out.push(q);
   }
   const cx = (img.w - 1) / 2, cy = (img.h - 1) / 2;
   return out.sort((a, b) => Math.hypot(a.x - cx, a.y - cy) - Math.hypot(b.x - cx, b.y - cy));
+}
+
+// Is (qx, qy) where two black and two white squares meet? Round a circle of radius R it goes
+// dark, light, dark, light, each part about a quarter turn (50° … 130°: the board at an angle,
+// the corner a little off). A soft edge goes dark, light; a bright strip along an edge gives two
+// thin light parts. Every grey level is tried as the split, as the two white squares (or the two
+// black ones) can differ a lot in uneven light.
+function crossing(img, qx, qy, R) {
+  const n = 48, raw = new Float32Array(n);
+  for (let k = 0; k < n; k++) {
+    const x = Math.round(qx + R * Math.cos((2 * Math.PI * k) / n)), y = Math.round(qy + R * Math.sin((2 * Math.PI * k) / n));
+    if (x < 0 || y < 0 || x >= img.w || y >= img.h) return false;
+    raw[k] = img.data[y * img.w + x];
+  }
+  // a little smoothing round the circle, so noise at a split doesn't count as a change
+  const v = raw.map((x, k) => (raw[(k + n - 1) % n] + 2 * x + raw[(k + 1) % n]) / 4);
+  const levels = [...new Set(v)].sort((a, b) => a - b);
+  for (let t = 0; t + 1 < levels.length; t++) {
+    const split = (levels[t] + levels[t + 1]) / 2;
+    const runs = [];
+    for (let k = 0; k < n; k++) {
+      const side = v[k] > split;
+      if (runs.length && runs[runs.length - 1].side === side) runs[runs.length - 1].len++;
+      else runs.push({ side, len: 1 });
+    }
+    if (runs.length > 1 && runs[0].side === runs[runs.length - 1].side) runs[0].len += runs.pop().len;
+    if (runs.length === 4 && runs.every((r) => r.len >= (n * 50) / 360 && r.len <= (n * 130) / 360)) return true;
+  }
+  return false;
 }
 
 // the corner near (qx, qy), sub-pixel: over the window, Σ g gᵀ (q − p) = 0
@@ -298,28 +327,48 @@ function cornerAngle(img, qx, qy, win) {
   return angle;
 }
 
-// The corners of a small checkerboard as a grid: two lattice vectors from the corner nearest
-// the middle to its nearest neighbours, every corner given whole-number grid indices, then a
-// least-squares fit pixel = o + i·a + j·b. Returns { a, b, o, n, worst } (px; worst = the
-// largest misfit of a corner, px: how much the lens bends straight lines here) or null.
+// The corners of a small checkerboard as a grid: every corner given whole-number grid indices,
+// then a least-squares fit pixel = o + i·a + j·b. Some corners found are false (a soft edge, a
+// shadow across a square), so the grid isn't taken from the nearest neighbours: each pair of
+// steps between the corners nearest the middle is tried, and the grid most corners sit on wins.
+// A 2 × 2 is enough: the Trotec's head camera sees under 3 of the 10 mm squares across.
+// Returns { a, b, o, n, worst, points } (px; worst = the largest misfit of a corner, px: how much
+// the lens bends straight lines here; points = the corners on the grid, nearest the middle
+// first) or null.
 function fitLattice(corners) {
-  if (corners.length < 6) return null;
-  const c0 = corners[0];
-  const vecs = corners.slice(1).map((c) => [c.x - c0.x, c.y - c0.y]).sort((p, q) => Math.hypot(...p) - Math.hypot(...q));
-  const a = vecs[0];
-  const la = Math.hypot(...a);
-  const b = vecs.find((v) => { const cos = Math.abs(v[0] * a[0] + v[1] * a[1]) / (la * Math.hypot(...v)); return cos < 0.3 && Math.hypot(...v) < la * 1.5; });
-  if (!b) return null;
-  const det = a[0] * b[1] - a[1] * b[0];
-  const rows = [], X = [], Y = [];
-  for (const c of corners) {
-    const dx = c.x - c0.x, dy = c.y - c0.y;
-    const fi = (dx * b[1] - dy * b[0]) / det, fj = (a[0] * dy - a[1] * dx) / det;
-    const i = Math.round(fi), j = Math.round(fj);
-    if (Math.abs(fi - i) > 0.25 || Math.abs(fj - j) > 0.25) continue;
-    rows.push({ i, j, c });
+  if (corners.length < 4) return null;
+  const onGrid = (c0, a, b) => {
+    const det = a[0] * b[1] - a[1] * b[0];
+    const rows = [];
+    let off = 0;
+    for (const c of corners) {
+      const dx = c.x - c0.x, dy = c.y - c0.y;
+      const fi = (dx * b[1] - dy * b[0]) / det, fj = (a[0] * dy - a[1] * dx) / det;
+      const i = Math.round(fi), j = Math.round(fj);
+      if (Math.abs(fi - i) > 0.25 || Math.abs(fj - j) > 0.25) continue;
+      rows.push({ i, j, c });
+      off += Math.abs(fi - i) + Math.abs(fj - j);
+    }
+    return { rows, off };
+  };
+  let best = null;
+  for (const c0 of corners.slice(0, 6)) {
+    const vecs = corners.filter((c) => c !== c0).map((c) => [c.x - c0.x, c.y - c0.y]);
+    for (const a of vecs) {
+      const la = Math.hypot(...a);
+      for (const b of vecs) {
+        const lb = Math.hypot(...b);
+        // squares: two steps about as long, about square to each other; each grid once (b left of a)
+        if (a[0] * b[1] - a[1] * b[0] <= 0 || lb < la / 1.5 || lb > la * 1.5 || Math.abs(a[0] * b[0] + a[1] * b[1]) / (la * lb) >= 0.3) continue;
+        const g = onGrid(c0, a, b);
+        // across and down both: not just a row of corners
+        if (new Set(g.rows.map((r) => r.i)).size < 2 || new Set(g.rows.map((r) => r.j)).size < 2) continue;
+        if (!best || g.rows.length > best.rows.length || (g.rows.length === best.rows.length && g.off < best.off)) best = g;
+      }
+    }
   }
-  if (rows.length < 6) return null;
+  if (!best || best.rows.length < 4) return null;
+  const rows = best.rows;
   // least squares for x and y separately: [1, i, j]
   const solve = (val) => {
     const N = [[0, 0, 0], [0, 0, 0], [0, 0, 0]], B = [0, 0, 0];
@@ -336,13 +385,13 @@ function fitLattice(corners) {
     const d = use.map(miss).sort((p, q) => p - q);
     const limit = Math.max(1.5, 3 * d[Math.floor(d.length / 2)]);
     const keep = use.filter((r) => miss(r) <= limit);
-    if (keep.length === use.length || keep.length < 6) break;
+    if (keep.length === use.length || keep.length < 4) break;
     use = keep;
     rows.splice(0, rows.length, ...use);
   }
   const fitA = [fx[1], fy[1]], fitB = [fx[2], fy[2]], o = [fx[0], fy[0]];
   const worst = Math.max(...use.map(miss));
-  return { a: fitA, b: fitB, o, n: use.length, worst };
+  return { a: fitA, b: fitB, o, n: use.length, worst, points: corners.filter((c) => use.some((r) => r.c === c)) };
 }
 
 // local min / max over a (2r+1)² box, then stretched to 0 … 255 (flat areas stay mid grey)

@@ -203,12 +203,14 @@ class Vision {
     if (!L) throw err('Put the ' + square + ' mm checkerboard under the laser head, flat, a few squares each way (' + cs0.length + ' corners seen)');
     const spacing = Math.sqrt(Math.abs(L.a[0] * L.b[1] - L.a[1] * L.b[0])); // px per square
     const pixel = square / spacing;
-    const c0 = cs0[0];
+    // only corners on the board's grid: a false one (a soft edge, a shadow) could be nearer
+    const c0 = L.points[0];
     const d = square * 0.3;
     const follow = async (x, y) => {
       await this.m.link.moveTo(x, y);
       await this.m.waitIdle(30000, 150);
-      const cs = detect.findCorners(await this.grab());
+      const Lk = detect.fitLattice(detect.findCorners(await this.grab()));
+      const cs = Lk ? Lk.points : [];
       const near = cs.sort((p, q) => Math.hypot(p.x - c0.x, p.y - c0.y) - Math.hypot(q.x - c0.x, q.y - c0.y))[0];
       if (!near || Math.hypot(near.x - c0.x, near.y - c0.y) > (d / pixel) * 1.6) throw err('Lost the board while moving: keep it flat under the camera and try again');
       return [near.x - c0.x, near.y - c0.y];
