@@ -282,6 +282,16 @@ function findCorners(img, opts = {}) {
   return out.sort((a, b) => Math.hypot(a.x - cx, a.y - cy) - Math.hypot(b.x - cx, b.y - cy));
 }
 
+// Corners in several pictures of the same view (the exposure stepped: the head's light on one part,
+// the rest in shadow, where corners only show at a longer exposure), one per place, nearest the
+// middle first.
+function findCornersIn(imgs, opts = {}) {
+  const img = imgs[0], near = img.w * 0.02, all = [];
+  for (const im of imgs) for (const c of findCorners(im, opts)) if (!all.some((o) => Math.hypot(o.x - c.x, o.y - c.y) < near)) all.push(c);
+  const cx = (img.w - 1) / 2, cy = (img.h - 1) / 2;
+  return all.sort((a, b) => Math.hypot(a.x - cx, a.y - cy) - Math.hypot(b.x - cx, b.y - cy));
+}
+
 // Is (qx, qy) where two black and two white squares meet? Round a circle of radius R it goes
 // dark, light, dark, light, each part about a quarter turn (50° … 130°: the board at an angle,
 // the corner a little off). A soft edge goes dark, light; a bright strip along an edge gives two
@@ -468,4 +478,4 @@ function preview(img, size) {
   return { w: s.w, h: s.h, data };
 }
 
-module.exports = { otsu, findDots, findCorner, findCorners, fitLattice, shrink, preview };
+module.exports = { otsu, findDots, findCorner, findCorners, findCornersIn, fitLattice, shrink, preview };

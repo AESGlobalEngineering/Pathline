@@ -628,6 +628,16 @@ async function visionTests() {
     const sb = Lb && Math.sqrt(Math.abs(Lb.a[0] * Lb.b[1] - Lb.a[1] * Lb.b[0]));
     ok(cb.length === 4 && real.every(([x, y]) => cb.some((c) => Math.hypot(c.x - 2 * x, c.y - 2 * y) < 16)) && Lb && Lb.n === 4 && Math.abs(sb - 738) < 20,
       'the same at full size with the paper\'s texture: ' + cb.length + ' corners (4), ' + (sb || 0).toFixed(0) + ' px a square', JSON.stringify(cb).slice(0, 300));
+    // the real camera again, the board where only the lower half of the view is lit: at the
+    // exposure in use the top two corners are lost in the shadow; at 3× and 9× (a linear sensor:
+    // times k, clipped) they show, and the corners of all three make the 2 × 2 grid
+    const bs = zlib.gunzipSync(fs.readFileSync(path.join(__dirname, '..', 'test', 'fixtures', 'camera-10mm-board-shadow.bin.gz')));
+    const sh = { w: bs.readUInt16BE(0), h: bs.readUInt16BE(2), data: new Uint8Array(bs.subarray(4)) };
+    const at = (k) => ({ w: sh.w, h: sh.h, data: sh.data.map((v) => Math.min(255, Math.round(v * k))) });
+    const one = detect.findCorners(sh), Ls = detect.fitLattice(detect.findCornersIn([1, 3, 9].map(at)));
+    const shReal = [[645, 348], [277, 349], [645, 716], [274, 715]];
+    ok(one.length === 2 && Ls && Ls.n === 4 && shReal.every(([x, y]) => Ls.points.some((c) => Math.hypot(c.x - x, c.y - y) < 8)),
+      'real camera, board half in shadow: ' + one.length + ' corners at one exposure, ' + (Ls ? Ls.n : 0) + ' on the grid with the exposure stepped 1×, 3×, 9×', JSON.stringify(Ls && Ls.points).slice(0, 300));
   }
   {
     // the camera's process runs on Electron's own Node in the installed app, where some koffi calls

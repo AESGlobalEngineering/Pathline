@@ -87,6 +87,21 @@ class Vision {
 
   exposureNow() { return this.cfg.exposure === 'auto' ? this.exp || null : Number(this.cfg.exposure); }
 
+  // The same view at the exposure in use, then at each step times it: where the light is uneven
+  // (the Trotec's lights one band of the view, the rest in shadow) corners in the dark part only
+  // show at a longer exposure. The next grab() goes back to the exposure in use.
+  async grabSteps(steps = [1, 3, 9]) {
+    const out = [await this.grab()];
+    const base = this.exposureNow() || 50000, c = await this.cam();
+    for (const k of steps.slice(1)) {
+      const e = Math.min(1000000, Math.round(base * k));
+      await c.setExposure(e);
+      this.expSet = e;
+      out.push(await c.grab());
+    }
+    return out;
+  }
+
   // a frame for the screen (grey bytes), about `size` px across
   async preview(size) {
     const img = await this.grab();
@@ -190,8 +205,8 @@ class Vision {
 
   async cameraOnBoard(square) {
     const start = { x: this.m.st.pos.x, y: this.m.st.pos.y };
-    const img0 = await this.grab();
-    const cs0 = detect.findCorners(img0);
+    // each view at stepped exposures, corners from all of them: the light covers only part of it
+    const cs0 = detect.findCornersIn(await this.grabSteps());
     const L = detect.fitLattice(cs0);
     if (!L) throw err('Put the ' + square + ' mm checkerboard under the camera, flat, filling the camera view (' + cs0.length + ' corners seen)');
     const spacing = Math.sqrt(Math.abs(L.a[0] * L.b[1] - L.a[1] * L.b[0])); // px per square
@@ -202,7 +217,7 @@ class Vision {
     const follow = async (x, y) => {
       await this.m.link.moveTo(x, y);
       await this.m.waitIdle(30000, 150);
-      const Lk = detect.fitLattice(detect.findCorners(await this.grab()));
+      const Lk = detect.fitLattice(detect.findCornersIn(await this.grabSteps()));
       const cs = Lk ? Lk.points : [];
       const near = cs.sort((p, q) => Math.hypot(p.x - c0.x, p.y - c0.y) - Math.hypot(q.x - c0.x, q.y - c0.y))[0];
       if (!near || Math.hypot(near.x - c0.x, near.y - c0.y) > (d / pixel) * 1.6) throw err('Lost the board while moving: keep it flat under the camera and try again');
