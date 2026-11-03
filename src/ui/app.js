@@ -88,6 +88,54 @@
 
   // Engrave resolution: a choice of CC.DPI_STEPS (a value from an older job that
   // isn't one of them stays listed, so it isn't changed by opening the menu).
+  // Drag a row of a process list up or down. Started from a pointerdown on
+  // the row's grip (delay 0) or by pressing and holding its ⋮ button (delay
+  // ms; a quick click still opens the menu). Rows are the [data-prow]
+  // elements beside the one pressed and k is the row's position among them.
+  // show({ i, to, dy, h } | null) draws the drag; drop(to) makes the move.
+  function rowDrag(e, k, show, drop, delay) {
+    if (e.button !== 0) return;
+    const me = e.currentTarget.closest('[data-prow]');
+    const els = [...me.parentElement.querySelectorAll('[data-prow]')];
+    const rects = els.map((el) => el.getBoundingClientRect());
+    const y0 = e.clientY;
+    let dragging = false, moved = false, to = k;
+    const start = () => { dragging = true; show({ i: k, to: k, dy: 0, h: rects[k].height }); };
+    const timer = delay ? setTimeout(start, delay) : null;
+    if (!delay) { e.preventDefault(); start(); }
+    const move = (ev) => {
+      if (!dragging) { if (Math.abs(ev.clientY - y0) > 6) clearTimeout(timer); return; }
+      const dy = Math.max(rects[0].top - rects[k].top, Math.min(rects[rects.length - 1].bottom - rects[k].bottom, ev.clientY - y0));
+      if (Math.abs(dy) > 2) moved = true;
+      const mid = (rects[k].top + rects[k].bottom) / 2 + dy;
+      to = rects.findIndex((r) => mid < r.bottom);
+      if (to < 0) to = rects.length - 1;
+      show({ i: k, to, dy, h: rects[k].height });
+    };
+    const up = () => {
+      clearTimeout(timer);
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      if (!dragging) return;
+      // a hold-and-drag release would also click the ⋮ button: swallow that click
+      if (delay || moved) {
+        const stop = (ev) => { ev.stopPropagation(); ev.preventDefault(); };
+        window.addEventListener('click', stop, true);
+        setTimeout(() => window.removeEventListener('click', stop, true), 300);
+      }
+      show(null);
+      if (to !== k) drop(to);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  }
+  // How a row looks while a drag (from rowDrag) is going on: the held row
+  // follows the pointer, the rows it passes make room.
+  function rowDragStyle(d, k) {
+    const lifted = !!d && d.i === k;
+    const shift = !d ? 0 : lifted ? d.dy : d.i < k && k <= d.to ? -d.h : d.to <= k && k < d.i ? d.h : 0;
+    return { lifted, dragT: shift ? 'translateY(' + shift + 'px)' : 'none', dragZ: lifted ? 2 : 'auto', dragSh: lifted ? 'var(--shadow-pop)' : 'none' };
+  }
   function dpiSelect(value, onPick, opts) {
     const h = window.React.createElement;
     const cur = Number(value) || 500;
@@ -1479,7 +1527,7 @@
     async reportBug() {
       const r = await dialog({
         title: 'Report a bug',
-        message: 'Saves the report as a file wherever you choose (with the app version, recent errors, a screenshot and, if you like, the current job), then you can send it to the Pathline developers as a GitHub issue.',
+        message: 'Saves the report as a file wherever you choose (with the app version, recent errors, a screenshot and, if you like, the current job), then you can send it to the Pathline Prepare developers as a GitHub issue.',
         fields: [
           { key: 'title', label: 'What went wrong (one line)', value: '', full: true },
           { key: 'description', label: 'What happened, and what you expected', type: 'textarea', value: '', full: true, rows: 4 },
@@ -1498,8 +1546,8 @@
       const showZip = () => (res.zip ? window.api.app.showItem(res.zip) : window.api.report.openFolder(res.folder));
       const send = await dialog({
         title: res.zip ? 'Bug report saved' : 'Bug report not saved as a file',
-        message: (res.zip ? 'Saved as ' + name + '.' : 'You cancelled saving, so there\'s no file to attach (a copy is in Pathline\'s reports folder).') +
-          (res.issueUrl ? '\n\nTo send it to the Pathline developers, choose Report on GitHub: it opens a GitHub issue in your browser, already filled in' + (res.zip ? ', and shows the report file so you can drag it into the issue.' : '.') + ' You need to be signed in to GitHub. Issues are public, so don\'t attach anything confidential.' : ''),
+        message: (res.zip ? 'Saved as ' + name + '.' : 'You cancelled saving, so there\'s no file to attach (a copy is in Pathline Prepare\'s reports folder).') +
+          (res.issueUrl ? '\n\nTo send it to the Pathline Prepare developers, choose Report on GitHub: it opens a GitHub issue in your browser, already filled in' + (res.zip ? ', and shows the report file so you can drag it into the issue.' : '.') + ' You need to be signed in to GitHub. Issues are public, so don\'t attach anything confidential.' : ''),
         buttons: [{ label: 'Close', value: null }].concat(res.zip ? [{ label: 'Show file', value: 'show' }] : []).concat(res.issueUrl ? [{ label: 'Report on GitHub', value: 'github', primary: true }] : [])
       });
       if (!send) return;
@@ -1521,7 +1569,7 @@
       add(box, 'h2', '', title || 'What\'s new');
       for (const c of entries) {
         const sec = add(box, 'section', 'cl-ver');
-        add(sec, 'h3', '', 'Pathline ' + c.version);
+        add(sec, 'h3', '', 'Pathline Prepare ' + c.version);
         if (c.date) add(sec, 'span', 'lbl', c.date);
         [['New', c.added], ['Fixed', c.fixed]].forEach(([label, list]) => {
           if (!list || !list.length) return;
@@ -1541,7 +1589,7 @@
       document.body.appendChild(scrim);
       ok.focus();
     },
-    async whatsNew() { this.showChangelog(await window.api.app.changelog(), 'What\'s new in Pathline'); },
+    async whatsNew() { this.showChangelog(await window.api.app.changelog(), 'What\'s new in Pathline Prepare'); },
     // the update window for a given state (used by the test harness)
     showUpdate: (s) => updateWindow(s),
     // Help → Check for updates: an update opens the update window; otherwise says what it found
@@ -1549,9 +1597,9 @@
       const s = await window.api.update.check();
       if (['available', 'downloading', 'ready'].includes(s.state)) return updateWindow(s);
       const msg = {
-        current: 'Pathline ' + s.version + ' is up to date.',
-        none: 'No Pathline releases have been published yet. You have version ' + s.version + '.',
-        off: 'Update checks aren\'t set up in this copy of Pathline (version ' + s.version + ').',
+        current: 'Pathline Prepare ' + s.version + ' is up to date.',
+        none: 'No Pathline Prepare releases have been published yet. You have version ' + s.version + '.',
+        off: 'Update checks aren\'t set up in this copy of Pathline Prepare (version ' + s.version + ').',
         portable: 'This is the portable copy (version ' + s.version + '). It can\'t update itself: download the latest version from the releases page.',
         error: 'Couldn\'t check for updates: ' + (s.message || 'no connection') + '.'
       }[s.state];
@@ -1572,7 +1620,7 @@
       const box = document.createElement('div');
       box.className = 'lrc-dlg';
       box.setAttribute('role', 'dialog');
-      box.setAttribute('aria-label', 'Pathline update');
+      box.setAttribute('aria-label', 'Pathline Prepare update');
       scrim.appendChild(box);
       document.body.appendChild(scrim);
       upd = { box, close: () => { scrim.remove(); upd = null; } };
@@ -1587,10 +1635,10 @@
     const v = s.version || '';
     if (s.state === 'available') {
       add(box, 'h2', '', 'Update available');
-      add(box, 'p', '', 'Pathline ' + v + ' is available. You have version ' + (s.current || '') + '.\nDownload it now, then restart Pathline to install it.');
+      add(box, 'p', '', 'Pathline Prepare ' + v + ' is available. You have version ' + (s.current || '') + '.\nDownload it now, then restart Pathline Prepare to install it.');
       buttons([['Later', () => upd.close()], ['Download and install', () => window.api.update.download().then((n) => updateWindow(n)).catch(fail), 'primary']]);
     } else if (s.state === 'downloading') {
-      add(box, 'h2', '', 'Downloading Pathline ' + v);
+      add(box, 'h2', '', 'Downloading Pathline Prepare ' + v);
       const bar = add(box, 'div', 'lrc-progress');
       const fill = add(bar, 'div');
       fill.style.transition = 'width 0.3s ease-out';
@@ -1602,7 +1650,7 @@
       buttons([['Hide', () => upd.close()]]);
     } else if (s.state === 'ready') {
       add(box, 'h2', '', 'Update ready to install');
-      add(box, 'p', '', 'Pathline ' + v + ' has downloaded. Restart to install it: Pathline closes, installs the update and opens again. You\'ll be asked to save a job with unsaved changes first.');
+      add(box, 'p', '', 'Pathline Prepare ' + v + ' has downloaded. Restart to install it: Pathline Prepare closes, installs the update and opens again. You\'ll be asked to save a job with unsaved changes first.');
       buttons([['Later', () => upd.close()], ['Restart and install', () => window.api.update.install(), 'primary']]);
     } else if (s.state === 'error') {
       add(box, 'h2', '', 'Update didn\'t download');
@@ -1614,14 +1662,14 @@
     // uncaught page errors go to the reports folder's errors.log
     window.addEventListener('error', (e) => { window.api.report.error({ page: location.pathname.split('/').pop(), message: e.message, stack: e.error && e.error.stack }).catch(() => {}); });
     window.addEventListener('unhandledrejection', (e) => { const r = e.reason; window.api.report.error({ page: location.pathname.split('/').pop(), message: String(r && r.message || r), stack: r && r.stack }).catch(() => {}); });
-    window.api.report.crashed((d) => toast('Something went wrong inside Pathline. A crash report was saved.', { kind: 'err', action: 'Show', onAction: () => window.api.report.openFolder(d && d.folder), ms: 12000 }));
+    window.api.report.crashed((d) => toast('Something went wrong inside Pathline Prepare. A crash report was saved.', { kind: 'err', action: 'Show', onAction: () => window.api.report.openFolder(d && d.folder), ms: 12000 }));
     // a crash in the last session (or an unexpected close) is mentioned once
     window.api.report.pending().then((folder) => {
-      if (folder) setTimeout(() => toast('Pathline didn\'t close normally last time. A crash report was saved.', { action: 'Show', onAction: () => window.api.report.openFolder(folder), ms: 12000 }), 1200);
+      if (folder) setTimeout(() => toast('Pathline Prepare didn\'t close normally last time. A crash report was saved.', { action: 'Show', onAction: () => window.api.report.openFolder(folder), ms: 12000 }), 1200);
     }).catch(() => {});
-    // an update found when Pathline opens asks first; the window follows the download.
+    // an update found when Pathline Prepare opens asks first; the window follows the download.
     // With the window hidden, a finished download is mentioned once in a toast.
-    const readyToast = (s) => toast('Pathline ' + s.version + ' is ready to install', { action: 'Restart and install', onAction: () => window.api.update.install(), ms: 20000 });
+    const readyToast = (s) => toast('Pathline Prepare ' + s.version + ' is ready to install', { action: 'Restart and install', onAction: () => window.api.update.install(), ms: 20000 });
     window.api.update.onState((s) => {
       if (upd || s.state === 'available') updateWindow(s);
       else if (s.state === 'ready') readyToast(s);
@@ -1629,11 +1677,11 @@
     });
     // the first page after an update shows what changed since the last version that ran
     window.api.app.whatsNew().then((list) => {
-      if (list && list.length) setTimeout(() => support.showChangelog(list, 'Pathline has been updated to ' + list[0].version), 600);
+      if (list && list.length) setTimeout(() => support.showChangelog(list, 'Pathline Prepare has been updated to ' + list[0].version), 600);
     }).catch(() => {});
     // after moving to another page: a download in progress shows its window again
     window.api.update.status().then((s) => { if (s.state === 'downloading') updateWindow(s); }).catch(() => {});
   }
 
-  window.LRC = { toast, fail, dialog, sendDialog, confirm, keys, guardNav, clip, ops, textEntity, JobCanvas, entityD, PX_PER_MM, contextMenu, closeMenu, theme, aci, support, dpiSelect };
+  window.LRC = { toast, fail, dialog, sendDialog, confirm, keys, guardNav, clip, ops, textEntity, JobCanvas, entityD, PX_PER_MM, contextMenu, closeMenu, theme, aci, support, dpiSelect, rowDrag, rowDragStyle };
 })();

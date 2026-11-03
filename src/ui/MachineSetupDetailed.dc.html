@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Machine setup · Pathline</title>
+<title>Machine setup · Pathline Prepare</title>
 <link rel="stylesheet" href="fonts.css">
 <link rel="stylesheet" href="theme.css">
 <script src="../shared/core.js"></script>
@@ -41,7 +41,7 @@
 
   <!-- ===== App bar ===== -->
   <header class="appbar">
-    <div class="brand"><svg viewBox="0 0 64 64" width="28" height="28" role="img" aria-label="Pathline" style="flex: none; display: block"><rect width="64" height="64" rx="15" fill="#D62828"></rect><g transform="translate(14 14) scale(0.5625)" stroke-width="6" stroke-linejoin="round"><polygon points="6,6 50,6 6,50" fill="#FFFFFF" stroke="#FFFFFF"></polygon><polygon points="58,14 58,58 14,58" fill="#111214" stroke="#111214"></polygon></g></svg><span class="word">Pathline</span></div>
+    <div class="brand"><svg viewBox="0 0 64 64" width="28" height="28" role="img" aria-label="Pathline Prepare" style="flex: none; display: block"><rect width="64" height="64" rx="15" fill="#D62828"></rect><g transform="translate(14 14) scale(0.5625)" stroke-width="6" stroke-linejoin="round"><polygon points="6,6 50,6 6,50" fill="#FFFFFF" stroke="#FFFFFF"></polygon><polygon points="58,14 58,58 14,58" fill="#111214" stroke="#111214"></polygon></g></svg><span class="word">Pathline Prepare</span></div>
     <nav aria-label="Sections" class="seg">
       <a href="MainDetailed.dc.html">Job</a>
       <a href="SimulationDetailed.dc.html">Simulation</a>
@@ -337,7 +337,7 @@ class Component extends DCLogic {
     // the IP field only applies to a real machine; only a simulated one is
     // named and given a type here (a real machine reports both from its HMI)
     const realOnly = (box, on) => {
-      box.querySelectorAll('[data-real]').forEach((el) => { el.style.opacity = on ? '' : '0.45'; el.querySelectorAll('input, select').forEach((i) => { i.disabled = !on; }); });
+      box.querySelectorAll('[data-real]').forEach((el) => { el.style.display = on ? '' : 'none'; });
       box.querySelectorAll('[data-sim]').forEach((el) => { el.style.display = on ? 'none' : ''; });
     };
     const typeField = { key: 'type', label: 'Type', type: 'seg', value: 'laser', options: [{ value: 'laser', label: 'Laser' }, { value: 'plotter', label: 'Plotter' }] };
@@ -347,13 +347,14 @@ class Component extends DCLogic {
         { key: 'kind', label: 'Machine', type: 'seg', value: 'real', options: [{ value: 'real', label: 'Real' }, { value: 'sim', label: 'Simulated' }], onChange: (v, _vals, box) => realOnly(box, v === 'real') },
         { ...typeField, sim: true, hidden: true },
         { key: 'name', label: 'Name', value: '', full: true, sim: true, hidden: true },
-        { key: 'ip', label: 'IP address', value: '', full: false, real: true },
-        { key: 'ctrl', label: 'Controller', type: 'select', value: 'Ruida', options: CONTROLLERS, full: false }
+        { key: 'ip', label: 'IP address', value: '', full: true, real: true },
+        { key: 'ctrl', label: 'Controller', type: 'select', value: 'Ruida', options: CONTROLLERS, full: true, sim: true, hidden: true }
       ],
       buttons: [{ label: 'Cancel', value: null }, { label: 'Add', value: 'ok', primary: true }]
     });
     if (!r) return;
-    let type = r.values.type, ctrl = r.values.ctrl, found = null;
+    // a real machine reports its controller (until it does, the default for its type)
+    let type = r.values.type, ctrl = r.values.kind === 'sim' ? r.values.ctrl : null, found = null;
     if (r.values.kind !== 'sim') {
       // ask the machine whether it is a laser or a plotter (GET /info)
       const ip = String(r.values.ip || '').trim();
@@ -367,7 +368,7 @@ class Component extends DCLogic {
         // not reachable (yet): the operator says which it is
         const t = await LRC.dialog({
           title: ip ? 'No answer from ' + ip : 'No IP address yet',
-          message: 'Pathline couldn\'t ask the machine what it is. Choose the type; it\'s checked again once the machine is connected.',
+          message: 'Pathline Prepare couldn\'t ask the machine what it is. Choose the type; it\'s checked again once the machine is connected.',
           fields: [typeField],
           buttons: [{ label: 'Cancel', value: null }, { label: 'Add', value: 'ok', primary: true }]
         });
@@ -379,7 +380,7 @@ class Component extends DCLogic {
     const isPlot = type === 'plotter';
     const m = r.values.kind === 'sim'
       ? { ...base, sim: true, conn: 'Local', ip: '', ctrl, kind: isPlot ? 'Plotter' : 'Laser · CO2', name: r.values.name || (isPlot ? 'Simulated plotter' : 'Simulated laser') }
-      : { ...base, ip: String(r.values.ip || '').trim(), ctrl, ...(found && found.name ? { name: String(found.name).trim(), hmiName: true } : {}) };
+      : { ...base, ip: String(r.values.ip || '').trim(), ctrl: ctrl || base.ctrl, ...(found && found.name ? { name: String(found.name).trim(), hmiName: true } : {}) };
     // created on disk already; keep the working copy in step
     this.setState((s) => ({ list: s.list.concat(m), saved: s.saved.concat(base), mid: m.id, tab: null }));
   }

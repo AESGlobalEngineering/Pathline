@@ -24,7 +24,7 @@ const newer = (a, b) => {
 let whatsNew = [];
 
 const UI = path.join(__dirname, '..', 'ui');
-// how often a running Pathline checks GitHub for a new version: each check reads
+// how often a running Pathline Prepare checks GitHub for a new version: each check reads
 // a few hundred bytes (latest.yml), so this costs nothing noticeable
 // (LRC_UPDATE_EVERY_MS overrides, for testing)
 const UPDATE_EVERY_MS = 5 * 60 * 1000;
@@ -55,7 +55,7 @@ function issueUrl(rep, zip) {
     '### What happened', cut(rep.description, 2500) || '_(not given)_', '',
     '### Steps to make it happen again', cut(rep.steps, 1500) || '_(not given)_', '',
     '### Details',
-    '- Pathline ' + app.getVersion() + ' · Windows ' + require('os').release() + ' · page ' + (rep.page || '?'),
+    '- Pathline Prepare ' + app.getVersion() + ' · Windows ' + require('os').release() + ' · page ' + (rep.page || '?'),
     rep.machine ? '- Machine: ' + rep.machine.type + (rep.machine.sim ? ' (simulated)' : '') + ' · ' + (rep.machine.ctrl || '?') + ' · ' + rep.machine.conn : '- Machine: none',
     rep.job ? '- Job: ' + rep.job.objects + ' objects, ' + rep.job.processes + ' processes' : '',
     '', zip ? '**Please drag the saved report into this issue:** `' + path.basename(zip) + '`' : '_No report file was saved._',
@@ -325,7 +325,7 @@ function registerIpc() {
     // a copy stays in the reports folder; the operator chooses where the .zip goes
     const folder = reports.bug(report, files);
     const stamp = path.basename(folder).replace(/^bug-/, '');
-    const fileName = 'Pathline bug report ' + stamp + '.zip';
+    const fileName = 'Pathline Prepare bug report ' + stamp + '.zip';
     // (test runs with LRC_SAVE_DIR save there without asking)
     const r = process.env.LRC_SHOT && process.env.LRC_SAVE_DIR
       ? { canceled: false, filePath: path.join(process.env.LRC_SAVE_DIR, fileName) }
@@ -351,7 +351,7 @@ function registerIpc() {
   handle('app:confirm', async (opts) => {
     const r = await dialog.showMessageBox(win, {
       type: opts.type || 'question', buttons: opts.buttons || ['OK', 'Cancel'], defaultId: 0, cancelId: (opts.buttons || ['OK', 'Cancel']).length - 1,
-      title: opts.title || 'Pathline', message: opts.message, detail: opts.detail || ''
+      title: opts.title || 'Pathline Prepare', message: opts.message, detail: opts.detail || ''
     });
     return r.response;
   });
@@ -534,7 +534,7 @@ function createWindow() {
   const dark = pref === 'dark' || (pref !== 'light' && nativeTheme.shouldUseDarkColors);
   win = new BrowserWindow({
     width: 1440, height: 900, minWidth: 1024, minHeight: 680,
-    title: 'Pathline',
+    title: 'Pathline Prepare',
     backgroundColor: dark ? '#0E0F11' : '#F3F4F6',
     autoHideMenuBar: true,
     icon: path.join(UI, 'brand', 'pathline-256.png'),
@@ -580,7 +580,7 @@ function createWindow() {
   win.webContents.on('render-process-gone', async (_e, d) => {
     if (d.reason === 'clean-exit' || win.forceClose) return;
     const folder = reportCrash('page-crash', { reason: d.reason, exitCode: d.exitCode, url: win.webContents.getURL() });
-    const r = await dialog.showMessageBox(win, { type: 'error', buttons: ['Reload', 'Show report', 'Close Pathline'], defaultId: 0, cancelId: 0, message: 'Pathline stopped working', detail: 'A crash report was saved' + (folder ? ' in ' + folder : '') + '. Unsaved changes to the job are kept in memory; reload to carry on.' });
+    const r = await dialog.showMessageBox(win, { type: 'error', buttons: ['Reload', 'Show report', 'Close Pathline Prepare'], defaultId: 0, cancelId: 0, message: 'Pathline Prepare stopped working', detail: 'A crash report was saved' + (folder ? ' in ' + folder : '') + '. Unsaved changes to the job are kept in memory; reload to carry on.' });
     if (r.response === 1 && folder) shell.openPath(folder);
     if (r.response === 2) { win.forceClose = true; win.close(); return; }
     win.loadFile(path.join(UI, 'MainDetailed.dc.html'));
@@ -671,9 +671,10 @@ if (!testRun && !app.requestSingleInstanceLock()) {
   });
   app.whenReady().then(() => {
     const dataDir = process.env.LRC_DATA_DIR || path.join(app.getPath('userData'), 'data');
-    // renamed from "Laser & Router Control": bring its machines and materials across once
-    const oldDir = path.join(app.getPath('appData'), 'Laser & Router Control', 'data');
-    if (!process.env.LRC_DATA_DIR && !fs.existsSync(dataDir) && fs.existsSync(oldDir)) {
+    // renamed from "Pathline" (and before that "Laser & Router Control"): bring
+    // the machines, materials and settings across once
+    const oldDir = ['Pathline', 'Laser & Router Control'].map((n) => path.join(app.getPath('appData'), n, 'data')).find((d) => fs.existsSync(d));
+    if (!process.env.LRC_DATA_DIR && !fs.existsSync(dataDir) && oldDir) {
       try { fs.cpSync(oldDir, dataDir, { recursive: true }); } catch (e) { /* start fresh */ }
     }
     const hadData = fs.existsSync(path.join(dataDir, 'settings.json'));

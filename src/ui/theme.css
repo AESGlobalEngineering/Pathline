@@ -217,6 +217,12 @@ svg.i { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-widt
 .ib { display: inline-flex; align-items: center; justify-content: center; width: var(--ctl-h); height: var(--ctl-h); border: 0; border-radius: var(--ctl-r); background: transparent; cursor: pointer; color: var(--text-2); padding: 0; flex: none; box-sizing: border-box; }
 .ib:hover { background: var(--hover); color: var(--text); }
 .ib:disabled:hover { background: transparent; }
+/* drag handle on a process row (LRC.rowDrag) */
+.grip { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: var(--ctl-h); border: 0; border-radius: 6px; background: transparent; color: var(--text-3); padding: 0; flex: none; cursor: grab; touch-action: none; }
+.grip:hover { background: var(--hover); color: var(--text); }
+.grip:active { cursor: grabbing; }
+.grip:disabled { cursor: default; opacity: 0.35; }
+.grip:disabled:hover { background: transparent; color: var(--text-3); }
 .ib.on, .ib[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent-fg); }
 .ib.sm { width: 28px; height: 28px; }
 

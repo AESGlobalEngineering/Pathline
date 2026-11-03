@@ -1,4 +1,4 @@
-# Builds Pathline on GitHub and publishes the installer as a GitHub release
+# Builds Pathline Prepare on GitHub and publishes the installer as a GitHub release
 # named after the version in package.json (tag v<version>, created with the
 # release). The release includes latest.yml, which installed copies read to
 # find updates.
@@ -60,6 +60,6 @@ jobs:
           if gh release view "v$V" > /dev/null 2>&1; then
             gh release upload "v$V" $FILES --clobber
           else
-            gh release create "v$V" $FILES --target "$GITHUB_SHA" --title "Pathline $V" \
-              --notes "Install with Pathline-Setup-$V.exe (updates itself), or run the portable exe. Installed copies of Pathline 1.1.0 and later update to this version automatically."
+            gh release create "v$V" $FILES --target "$GITHUB_SHA" --title "Pathline Prepare $V" \
+              --notes "Install with Pathline-Setup-$V.exe (updates itself), or run the portable exe. Installed copies of Pathline (Prepare) 1.1.0 and later update to this version automatically."
           fi

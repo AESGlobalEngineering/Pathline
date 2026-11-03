@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Material library · Pathline</title>
+<title>Material library · Pathline Prepare</title>
 <link rel="stylesheet" href="fonts.css">
 <link rel="stylesheet" href="theme.css">
 <script src="../shared/core.js"></script>
@@ -33,7 +33,7 @@ select.dd:disabled{background-color:var(--sunken);background-repeat:no-repeat;ba
 
   <!-- ===== App bar ===== -->
   <header class="appbar">
-    <div class="brand"><svg viewBox="0 0 64 64" width="28" height="28" role="img" aria-label="Pathline" style="flex: none; display: block"><rect width="64" height="64" rx="15" fill="#D62828"></rect><g transform="translate(14 14) scale(0.5625)" stroke-width="6" stroke-linejoin="round"><polygon points="6,6 50,6 6,50" fill="#FFFFFF" stroke="#FFFFFF"></polygon><polygon points="58,14 58,58 14,58" fill="#111214" stroke="#111214"></polygon></g></svg><span class="word">Pathline</span></div>
+    <div class="brand"><svg viewBox="0 0 64 64" width="28" height="28" role="img" aria-label="Pathline Prepare" style="flex: none; display: block"><rect width="64" height="64" rx="15" fill="#D62828"></rect><g transform="translate(14 14) scale(0.5625)" stroke-width="6" stroke-linejoin="round"><polygon points="6,6 50,6 6,50" fill="#FFFFFF" stroke="#FFFFFF"></polygon><polygon points="58,14 58,58 14,58" fill="#111214" stroke="#111214"></polygon></g></svg><span class="word">Pathline Prepare</span></div>
     <nav aria-label="Sections" class="seg">
       <a href="MainDetailed.dc.html">Job</a>
       <a href="SimulationDetailed.dc.html">Simulation</a>
@@ -166,7 +166,7 @@ select.dd:disabled{background-color:var(--sunken);background-repeat:no-repeat;ba
         <sc-if value="{{isLaser}}" hint-placeholder-val="{{true}}">
           <div style="overflow-x: auto">
             <div role="table" aria-label="Laser processes" style="min-width: 1070px">
-              <div role="row" style="display: grid; grid-template-columns: 24px minmax(150px, 1.2fr) 112px 112px 80px 92px 112px 118px 108px 36px; gap: 10px; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--line)">
+              <div role="row" style="display: grid; grid-template-columns: 46px minmax(150px, 1.2fr) 112px 112px 80px 92px 112px 118px 108px 36px; gap: 10px; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--line)">
                 <span role="columnheader" class="th" title="Output">Out</span>
                 <span role="columnheader" class="th">Name</span>
                 <span role="columnheader" class="th">Process</span>
@@ -180,8 +180,8 @@ select.dd:disabled{background-color:var(--sunken);background-repeat:no-repeat;ba
               </div>
               <sc-for list="{{laserRows}}" as="r" hint-placeholder-count="6">
                 <div data-prow="1" style="border-bottom: 1px solid var(--line-soft); background: {{r.bg}}; transform: {{r.dragT}}; position: relative; z-index: {{r.dragZ}}; box-shadow: {{r.dragSh}}">
-                  <div role="row" style="display: grid; grid-template-columns: 24px minmax(150px, 1.2fr) 112px 112px 80px 92px 112px 118px 108px 36px; gap: 10px; align-items: center; padding: 8px 16px">
-                    <span role="cell"><input type="checkbox" checked="{{r.out}}" onChange="{{r.toggleOut}}" disabled="{{locked}}" aria-label="{{r.name}} output" style="width: 18px; height: 18px; margin: 0"></span>
+                  <div role="row" style="display: grid; grid-template-columns: 46px minmax(150px, 1.2fr) 112px 112px 80px 92px 112px 118px 108px 36px; gap: 10px; align-items: center; padding: 8px 16px">
+                    <span role="cell" style="display: flex; align-items: center; gap: 4px"><button class="grip" onPointerDown="{{r.grip}}" disabled="{{locked}}" aria-label="Drag {{r.name}} up or down" title="Drag to reorder"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="stroke-width: 2.6"><path d="{{icons.grip}}"></path></svg></button><input type="checkbox" checked="{{r.out}}" onChange="{{r.toggleOut}}" disabled="{{locked}}" aria-label="{{r.name}} output" style="width: 18px; height: 18px; margin: 0"></span>
                     <span role="cell" style="display: flex; align-items: center; gap: 6px; min-width: 0">
                       <input class="cell sans" value="{{r.name}}" onChange="{{r.setName}}" disabled="{{locked}}" aria-label="Process name" style="font-weight: 500">
                       <sc-if value="{{r.edited}}" hint-placeholder-val="{{false}}"><span role="img" aria-label="Edited" style="width: 7px; height: 7px; flex: none; border-radius: 50%; background: {{accent}}"></span></sc-if>
@@ -320,6 +320,7 @@ select.dd:disabled{background-color:var(--sunken);background-repeat:no-repeat;ba
               <sc-for list="{{plotRows}}" as="r" hint-placeholder-count="5">
                 <div role="row" data-prow="1" style="display: grid; grid-template-columns: minmax(260px, 1.6fr) 190px 100px 76px 64px 84px 84px 60px 36px; gap: 8px; align-items: center; padding: 6px 16px; border-bottom: 1px solid var(--line-soft); background: {{r.bg}}; transform: {{r.dragT}}; position: relative; z-index: {{r.dragZ}}; box-shadow: {{r.dragSh}}">
                   <span role="cell" style="display: flex; align-items: center; gap: 8px; min-width: 0">
+                    <button class="grip" onPointerDown="{{r.grip}}" disabled="{{locked}}" aria-label="Drag {{r.name}} up or down" title="Drag to reorder"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="stroke-width: 2.6"><path d="{{icons.grip}}"></path></svg></button>
                     <button class="aci-pick" onClick="{{r.pick}}" aria-expanded="{{r.picking}}" aria-label="Colours for {{r.name}}" style="flex: none; border-color: {{r.pickBd}}">
                       <sc-for list="{{r.chips}}" as="k" hint-placeholder-count="1"><span class="chip" title="{{k.title}}" style="width: 20px; height: 20px; background: {{k.hex}}; color: {{k.fg}}">{{k.n}}</span></sc-for>
                       <sc-if value="{{r.none}}" hint-placeholder-val="{{false}}"><span class="lbl">None</span></sc-if>
@@ -398,6 +399,9 @@ select.dd:disabled{background-color:var(--sunken);background-repeat:no-repeat;ba
               <span class="fld"><input class="mono" value="{{tg.sLo}}" onChange="{{tg.setSLo}}" aria-label="Lowest speed"><span class="lbl">mm/s</span></span>
               <span class="fld"><input class="mono" value="{{tg.sHi}}" onChange="{{tg.setSHi}}" aria-label="Highest speed"><span class="lbl">mm/s</span></span>
               <span class="fld"><input class="mono" value="{{tg.sN}}" onChange="{{tg.setSN}}" aria-label="Speed divisions"></span>
+              <span class="lbl">Passes</span>
+              <span class="fld"><input class="mono" value="{{tg.passes}}" onChange="{{tg.setPasses}}" aria-label="Test grid passes"><span class="lbl">×</span></span>
+              <span></span><span></span>
             </div>
             <div style="display: flex; flex-direction: column; gap: 6px">
               <div style="display: flex; gap: 6px; align-items: center">
@@ -519,7 +523,7 @@ class Component extends DCLogic {
   }
   async newMaterial() {
     // the standard groups (the thermal reference data is matched by them), then any of the library's own
-    const groups = [...new Set(['Acrylic', 'Wood', 'Board & card', 'Film & sheet', 'Metal'].concat(this.state.lib.map((m) => m.g)))];
+    const groups = [...new Set(['Acrylic', 'Wood', 'Board & card', 'Film & sheet', 'Foam', 'Metal'].concat(this.state.lib.map((m) => m.g)))];
     const r = await LRC.dialog({
       title: 'New material',
       fields: [
@@ -550,38 +554,12 @@ class Component extends DCLogic {
     const lib = this.state.lib.filter((x) => x.id !== m.id);
     this.setState({ lib, matId: lib[0] ? lib[0].id : null });
   }
-  // Press and hold a process's ⋮ button, then drag it up or down the list.
-  // A plain click still opens the menu.
-  holdDrag(e, i) {
-    if (e.button !== 0 || this.mat().locked) return;
-    const me = e.currentTarget.closest('[data-prow]');
-    const els = [...me.parentElement.querySelectorAll('[data-prow]')];
-    const rects = els.map((el) => el.getBoundingClientRect());
-    const y0 = e.clientY;
-    let dragging = false, to = i;
-    const timer = setTimeout(() => { dragging = true; this.setState({ drag: { i, to: i, dy: 0, h: rects[i].height } }); }, 300);
-    const move = (ev) => {
-      if (!dragging) { if (Math.abs(ev.clientY - y0) > 6) clearTimeout(timer); return; }
-      const dy = Math.max(rects[0].top - rects[i].top, Math.min(rects[rects.length - 1].bottom - rects[i].bottom, ev.clientY - y0));
-      const mid = (rects[i].top + rects[i].bottom) / 2 + dy;
-      to = rects.findIndex((r) => mid < r.bottom);
-      if (to < 0) to = rects.length - 1;
-      this.setState({ drag: { i, to, dy, h: rects[i].height } });
-    };
-    const up = () => {
-      clearTimeout(timer);
-      window.removeEventListener('pointermove', move);
-      window.removeEventListener('pointerup', up);
-      if (!dragging) return;
-      // the release would also click the button: swallow that click
-      const stop = (ev) => { ev.stopPropagation(); ev.preventDefault(); };
-      window.addEventListener('click', stop, true);
-      setTimeout(() => window.removeEventListener('click', stop, true), 300);
-      this.setState({ drag: null, picking: null });
-      if (to !== i) this.patchRows((list) => { const [x] = list.splice(i, 1); list.splice(to, 0, x); return list; });
-    };
-    window.addEventListener('pointermove', move);
-    window.addEventListener('pointerup', up);
+  // Reorder processes: drag a row by its grip, or press and hold its ⋮ button
+  // and drag (LRC.rowDrag). delay: 0 from the grip, 300 ms from ⋮.
+  holdDrag(e, i, delay) {
+    if (this.mat().locked) return;
+    LRC.rowDrag(e, i, (d) => this.setState(d ? { drag: d } : { drag: null, picking: null }),
+      (to) => this.patchRows((list) => { const [x] = list.splice(i, 1); list.splice(to, 0, x); return list; }), delay);
   }
   async rowMore(i) {
     const rows = CC.presetsFor(this.mat(), this.tabMachine());
@@ -645,6 +623,7 @@ class Component extends DCLogic {
       chev: 'M6 9l6 6 6-6',
       check: 'M5 12.5l4.5 4.5L19 7',
       more: 'M12 5h.01 M12 12h.01 M12 19h.01',
+      grip: 'M9 6h.01 M15 6h.01 M9 12h.01 M15 12h.01 M9 18h.01 M15 18h.01',
       layers: 'M12 3l9 5-9 5-9-5z M3 13l9 5 9-5'
     };
     const S = this.state;
@@ -661,7 +640,7 @@ class Component extends DCLogic {
     const q = S.q.trim().toLowerCase();
     const visible = S.lib.filter((x) => (filter === 'all' || x.m.includes(filter)) && (!q || x.name.toLowerCase().includes(q) || x.g.toLowerCase().includes(q) || String(x.t).includes(q)));
     const mat = this.mat();
-    const groupNames = [...new Set(['Acrylic', 'Wood', 'Board & card', 'Film & sheet'].concat(S.lib.map((x) => x.g)))];
+    const groupNames = [...new Set(['Acrylic', 'Wood', 'Board & card', 'Film & sheet', 'Foam'].concat(S.lib.map((x) => x.g)))];
     const groups = groupNames.map((g) => {
       const items = visible.filter((x) => x.g === g).map((x) => {
         const on = mat && x.id === mat.id;
@@ -753,8 +732,7 @@ class Component extends DCLogic {
     const common = (b, i) => {
       const chips = (b.aci || []).map(chip);
       const out = b.out !== false;
-      const D = S.drag, lifted = !!D && D.i === i;
-      const shift = !D ? 0 : lifted ? D.dy : D.i < i && i <= D.to ? -D.h : D.to <= i && i < D.i ? D.h : 0;
+      const D = S.drag, ds = LRC.rowDragStyle(D, i), lifted = ds.lifted;
       return {
         chips, none: chips.length === 0, name: b.name, setName: setF(i, 'name'),
         picking: S.picking === i, pickBd: S.picking === i ? accent : 'var(--line-strong)',
@@ -765,8 +743,8 @@ class Component extends DCLogic {
         dash: !!b.dash, dashOff: !b.dash || locked, dl: String(b.dl), gl: String(b.gl),
         out, swBg: out ? accent : 'var(--track)', swJ: out ? 'flex-end' : 'flex-start', bg: lifted ? 'var(--surface)' : out ? 'transparent' : 'var(--surface-2)',
         // hold-and-drag on the ⋮ button: the held row follows the pointer, the rows it passes make room
-        hold: (e) => this.holdDrag(e, i), grab: locked ? '' : D ? 'grabbing' : 'grab',
-        dragT: shift ? 'translateY(' + shift + 'px)' : 'none', dragZ: lifted ? 2 : 'auto', dragSh: lifted ? 'var(--shadow-pop)' : 'none',
+        hold: (e) => this.holdDrag(e, i, 300), grip: (e) => this.holdDrag(e, i, 0), grab: locked ? '' : D ? 'grabbing' : 'grab',
+        dragT: ds.dragT, dragZ: ds.dragZ, dragSh: ds.dragSh,
         setSpeed: setF(i, 'speed', true), setPasses: setF(i, 'passes', true), setDl: setF(i, 'dl', true), setGl: setF(i, 'gl', true),
         toggleDash: flip(i, 'dash'), toggleOut: () => this.patchRows((list) => { list[i] = { ...list[i], out: !out }; return list; }),
         more: R(() => this.rowMore(i))
@@ -830,7 +808,7 @@ class Component extends DCLogic {
       // until changed it is centred on the preset (±10 % power, 60–140 % speed, 4 divisions)
       const p0 = Number(tr.power) || 50, s0 = Number(tr.speed) || 20;
       const rangeKey = mat.id + '|' + (machine ? machine.id : '') + '|' + tgProc;
-      const def = { pLo: String(Math.max(5, p0 - 10)), pHi: String(Math.min(100, p0 + 10)), pN: '4', sLo: String(Math.max(1, Math.round(s0 * 0.6))), sHi: String(Math.max(1, Math.round(s0 * 1.4))), sN: '4' };
+      const def = { pLo: String(Math.max(5, p0 - 10)), pHi: String(Math.min(100, p0 + 10)), pN: '4', sLo: String(Math.max(1, Math.round(s0 * 0.6))), sHi: String(Math.max(1, Math.round(s0 * 1.4))), sN: '4', passes: String(Math.max(1, Number(tr.passes) || 1)) };
       const rg = { ...def, ...((S.tgRange || {})[rangeKey] || {}) };
       const num = (v, d) => { const n = parseFloat(v); return Number.isFinite(n) ? n : parseFloat(d); };
       const steps = (lo, hi, n, round) => {
@@ -840,6 +818,7 @@ class Component extends DCLogic {
       const powers = steps(Math.max(0, Math.min(100, num(rg.pLo, def.pLo))), Math.max(0, Math.min(100, num(rg.pHi, def.pHi))), num(rg.pN, def.pN), (v) => Math.round(v * 10) / 10);
       const speeds = steps(Math.max(0.1, num(rg.sLo, def.sLo)), Math.max(0.1, num(rg.sHi, def.sHi)), num(rg.sN, def.sN), (v) => (v < 10 ? Math.round(v * 10) / 10 : Math.round(v)));
       const setRange = (k) => (e) => { const v = e.target.value; this.setState((s) => ({ tgRange: { ...(s.tgRange || {}), [rangeKey]: { ...((s.tgRange || {})[rangeKey] || {}), [k]: v } }, tgCell: null })); };
+      const passes = Math.max(1, Math.min(20, Math.round(num(rg.passes, def.passes))));
       const mid = (n) => Math.floor((n - 1) / 2);
       const cellKey = S.tgCell || mid(powers.length) + '-' + mid(speeds.length);
       const lerp = (a, b, k) => Math.round(a + (b - a) * k);
@@ -847,20 +826,20 @@ class Component extends DCLogic {
       const [cr, cc] = cellKey.split('-').map(Number);
       const pk = (i, n) => (n > 1 ? i / (n - 1) : 0.5);
       tg = {
-        ...rg, setPLo: setRange('pLo'), setPHi: setRange('pHi'), setPN: setRange('pN'), setSLo: setRange('sLo'), setSHi: setRange('sHi'), setSN: setRange('sN'),
+        ...rg, setPLo: setRange('pLo'), setPHi: setRange('pHi'), setPN: setRange('pN'), setSLo: setRange('sLo'), setSHi: setRange('sHi'), setSN: setRange('sN'), setPasses: setRange('passes'),
         target: tgProc, targetName: tr.name,
         targets: [{ v: 'Cut', l: 'Cut' }, { v: 'Engrave', l: 'Engrave' }],
         setTarget: (e) => this.setState({ tgTarget: e.target.value, tgCell: null }),
         speeds,
         rows: powers.map((p, ri) => ({ p, cells: speeds.map((sp, ci) => { const id = ri + '-' + ci; const on = id === cellKey; return { on, label: p + '% power, ' + sp + ' mm/s', bg: burn(pk(ri, powers.length) * 0.55 + (1 - pk(ci, speeds.length)) * 0.45), ring: on ? '0 0 0 2px var(--surface), 0 0 0 4px ' + accent : 'none', pick: () => this.setState({ tgCell: id }) }; }) })),
-        pickLabel: powers[cr] + ' % · ' + speeds[cc] + ' mm/s',
+        pickLabel: powers[cr] + ' % · ' + speeds[cc] + ' mm/s' + (passes > 1 ? ' · ' + passes + ' passes' : ''),
         apply: () => {
           if (ti < 0) return LRC.toast('No ' + tgProc.toLowerCase() + ' process for ' + machine.name + ' yet — add one first');
-          this.patchRows((list) => { list[ti] = { ...list[ti], power: powers[cr], speed: speeds[cc] }; return list; });
+          this.patchRows((list) => { list[ti] = { ...list[ti], power: powers[cr], speed: speeds[cc], passes }; return list; });
           this.setState({ tgCell: null });
-          LRC.toast(tr.name + ' on ' + machine.name + ' set to ' + powers[cr] + ' % · ' + speeds[cc] + ' mm/s — save to keep it');
+          LRC.toast(tr.name + ' on ' + machine.name + ' set to ' + powers[cr] + ' % · ' + speeds[cc] + ' mm/s' + (passes > 1 ? ' · ' + passes + ' passes' : '') + ' — save to keep it');
         },
-        make: R(() => this.makeGrid(tBase, powers, speeds))
+        make: R(() => this.makeGrid({ ...tBase, passes }, powers, speeds))
       };
       tg.select = React.createElement('select', { className: 'dd', style: { width: 170 }, value: tg.target, onChange: tg.setTarget, 'aria-label': 'Test grid process' },
         tg.targets.map((o) => React.createElement('option', { key: o.v, value: o.v }, o.l)));
