@@ -188,13 +188,12 @@ function shrink(img, size) {
   return { w, h, data, f };
 }
 
-// The checkerboard corner (where two black and two white squares meet) nearest the middle, at
-// any angle (the board needn't be square to the machine or the camera).
+// Checkerboard corners (where two black and two white squares meet), at any angle (the board
+// needn't be square to the machine or the camera).
 // Coarse, on a shrunk copy: the ChESS response. 16 samples on a ring round each point; at a
 // corner, opposite samples match and samples a quarter turn apart differ, whichever way the
 // board is turned. Fine: the classic gradient refinement (every edge pixel nearby points at the
-// corner) at full size. Returns { x, y, contrast, angle } or null; angle (deg) is the direction
-// of one of the board's lines through the corner, in the image.
+// corner).
 // The ChESS response over a shrunk, evened-out copy: score and contrast per pixel (score > 0 and
 // contrast above the minimum: a corner there).
 function chessMap(img, opts = {}) {
@@ -225,24 +224,12 @@ function chessMap(img, opts = {}) {
   return { s, w, h, r, score, contrast, minContrast: opts.minContrast || 25 };
 }
 
+// The corner nearest the middle (the bed checkerboard, one corner in view), with angle (deg): the
+// direction of one of the board's lines through it, in the image. Only a real crossing counts,
+// as in findCorners: before, the strongest ChESS response near the middle did, and on the
+// Trotec's unevenly lit view a shadow's edge could. Returns { x, y, angle } or null.
 function findCorner(img, opts = {}) {
-  const M = chessMap(img, opts);
-  const { w, h, r, s } = M;
-  const cx = w / 2, cy = h / 2;
-  let best = null;
-  for (let y = r + 1; y < h - r - 1; y++) {
-    for (let x = r + 1; x < w - r - 1; x++) {
-      const i = y * w + x;
-      if (M.contrast[i] < M.minContrast || M.score[i] <= 0) continue;
-      // prefer the middle: a strong corner a little further out loses to one near the centre
-      const val = M.score[i] - 0.5 * Math.hypot(x - cx, y - cy);
-      if (!best || val > best.val) best = { x, y, val, contrast: M.contrast[i] };
-    }
-  }
-  if (!best) return null;
-  const fine = fineCopy(img);
-  const q = refineAt(fine, M, best.x * s.f + s.f / 2, best.y * s.f + s.f / 2);
-  return q ? { x: q.x, y: q.y, contrast: best.contrast, angle: cornerAngle(fine, q.fx, q.fy, q.win) } : null;
+  return findCorners(img, { ...opts, angle: true })[0] || null;
 }
 
 // The copy corners are refined on: about 800 px across, then each pixel the mean of the 5 × 5
@@ -300,7 +287,10 @@ function findCorners(img, opts = {}) {
     out.push(q);
   }
   const cx = (img.w - 1) / 2, cy = (img.h - 1) / 2;
-  return out.sort((a, b) => Math.hypot(a.x - cx, a.y - cy) - Math.hypot(b.x - cx, b.y - cy));
+  out.sort((a, b) => Math.hypot(a.x - cx, a.y - cy) - Math.hypot(b.x - cx, b.y - cy));
+  // opts.angle: the first one's line direction too (findCorner)
+  if (opts.angle && out[0]) { const g = fine.f; out[0].angle = cornerAngle(fine, (out[0].x + 0.5) / g - 0.5, (out[0].y + 0.5) / g - 0.5, Math.max(6, Math.round(win / g))); }
+  return out;
 }
 
 // Corners in several pictures of the same view (the exposure stepped: the head's light on one part,

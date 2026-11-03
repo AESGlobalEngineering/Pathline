@@ -93,14 +93,30 @@ class Vision {
   // show at a longer exposure. The next grab() goes back to the exposure in use.
   async grabSteps(steps = [1, 3, 9]) {
     const out = [await this.grab()];
-    const base = this.exposureNow() || 50000, c = await this.cam();
-    for (const k of steps.slice(1)) {
-      const e = Math.min(1000000, Math.round(base * k));
-      await c.setExposure(e);
-      this.expSet = e;
-      out.push(await c.grab());
-    }
+    for (const k of steps.slice(1)) out.push(await this.grabTimes(k));
     return out;
+  }
+
+  // the same view at k times the exposure in use (1 s at most)
+  async grabTimes(k) {
+    const e = Math.min(1000000, Math.round((this.exposureNow() || 50000) * k)), c = await this.cam();
+    await c.setExposure(e);
+    this.expSet = e;
+    return c.grab();
+  }
+
+  // A picture and the thing looked for in it; where it isn't there, the same view at 3× and then
+  // 9× the exposure, as the Trotec's light covers only part of the view (only when needed: the
+  // bed checkerboard takes over a hundred of these)
+  async grabFind(kind, d, opts) {
+    let img = await this.grab();
+    let hit = this.find(img, kind, d, opts);
+    for (const k of [3, 9]) {
+      if (hit) break;
+      img = await this.grabTimes(k);
+      hit = this.find(img, kind, d, opts);
+    }
+    return { img, hit };
   }
 
   // a frame for the screen (grey bytes), about `size` px across
@@ -150,8 +166,7 @@ class Vision {
     for (let k = 0; k <= v.recentre; k++) {
       if (opts.ctl && opts.ctl.aborted) throw err('Stopped');
       await this.moveCamera(at, opts);
-      const img = await this.grab();
-      const hit = this.find(img, kind, opts.d, opts);
+      const { img, hit } = await this.grabFind(kind, opts.d, opts);
       if (!hit) return null;
       const off = this.toBed(img, hit);
       const found = [at[0] + off[0], at[1] + off[1]];
