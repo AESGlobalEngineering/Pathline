@@ -31,7 +31,7 @@ Settings, the queue and received jobs are kept in `%APPDATA%\Pathline Run\data` 
 
 ## Updates
 
-The same as Pathline. Pathline Run checks for a newer release when it opens and every 5 minutes while it runs. When it finds one it **asks first**: **Later** or **Download and install**. A version you said Later to isn't offered again until the next start. The download shows its progress and can be hidden. When it has finished, **Restart and install** closes Pathline Run, installs the update and opens it again. Queued jobs and settings are kept. It can't restart while a job is running. After the update, Pathline Run shows **what's new**. **☰ → Check for updates…** checks on demand, and **☰ → What's new** lists every version.
+The same as Pathline. Pathline Run checks for a newer release when it opens and every minute while it runs. When it finds one it **asks first**: **Later** or **Download and install**. A version you said Later to isn't offered again until the next start. The download shows its progress and can be hidden. When it has finished, **Restart and install** closes Pathline Run, installs the update and opens it again. Queued jobs and settings are kept. It can't restart while a job is running. After the update, Pathline Run shows **what's new**. **☰ → Check for updates…** checks on demand, and **☰ → What's new** lists every version.
 
 Only the machine's own screen offers updates. Browsers on other PCs viewing the same page (Pathline's **Open HMI**) don't. The portable exe and copies run from source don't update themselves.
 
@@ -40,7 +40,7 @@ Updates come from the `pathlinerun` release (a generic feed, set in `build.publi
 ## Releasing a new version
 
 1. Set the new `version` in `run/package.json` and add an entry to `src/changelog.js`. Commit and push to `main`.
-2. That's it. The workflow ([../.github/workflows/release-run.yml](../.github/workflows/release-run.yml)) runs the self-test. It builds the Windows installer and portable exe on Windows, and the AppImages on Linux. It replaces the files in the `pathlinerun` release with the new version's, and installed copies read them there. They offer the update within 5 minutes.
+2. That's it. The workflow ([../.github/workflows/release-run.yml](../.github/workflows/release-run.yml)) runs the self-test. It builds the Windows installer and portable exe on Windows, and the AppImages on Linux. It replaces the files in the `pathlinerun` release with the new version's, and installed copies read them there. They offer the update within a minute, and download only the parts of the installer that changed.
 3. To redo a release, use **Actions → Release Pathline Run → Run workflow**.
 
 ## Develop

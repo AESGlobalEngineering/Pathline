@@ -272,7 +272,7 @@ function header() {
 }
 
 // ---------------------------------------------------------------- updates (as in Pathline)
-// The installed app checks when it opens and every 5 minutes. A found update
+// The installed app checks when it opens and every minute. A found update
 // asks first (Later / Download and install), the download shows its progress,
 // then Restart and install. Nothing downloads or installs without a tap. Only
 // the machine's own screen sees this, not browsers elsewhere on the network.

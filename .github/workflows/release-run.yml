@@ -4,7 +4,8 @@
 #   - this version's files and the update files installed copies read (latest.yml,
 #     latest-linux-arm64.yml, latest-linux.yml; the address is build.publish in run/package.json)
 #   - the same downloads under fixed names, for the README links
-# Each new version replaces the previous one's files. The release is never
+# Each new version replaces the previous one's files (their block maps stay, for
+# downloading only what changed). The release is never
 # marked as the repository's "latest": that one belongs to Pathline, whose updater reads it.
 #
 # - Pushing to main releases automatically when run/package.json has a version
@@ -131,6 +132,10 @@ jobs:
           for a in $(gh release view pathlinerun --json assets --jq '.assets[].name'); do
             # while Linux builds are paused, its files (AppImages, latest-linux*.yml) stay
             if [ "$LINUX" = false ] && echo "$a" | grep -qE '\.AppImage$|^latest-linux'; then continue; fi
+            # earlier versions' block maps stay (130 KB each): an installed copy compares its own
+            # version's map with the new one and downloads only the parts that changed, not the
+            # whole installer (electron-updater looks for Pathline-Run-Setup-<its version>.exe.blockmap)
+            if echo "$a" | grep -qE '^Pathline-Run-Setup-[0-9.]+\.exe\.blockmap$'; then continue; fi
             echo "$KEEP" | grep -qxF "$a" || retry gh release delete-asset pathlinerun "$a" -y
           done
           retry gh release edit pathlinerun --title "Pathline Run $V" --latest=false --notes "$NOTES"

@@ -348,19 +348,29 @@ function fitLattice(corners) {
 // local min / max over a (2r+1)² box, then stretched to 0 … 255 (flat areas stay mid grey)
 function evenOut(s, r) {
   const { w, h, data } = s;
-  const pass = (src, horizontal, pick) => {
+  // one row or column at a time, in one sweep: a queue of the window's candidates, best at the
+  // front (each value goes in and out once), the same as looking at the whole window per pixel
+  const q = new Int32Array(Math.max(w, h));
+  const pass = (src, horizontal, better) => {
     const out = new Float32Array(w * h);
-    for (let y = 0; y < h; y++) {
-      for (let x = 0; x < w; x++) {
-        let m = src[y * w + x];
-        const lo = horizontal ? Math.max(0, x - r) : Math.max(0, y - r), hi = horizontal ? Math.min(w - 1, x + r) : Math.min(h - 1, y + r);
-        for (let k = lo; k <= hi; k++) { const v = horizontal ? src[y * w + k] : src[k * w + x]; m = pick(m, v); }
-        out[y * w + x] = m;
+    const lines = horizontal ? h : w, n = horizontal ? w : h, step = horizontal ? 1 : w;
+    for (let l = 0; l < lines; l++) {
+      const base = horizontal ? l * w : l;
+      let head = 0, tail = 0, next = 0;
+      for (let i = 0; i < n; i++) {
+        for (const hi = Math.min(n - 1, i + r); next <= hi; next++) {
+          const v = src[base + next * step];
+          while (tail > head && !better(src[base + q[tail - 1] * step], v)) tail--;
+          q[tail++] = next;
+        }
+        while (q[head] < i - r) head++;
+        out[base + i * step] = src[base + q[head] * step];
       }
     }
     return out;
   };
-  const mn = pass(pass(data, true, Math.min), false, Math.min), mx = pass(pass(data, true, Math.max), false, Math.max);
+  const lt = (a, b) => a < b, gt = (a, b) => a > b;
+  const mn = pass(pass(data, true, lt), false, lt), mx = pass(pass(data, true, gt), false, gt);
   const out = new Float32Array(w * h);
   for (let i = 0; i < w * h; i++) { const span = mx[i] - mn[i]; out[i] = span < 20 ? 128 : ((data[i] - mn[i]) / span) * 255; }
   return out;

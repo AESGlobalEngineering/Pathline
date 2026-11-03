@@ -10,8 +10,9 @@ const { app, BrowserWindow, Menu, dialog, shell } = require('electron');
 const updates = require('./updates');
 const server = require('../src/server');
 
+// each check reads only latest.yml (under 1 KB), so once a minute is cheap
 // (PATHLINE_RUN_UPDATE_EVERY_MS overrides, for testing)
-const UPDATE_EVERY_MS = 5 * 60 * 1000;
+const UPDATE_EVERY_MS = 60 * 1000;
 const kiosk = process.argv.includes('--kiosk');
 const sim = process.argv.includes('--sim');
 
