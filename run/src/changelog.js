@@ -15,7 +15,8 @@ module.exports = [
       'Head camera: a camera that gets stuck (no pictures until it was unplugged) is reset by Pathline Run itself, with the camera\'s own DeviceReset, and the picture taken again: about 10 s, no unplugging.',
       'Head camera: always the whole sensor (2592 × 1944). A crop left on the camera by another program moved the picture\'s middle, and every position measured with it.',
       'Offset calibration (stage 2): the mark is three circles (r 1, 1.5, 2 mm) the Trotec cuts reliably (of the five tight ones only the outer one burnt), and the camera takes rings as one disc. If the mark isn\'t where the stored offset puts it, the camera looks where the offset with the other sign would put it (Ruby\'s offset is the other way round), and saves the one that finds it.',
-      'Checkerboard, offset calibration and print and cut: where a picture doesn\'t show the corner or mark looked for, the same view is taken at 3× and then 9× the exposure. A checkerboard corner only counts where two black and two white squares really meet (a shadow\'s edge no longer does).'
+      'Checkerboard, offset calibration and print and cut: where a picture doesn\'t show the corner or mark looked for, the same view is taken at 3× and then 9× the exposure. A checkerboard corner only counts where two black and two white squares really meet (a shadow\'s edge no longer does).',
+      'Jog → Camera: the live picture is never taken while the head moves (the camera got stuck when pictures were taken during jogs); it waits for the head to stop, and shows the last picture while an arrow is held down.'
     ]
   },
   {

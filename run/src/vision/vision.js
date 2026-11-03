@@ -120,9 +120,14 @@ class Vision {
   }
 
   // a frame for the screen (grey bytes), about `size` px across
+  // Never while the head moves: the camera rides on it, and pictures taken while jogging got the
+  // camera stuck (its USB link drops out as the cable flexes). It waits for the head to stop; if
+  // it's still moving (an arrow held down), the last picture is shown again
   async preview(size) {
+    if (!(await this.m.waitIdle(10000, 0)) && this.lastPreview) return this.lastPreview;
     const img = await this.grab();
-    return detect.preview(img, size || 480);
+    this.lastPreview = detect.preview(img, size || 480);
+    return this.lastPreview;
   }
 
   // pixel offset from the frame centre → mm on the bed

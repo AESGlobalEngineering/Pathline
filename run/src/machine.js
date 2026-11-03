@@ -328,14 +328,16 @@ class Machine {
     return { state: 'framing' };
   }
 
+  // true once the machine is idle, false if it still isn't after ms
   async waitIdle(ms, minMs) {
     const t0 = Date.now();
     await sleep(minMs || 0);
     while (Date.now() - t0 < ms) {
       const p = this.apply(await this.link.poll());
-      if (p.state === 'idle') return;
+      if (p.state === 'idle') return true;
       await sleep(150);
     }
+    return false;
   }
 
   async io(b) {
