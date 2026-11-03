@@ -106,7 +106,27 @@ class VimbaCamera {
   // step(name): called before each Vimba X call that can stall, so a stuck one can be named
   constructor(opts = {}, log, step) { this.opts = opts; this.log = log || (() => {}); this.step = step || (() => {}); }
 
+  // opts.reset: the camera got stuck (a picture that never came, a call that never returned, and
+  // then no pictures at all until it's unplugged): reboot it first with its own DeviceReset, as
+  // unplugging would, then open it again once it's back
   async open() {
+    if (!this.opts.reset) return this.openOnce();
+    await this.openOnce();
+    this.log('camera: resetting it (DeviceReset), as it got stuck');
+    this.step('DeviceReset');
+    this.vmb.command(this.h, 'DeviceReset');
+    await this.close();
+    // it leaves the USB bus and is back a few seconds later
+    let last = null;
+    for (let k = 0; k < 15; k++) {
+      await new Promise((r) => setTimeout(r, 1000));
+      if (k < 2) continue;
+      try { return await this.openOnce(); } catch (e) { last = e; await this.close(); }
+    }
+    throw last;
+  }
+
+  async openOnce() {
     const { file, tried } = vmbLibrary();
     if (!file) throw new Error('Vimba X isn\'t installed (looked for ' + tried.join(', ') + '). Install Allied Vision\'s Vimba X, then try again.');
     const api = vmbApi(file);
@@ -151,6 +171,16 @@ class VimbaCamera {
     // grey frames: Mono8 where the camera has it (Alvium colour models do), else colour → grey here
     if (this.vmb.enumSet(this.h, 'PixelFormat', 'Mono8') !== 0) this.vmb.enumSet(this.h, 'PixelFormat', 'BayerRG8');
     this.vmb.enumSet(this.h, 'AcquisitionMode', 'SingleFrame');
+    // the whole sensor, every time: a crop left on the camera (Ruby left a square 1944 × 1944 one)
+    // moves the picture's middle, and with it every position the camera measures
+    const wm = [0], hm = [0], W = [0], H = [0];
+    if (this.vmb.intGet(this.h, 'WidthMax', wm) === 0 && this.vmb.intGet(this.h, 'HeightMax', hm) === 0) {
+      this.vmb.intSet(this.h, 'OffsetX', 0);
+      this.vmb.intSet(this.h, 'OffsetY', 0);
+      this.vmb.intSet(this.h, 'Width', Number(wm[0]));
+      this.vmb.intSet(this.h, 'Height', Number(hm[0]));
+    }
+    if (this.vmb.intGet(this.h, 'Width', W) === 0 && this.vmb.intGet(this.h, 'Height', H) === 0) this.log('camera: picture ' + Number(W[0]) + ' × ' + Number(H[0]) + ' (the whole sensor)');
     // On a USB 2 link (or a slow cable / hub) the camera's default throughput limit is far more
     // than the link carries, and every frame arrives incomplete: keep to 80 % of the link speed
     const speed = [0];
@@ -374,15 +404,33 @@ class ProcessCamera {
     });
   }
 
+  // after a stuck picture the camera is reset (DeviceReset) as it opens
   async open() {
     this.opened = false;
-    this.info = await this.call('open', [this.opts], 30000, 'opening it');
+    const reset = !!this.stuck;
+    this.info = await this.call('open', [{ ...this.opts, reset }], reset ? 60000 : 30000, reset ? 'resetting and opening it' : 'opening it');
+    this.stuck = false;
     this.opened = true;
     return this.info;
   }
   // after a process was left behind, or an open that failed (busy), open the camera again first
   async again() { if (!this.opened && this.info) await this.open(); }
-  async grab(timeout = 2000) { await this.again(); const r = await this.call('grab', [timeout], timeout * 3 + 8000, 'taking a picture'); return { w: r.w, h: r.h, half: r.half, data: new Uint8Array(r.data) }; }
+  // a picture that never came, or a call that never returned: the camera is stuck (and stays so
+  // until it's unplugged). It's reset and the picture taken once more
+  async grab(timeout = 2000) {
+    for (let k = 0; ; k++) {
+      await this.again();
+      try {
+        const r = await this.call('grab', [timeout], timeout * 3 + 8000, 'taking a picture');
+        return { w: r.w, h: r.h, half: r.half, data: new Uint8Array(r.data) };
+      } catch (e) {
+        if (k || !/didn't answer|couldn't get a frame|incomplete|camera process stopped/.test(e.message)) throw e;
+        this.log('camera: ' + e.message.split('. If')[0] + ': resetting the camera');
+        this.stuck = true;
+        this.opened = false;
+      }
+    }
+  }
   async setExposure(us) { await this.again(); this.opts.exposure = us; return this.call('exposure', [us], 5000, 'setting the exposure'); }
   async close() {
     if (!this.w) return;

@@ -11,7 +11,9 @@ module.exports = [
       'Camera calibration (stage 1) now uses the camera where it is: put the 10 mm board under the camera, not the laser head. It needs no offset, so the camera isn\'t moved over the laser\'s spot first; the head still goes back where it was. The offset calibration and the checkerboard still start from the laser head.',
       'Camera calibration takes each picture at the exposure in use and at 3× and 9× it, and uses the corners from all three: the Trotec\'s light covers only part of the view, and corners in the shadow only show at a longer exposure.',
       'When a camera task gives up, its message is also written to ☰ → Diagnostics log.',
-      'Head camera: after a picture that got stuck, the camera opens again by itself. It waits up to 10 s while the camera is still busy, and never takes pictures with a camera that didn\'t open (before: "Unexpected Undefined value"). A stuck picture now says which Vimba X call it was stuck in.'
+      'Head camera: after a picture that got stuck, the camera opens again by itself. It waits up to 10 s while the camera is still busy, and never takes pictures with a camera that didn\'t open (before: "Unexpected Undefined value"). A stuck picture now says which Vimba X call it was stuck in.',
+      'Head camera: a camera that gets stuck (no pictures until it was unplugged) is reset by Pathline Run itself, with the camera\'s own DeviceReset, and the picture taken again: about 10 s, no unplugging.',
+      'Head camera: always the whole sensor (2592 × 1944). A crop left on the camera by another program moved the picture\'s middle, and every position measured with it.'
     ]
   },
   {
