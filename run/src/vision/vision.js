@@ -180,19 +180,12 @@ class Vision {
   // square, so the corner followed can't be mistaken for its neighbour): that gives which way the
   // picture is turned and whether it's mirrored, relative to the machine. The board itself can
   // lie at any angle.
-  // The board goes under the laser head, where it is now: the camera is brought over that spot
-  // first, and the head goes back there at the end.
+  // The board goes under the camera, where it is now: this stage needs no offset (stage 2 finds
+  // it), so the camera isn't moved over the laser's spot first. The head goes back where it was.
   async calibrateCamera(opts = {}) {
     await this.m.waitIdle(30000, 150);
     const square = Number(opts.square || (this.cfg.camBoard || {}).square || 10);
-    const laser = { x: this.m.st.pos.x, y: this.m.st.pos.y };
-    try {
-      await this.moveCamera([laser.x, laser.y], { raw: true });
-      return await this.cameraOnBoard(square);
-    } finally {
-      await this.m.link.moveTo(laser.x, laser.y);
-      await this.m.waitIdle(30000, 150);
-    }
+    return this.cameraOnBoard(square);
   }
 
   async cameraOnBoard(square) {
@@ -200,7 +193,7 @@ class Vision {
     const img0 = await this.grab();
     const cs0 = detect.findCorners(img0);
     const L = detect.fitLattice(cs0);
-    if (!L) throw err('Put the ' + square + ' mm checkerboard under the laser head, flat, a few squares each way (' + cs0.length + ' corners seen)');
+    if (!L) throw err('Put the ' + square + ' mm checkerboard under the camera, flat, filling the camera view (' + cs0.length + ' corners seen)');
     const spacing = Math.sqrt(Math.abs(L.a[0] * L.b[1] - L.a[1] * L.b[0])); // px per square
     const pixel = square / spacing;
     // only corners on the board's grid: a false one (a soft edge, a shadow) could be nearer

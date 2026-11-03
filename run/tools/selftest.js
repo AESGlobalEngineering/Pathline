@@ -663,14 +663,15 @@ async function visionTests() {
   const jogTo = async (x, y) => { await call('POST', 'v1/jog', { x, y }); await new Promise((r) => setTimeout(r, 400)); };
   try {
     for (let i = 0; i < 50; i++) { try { await call('GET', 'v1/info'); break; } catch (e) { await new Promise((r) => setTimeout(r, 100)); } }
-    // stage 1, camera: the laser head over the small 10 mm board (laid at 7°, unevenly lit)
-    await jogTo(745, 145);
+    // stage 1, camera: the camera over the small 10 mm board (laid at 7°, unevenly lit), where it
+    // is: the head at the board's middle (745, 145) plus the camera's true offset (41.2, 12.9)
+    await jogTo(786.2, 157.9);
     const px = await call('POST', 'local/camera/calibrate');
     ok(px.status === 200 && Math.abs(px.data.pixel - 0.08) < 0.0002 && Math.abs(Math.abs(px.data.rotation) - 90) < 0.2 && !px.data.mirrored,
       'stage 1, camera on the 10 mm board: ' + (px.data && px.data.corners) + ' corners, ' + (px.data && (px.data.pixel * 1000).toFixed(2)) + ' µm, picture turned ' + (px.data && px.data.rotation.toFixed(2)) + '° (80 µm, 90°)', JSON.stringify(px.data));
     await new Promise((r) => setTimeout(r, 400));
     const back = (await call('GET', 'v1/status')).data.pos;
-    ok(Math.hypot(back.x - 745, back.y - 145) < 0.01, 'the laser head over the board to start with, and back there afterwards', JSON.stringify(back));
+    ok(Math.hypot(back.x - 786.2, back.y - 157.9) < 0.01, 'the camera over the board to start with (not moved to the laser\'s spot), and the head back there afterwards', JSON.stringify(back));
     // stage 2, offset: the laser cuts its mark on scrap at a clear spot, the camera finds it, then checks
     await jogTo(900, 150);
     const of = await call('POST', 'local/camera/offset', { power: 20, speed: 50 });

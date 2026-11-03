@@ -672,11 +672,11 @@ function setupView() {
       ro('Camera', S.camera.info ? esc(S.camera.info.model + ' · ' + S.camera.info.serial) : 'not opened yet'),
     'The Alvium on the head plugs into this computer by USB (not into the laser). It needs Allied Vision\'s Vimba X installed, and Ruby / JobDispatcher closed: only one program can use it.'));
     const when = (t) => (t ? new Date(t).toLocaleString() : 'not yet');
-    tabs.Camera.push(card('1 · Camera calibration', num('Checkerboard squares', 'vision.camBoard.square', 'mm', 'The small board, under the laser head') +
+    tabs.Camera.push(card('1 · Camera calibration', num('Checkerboard squares', 'vision.camBoard.square', 'mm', 'The small board, under the camera') +
       ro('Pixel size', (pixel * 1000).toFixed(2) + ' µm') + ro('Picture turned', turned.toFixed(2) + '°' + (ma * md - mb * mc < 0 ? ' (mirrored)' : '')) +
       ro('Lens bends lines', v.cameraLens !== undefined ? (v.cameraLens * 1000).toFixed(0) + ' µm at most' : '—') + ro('Calibrated', when(v.cameraAt)) +
       '<div style="display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end"><button class="btn-primary" data-a="camCalibrate"' + need + '>Calibrate camera</button></div>',
-    'Lay the ' + (get(d, 'vision.camBoard.square') || 10) + ' mm checkerboard flat, at any angle, and jog the laser head over its middle. Pathline Run brings the camera over that spot; the squares give the pixel size, then the head moves a few mm along X and Y so it knows which way the picture is turned. The head goes back where it was.'));
+    'Lay the ' + (get(d, 'vision.camBoard.square') || 10) + ' mm checkerboard flat, at any angle, and jog the head until the board fills the camera view. The squares give the pixel size, then the head moves a few mm along X and Y so it knows which way the picture is turned. The head goes back where it was.'));
     const stage2 = !v.cameraAt ? ' disabled title="Calibrate the camera (stage 1) first"' : need;
     tabs.Camera.push(card('2 · Offset calibration (cut check)', num('Camera offset X', 'vision.offset.0', 'mm', 'Laser − camera') + num('Camera offset Y', 'vision.offset.1', 'mm') +
       num('Cut power', 'vision.mark.power', '%', 'For the check mark') + num('Cut speed', 'vision.mark.speed', 'mm/s') +

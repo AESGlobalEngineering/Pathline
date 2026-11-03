@@ -8,7 +8,8 @@ module.exports = [
     version: '0.7.8', date: '3 Nov 2026',
     fixed: [
       'Camera calibration still didn\'t recognise the 10 mm checkerboard: in the camera\'s full-size picture the paper\'s texture pulled each corner off into a white square, so none counted. Corners are now placed on a lightly smoothed copy, the same at any picture size. The bed checkerboard uses the same.',
-      'Setup → Camera: the 10 mm board goes under the laser head (a hint said under the camera). When a camera task gives up, its message is also written to ☰ → Diagnostics log.'
+      'Camera calibration (stage 1) now uses the camera where it is: put the 10 mm board under the camera, not the laser head. It needs no offset, so the camera isn\'t moved over the laser\'s spot first; the head still goes back where it was. The offset calibration and the checkerboard still start from the laser head.',
+      'When a camera task gives up, its message is also written to ☰ → Diagnostics log.'
     ]
   },
   {
