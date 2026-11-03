@@ -199,6 +199,9 @@ class VimbaCamera {
       this.vmb.enumSet(this.h, 'DeviceLinkThroughputLimitMode', 'On');
       if (this.vmb.intSet(this.h, 'DeviceLinkThroughputLimit', limit) === 0) this.log('camera: USB link ' + Math.round(Number(speed[0]) / 1e6) + ' MB/s' + (Number(speed[0]) < 100e6 ? ' (USB 2: a USB 3 port and cable are faster)' : '') + ', streaming at ' + Math.round(limit / 1e6) + ' MB/s');
     }
+    // the exposure it has now (left from before, maybe long): a shorter one set next waits for it
+    const ex = [0];
+    if (this.vmb.floatGet(this.h, 'ExposureTime', ex) === 0) this.expUs = Number(ex[0]);
     if (this.opts.exposure) await this.setExposure(this.opts.exposure);
     const size = [0];
     this.check(this.vmb.payload(this.h, size), 'read the frame size');
@@ -217,7 +220,12 @@ class VimbaCamera {
     if (us === 'auto') { this.vmb.enumSet(this.h, 'ExposureAuto', 'Once'); this.expUs = MAX_EXPOSURE; return; }
     this.vmb.enumSet(this.h, 'ExposureAuto', 'Off');
     this.check(this.vmb.floatSet(this.h, 'ExposureTime', Number(us)), 'set the exposure');
+    // Shorter than the last one: the Alvium needs that long before it takes a picture at the new
+    // one. Sooner, the picture never came and the camera was stuck until reset (every time, from
+    // 600 ms back to 120 ms: the stepped exposures, auto exposure in the live picture)
+    const prev = this.expUs || 0;
     this.expUs = Number(us);
+    if (this.expUs < prev) await new Promise((r) => setTimeout(r, Math.min(MAX_EXPOSURE, prev) / 1000));
   }
 
   // one frame; an incomplete one (USB hiccup, or the first after starting) is grabbed again.

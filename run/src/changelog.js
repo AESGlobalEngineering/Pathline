@@ -16,7 +16,8 @@ module.exports = [
       'Head camera: always the whole sensor (2592 × 1944). A crop left on the camera by another program moved the picture\'s middle, and every position measured with it.',
       'Offset calibration (stage 2): the mark is three circles (r 1, 1.5, 2 mm) the Trotec cuts reliably (of the five tight ones only the outer one burnt), and the camera takes rings as one disc. If the mark isn\'t where the stored offset puts it, the camera looks where the offset with the other sign would put it (Ruby\'s offset is the other way round), and saves the one that finds it.',
       'Checkerboard, offset calibration and print and cut: where a picture doesn\'t show the corner or mark looked for, the same view is taken at 3× and then 9× the exposure. A checkerboard corner only counts where two black and two white squares really meet (a shadow\'s edge no longer does).',
-      'Jog → Camera: the live picture is never taken while the head moves (the camera got stuck when pictures were taken during jogs); it waits for the head to stop, and shows the last picture while an arrow is held down.'
+      'Jog → Camera: the live picture is never taken while the head moves (the camera got stuck when pictures were taken during jogs); it waits for the head to stop, and shows the last picture while an arrow is held down.',
+      'Head camera: the camera got stuck whenever a picture at a shorter exposure followed a long one (the stepped exposures on the checkerboard, auto exposure in the live picture). Pathline Run now waits as long as the last exposure before such a picture: 60 pictures in a row switching between 120 ms and 600 ms, none stuck (before: every switch down). Exposures are kept to 0.6 s at most, the camera\'s time to answer grows with the exposure, and a frame that doesn\'t come no longer leaves the camera busy.'
     ]
   },
   {
