@@ -57,9 +57,16 @@ jobs:
           V=$(node -p "require('./package.json').version")
           FILES="dist/Pathline-Setup-$V.exe dist/Pathline-Setup-$V.exe.blockmap dist/latest.yml dist/Pathline-$V-portable.exe"
           ls -l $FILES
-          if gh release view "v$V" > /dev/null 2>&1; then
-            gh release upload "v$V" $FILES --clobber
-          else
-            gh release create "v$V" $FILES --target "$GITHUB_SHA" --title "Pathline Prepare $V" \
-              --notes "Install with Pathline-Setup-$V.exe (updates itself), or run the portable exe. Installed copies of Pathline (Prepare) 1.1.0 and later update to this version automatically."
-          fi
+          # GitHub's API sometimes answers 502/503 for a moment: try up to 5 times,
+          # 30 s apart. A release made by an earlier attempt just gets its files.
+          for attempt in 1 2 3 4 5; do
+            if gh release view "v$V" > /dev/null 2>&1; then
+              gh release upload "v$V" $FILES --clobber && exit 0
+            else
+              gh release create "v$V" $FILES --target "$GITHUB_SHA" --title "Pathline Prepare $V" \
+                --notes "Install with Pathline-Setup-$V.exe (updates itself), or run the portable exe. Installed copies of Pathline (Prepare) 1.1.0 and later update to this version automatically." && exit 0
+            fi
+            echo "Attempt $attempt didn't get through; trying again in 30 s"
+            sleep 30
+          done
+          exit 1
