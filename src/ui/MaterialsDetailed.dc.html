@@ -931,7 +931,7 @@ class Component extends DCLogic {
         const type = job.machineType;
         const jm = S.machines.find((x) => x.id === job.machineId);
         if (!mat.m.includes(type) || !jm) return LRC.toast(mat.name + ' has no ' + type + ' presets — add the ' + type + ' tab first');
-        await window.api.job.update({ ...job, materialId: mat.id, processes: CC.presetsFor(mat, jm).map((p) => ({ ...JSON.parse(JSON.stringify(p)), src: 'preset' })) }, { record: true });
+        await window.api.job.update({ ...job, materialId: mat.id, processes: CC.withPresets(job, CC.presetsFor(mat, jm).map((p) => ({ ...JSON.parse(JSON.stringify(p)), src: 'preset' }))) }, { record: true });
         const settings = await window.api.settings.get();
         await window.api.settings.set({ currentMaterial: { ...(settings.currentMaterial || {}), [type]: mat.id } });
         location.href = 'MainDetailed.dc.html';

@@ -1469,6 +1469,39 @@
     const key = thermalKey(mat);
     return key ? { key, ...THERMAL[key] } : null;
   }
+  // The material's colour, from its name (clear, black, white…) or else its
+  // swatch: { label, dark 0–1, clear }. null when neither says (the default
+  // swatch is not a colour).
+  const DEFAULT_SWATCH = '#e1e4e8';
+  function colourOf(mat) {
+    const n = (((mat && mat.name) || '') + ' ' + ((mat && mat.notes) || '')).toLowerCase();
+    if (/clear|transparent|crystal/.test(n)) return { label: 'Clear', dark: 0, clear: true };
+    if (/frost|translucent|opal/.test(n)) return { label: 'Translucent', dark: 0.1, clear: true };
+    if (/black/.test(n)) return { label: 'Black', dark: 1 };
+    if (/white/.test(n)) return { label: 'White', dark: 0 };
+    const named = [['grey', 0.5], ['gray', 0.5], ['red', 0.55], ['blue', 0.65], ['green', 0.6], ['yellow', 0.2], ['orange', 0.35], ['brown', 0.7], ['silver', 0.3], ['gold', 0.35]].find(([w]) => new RegExp('\\b' + w + '\\b').test(n));
+    if (named) return { label: named[0][0].toUpperCase() + named[0].slice(1), dark: named[1] };
+    const sw = String((mat && mat.sw) || '').toLowerCase();
+    const m = sw.match(/^#([0-9a-f]{6})$/);
+    if (!m || sw === DEFAULT_SWATCH) return null;
+    const [r, g, b] = [0, 2, 4].map((i) => parseInt(m[1].slice(i, i + 2), 16) / 255);
+    const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    return { label: 'Swatch ' + sw.toUpperCase(), dark: Math.round((1 - lum) * 100) / 100 };
+  }
+  // Beam absorption for a material and its colour. At CO2's 10.6 µm plastics,
+  // wood and paper absorb whatever their colour, so colour moves it only a
+  // little (±3 %); at fibre's 1.06 µm a clear or white sheet lets most of the
+  // beam through or reflects it and a black one takes most of it. Bare metals
+  // reflect either way (no colour).
+  const BARE_METAL = new Set(['ss304', 'ss316', 'mildsteel', 'aluminium', 'brass']);
+  function absorptionOf(props, mat, fibre) {
+    const base = fibre ? props.aFiber : props.aCO2;
+    const col = BARE_METAL.has(props.key) ? null : colourOf(mat);
+    if (!col) return { absorb: base, colour: null };
+    if (!fibre) return { absorb: Math.min(0.98, Math.max(0.02, base + (col.dark - 0.5) * 0.06)), colour: col };
+    const lo = col.clear ? 0.03 : 0.08, hi = 0.9;
+    return { absorb: Math.round((lo + (hi - lo) * col.dark) * 100) / 100, colour: col };
+  }
 
   /**
    * Heat build-up in the sheet during a job. The sheet is split into cells;
@@ -1483,7 +1516,8 @@
     const props = thermalOf(material);
     if (!props) return null;
     const fibre = /fib/i.test(info.source || '');
-    const absorb = fibre ? props.aFiber : props.aCO2;
+    // the material's colour changes how much of the beam it takes (mostly on fibre)
+    const { absorb, colour } = absorptionOf(props, material, fibre);
     const rated = Number(info.power) || 80;
     const t_m = Math.max(0.1, Number(material && material.t) || 3) / 1000;
     // Every laser has a robust extraction system, so the sheet is cooled by
@@ -1548,7 +1582,7 @@
       if (time - snaps[snaps.length - 1].time >= 5) snaps.push({ time, T: T.slice(), peak, peakAt });
     };
     const api = {
-      nx, ny, dx, x0, y0, T0, props, absorb, fibre, cellMm: dx,
+      nx, ny, dx, x0, y0, T0, props, absorb, colour, fibre, cellMm: dx,
       get T() { return T; }, get time() { return time; }, get peak() { return peak; }, get peakAt() { return peakAt; },
       // advance (or rewind to a snapshot and advance) to time t
       to(t) {
@@ -1592,6 +1626,18 @@
   }
   // A new reg-mark process (added when reg marks are switched on).
   const regProcess = () => ({ name: 'Registration marks', proc: REG_PROC, power: 0, speed: 0, f: 0, passes: 1, dash: false, dl: 5, gl: 2, out: true, aci: [], adv: {}, src: 'job' });
+  // A job's processes after taking a material's presets: the job's own
+  // Registration marks process (and its colours) stays, and presets never bring one
+  function withPresets(job, presets) {
+    const reg = ((job && job.processes) || []).find(isRegProc);
+    const list = (presets || []).filter((p) => !isRegProc(p));
+    return reg ? list.concat(reg) : list;
+  }
+  // Registration marks on means the job has a Registration marks process to give colours to
+  function ensureRegProcess(job) {
+    if (!job || !job.regMode || job.regMode === 'off' || (job.processes || []).some(isRegProc)) return job;
+    return { ...job, processes: (job.processes || []).concat(regProcess()) };
+  }
 
   // ---------------------------------------------------------------- job checks
   function checkJob(job, machine) {
@@ -1653,8 +1699,8 @@
     uid, EMPTY_BOX, growBox, entityBox, boxOf, boxValid, boxW, boxH,
     mapEntity, translate, scaleAbout, rotateAbout, polyLen, polyArea, pointInPoly, distToEntity, isClosedPts, cleanPath, shapes,
     processOrder, processOfAci, toolSlot, toolRank, polyTime, travelTime, rasterSpans, orderPaths,
-    estimate, headAt, fmtDuration, fmtLen, fmtArea, checkJob, regMarks, regMarkAci, regProcess, isRegProc, REG_PROC, REG_NEEDED,
+    estimate, headAt, fmtDuration, fmtLen, fmtArea, checkJob, regMarks, regMarkAci, regProcess, withPresets, ensureRegProcess, isRegProc, REG_PROC, REG_NEEDED,
     cutOrderOf, CUT_ORDER_DEFAULT, commonLines, bedOf, bedCount, defaultPresets, DEFAULTS,
-    rasterIslands, engraveScan, ENGRAVE_DIRS, DPI_STEPS, starterPresets, nestRects, THERMAL, thermalKey, thermalOf, thermalSim, metalPresets, presetsFor
+    rasterIslands, engraveScan, ENGRAVE_DIRS, DPI_STEPS, starterPresets, nestRects, THERMAL, thermalKey, thermalOf, colourOf, absorptionOf, thermalSim, metalPresets, presetsFor
   };
 });

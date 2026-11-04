@@ -126,6 +126,23 @@ async function main() {
       ok(idx(rPart, 'h0') < idx(rPart, 'o0') && idx(rPart, 'h1') < idx(rPart, 'o1') && (idx(rPart, 'o0') < idx(rPart, 'h1') || idx(rPart, 'o1') < idx(rPart, 'h0')), 'fastest, per part: each part finished before the next (' + rPart.join(' ') + ')');
       ok(rOff.length === 6 && idx(rOff, 'g0') < idx(rOff, 'o0') && idx(rOff, 'g1') < idx(rOff, 'o1'), 'fastest, inside-first off: still engraves before cutting out (' + rOff.join(' ') + ')');
     }
+    // registration marks: on means a Registration marks process; presets keep the job's own and never bring one
+    {
+      const cut = { name: 'Cut', proc: 'Cut', aci: [1] }, reg = { ...CC.regProcess(), aci: [5] };
+      ok(CC.ensureRegProcess({ regMode: 'linear', processes: [cut] }).processes.some(CC.isRegProc), 'marks on adds a Registration marks process');
+      ok(!CC.ensureRegProcess({ regMode: 'off', processes: [cut] }).processes.some(CC.isRegProc), 'marks off adds nothing');
+      const kept = CC.withPresets({ processes: [cut, reg] }, [{ name: 'New cut', proc: 'Cut', aci: [1] }, { ...CC.regProcess(), aci: [9] }]);
+      ok(kept.length === 2 && kept[1].aci[0] === 5, 'material presets keep the job\'s registration marks (and their colour)');
+    }
+    // thermal map: colour matters on a fibre laser, barely on CO2
+    {
+      const clear = { name: 'Clear acrylic', g: 'Acrylic', t: 3 }, black = { name: 'Black acrylic', g: 'Acrylic', t: 3 };
+      const P = CC.thermalOf(clear);
+      const f = (m, fib) => CC.absorptionOf(P, m, fib).absorb;
+      ok(f(black, true) > 5 * f(clear, true), 'fibre: black acrylic takes far more of the beam than clear (' + f(black, true) + ' vs ' + f(clear, true) + ')');
+      ok(Math.abs(f(black, false) - f(clear, false)) <= 0.0601, 'CO2: colour changes absorption only a little (' + f(black, false) + ' vs ' + f(clear, false) + ')');
+      ok(CC.absorptionOf(CC.thermalOf({ name: 'Black stainless 304' }), { name: 'Black stainless 304' }, true).colour === null, 'bare metal has no colour');
+    }
     // repeat: the whole job once, then again; a process marked once isn't repeated
     {
       const sq = (id, x, aci) => ({ id, aci, paths: [{ p: CC.shapes.rect(x, 10, 20, 20, 0), c: true }] });

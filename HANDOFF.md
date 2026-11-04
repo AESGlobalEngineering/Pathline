@@ -15,6 +15,19 @@ Latest round (28 Oct, final):
 - **Dark mode bed is grey** (`--bed`, `--sheet`, `--bed-grid*` in theme.css). **ACI 7 shows as white in dark mode** (black in light), as in CAD, and so do the marks drawn on the bed (registration marks, engrave hatching, arrows, start points): see the `--aci7*` and `--ink` tokens, and `LRC.aci.hex/fg/stroke` in app.js. Exports (DXF/SVG/PDF) still use real black.
 - **Sample machines and materials from earlier builds are removed on first start** (main.js, tracked by `settings.samplesRemoved`). This is by exact id (trotec, flatbed, laser2, acr-print-3 … brass-1); anything the operator created stays.
 
+Version 1.5.7 (4 Nov):
+- **Registration marks always start off** (`newJob` in main.js, and switching machine on the Job page).
+  - `CC.ensureRegProcess(job)` adds a Registration marks process whenever `regMode` isn't off. It runs in main's `setJob` and the Job page's `commit`.
+  - `CC.withPresets(job, presets)` is used wherever processes are replaced by a material's presets (new job, Choose material, Use for current job, switching machine type). It keeps the job's own Registration marks process (with its colours) and drops any that a preset brings.
+  - Choosing a material no longer counts the registration process as a job override.
+  - The Registration marks process has no Advanced section (`sel.showAdv`).
+- **Thermal map colour:** `CC.colourOf(mat)` reads the colour from the material's name or notes (clear, translucent, black, white, common colour words), else from its swatch (the default `#E1E4E8` is not a colour). `CC.absorptionOf(props, mat, fibre)`:
+  - CO2: base ±3 % by darkness.
+  - Fibre: 0.03 (clear) / 0.08 (white) up to 0.9 (black).
+  - Bare metals: no colour.
+
+  `thermalSim` returns `colour`, and the Simulation's thermal panel shows it, with a note on how much colour matters for the source.
+
 Version 1.5.6 (4 Nov): `START_CLEAR` 0.1 mm, set by the owner (1.5.5 had 0.3 mm, 1.5.4 had 1 mm).
 
 Version 1.5.4 (4 Nov):

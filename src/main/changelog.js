@@ -5,6 +5,17 @@
 
 module.exports = [
   {
+    version: '1.5.7', date: '4 Nov 2026',
+    added: [
+      'Thermal map: the material\'s colour (from its name, e.g. Clear or Black, or its swatch) changes how much of the beam it takes. It matters a lot on a fibre laser and only a little on CO2; the panel shows the colour used.'
+    ],
+    fixed: [
+      'Registration marks were switched on (Full linear) by default for a new job on a machine with a camera, and when switching to one. They now always start off.',
+      'With registration marks on, the Registration marks process sometimes didn\'t show (e.g. after choosing a material or a new job). It now always does, and keeps its colours when the material changes.',
+      'The Registration marks process no longer has an Advanced section.'
+    ]
+  },
+  {
     version: '1.5.6', date: '4 Nov 2026',
     added: [],
     fixed: ['Closed cuts start 0.1 mm from the corner (was 0.3 mm).']

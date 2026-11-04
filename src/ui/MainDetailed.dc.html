@@ -470,7 +470,7 @@
                     </sc-for>
                   </div>
 
-                  <sc-if value="{{isLaser}}" hint-placeholder-val="{{true}}">
+                  <sc-if value="{{sel.showAdv}}" hint-placeholder-val="{{true}}">
                     <button class="btn-link" onClick="{{toggleAdv}}" aria-expanded="{{advOpen}}" style="align-self: flex-start">
                       <svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="transform: rotate({{advRot}})"><path d="{{icons.chev}}"></path></svg>Advanced
                     </button>
@@ -822,6 +822,8 @@ class Component extends DCLogic {
   }
   // Apply a job change; record:true adds an undo step.
   commit(job, opts, sel) {
+    // registration marks on always come with their process (as the main process keeps it)
+    job = CC.ensureRegProcess(job);
     const patch = { job };
     if (sel) patch.sel = sel;
     this.setState(patch);
@@ -1123,8 +1125,8 @@ class Component extends DCLogic {
       const bed = CC.bedOf(m);
       job = {
         ...job, machineType: m.type, materialId: mat.id,
-        processes: presets.map((p) => ({ ...JSON.parse(JSON.stringify(p)), src: 'preset' })),
-        regMode: m.type === 'laser' && m.info && m.info.f && m.info.f.camera ? job.regMode || 'linear' : 'off',
+        processes: CC.withPresets(job, presets.map((p) => ({ ...JSON.parse(JSON.stringify(p)), src: 'preset' }))),
+        regMode: m.type === 'laser' && m.info && m.info.f && m.info.f.camera ? job.regMode || 'off' : 'off',
         sheet: { ...job.sheet, w: Math.min(job.sheet.w, bed[0]), h: Math.min(job.sheet.h, bed[1]) },
         entities: job.entities.map((e) => ({ ...e, bed: m.type === 'laser' ? 0 : e.bed || 0 }))
       };
@@ -1151,10 +1153,10 @@ class Component extends DCLogic {
     const type = this.machine().type;
     this.setState({ matOpen: false });
     if (!mat) return;
-    const overrides = s.job.processes.some((p) => p.src === 'job');
+    const overrides = s.job.processes.some((p) => p.src === 'job' && !CC.isRegProc(p));
     if (overrides && !(await LRC.confirm('Switch material?', 'This job has process settings saved for this job only. Switching to ' + mat.name + ' replaces them with its presets.', 'Switch'))) return;
     const presets = CC.presetsFor(mat, this.machine()).map((p) => ({ ...JSON.parse(JSON.stringify(p)), src: 'preset' }));
-    this.commit({ ...s.job, materialId: mat.id, processes: presets.length ? presets : s.job.processes }, { record: true });
+    this.commit({ ...s.job, materialId: mat.id, processes: presets.length ? CC.withPresets(s.job, presets) : s.job.processes }, { record: true });
     this.setState({ edit: {}, procSel: 0 });
     const settings = await window.api.settings.get();
     window.api.settings.set({ currentMaterial: { ...(settings.currentMaterial || {}), [type]: mat.id } });
@@ -1648,6 +1650,8 @@ class Component extends DCLogic {
         Direction: { v: { down: 'Top down', up: 'Bottom up', fastest: 'Fastest' }[scan.dir], set: (o) => this.setEdit('dir', { 'Top down': 'down', 'Bottom up': 'up', 'Fastest': 'fastest' }[o]) },
         Scan: { v: scan.uni ? 'One way' : 'Both ways', set: (o) => this.setEdit('uni', o === 'One way') }
       };
+      // Advanced settings: laser processes only, and never for registration marks
+      sel.showAdv = isLaser;
       sel.adv = ADV.map(([kind, l, d, u]) => {
         if (SCAN[l]) {
           const k = selIdx + '|' + l, open = S.openPick === k;
@@ -1668,6 +1672,7 @@ class Component extends DCLogic {
         // reg marks are read by the camera: only their colours matter
         Object.assign(sel, { sliders: [], nums: [], showLinks: false, status: 'Registration marks', statusBg: 'var(--sunken)', statusFg: 'var(--text-2)' });
         sel.adv = [];
+        sel.showAdv = false;
       }
       const selOpts = isLaser ? ['Cut', 'Engrave'].concat(regOnNow ? [CC.REG_PROC] : []) : ['T1 · Knife', 'T2 · V-cut 45°', 'T3 · Crease wheel', 'T4 · Pen'];
       sel.selectOpen = S.procOpen;
