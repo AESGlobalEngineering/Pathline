@@ -316,6 +316,47 @@ async function jogTests() {
   ok(JSON.stringify(sent) === '[["move",100,1600,10],["stop"]]', 'held arrow on an RDD6584: one move to the bed edge at 10 mm/s, then stop on release', JSON.stringify(sent));
 }
 
+// ---------------------------------------------------------------- material settings (HMI-BRIEF §5.3)
+// Pathline Prepare keeps each machine's material settings on it: PUT the whole list, GET it back
+// byte for byte (fields Run doesn't know, their order, ·×° and the spacing), a non-list refused
+// with 400, and the list still there after a restart
+async function materialsTests() {
+  console.log('Material settings kept for Pathline Prepare');
+  const data = fs.mkdtempSync(path.join(os.tmpdir(), 'pathline-run-mat-'));
+  fs.writeFileSync(path.join(data, 'config.json'), JSON.stringify({ controller: 'trotec', configured: true, name: 'Sim', bed: [813, 508] }));
+  const port = 19700 + Math.floor(Math.random() * 200);
+  const base = 'http://127.0.0.1:' + port + '/api/v1/materials';
+  const startSrv = async () => {
+    const s = spawn(process.execPath, [path.join(__dirname, '..', 'src', 'server.js'), '--sim', '--port', String(port), '--data', data], { stdio: ['ignore', 'pipe', 'pipe'] });
+    for (let i = 0; i < 50; i++) { try { await fetch(base); break; } catch (e) { await new Promise((r) => setTimeout(r, 100)); } }
+    return s;
+  };
+  const doc = '{"format":"pathline-materials", "version":1,\n "machine":{"id":"m-eth","name":"Trotec Q500 · test","type":"laser"},\n' +
+    ' "materials":[{"id":"mat-3k9x2","name":"Cast acrylic","t":3,"g":"Acrylic","sw":"#E1E4E8","notes":"5 × 5 mm, 45°","updatedAt":"2026-11-04T10:02:39.928Z",' +
+    '"future":{"2":"b","1":"a"},"processes":[{"name":"Cut contour","proc":"Cut","power":90,"speed":20,"f":5000,"passes":1,"out":true,"aci":[1],"adv":{}}]}]}';
+  let srv = await startSrv();
+  try {
+    const empty = await (await fetch(base)).json();
+    ok(empty.format === 'pathline-materials' && empty.version === 1 && Array.isArray(empty.materials) && !empty.materials.length, 'GET /materials before any: the empty list');
+    const put = await fetch(base, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: doc });
+    const pj = await put.json();
+    ok(put.status === 200 && pj.ok === true && pj.count === 1, 'PUT /materials: { ok, count: 1 }', JSON.stringify(pj));
+    const back = await (await fetch(base)).text();
+    ok(back === doc, 'GET /materials gives it back byte for byte (unknown fields, their order, · × °, spacing)', back.slice(0, 160));
+    const bad = await fetch(base, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ format: 'something-else', materials: [] }) });
+    const bad2 = await fetch(base, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ format: 'pathline-materials', materials: {} }) });
+    ok(bad.status === 400 && (await bad.json()).error === 'Not a materials list' && bad2.status === 400, 'not a materials list → 400 { error: "Not a materials list" }');
+    ok((await (await fetch(base)).text()) === doc && !fs.existsSync(path.join(data, 'materials.json.tmp')), 'a refused PUT leaves the list as it was, and no temporary file');
+    srv.kill();
+    await new Promise((r) => setTimeout(r, 300));
+    srv = await startSrv();
+    ok((await (await fetch(base)).text()) === doc, 'the list is still there after a restart');
+  } catch (e) { ok(false, 'material settings', e.stack); } finally {
+    srv.kill();
+    fs.rmSync(data, { recursive: true, force: true });
+  }
+}
+
 // ---------------------------------------------------------------- server, simulated machine
 async function serverTests() {
   console.log('HTTP protocol (simulated machine)');
@@ -741,7 +782,7 @@ async function visionTests() {
   srv.kill();
 }
 
-jogTests().then(linkTests).then(serverTests).then(visionTests).then(() => {
+jogTests().then(linkTests).then(serverTests).then(materialsTests).then(visionTests).then(() => {
   console.log(failed ? '\n' + failed + ' FAILED' : '\nAll passed');
   process.exit(failed ? 1 : 0);
 });

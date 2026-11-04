@@ -14,6 +14,7 @@ const fs = require('fs');
 const path = require('path');
 const config = require('./config');
 const Store = require('./store');
+const materials = require('./materials');
 const Machine = require('./machine');
 const validate = require('./job/validate');
 const plan = require('./job/plan');
@@ -127,20 +128,23 @@ function start(opts = {}) {
     if (prev !== pkgJson.version) fs.writeFileSync(f, JSON.stringify({ ...s, lastRunVersion: pkgJson.version }, null, 2));
   }
 
-  function body(req, limit) {
+  // the request body as text (what: what's too large, for the message)
+  function rawBody(req, limit, what = 'The job') {
     return new Promise((resolve, reject) => {
       const chunks = [];
       let n = 0;
       req.on('data', (c) => {
         n += c.length;
-        if (n > limit) { reject(err(413, 'The job is too large (over ' + Math.round(limit / 1048576) + ' MB)')); req.destroy(); } else chunks.push(c);
+        if (n > limit) { reject(err(413, what + ' is too large (over ' + Math.round(limit / 1048576) + ' MB)')); req.destroy(); } else chunks.push(c);
       });
-      req.on('end', () => {
-        const s = Buffer.concat(chunks).toString('utf8');
-        try { resolve(s ? JSON.parse(s) : {}); } catch (e) { reject(err(400, 'Body is not JSON')); }
-      });
+      req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
       req.on('error', reject);
     });
+  }
+
+  async function body(req, limit) {
+    const s = await rawBody(req, limit);
+    try { return s ? JSON.parse(s) : {}; } catch (e) { throw err(400, 'Body is not JSON'); }
   }
 
   function send(res, code, data) {
@@ -431,6 +435,17 @@ function start(opts = {}) {
           head.writeUInt16BE(f.w, 0); head.writeUInt16BE(f.h, 2);
           res.writeHead(200, { 'content-type': 'application/octet-stream', 'cache-control': 'no-store' });
           return res.end(Buffer.concat([head, Buffer.from(f.data)]));
+        }
+        // material settings kept for Pathline Prepare (HMI-BRIEF §5.3): stored and given back as the
+        // text received, so nothing is reordered or lost (materials.js)
+        if (!isLocal && route === 'GET /materials') {
+          res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
+          return res.end(materials.read(DATA));
+        }
+        if (!isLocal && route === 'PUT /materials') {
+          const n = materials.write(DATA, await rawBody(req, 20 * 1048576, 'The materials list'));
+          log('materials: ' + n + ' kept for Pathline Prepare');
+          return send(res, 200, { ok: true, count: n });
         }
         const fn = (isLocal ? local : api)[route];
         if (!fn) return send(res, 404, { error: 'No route ' + route });

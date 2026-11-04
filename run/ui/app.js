@@ -701,6 +701,26 @@ function setupView() {
     'Lay the checkerboard anywhere on the bed, at any angle, and jog the laser head over its top-left inner corner: the scan starts there, as an anchored job would, and the head comes back there. Check measures with the bed map on; Calibrate measures the machine as it is and saves a new map. The board\'s own position and angle are taken out: what\'s left is the machine. A board that isn\'t flat moves some corners: those are left out. Scale and squareness is the safe choice for a board that isn\'t flat; Every corner only for one that is.'));
   }
 
+  // the material settings Pathline Prepare keeps on this machine (GET /materials), read only:
+  // they're made and changed in Prepare
+  if (cfg().configured) {
+    if (ui.mats === undefined) {
+      ui.mats = 'loading';
+      call('GET', API('/materials')).then((m) => { ui.mats = m; render(); }).catch((e) => { ui.mats = { error: e.message }; render(); });
+    }
+    const m = ui.mats;
+    const list = m && m !== 'loading' && Array.isArray(m.materials) ? m.materials : [];
+    tabs.Materials = m === 'loading' ? [card('Materials', '<span class="lbl">Loading…</span>')]
+      : m && m.error ? [card('Materials', '<div class="warnbox">' + esc(m.error) + '</div>')]
+        : !list.length ? [card('Materials', '<span class="lbl">None kept yet. Pathline Prepare sends this machine\'s material settings when it connects, and whenever its material library is saved.</span>')]
+          : list.map((x) => card('<span style="display:inline-flex;align-items:center;gap:10px"><span aria-hidden="true" style="width:14px;height:14px;border-radius:4px;flex:none;box-shadow:inset 0 0 0 1px var(--line-strong);background:' + esc(x.sw || 'var(--sunken)') + '"></span>' + esc(x.name || 'Unnamed') + '</span>',
+            '<div class="row"><span>Thickness</span><span class="mono">' + (x.t !== undefined && x.t !== '' ? esc(x.t) + ' mm' : '—') + '</span></div>' +
+            '<div class="row"><span>Group</span><span>' + esc(x.g || '—') + '</span></div>' +
+            '<div style="display:flex;flex-direction:column;gap:6px">' + procRows({ processes: x.processes || [] }) + '</div>',
+            x.updatedAt ? 'Changed ' + new Date(x.updatedAt).toLocaleString() : ''));
+    if (list.length) tabs.Materials.unshift(card('Materials', '<span class="lbl">' + list.length + (list.length === 1 ? ' material' : ' materials') + ' made in Pathline Prepare for this machine. Any computer running Prepare that connects gets them. Change them in Prepare: here they\'re read only.</span>'));
+  }
+
   const tab = tabs[ui.setTab] ? ui.setTab : 'Machine';
   // no machine yet: this page adds one (name, controller and connection on the Machine tab)
   const adding = !cfg().configured;
@@ -932,7 +952,7 @@ const H = {
   simLid: act(async () => call('POST', LOCAL('/sim/lid'), { open: !S.status.interlock })),
   hist: (v) => { ui.histFilter = v; render(); },
   rerun: act(async (id) => { const j = await call('POST', LOCAL('/jobs/' + id + '/requeue'), {}); ui.sel = j.id; ui.view = 'queue'; }),
-  setTab: (v) => { ui.setTab = v; if (v === 'Network') { ui.netDraft = null; loadNetwork(); } render(); },
+  setTab: (v) => { ui.setTab = v; if (v === 'Network') { ui.netDraft = null; loadNetwork(); } if (v === 'Materials') ui.mats = undefined; render(); },
   netMode: (v) => { ui.netDraft.mode = v; render(); },
   netApply: async () => {
     const d = ui.netDraft;
