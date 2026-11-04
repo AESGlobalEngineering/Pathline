@@ -15,7 +15,7 @@ Latest round (28 Oct, final):
 - **Dark mode bed is grey** (`--bed`, `--sheet`, `--bed-grid*` in theme.css). **ACI 7 shows as white in dark mode** (black in light), as in CAD, and so do the marks drawn on the bed (registration marks, engrave hatching, arrows, start points): see the `--aci7*` and `--ink` tokens, and `LRC.aci.hex/fg/stroke` in app.js. Exports (DXF/SVG/PDF) still use real black.
 - **Sample machines and materials from earlier builds are removed on first start** (main.js, tracked by `settings.samplesRemoved`). This is by exact id (trotec, flatbed, laser2, acr-print-3 … brass-1); anything the operator created stays.
 
-Version 1.5.5 (4 Nov): `START_CLEAR` 0.1 mm (was 1 mm in 1.5.4), set by the owner.
+Version 1.5.6 (4 Nov): `START_CLEAR` 0.1 mm, set by the owner (1.5.5 had 0.3 mm, 1.5.4 had 1 mm).
 
 Version 1.5.4 (4 Nov):
 - **Closed cuts start off the corners** (`startPoints`, `pointOn`, `rotateTo`, `refineStarts` in core.js). A closed path's start (which is also its end) is chosen from:
