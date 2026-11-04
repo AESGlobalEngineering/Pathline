@@ -15,6 +15,10 @@ Latest round (28 Oct, final):
 - **Dark mode bed is grey** (`--bed`, `--sheet`, `--bed-grid*` in theme.css). **ACI 7 shows as white in dark mode** (black in light), as in CAD, and so do the marks drawn on the bed (registration marks, engrave hatching, arrows, start points): see the `--aci7*` and `--ink` tokens, and `LRC.aci.hex/fg/stroke` in app.js. Exports (DXF/SVG/PDF) still use real black.
 - **Sample machines and materials from earlier builds are removed on first start** (main.js, tracked by `settings.samplesRemoved`). This is by exact id (trotec, flatbed, laser2, acr-print-3 … brass-1); anything the operator created stays.
 
+Version 1.5.1 (4 Nov):
+- **Whole-job repeat:** `job.repeat` (1–50; set in Job settings → Run the whole job). In `estimateIn`, each bed's work runs `repeat` times, every step once before any is repeated. Timeline ops carry `round`, and so do package steps (exporters `toolpath`). A process with `once: true` runs only in round 1. The job sheet says "Repeat". The Simulation shows "round r of n" and counts items within the round.
+- **Test grid passes** now set the job's `repeat` (each square is one pass) with Ordered cut order, and the label process is `once`, so the whole grid runs and then runs again.
+
 Version 1.5.0 (4 Nov):
 - **Materials on the machine** (main.js, protocol in HMI-BRIEF §5.3; the brief for the Run side is `hmi/RUN-MATERIALS-BRIEF.md`).
   - `stampPresets(before, after)` stamps `mat.presetsAt[machineId]` whenever a material's presets for that machine change. This happens in `materials:save`, `saveAll` and `import`.

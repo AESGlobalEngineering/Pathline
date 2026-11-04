@@ -633,10 +633,11 @@ class Component extends DCLogic {
         nowCol = 'var(--idle-dot)';
       }
       else {
-        const same = tl.filter((o) => o.kind === 'op' && o.proc === cur.proc && o.bed === cur.bed && (o.pass || null) === (cur.pass || null));
+        const same = tl.filter((o) => o.kind === 'op' && o.proc === cur.proc && o.bed === cur.bed && (o.pass || null) === (cur.pass || null) && (o.round || 1) === (cur.round || 1));
         nowName = job.processes[cur.proc].name;
         nowStep = (isLaser ? '' : 'Bed ' + (cur.bed + 1) + ' · ') + (cur.mode === 'raster' ? cur.rows + ' scan lines' + (cur.shared ? ' across ' + cur.shared + ' items' : '') : (same.indexOf(cur) + 1) + ' of ' + same.length)
-          + (cur.pass ? ' · pass ' + cur.pass + ' of ' + job.processes[cur.proc].passes : '');
+          + (cur.pass ? ' · pass ' + cur.pass + ' of ' + job.processes[cur.proc].passes : '')
+          + (cur.round ? ' · round ' + cur.round + ' of ' + (est.repeats || 1) : '');
         nowCol = procCol(cur.proc);
       }
     }

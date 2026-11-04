@@ -126,6 +126,15 @@ async function main() {
       ok(idx(rPart, 'h0') < idx(rPart, 'o0') && idx(rPart, 'h1') < idx(rPart, 'o1') && (idx(rPart, 'o0') < idx(rPart, 'h1') || idx(rPart, 'o1') < idx(rPart, 'h0')), 'fastest, per part: each part finished before the next (' + rPart.join(' ') + ')');
       ok(rOff.length === 6 && idx(rOff, 'g0') < idx(rOff, 'o0') && idx(rOff, 'g1') < idx(rOff, 'o1'), 'fastest, inside-first off: still engraves before cutting out (' + rOff.join(' ') + ')');
     }
+    // repeat: the whole job once, then again; a process marked once isn't repeated
+    {
+      const sq = (id, x, aci) => ({ id, aci, paths: [{ p: CC.shapes.rect(x, 10, 20, 20, 0), c: true }] });
+      const rj = { ...pj, regMode: 'off', repeat: 3, cutOrder: { order: 'process', inside: 'off' }, entities: [sq('a', 10, 1), sq('b', 60, 2), sq('l', 110, 3)],
+        processes: [{ name: 'A', proc: 'Cut', power: 50, speed: 20, f: 5000, passes: 1, out: true, aci: [1] }, { name: 'B', proc: 'Cut', power: 60, speed: 20, f: 5000, passes: 1, out: true, aci: [2] }, { name: 'Labels', proc: 'Cut', power: 10, speed: 50, f: 5000, passes: 1, once: true, out: true, aci: [3] }] };
+      const ops = CC.estimate(rj, laser, { timeline: true }).timeline.filter((o) => o.kind === 'op');
+      const seq = ops.map((o) => o.ent + o.round).join(' ');
+      ok(seq === 'a1 b1 l1 a2 b2 a3 b3', 'repeat runs the whole job, then again; once-only processes once (' + seq + ')');
+    }
     // overlapping lines are cut once
     {
       const sq = (x) => ({ p: CC.shapes.rect(x, 0, 50, 50, 0), c: true });

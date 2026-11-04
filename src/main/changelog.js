@@ -5,6 +5,14 @@
 
 module.exports = [
   {
+    version: '1.5.1', date: '4 Nov 2026',
+    added: [
+      'A test grid job with more than one pass now runs the whole grid, then the whole grid again (it used to do each square\'s passes back to back). The labels are engraved once.',
+      'Job settings → Run the whole job ×N: repeats the whole job, all of it once before any of it again. The Simulation shows which round it\'s on.'
+    ],
+    fixed: []
+  },
+  {
     version: '1.5.0', date: '4 Nov 2026',
     added: [
       'Material settings are kept on the machine (needs Pathline Run with material storage). Saving the library sends each machine its settings; connecting to a machine brings in newer settings and materials made on another computer. Deleted materials stay deleted.',

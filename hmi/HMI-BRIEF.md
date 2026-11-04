@@ -164,7 +164,7 @@ Run `toolpath` **in array order**. **Every step is one pass.** Travel between st
 | `toolchange` | `process`, `tool`, `bed` | Plotter: switch to the tool's slot (`"T2 · V-cut 45°"` → `T2`) |
 | `feed` | `bed` | Plotter conveyor: advance the material one bed (`feedLen`), then continue with the next bed's steps |
 
-`pass` (when present) is the pass number for that step (1, 2, …), for display only.
+`pass` (when present) is the pass number for that step (1, 2, …), for display only. `round` (when present, from Pathline Prepare 1.5.1) says which time through the whole job a step belongs to, when the job is set to run more than once (e.g. a test grid with 2 passes: every square once, then every square again). The steps are already in order and repeated, so just run them; `round` is for display only.
 
 **Order rules, already applied by Pathline:** registration marks first, then engraving, then cutting (lasers), with inside shapes before their outline. Passes are grouped according to `cutOrder`. Run the list as given; don't reorder it.
 

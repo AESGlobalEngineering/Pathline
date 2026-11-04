@@ -592,6 +592,8 @@ class Component extends DCLogic {
       : { name: 'New process', tool: 'T1 · Knife', speed: 300, passes: 1, dash: false, dl: 5, gl: 2, out: true, aci: [], adv: {} }));
   }
   // Build a job with one square per power/speed pair, each with its own colour.
+  // Passes repeat the whole grid (every square once, then all again), not each
+  // square on its own; the labels are engraved once.
   async makeGrid(base, powers, speeds) {
     const mat = this.mat();
     const machine = this.tabMachine();
@@ -601,18 +603,18 @@ class Component extends DCLogic {
     const cell = 10, gap = 4, x0 = 30, y0 = 20;
     let aci = 10;
     powers.forEach((p, r) => speeds.forEach((s, c) => {
-      processes.push({ ...JSON.parse(JSON.stringify(base)), name: p + ' % · ' + s + ' mm/s', power: p, speed: s, aci: [aci], out: true, src: 'job' });
+      processes.push({ ...JSON.parse(JSON.stringify(base)), name: p + ' % · ' + s + ' mm/s', power: p, speed: s, passes: 1, aci: [aci], out: true, src: 'job' });
       const shape = base.proc === 'Engrave' ? CC.shapes.rect(x0 + c * (cell + gap), y0 + r * (cell + gap), cell, cell, 0) : CC.shapes.rect(x0 + c * (cell + gap) + 1, y0 + r * (cell + gap) + 1, cell - 2, cell - 2, 0);
       entities.push({ id: CC.uid('e'), name: p + '% / ' + s, type: 'Rectangle', aci, paths: [{ p: shape, c: true }] });
       aci++;
     }));
     // labels: power down the side, speed along the top, marked at low power
-    const labelProc = { name: 'Grid labels', proc: 'Engrave', power: 15, speed: 300, f: 300, passes: 1, air: 'Off', dash: false, dl: 5, gl: 2, out: true, aci: [8], adv: {}, src: 'job' };
+    const labelProc = { name: 'Grid labels', proc: 'Engrave', power: 15, speed: 300, f: 300, passes: 1, once: true, air: 'Off', dash: false, dl: 5, gl: 2, out: true, aci: [8], adv: {}, src: 'job' };
     try {
       for (let r = 0; r < powers.length; r++) entities.push(await LRC.textEntity(powers[r] + '%', 4, 6, y0 + r * (cell + gap) + 3, 8));
       for (let c = 0; c < speeds.length; c++) entities.push(await LRC.textEntity(String(speeds[c]), 4, x0 + c * (cell + gap), 10, 8));
     } catch (e) { /* labels are optional */ }
-    await window.api.job.replace({ ...job, name: 'Test grid · ' + mat.name + ' ' + mat.t + ' mm · ' + base.proc, materialId: mat.id, processes: processes.concat(labelProc), entities, regMode: 'off', sheet: { ...job.sheet, on: false } });
+    await window.api.job.replace({ ...job, name: 'Test grid · ' + mat.name + ' ' + mat.t + ' mm · ' + base.proc, materialId: mat.id, processes: processes.concat(labelProc), entities, repeat: Math.max(1, Number(base.passes) || 1), cutOrder: { order: 'ordered', inside: 'off' }, regMode: 'off', sheet: { ...job.sheet, on: false } });
     location.href = 'MainDetailed.dc.html';
   }
 

@@ -131,6 +131,7 @@ function jobSheet(job, machine, material, est) {
   if (isLaser) line('Reg marks: ' + ({ off: 'Off', pos: 'Position & rotation (2 marks)', linear: 'Full linear (3 marks)', nonlinear: 'Non-linear (3 marks)' }[job.regMode || 'off']) + (job.regMode && job.regMode !== 'off' ? ' · ' + regMarks(job, machine).length + ' in job' : ''));
   const co = CC.cutOrderOf(job);
   line('Cut order: ' + { process: 'by process (list order)', speed: 'fastest', ordered: 'ordered (marks, engraving, cutting)' }[co.order] + ' · inside shapes ' + { part: 'first, part by part', all: 'all first', off: 'not prioritised' }[co.inside]);
+  if ((Number(job.repeat) || 1) > 1) line('Repeat:    the whole job ' + est.repeats + ' times (all of it once, then again)');
   if (!isLaser) line('Beds:      ' + est.beds);
   line('');
   line('ESTIMATED TIME: ' + CC.fmtDuration(est.total, true));
@@ -167,10 +168,10 @@ function toolpath(job, est) {
   for (const o of est.timeline || []) {
     const p = o.proc >= 0 ? job.processes[o.proc] : null;
     if (o.kind === 'op' && o.mode === 'vector') {
-      out.push({ type: 'cut', process: o.proc, name: p.name, ent: o.ent, bed: o.bed, closed: !!o.path.c, passes: o.passes || 1, pass: o.pass || undefined, seconds: +o.dur.toFixed(3), p: o.path.p.map(([x, y]) => [r3(x), r3(y)]) });
+      out.push({ type: 'cut', process: o.proc, name: p.name, ent: o.ent, bed: o.bed, closed: !!o.path.c, passes: o.passes || 1, pass: o.pass || undefined, round: o.round, seconds: +o.dur.toFixed(3), p: o.path.p.map(([x, y]) => [r3(x), r3(y)]) });
     } else if (o.kind === 'op' && o.mode === 'raster') {
       // direction is resolved per step ("fastest" becomes up or down); bidirectional false = every line left to right
-      out.push({ type: 'engrave', process: o.proc, name: p.name, ents: o.ents, bed: o.bed, dpi: o.dpi, passes: o.passes || 1, pass: o.pass || undefined, lines: o.rows, scan: o.shared ? 'across' : 'island', direction: o.dir || 'down', bidirectional: !o.uni, seconds: +o.dur.toFixed(3), box: [r3(o.box.x0), r3(o.box.y0), r3(o.box.x1), r3(o.box.y1)] });
+      out.push({ type: 'engrave', process: o.proc, name: p.name, ents: o.ents, bed: o.bed, dpi: o.dpi, passes: o.passes || 1, pass: o.pass || undefined, round: o.round, lines: o.rows, scan: o.shared ? 'across' : 'island', direction: o.dir || 'down', bidirectional: !o.uni, seconds: +o.dur.toFixed(3), box: [r3(o.box.x0), r3(o.box.y0), r3(o.box.x1), r3(o.box.y1)] });
     } else if (o.kind === 'inspect') {
       out.push({ type: 'inspect', mark: o.mark, of: o.of, at: [r3(o.at[0]), r3(o.at[1])], d: r3(o.d), seconds: +o.dur.toFixed(3) });
     } else if (o.kind === 'dwell') {

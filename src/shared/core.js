@@ -1020,8 +1020,12 @@
     let at = home;
     let first = true;
     let curTool = null;
+    // job.repeat: the whole job (each bed's work, on a plotter) runs this many
+    // times over, every step once before any is repeated; each step says its round
+    const repeats = Math.max(1, Math.min(50, Math.round(Number(job.repeat) || 1)));
+    let round = 1;
     const push = (o2) => {
-      if (opts.timeline) timeline.push({ ...o2, start: t, end: t + o2.dur });
+      if (opts.timeline) timeline.push({ ...o2, ...(repeats > 1 ? { round } : {}), start: t, end: t + o2.dur });
       t += o2.dur;
     };
     const travelTo = (pt, bedNo, proc, kind) => {
@@ -1105,7 +1109,11 @@
         ? plan.map((s, k) => ({ pi: s.pi, key: 's' + k, only: s.only, mine: bedEnts.filter((e) => s.ids.has(e)) }))
         : order.map((pi) => ({ pi, key: pi, mine: bedEnts.filter((e) => (job.processes[pi].aci || []).includes(e.aci)) }))).filter((w) => w.mine.length);
       const cache = new Map();
-      for (const { pi, key, only, mine } of work) runPass(bed, pi, job.processes[pi], mine, passesOf(job.processes[pi]), cache, key, only);
+      for (round = 1; round <= repeats; round++) {
+        // a process marked once (e.g. a test grid's labels) isn't repeated
+        for (const { pi, key, only, mine } of work) if (round === 1 || !job.processes[pi].once) runPass(bed, pi, job.processes[pi], mine, passesOf(job.processes[pi]), cache, key, only);
+      }
+      round = repeats;
       if (!isLaser && bed < nBeds - 1) {
         const dur = travelTime(feedLen, plot.feedSpeed, 500) + plot.feedSettle;
         feeds++;
@@ -1258,7 +1266,7 @@
       total: t,
       perProcess: per.filter((p) => p.ops > 0),
       travel, travelTime: travelT, travelLegs: trav, home, cutOrder: cut, inspectTime, dwellTime, marks: marks.length,
-      cutLen, engArea, toolChanges, feeds, beds: nBeds, procOrder: order,
+      cutLen, engArea, toolChanges, feeds, beds: nBeds, procOrder: order, repeats,
       machine: { speed: vMax, acc },
       timeline: opts.timeline ? timeline : undefined
     };
