@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Pathline</title>
+<title>Pathline Prepare</title>
 <link rel="stylesheet" href="fonts.css">
 <link rel="stylesheet" href="theme.css">
 <script src="../shared/core.js"></script>
@@ -68,8 +68,8 @@
   <!-- ===== App bar ===== -->
   <header class="appbar">
     <div class="brand">
-      <svg viewBox="0 0 64 64" width="28" height="28" role="img" aria-label="Pathline" style="flex: none; display: block"><rect width="64" height="64" rx="15" fill="#D62828"></rect><g transform="translate(14 14) scale(0.5625)" stroke-width="6" stroke-linejoin="round"><polygon points="6,6 50,6 6,50" fill="#FFFFFF" stroke="#FFFFFF"></polygon><polygon points="58,14 58,58 14,58" fill="#111214" stroke="#111214"></polygon></g></svg>
-      <span class="word">Pathline</span>
+      <svg viewBox="0 0 64 64" width="28" height="28" role="img" aria-label="Pathline Prepare" style="flex: none; display: block"><rect width="64" height="64" rx="15" fill="#D62828"></rect><g transform="translate(14 14) scale(0.5625)" stroke-width="6" stroke-linejoin="round"><polygon points="6,6 50,6 6,50" fill="#FFFFFF" stroke="#FFFFFF"></polygon><polygon points="58,14 58,58 14,58" fill="#111214" stroke="#111214"></polygon></g></svg>
+      <span class="word">Pathline Prepare</span>
     </div>
     <nav aria-label="Sections" class="seg">
       <a href="MainDetailed.dc.html" aria-current="page">Job</a>
@@ -384,8 +384,9 @@
           </sc-if>
           <div style="display: flex; flex-direction: column; gap: 4px">
             <sc-for list="{{colours}}" as="c" hint-placeholder-count="4">
-              <div class="proc" style="background: {{c.bg}}; box-shadow: inset 0 0 0 1px {{c.bd}}">
+              <div class="proc" data-prow="1" style="background: {{c.bg}}; box-shadow: {{c.sh}}; transform: {{c.dragT}}; position: relative; z-index: {{c.dragZ}}">
                 <div style="display: flex; align-items: center; opacity: {{c.op}}">
+                <button class="grip" onPointerDown="{{c.grip}}" aria-label="Drag {{c.name}} up or down" title="Drag to reorder" style="margin-left: 2px"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="stroke-width: 2.6"><path d="{{icons.grip}}"></path></svg></button>
                 <button class="proc-head" onClick="{{c.pick}}" aria-expanded="{{c.open}}">
                   <span style="display: flex; gap: 3px; flex: none; min-width: 18px">
                     <sc-for list="{{c.chips}}" as="k" hint-placeholder-count="1"><span class="chip" title="{{k.title}}" style="background: {{k.hex}}; color: {{k.fg}}">{{k.n}}</span></sc-for>
@@ -769,6 +770,8 @@ class Component extends DCLogic {
     this.poll = setInterval(() => this.pollDevice(), 1500);
     // settings read from a controller in the background (bed, speeds, features, name)
     window.api.machines.onUpdated((m) => this.setState((s) => ({ machines: s.machines.map((x) => (x.id === m.id ? m : x)) })));
+    // material settings pulled from a machine
+    window.api.materials.onUpdated((list) => this.setState({ materials: list }));
     this.onDragOver = (e) => { e.preventDefault(); };
     this.onDrop = (e) => {
       e.preventDefault();
@@ -1265,6 +1268,18 @@ class Component extends DCLogic {
     this.commit({ ...this.state.job, processes }, { record: true });
     this.setState({ procSel: processes.length - 1, edit: {} });
   }
+  // Move a process in the list (the run order with By process); edits in
+  // progress and the open process move with it
+  moveProcess(from, to) {
+    const old = this.state.job.processes;
+    if (from === to || !old[from] || !old[to]) return;
+    const order = old.map((_, k) => k);
+    order.splice(to, 0, order.splice(from, 1)[0]);
+    const edit = {};
+    order.forEach((k, n) => { if (this.state.edit[k]) edit[n] = this.state.edit[k]; });
+    this.setState({ edit, procSel: Math.max(0, order.indexOf(this.state.procSel)) });
+    this.commit({ ...this.state.job, processes: order.map((k) => old[k]) }, { record: true });
+  }
   async deleteProcess() {
     const i = this.state.procSel;
     const p = this.state.job.processes[i];
@@ -1444,6 +1459,7 @@ class Component extends DCLogic {
       heads: 'M9 3h6v5H9z M12 8v7 M8.5 15h7L12 21z',
       conveyor: 'M3 15h18 M3 19h18 M7 15V9h10v6 M5 17h.01 M19 17h.01',
       nest: 'M3 3h8v11H3z M13 3h8v6h-8z M13 11h8v10h-8z M3 16h8v5H3z',
+      grip: 'M9 6h.01 M15 6h.01 M9 12h.01 M15 12h.01 M9 18h.01 M15 18h.01',
       bridges: 'M3 12h6 M15 12h6 M9 8v8 M15 8v8',
       frame: 'M4 9V4h5 M15 4h5v5 M20 15v5h-5 M9 20H4v-5',
       sim: 'M3 12h4l3-7 4 14 3-7h4',
@@ -1539,7 +1555,7 @@ class Component extends DCLogic {
       const out = p.out !== false;
       const shown = !p.hidden;
       return {
-        hidden: isReg && !regOnNow,
+        hidden: isReg && !regOnNow, pi: i,
         chips, none: chips.length === 0, name: p.name, badge,
         badgeBg: badge === 'Edited' ? 'var(--warn-soft)' : accentSoft, badgeFg: badge === 'Edited' ? 'var(--warn)' : accentFg,
         proc: (isReg ? 'Camera marks, not cut' : isLaser ? p.proc : p.tool) + (nObj ? ' · ' + nObj + ' object' + (nObj > 1 ? 's' : '') : ''),
@@ -1558,7 +1574,12 @@ class Component extends DCLogic {
           this.commit({ ...job, processes: procs.map((x, k) => (k === i ? { ...x, hidden: shown } : x)) }, { record: true }, sel);
         }
       };
-    }).filter((c) => !c.hidden);
+    }).filter((c) => !c.hidden).map((c, v, list) => {
+      // drag a row by its grip to change the run order (rows hidden here keep their place)
+      const ds = LRC.rowDragStyle(S.procDrag, v);
+      return { ...c, dragT: ds.dragT, dragZ: ds.dragZ, sh: 'inset 0 0 0 1px ' + c.bd + (ds.lifted ? ', var(--shadow-pop)' : ''),
+        grip: (e) => LRC.rowDrag(e, v, (d) => this.setState({ procDrag: d }), (to) => this.moveProcess(c.pi, list[to].pi), 0) };
+    });
 
     const hasSel = procs.length > 0;
     const sc = hasSel ? this.effective(selIdx) : null;
@@ -2190,7 +2211,7 @@ class Component extends DCLogic {
   }
   async about() {
     const info = await window.api.app.info();
-    LRC.dialog({ title: 'Pathline', message: 'Version ' + info.version + '\nPrepare laser and plotter jobs — import, set speeds and feeds, simulate, and send to the machine controller.', buttons: [{ label: 'Close', value: 'ok', primary: true }] });
+    LRC.dialog({ title: 'Pathline Prepare', message: 'Version ' + info.version + '\nPrepare laser and plotter jobs — import, set speeds and feeds, simulate, and send to the machine controller.', buttons: [{ label: 'Close', value: 'ok', primary: true }] });
   }
 }
 </script>

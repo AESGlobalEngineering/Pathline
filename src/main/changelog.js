@@ -5,6 +5,26 @@
 
 module.exports = [
   {
+    version: '1.5.0', date: '4 Nov 2026',
+    added: [
+      'Material settings are kept on the machine (needs Pathline Run with material storage). Saving the library sends each machine its settings; connecting to a machine brings in newer settings and materials made on another computer. Deleted materials stay deleted.',
+      'Test grid: Create job (was Engrave grid). Send puts the chosen square\'s settings into the process you pick from the list.'
+    ],
+    fixed: []
+  },
+  {
+    version: '1.4.0', date: '3 Nov 2026',
+    added: [
+      'Pathline is now Pathline Prepare. Your machines, materials and settings come across by themselves.',
+      'Processes have a drag handle (⠿): drag a process up or down, in Materials and on the Job page. (Holding ⋮ in Materials still works.)',
+      'Test grid: set how many passes. Apply sets the passes as well as power and speed.',
+      'New material group: Foam.',
+      'Thermal map: choose the material right in the Simulation (it doesn\'t change the job\'s processes).',
+      'Adding a real machine just asks for its IP address: the type, name and controller come from the machine.'
+    ],
+    fixed: []
+  },
+  {
     version: '1.3.2', date: '2 Nov 2026',
     added: ['Fill copies can be nested: Layout → Nested packs the copies, turning them 90° where that fits more than a straight grid. Grid is still there.'],
     fixed: []

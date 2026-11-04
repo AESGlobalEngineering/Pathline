@@ -71,7 +71,7 @@ PROTOCOL.md lists every endpoint. These are the practical details Pathline depen
 |---|---|
 | Machines → **Test connection** | `GET /info`: must return `protocol: 1`, `type`, `bed` |
 | Machines → **Refresh from machine** | `GET /machine`; the values replace the machine's settings in Pathline |
-| Machines → **Open HMI** | Opens `http://<ip>:<port>/` in the browser |
+| Machines → refresh, first contact, app open, every 5 min; Setup → Materials → **Save** | `GET /materials`, then `PUT /materials` if the machine's list is missing or older settings (§5.3) |
 | Job page header status / Move tab position | `GET /status` (polled) |
 | Job → **Send to machine** | `GET /status` first ("connection check"), then `POST /jobs` with the package. Pathline does **not** start the job. |
 | Job → Queue tab: list / drag to reorder / remove / **Start** | `GET /jobs`, `POST /jobs/order`, `DELETE /jobs/{id}`, `POST /start` |
@@ -208,6 +208,29 @@ Return any subset. Missing keys keep Pathline's current value. Pathline reads th
 | `f: { camera, autofocus, rotary, air, conveyor, vacuum, pointer, pass, interlock, detect }` | **Feature flags.** Pathline **hides** the controls for features that are `false` (registration marks, auto-focus, air, conveyor feed, vacuum, pointer…), so report them accurately. |
 
 See `examples/responses/GET-machine-laser.json` and `GET-machine-plotter.json`. `/info` is separate and small (`name`, `type`, `ctrl`, `model`, `firmware`, `protocol: 1`, `bed`).
+
+### 5.3 Material settings kept on the machine (`GET` / `PUT /materials`, from Pathline Prepare 1.5.0)
+
+The material settings (processes) made in Pathline Prepare for a machine are stored **on that machine**, so another computer running Pathline Prepare picks them up when it connects. The HMI only **stores and returns** the list; it doesn't need to understand the processes (every job package carries its own settings anyway).
+
+- `GET /materials` → the list last stored, or `{ "format": "pathline-materials", "version": 1, "materials": [] }` when there is none. An HMI that answers **404** is treated as "doesn't keep materials", and nothing is sent.
+- `PUT /materials` with the whole list → **replace** what is stored (keep it on disk, so it survives a restart). Answer `{ "ok": true, "count": n }`. Refuse anything that isn't `format: "pathline-materials"` with `400`.
+
+```json
+{
+  "format": "pathline-materials", "version": 1,
+  "machine": { "id": "m-eth", "name": "Trotec Q500", "type": "laser" },
+  "materials": [
+    { "id": "mat-…", "name": "Cast acrylic", "t": 3, "g": "Acrylic", "sw": "#E1E4E8", "notes": "",
+      "updatedAt": "2026-11-04T10:02:39.928Z",
+      "processes": [ { "name": "Cut contour", "proc": "Cut", "power": 90, "speed": 20, "f": 5000, "passes": 1, "out": true, "aci": [1], "adv": {} } ] }
+  ]
+}
+```
+
+- `updatedAt` is when that material's settings for this machine last changed. Keep every field exactly as received, including fields not listed here; Pathline Prepare decides which copy is newer.
+- How Pathline Prepare uses it: it reads `/materials` whenever it reads `/machine`. A material that is newer on the machine, or that it doesn't have yet, comes into its library. A material it deleted is not brought back. If its own list differs, it sends the whole list with `PUT`. Saving the material library sends it to every connected machine within a couple of seconds.
+- Optional on the HMI: show the stored materials read-only (name, thickness, process names with power/speed). Editing them on the HMI is not part of v1.
 
 ## 6. Status, queue and state
 

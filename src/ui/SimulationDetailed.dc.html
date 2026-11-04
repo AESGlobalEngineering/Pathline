@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Simulation · Pathline</title>
+<title>Simulation · Pathline Prepare</title>
 <link rel="stylesheet" href="fonts.css">
 <link rel="stylesheet" href="theme.css">
 <script src="../shared/core.js"></script>
@@ -41,7 +41,7 @@
 
   <!-- ===== App bar ===== -->
   <header class="appbar">
-    <div class="brand"><svg viewBox="0 0 64 64" width="28" height="28" role="img" aria-label="Pathline" style="flex: none; display: block"><rect width="64" height="64" rx="15" fill="#D62828"></rect><g transform="translate(14 14) scale(0.5625)" stroke-width="6" stroke-linejoin="round"><polygon points="6,6 50,6 6,50" fill="#FFFFFF" stroke="#FFFFFF"></polygon><polygon points="58,14 58,58 14,58" fill="#111214" stroke="#111214"></polygon></g></svg><span class="word">Pathline</span></div>
+    <div class="brand"><svg viewBox="0 0 64 64" width="28" height="28" role="img" aria-label="Pathline Prepare" style="flex: none; display: block"><rect width="64" height="64" rx="15" fill="#D62828"></rect><g transform="translate(14 14) scale(0.5625)" stroke-width="6" stroke-linejoin="round"><polygon points="6,6 50,6 6,50" fill="#FFFFFF" stroke="#FFFFFF"></polygon><polygon points="58,14 58,58 14,58" fill="#111214" stroke="#111214"></polygon></g></svg><span class="word">Pathline Prepare</span></div>
     <nav aria-label="Sections" class="seg">
       <a href="MainDetailed.dc.html">Job</a>
       <a href="SimulationDetailed.dc.html" aria-current="page">Simulation</a>
@@ -80,6 +80,7 @@
       <sc-if value="{{thermal.on}}" hint-placeholder-val="{{false}}">
         <div class="card" style="display: flex; flex-direction: column; gap: 8px; padding: 12px; background: var(--surface-2)">
           <h3 class="h-sec">Thermal map</h3>
+          <label class="fcol" style="gap: 4px"><span class="lbl">Material</span>{{thermal.pick}}</label>
           <sc-if value="{{thermal.none}}" hint-placeholder-val="{{false}}"><span class="lbl">{{thermal.msg}}</span></sc-if>
           <sc-if value="{{thermal.has}}" hint-placeholder-val="{{false}}">
           <span class="lbl">{{thermal.mat}}</span>
@@ -436,13 +437,19 @@ class Component extends DCLogic {
     // ---- thermal (laser): run the heat model up to time t
     let thermal = { on: false, rows: [] };
     if (S.vis.heat && isLaser) {
-      const mat = (S.materials || []).find((x) => x.id === job.materialId) || null;
+      // the material the heat model uses: its own choice here, else the job's
+      // (choosing one here doesn't change the job's processes)
+      const mats = S.materials || [];
+      const mat = mats.find((x) => x.id === (job.thermalMaterialId || job.materialId)) || null;
+      const pick = React.createElement('select', { className: 'dd', value: mat ? mat.id : '', 'aria-label': 'Thermal map material', style: { width: '100%' },
+        onChange: (e) => this.commit({ ...job, thermalMaterialId: e.target.value || null }) },
+      [React.createElement('option', { key: '', value: '' }, mats.length ? 'Choose a material…' : 'No materials yet')].concat(mats.map((x) => React.createElement('option', { key: x.id, value: x.id }, x.name + ' · ' + x.t + ' mm'))));
       const model = this.thermal(mat);
       const ref = CC.thermalOf(mat);
       if (!model) {
         thermal = {
-          on: true, none: true, rows: [],
-          msg: !mat ? 'Pick a material on the Job page to see the thermal map.'
+          on: true, none: true, rows: [], pick,
+          msg: !mat ? (mats.length ? 'Choose the material to see the thermal map.' : 'Add a material in Setup → Materials to see the thermal map.')
             : !ref ? 'No reference thermal data for ' + mat.name + '. The map covers acrylic, wood, MDF, card, foam board, PET film, magnetic sheet, stainless 304/316, mild steel, aluminium and brass.'
               : 'Nothing to simulate yet.'
         };
@@ -455,7 +462,7 @@ class Component extends DCLogic {
         for (let k = 0; k < model.T.length; k++) if (model.T[k] >= pr.limit) over++;
         const overArea = over * model.dx * model.dx;
         thermal = {
-          on: true, has: true, model, top,
+          on: true, has: true, model, top, pick,
           mat: mat.name + ' · ' + mat.t + ' mm · ' + (Number(machine.info && machine.info.power) || 80) + ' W ' + (model.fibre ? 'fibre' : 'CO2'),
           src: 'Data: ' + pr.name + ' — ' + pr.src + '.',
           rows: [

@@ -1,4 +1,4 @@
-# Builds Pathline on GitHub and publishes the installer as a GitHub release
+# Builds Pathline Prepare on GitHub and publishes the installer as a GitHub release
 # named after the version in package.json (tag v<version>, created with the
 # release). The release includes latest.yml, which installed copies read to
 # find updates.
@@ -32,7 +32,8 @@ jobs:
         run: |
           V=$(node -p "require('./package.json').version")
           echo "version=$V" >> "$GITHUB_OUTPUT"
-          if gh release view "v$V" > /dev/null 2>&1; then echo "released=true" >> "$GITHUB_OUTPUT"; else echo "released=false" >> "$GITHUB_OUTPUT"; fi
+          # a draft left by a publish that failed half way counts as not released
+          if [ "$(gh release view "v$V" --json isDraft -q .isDraft 2>/dev/null)" = "false" ]; then echo "released=true" >> "$GITHUB_OUTPUT"; else echo "released=false" >> "$GITHUB_OUTPUT"; fi
 
   windows:
     needs: check
@@ -57,9 +58,17 @@ jobs:
           V=$(node -p "require('./package.json').version")
           FILES="dist/Pathline-Setup-$V.exe dist/Pathline-Setup-$V.exe.blockmap dist/latest.yml dist/Pathline-$V-portable.exe"
           ls -l $FILES
-          if gh release view "v$V" > /dev/null 2>&1; then
-            gh release upload "v$V" $FILES --clobber
-          else
-            gh release create "v$V" $FILES --target "$GITHUB_SHA" --title "Pathline $V" \
-              --notes "Install with Pathline-Setup-$V.exe (updates itself), or run the portable exe. Installed copies of Pathline 1.1.0 and later update to this version automatically."
-          fi
+          # GitHub's API sometimes answers 502/503 for a moment: try up to 5 times,
+          # 30 s apart. A release made by an earlier attempt just gets its files.
+          for attempt in 1 2 3 4 5; do
+            if gh release view "v$V" > /dev/null 2>&1; then
+              # (a draft from an earlier failed attempt is published once its files are up)
+              gh release upload "v$V" $FILES --clobber && gh release edit "v$V" --draft=false && exit 0
+            else
+              gh release create "v$V" $FILES --target "$GITHUB_SHA" --title "Pathline Prepare $V" \
+                --notes "Install with Pathline-Setup-$V.exe (updates itself), or run the portable exe. Installed copies of Pathline (Prepare) 1.1.0 and later update to this version automatically." && exit 0
+            fi
+            echo "Attempt $attempt didn't get through; trying again in 30 s"
+            sleep 30
+          done
+          exit 1

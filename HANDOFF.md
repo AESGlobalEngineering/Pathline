@@ -15,6 +15,29 @@ Latest round (28 Oct, final):
 - **Dark mode bed is grey** (`--bed`, `--sheet`, `--bed-grid*` in theme.css). **ACI 7 shows as white in dark mode** (black in light), as in CAD, and so do the marks drawn on the bed (registration marks, engrave hatching, arrows, start points): see the `--aci7*` and `--ink` tokens, and `LRC.aci.hex/fg/stroke` in app.js. Exports (DXF/SVG/PDF) still use real black.
 - **Sample machines and materials from earlier builds are removed on first start** (main.js, tracked by `settings.samplesRemoved`). This is by exact id (trotec, flatbed, laser2, acr-print-3 … brass-1); anything the operator created stays.
 
+Version 1.5.0 (4 Nov):
+- **Materials on the machine** (main.js, protocol in HMI-BRIEF §5.3; the brief for the Run side is `hmi/RUN-MATERIALS-BRIEF.md`).
+  - `stampPresets(before, after)` stamps `mat.presetsAt[machineId]` whenever a material's presets for that machine change. This happens in `materials:save`, `saveAll` and `import`.
+  - `syncMaterials(m)` runs at the end of every `syncMachine`. It calls `GET /materials` (a 404 means the HMI doesn't keep materials, and nothing is sent), merges with `mergeMachineMaterials` (newer `updatedAt` wins per material; unknown materials are added), then `PUT`s `materialsDoc(m)` if the machine's id/updatedAt list differs.
+  - Saving the library calls `schedulePushMaterials()` (1.5 s debounce, every machine).
+  - Deleted ids go to `settings.removedMaterials` and are never pulled back.
+  - The window hears `materials:updated` (`api.materials.onUpdated`). Materials takes the new list except for materials with unsaved edits; the Job page refreshes its list.
+  - `device.materials` / `device.putMaterials` are the device calls, and errors from the device now carry `status`. The emulator stores the list in `<out>/materials.json` (it ignores a BOM).
+- **Test grid:** the button is now **Create job**. Apply is replaced by a process dropdown (`tgSendTo`; default is the first process of the kind being tested) and **Send**.
+
+Version 1.4.0 (3 Nov):
+- **Renamed Pathline Prepare.**
+  - What changed: `productName` and `shortcutName`, window titles, the brand word, dialogs, update, crash and bug-report text, and the release title in `.github/workflows/release.yml`.
+  - What stayed: "Pathline Run", "Pathline job" files (.cjob), the package `name` (`pathline`, so the updater cache folder is the same), the installer artifact names (`Pathline-Setup-<v>.exe`, which release.yml relies on), `appId`, and the GitHub repo.
+  - userData is now `%APPDATA%\Pathline Prepare`. On first start the old `%APPDATA%\Pathline\data` (or `Laser & Router Control`) is copied across when the new folder has none.
+- **Process reordering:** shared `LRC.rowDrag(e, k, show, drop, delay)` and `LRC.rowDragStyle(drag, k)` in app.js.
+  - Materials: a `.grip` handle on each row (delay 0); holding ⋮ still works (300 ms).
+  - Job page: a grip on each process row. Visible rows map to process indices (`pi`), and `moveProcess(from, to)` carries in-progress edits (`S.edit`) and the open process with the move.
+- **Test grid passes** (`tg.passes`, 1–20): used by the generated grid job and set by Apply.
+- **Foam** material group.
+- **Thermal map material:** a picker in the Simulation's thermal panel. It stores `job.thermalMaterialId`, defaulting to `job.materialId`, and only the heat model uses it.
+- **Add machine (Real):** only the IP address is asked for. Type, name and controller come from GET /info; a controller that isn't reported falls back to the type's default. Fields that don't apply are hidden, not greyed.
+
 Version 1.3.2 (2 Nov):
 - **Nested fill:** Fill copies has Layout **Grid / Nested** (`fillLayout`, default Nested), plus the Turn parts 90° switch. `LRC.ops.fillNest(job, ids, area, count, { spacing, margin, rotate, beds, dry })` packs `count` copies with `CC.nestRects`, or as many as fit when `count` is null (bounded by area). With `beds` (plotter) a count can add beds. The first copy is the original, moved into place.
   - The popover's count comes from a `dry` run, cached in `this.fillMemo` by its inputs. It also says how many more than a grid fit.
