@@ -78,6 +78,9 @@ async function refresh() {
       if (!last || Math.hypot(last[0] - st.pos.x, last[1] - st.pos.y) > 0.5) ui.trail.pts.push([st.pos.x, st.pos.y]);
       if (ui.trail.pts.length > 4000) ui.trail.pts.splice(0, 1000);
     }
+    // and along the job's own paths (its package is needed for that, shown or not)
+    if (st.job && !ui.pkgs[st.job]) { const id = st.job; ui.pkgs[id] = 'loading'; call('GET', LOCAL('/jobs/' + id + '/package')).then((p) => { ui.pkgs[id] = p; }).catch(() => { delete ui.pkgs[id]; }); }
+    followHead(st, ui.pkgs[st.job]);
   } catch (e) { if (S) S.offline = true; }
   const queue = visibleQueue();
   if (!queue.some((j) => j.id === ui.sel)) {
@@ -93,6 +96,140 @@ async function refresh() {
 const visibleQueue = () => (S ? S.jobs.filter((j) => j.status === 'queued' || j.status === 'running') : []);
 const cfg = () => S.config;
 const running = () => S && (S.status.state === 'running' || S.status.state === 'paused');
+
+// ---------------------------------------------------------------- the running job, followed along its paths
+// The head's position comes every 0.7 s; in between it may cut several shapes, so joining the
+// positions drew lines straight across the job. Instead the job's toolpath is laid out as one route
+// (travel to each step's start, then along it, each step taking Pathline's estimate spread by length),
+// every reported position is placed on the route (only ahead of the last one and not far ahead in
+// time, so a path crossing another can't pull it back or on), what's been run is drawn along the
+// job's own lines, and between reports the head moves on along the route (at most 1.5 s ahead).
+// Positions that don't fit the route (a job moved onto registration marks, say) go back to the trace.
+// rate: route seconds per real second, learnt as it runs (the machine needn't match the estimate)
+const follow = { job: null, route: null, k: 0, t: 0, at: 0, miss: 0, doneK: -1, rate: 1, found: false };
+
+function routeOf(pkg) {
+  const travel = Number((cfg().trotec || {}).travelSpeed) || 500;
+  const segs = [];
+  let t = 0, cur = null;
+  const add = (a, b, dt, kind, step) => { segs.push({ a, b, t0: t, dt: Math.max(dt, 1e-3), kind, step }); t += Math.max(dt, 1e-3); };
+  const go = (p, step) => { if (cur && Math.hypot(p[0] - cur[0], p[1] - cur[1]) > 0.01) add(cur, p, Math.hypot(p[0] - cur[0], p[1] - cur[1]) / travel, 'travel', step); cur = p; };
+  (pkg.toolpath || []).forEach((s, i) => {
+    let pts = null, kind = 'cut';
+    if (Array.isArray(s.p) && s.p.length > 1) pts = s.closed ? s.p.concat([s.p[0]]) : s.p;
+    else if (s.type === 'engrave' && Array.isArray(s.box) && s.box.length === 4) {
+      // the scan lines (at most 200 of them here: enough to follow and draw)
+      const [x0, y0, x1, y1] = s.box, n = Math.max(1, Math.min(200, s.lines || 20)), up = s.direction === 'up';
+      pts = [];
+      for (let r = 0; r < n; r++) {
+        const y = up ? y1 - ((y1 - y0) * (r + 0.5)) / n : y0 + ((y1 - y0) * (r + 0.5)) / n;
+        const back = s.bidirectional !== false && r % 2;
+        pts.push(back ? [x1, y] : [x0, y], back ? [x0, y] : [x1, y]);
+      }
+      kind = 'row';
+    }
+    if (!pts) { if (s.seconds) add(cur || [0, 0], cur || [0, 0], s.seconds, 'wait', i); return; }
+    go(pts[0], i);
+    const proc = (pkg.processes || []).find((p) => p.index === s.process) || {};
+    let len = 0;
+    for (let k = 1; k < pts.length; k++) len += Math.hypot(pts[k][0] - pts[k - 1][0], pts[k][1] - pts[k - 1][1]);
+    const secs = s.seconds || len / (Number(proc.speed) || 20);
+    for (let k = 1; k < pts.length; k++) {
+      // engraving: the beam is on along a row, the step between rows is part of the scan
+      const dl = Math.hypot(pts[k][0] - pts[k - 1][0], pts[k][1] - pts[k - 1][1]);
+      add(pts[k - 1], pts[k], len ? (secs * dl) / len : 0, kind === 'row' && k % 2 === 0 ? 'step' : kind, i);
+    }
+    cur = pts[pts.length - 1];
+  });
+  return { segs, end: t };
+}
+
+// where the route is at time t (s): segment index and point
+function routeAt(route, t) {
+  const s = route.segs;
+  let lo = 0, hi = s.length - 1;
+  while (lo < hi) { const m = (lo + hi + 1) >> 1; if (s[m].t0 <= t) lo = m; else hi = m - 1; }
+  const g = s[lo], u = Math.max(0, Math.min(1, (t - g.t0) / g.dt));
+  return { k: lo, p: [g.a[0] + (g.b[0] - g.a[0]) * u, g.a[1] + (g.b[1] - g.a[1]) * u] };
+}
+
+// a reported head position: placed on the route, ahead of the last place and within reach in time
+function followHead(st, pkg) {
+  if (!st.job || !pkg || pkg === 'loading' || !Number.isFinite(st.pos.x)) { follow.job = null; return; }
+  const now = performance.now();
+  if (follow.job !== st.job) Object.assign(follow, { job: st.job, route: routeOf(pkg), k: 0, t: 0, at: now, miss: 0, doneK: -1, rate: 1, found: false });
+  const R = follow.route;
+  if (!R.segs.length) return;
+  const P = [st.pos.x, st.pos.y];
+  // The first time (the screen opened mid-job), or lost for a few reports: anywhere on the route
+  // the controller's progress allows (the head waiting where the last run ended can also be where
+  // this one ends: the same job again), nearest that progress. Otherwise a few seconds ahead at the
+  // pace learnt.
+  const wide = !follow.found || follow.miss >= 3;
+  const hint = (Number(st.progress) || 0) * R.end, tol = Math.max(15, 0.3 * R.end);
+  const from = wide ? 0 : follow.k;
+  const reach = wide ? hint + tol : follow.t + 3 + (2 * Math.max(1, follow.rate) * (now - follow.at)) / 1000;
+  let best = null;
+  for (let k = from; k < R.segs.length && R.segs[k].t0 <= reach; k++) {
+    const g = R.segs[k], dx = g.b[0] - g.a[0], dy = g.b[1] - g.a[1], L2 = dx * dx + dy * dy;
+    let u = L2 ? ((P[0] - g.a[0]) * dx + (P[1] - g.a[1]) * dy) / L2 : 0;
+    u = Math.max(!wide && k === follow.k ? Math.min(1, (follow.t - g.t0) / g.dt) : 0, Math.min(1, u));
+    const d = Math.hypot(g.a[0] + dx * u - P[0], g.a[1] + dy * u - P[1]), t = g.t0 + u * g.dt;
+    if (wide && Math.abs(t - hint) > tol) continue;
+    // (searching wide, of the places that fit, the one nearest the progress reported)
+    const score = wide ? d + Math.abs(t - hint) * 0.01 : d;
+    if (d < 4 && (!best || score < best.score - 0.01)) best = { k, t, d, score };
+  }
+  if (best) {
+    // the pace: route seconds per real second since the last fix, smoothed (and kept sensible)
+    const dt = (now - follow.at) / 1000;
+    if (follow.found && dt > 0.3 && best.t > follow.t) follow.rate = Math.max(0.3, Math.min(4, 0.6 * follow.rate + 0.4 * ((best.t - follow.t) / dt)));
+    Object.assign(follow, { k: best.k, t: best.t, at: now, miss: 0, found: true });
+  } else follow.miss++;
+}
+
+// following this package's run (its route fits the reported positions)?
+const following = (pkg) => !!(follow.job && follow.route && follow.found && S && S.status.job === follow.job && pkg && pkg !== 'loading' && follow.miss < 6 && ui.pkgs[follow.job] === pkg);
+
+// the head as predicted now: on from the last place at the pace learnt (not while paused), never
+// more than 1.5 s on
+function predicted() {
+  const ahead = S.status.state === 'running' ? Math.min(1.5, (performance.now() - follow.at) / 1000) * follow.rate : 0;
+  return routeAt(follow.route, Math.min(follow.route.end, follow.t + ahead));
+}
+
+// what's been run: the cut and engraved parts of the route up to segment k (and point p on it)
+function doneD(k0, k1, p) {
+  let d = '';
+  const segs = follow.route.segs;
+  for (let k = k0; k <= k1 && k < segs.length; k++) {
+    const g = segs[k];
+    if (g.kind === 'travel' || g.kind === 'wait' || g.kind === 'step') continue;
+    const b = k === k1 && p ? p : g.b;
+    d += 'M' + g.a[0].toFixed(2) + ' ' + g.a[1].toFixed(2) + 'L' + b[0].toFixed(2) + ' ' + b[1].toFixed(2);
+  }
+  return d;
+}
+
+// between redraws: the head, its crosshair and the run so far move on (about 30 times a second)
+let lastFrame = 0;
+function followFrame(ts) {
+  requestAnimationFrame(followFrame);
+  if (ts - lastFrame < 33 || !S || ui.view !== 'queue') return;
+  lastFrame = ts;
+  const svg = document.getElementById('bedview');
+  if (!svg || svg.dataset.follow !== follow.job || !following(ui.pkgs[follow.job])) return;
+  const { k, p } = predicted();
+  const step = follow.route.segs[k].step;
+  let first = k;
+  while (first > 0 && follow.route.segs[first - 1].step === step) first--;
+  const set = (id, attrs) => { const el = document.getElementById(id); if (el) for (const a in attrs) el.setAttribute(a, attrs[a]); };
+  if (follow.doneK !== first) { set('run-done', { d: doneD(0, first - 1) }); follow.doneK = first; }
+  set('run-now', { d: doneD(first, k, p) });
+  set('head-vx', { x1: p[0], x2: p[0] }); set('head-hy', { y1: p[1], y2: p[1] });
+  set('head-ring', { cx: p[0], cy: p[1] }); set('head-dot', { cx: p[0], cy: p[1] });
+}
+requestAnimationFrame(followFrame);
 
 // ---------------------------------------------------------------- drawing
 function bedSvg(pkg, opts = {}) {
@@ -119,20 +256,32 @@ function bedSvg(pkg, opts = {}) {
   if (opts.head && Array.isArray(S.status.marks)) {
     for (const m of S.status.marks) body += '<circle cx="' + m[0] + '" cy="' + m[1] + '" r="' + r * 0.7 + '" fill="none" stroke="#30A46C" vector-effect="non-scaling-stroke" style="stroke-width:2px"/><circle cx="' + m[0] + '" cy="' + m[1] + '" r="' + r * 0.12 + '" fill="#30A46C"/>';
   }
-  // the path the head has travelled in this job
-  if (opts.head && ui.trail.pts.length > 1) {
+  // what's been run of this job: along its own paths while the head can be followed on them,
+  // else the trace of where the head has been
+  const along = opts.head && following(pkg);
+  let at = null;
+  if (along) {
+    const pr = predicted();
+    at = pr.p;
+    let first = pr.k;
+    while (first > 0 && follow.route.segs[first - 1].step === follow.route.segs[pr.k].step) first--;
+    follow.doneK = first;
+    const line = (id, d) => '<path id="' + id + '" d="' + d + '" fill="none" stroke="var(--accent)" vector-effect="non-scaling-stroke" style="stroke-width:2.5px" stroke-linecap="round"/>';
+    body += line('run-done', doneD(0, first - 1)) + line('run-now', doneD(first, pr.k, pr.p));
+  } else if (opts.head && ui.trail.pts.length > 1) {
     body += '<polyline points="' + ui.trail.pts.map((p) => p[0].toFixed(1) + ',' + p[1].toFixed(1)).join(' ') + '" fill="none" stroke="var(--accent)" stroke-opacity="0.45" vector-effect="non-scaling-stroke" style="stroke-width:1.5px" stroke-linejoin="round"/>';
   }
-  // the toolhead: crosshair across the bed and a ring at its position (only when it's known)
+  // the toolhead: crosshair across the bed and a ring at its position (only when it's known;
+  // followed along the job, where it's predicted to be now)
   if (opts.head && Number.isFinite(S.status.pos.x) && S.status.link === 'online') {
-    const { x, y } = S.status.pos;
-    body += '<line x1="' + x + '" y1="0" x2="' + x + '" y2="' + H + '" stroke="var(--accent)" stroke-opacity="0.35" vector-effect="non-scaling-stroke" stroke-dasharray="4 4" style="stroke-width:1px"/>' +
-      '<line x1="0" y1="' + y + '" x2="' + W + '" y2="' + y + '" stroke="var(--accent)" stroke-opacity="0.35" vector-effect="non-scaling-stroke" stroke-dasharray="4 4" style="stroke-width:1px"/>' +
-      '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="var(--accent-ring)" stroke="var(--accent)" stroke-width="' + r / 4 + '"/><circle cx="' + x + '" cy="' + y + '" r="' + r / 4 + '" fill="var(--accent)"/>';
+    const [x, y] = at || [S.status.pos.x, S.status.pos.y];
+    body += '<line id="head-vx" x1="' + x + '" y1="0" x2="' + x + '" y2="' + H + '" stroke="var(--accent)" stroke-opacity="0.35" vector-effect="non-scaling-stroke" stroke-dasharray="4 4" style="stroke-width:1px"/>' +
+      '<line id="head-hy" x1="0" y1="' + y + '" x2="' + W + '" y2="' + y + '" stroke="var(--accent)" stroke-opacity="0.35" vector-effect="non-scaling-stroke" stroke-dasharray="4 4" style="stroke-width:1px"/>' +
+      '<circle id="head-ring" cx="' + x + '" cy="' + y + '" r="' + r + '" fill="var(--accent-ring)" stroke="var(--accent)" stroke-width="' + r / 4 + '"/><circle id="head-dot" cx="' + x + '" cy="' + y + '" r="' + r / 4 + '" fill="var(--accent)"/>';
   }
   if (!opts.head) return '<svg class="bedsvg" viewBox="0 0 ' + W + ' ' + H + '" style="aspect-ratio:' + W + '/' + H + '" preserveAspectRatio="xMidYMid meet" aria-hidden="true">' + body + '</svg>';
   // with the head shown: the whole viewport, zoomed and panned (bedViewBox)
-  return '<svg id="bedview" viewBox="' + bedViewBox().join(' ') + '" style="display:block;width:100%;height:100%;touch-action:none;cursor:grab" preserveAspectRatio="xMidYMid meet" aria-hidden="true">' +
+  return '<svg id="bedview"' + (along ? ' data-follow="' + esc(follow.job) + '"' : '') + ' viewBox="' + bedViewBox().join(' ') + '" style="display:block;width:100%;height:100%;touch-action:none;cursor:grab" preserveAspectRatio="xMidYMid meet" aria-hidden="true">' +
     '<rect x="0" y="0" width="' + W + '" height="' + H + '" rx="' + (W / 200).toFixed(2) + '" fill="var(--bed)" stroke="var(--bed-line)" vector-effect="non-scaling-stroke" style="stroke-width:1px"/>' + body + '</svg>';
 }
 

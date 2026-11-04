@@ -7,7 +7,8 @@ module.exports = [
   {
     version: '0.7.9', date: '4 Nov 2026',
     fixed: [
-      'Queue: a long list of processes (a test grid) can be scrolled. The screen redraws every 0.7 s and sent it back to the top; now every part that scrolls keeps its place (also the queue list and the Jog page).'
+      'Queue: a long list of processes (a test grid) can be scrolled. The screen redraws every 0.7 s and sent it back to the top; now every part that scrolls keeps its place (also the queue list and the Jog page).',
+      'Queue: a running job is followed along its own paths. What\'s been cut and engraved is drawn over the job, and the head moves smoothly between the controller\'s reports, predicted at the pace the machine is really going. Before, the reported positions were joined with straight lines, which cut across the job.'
     ]
   },
   {
