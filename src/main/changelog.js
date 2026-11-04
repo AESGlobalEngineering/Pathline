@@ -7,7 +7,7 @@ module.exports = [
   {
     version: '1.5.5', date: '4 Nov 2026',
     added: [],
-    fixed: ['Closed cuts start 0.3 mm from the corner (was 1 mm).']
+    fixed: ['Closed cuts start 0.1 mm from the corner (was 1 mm).']
   },
   {
     version: '1.5.4', date: '4 Nov 2026',

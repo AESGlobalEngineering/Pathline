@@ -751,7 +751,7 @@
   // a millimetre of a corner at cutting speeds), or a vertex where the path
   // hardly turns (on a curve). Only a shape with neither (tiny) starts on a
   // corner. Each start is { v, t }: t along the segment from vertex v.
-  const START_CLEAR = 0.3; // mm between a start and the nearest corner
+  const START_CLEAR = 0.1; // mm between a start and the nearest corner
   function startPoints(p) {
     const n = p.length, out = [];
     for (let v = 0; v < n; v++) {

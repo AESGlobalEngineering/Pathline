@@ -140,7 +140,7 @@ async function main() {
       const sqs = [0, 1, 2].map((i) => ({ id: 'q' + i, aci: 1, paths: [{ p: CC.shapes.rect(20 + i * 40, 20, 30, 30, 0), c: true }] }));
       const ops = CC.estimate({ ...pj, regMode: 'off', repeat: 1, entities: sqs, cutOrder: { order: 'speed', inside: 'off' } }, laser, { timeline: true }).timeline.filter((o) => o.kind === 'op');
       const corners = sqs.map((e) => e.paths[0].p);
-      const onCorner = ops.filter((o) => corners.some((c) => c.some((v) => Math.hypot(v[0] - o.path.p[0][0], v[1] - o.path.p[0][1]) < 0.2)));
+      const onCorner = ops.filter((o) => corners.some((c) => c.some((v) => Math.hypot(v[0] - o.path.p[0][0], v[1] - o.path.p[0][1]) < 0.05)));
       ok(ops.length === 3 && !onCorner.length, 'squares start along an edge, not on a corner (' + ops.map((o) => o.path.p[0].map((v) => v.toFixed(1)).join(',')).join(' · ') + ')');
       ok(ops.every((o) => Math.abs(CC.polyLen(o.path.p, true) - 120) < 0.01), 'starting along an edge keeps the whole outline (120 mm each)');
     }
@@ -233,7 +233,7 @@ async function main() {
     const squares = [{ id: 's1', aci: 1, paths: [{ p: [[110, 110], [10, 110], [10, 10], [110, 10]], c: true }] }, { id: 's2', aci: 1, paths: [{ p: [[200, 10], [250, 10], [250, 60], [200, 60]], c: true }] }];
     const st = CC.estimate({ ...pj, entities: squares, cutOrder: { inside: 'off', order: 'file' } }, laser, { timeline: true }).timeline.filter((o) => o.kind === 'op');
     // from the origin, the corner (110, 10) is on the way to the next part, so the start is on an edge beside it
-    const isCorner = (q, e) => e.paths[0].p.some((v) => Math.hypot(v[0] - q[0], v[1] - q[1]) < 0.2);
+    const isCorner = (q, e) => e.paths[0].p.some((v) => Math.hypot(v[0] - q[0], v[1] - q[1]) < 0.05);
     const s0 = st[0].path.p[0], s1 = st[1].path.p[0];
     ok(!isCorner(s0, squares[0]) && Math.hypot(s0[0] - 110, s0[1] - 10) <= 26, 'cut starts on an edge near where it is most convenient on the travel path: ' + s0.join(','));
     ok(!isCorner(s1, squares[1]) && Math.hypot(s1[0] - 200, s1[1] - 10) <= 13, 'next cut starts on an edge nearest the previous one: ' + s1.join(','));
