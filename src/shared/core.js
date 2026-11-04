@@ -1578,6 +1578,9 @@
     // objects whose process has output switched off are not sent: say so (by process)
     const offNames = job.processes.filter((p) => p.out === false && !isRegProc(p) && (p.aci || []).some((a) => used.has(a))).map((p) => p.name);
     if (offNames.length) out.push({ ok: false, warn: true, l: 'Output off: ' + offNames.join(', ') + ' — those objects won\'t be sent' });
+    // a whole-job repeat is easy to forget (e.g. a job that started as a test grid): always say so
+    const rep = Math.max(1, Math.round(Number(job.repeat) || 1));
+    if (rep > 1 && ents.length) out.push({ ok: false, warn: true, repeat: true, l: 'Runs the whole job ' + rep + ' times (Job settings)' });
     if (isLaser) {
       const cutAci = new Set(job.processes.filter((p) => p.proc === 'Cut' && p.out !== false).flatMap((p) => p.aci || []));
       // open lines are fine (tear-off lines, perforations); a contour whose ends

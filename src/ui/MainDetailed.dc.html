@@ -726,7 +726,7 @@
     </div>
     <div style="display: flex; flex-wrap: wrap; gap: 6px">
       <sc-for list="{{checks}}" as="k" hint-placeholder-count="3">
-        <span class="pill check {{k.cls}}" style="background: {{k.bg}}; color: {{k.fg}}">
+        <span class="pill check {{k.cls}}" onClick="{{k.click}}" title="{{k.tip}}" style="background: {{k.bg}}; color: {{k.fg}}; cursor: {{k.cur}}">
           <svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width: 14px; height: 14px"><path d="{{k.icon}}"></path></svg>{{k.l}}
         </span>
       </sc-for>
@@ -2013,11 +2013,13 @@ class Component extends DCLogic {
     const checks = CC.checkJob(job, machine).map((c) => ({
       l: c.l, icon: c.ok ? icons.check : icons.warn,
       cls: c.ok ? 'ok' : c.warn ? 'warn' : 'err',
-      bg: c.ok ? 'var(--ok-soft)' : c.warn ? 'var(--warn-soft)' : 'var(--err-soft)', fg: c.ok ? 'var(--ok)' : c.warn ? 'var(--warn)' : 'var(--err)'
+      bg: c.ok ? 'var(--ok-soft)' : c.warn ? 'var(--warn-soft)' : 'var(--err-soft)', fg: c.ok ? 'var(--ok)' : c.warn ? 'var(--warn)' : 'var(--err)',
+      // the repeat warning opens Job settings, where it's changed
+      click: c.repeat ? R(() => this.jobSettings()) : noop, cur: c.repeat ? 'pointer' : '', tip: c.repeat ? 'Open Job settings' : ''
     }));
     const outProcs = procs.filter((p) => p.out !== false && (p.aci || []).some((a) => usedAci.has(a))).length;
     const nObj = job.entities.filter((e) => !e.hidden).length;
-    const jobSummary = outProcs + ' process' + (outProcs === 1 ? '' : 'es') + ' · ' + (isLaser ? (SH.on ? SH.w + ' × ' + SH.h + ' sheet' : 'full bed') : est.beds + ' bed' + (est.beds > 1 ? 's' : '')) + ' · ' + nObj + ' object' + (nObj === 1 ? '' : 's') + (est.total ? ' · ' + CC.fmtLen(est.cutLen) + ' cut' : '');
+    const jobSummary = outProcs + ' process' + (outProcs === 1 ? '' : 'es') + ' · ' + (isLaser ? (SH.on ? SH.w + ' × ' + SH.h + ' sheet' : 'full bed') : est.beds + ' bed' + (est.beds > 1 ? 's' : '')) + ' · ' + nObj + ' object' + (nObj === 1 ? '' : 's') + (est.total ? ' · ' + CC.fmtLen(est.cutLen) + ' cut' : '') + (est.repeats > 1 ? ' · whole job ' + est.repeats + '×' : '');
 
     // ---- canvas
     const canvasEl = React.createElement(LRC.JobCanvas, {

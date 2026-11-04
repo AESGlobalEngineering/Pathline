@@ -15,6 +15,9 @@ Latest round (28 Oct, final):
 - **Dark mode bed is grey** (`--bed`, `--sheet`, `--bed-grid*` in theme.css). **ACI 7 shows as white in dark mode** (black in light), as in CAD, and so do the marks drawn on the bed (registration marks, engrave hatching, arrows, start points): see the `--aci7*` and `--ink` tokens, and `LRC.aci.hex/fg/stroke` in app.js. Exports (DXF/SVG/PDF) still use real black.
 - **Sample machines and materials from earlier builds are removed on first start** (main.js, tracked by `settings.samplesRemoved`). This is by exact id (trotec, flatbed, laser2, acr-print-3 … brass-1); anything the operator created stays.
 
+Version 1.5.3 (4 Nov):
+- **Repeat is always visible.** `checkJob` adds a warn check, "Runs the whole job N times (Job settings)" (`repeat: true`), whenever `job.repeat > 1`; on the Job page that pill opens Job settings. The summary under the estimate ends with "whole job N×". This came from a bug report: a test-grid job with 2 passes was reused for parts and silently cut everything twice.
+
 Version 1.5.2 (4 Nov; 1.5.1 was released by the Pathline Run session with its test grid choices, see its commit):
 - **Whole-job repeat:** `job.repeat` (1–50; set in Job settings → Run the whole job). In `estimateIn`, each bed's work runs `repeat` times, every step once before any is repeated. Timeline ops carry `round`, and so do package steps (exporters `toolpath`). A process with `once: true` runs only in round 1. The job sheet says "Repeat". The Simulation shows "round r of n" and counts items within the round.
 - **Test grid passes** now set the job's `repeat` (each square is one pass) with Ordered cut order, and the label process is `once`, so the whole grid runs and then runs again.

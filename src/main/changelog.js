@@ -5,6 +5,13 @@
 
 module.exports = [
   {
+    version: '1.5.3', date: '4 Nov 2026',
+    added: [],
+    fixed: [
+      'A job that started as a test grid with 2 or more passes kept running the whole job that many times after its contents were replaced, with nothing on screen to say so. A job set to run more than once now shows it in the checks (click to open Job settings) and in the summary under the time.'
+    ]
+  },
+  {
     version: '1.5.2', date: '4 Nov 2026',
     added: [
       'A test grid job with more than one pass now runs the whole grid, then the whole grid again (it used to do each square\'s passes back to back). The labels are engraved once.',
