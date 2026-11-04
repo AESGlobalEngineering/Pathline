@@ -413,12 +413,12 @@ function queueView() {
     // Select: tick several jobs; Start runs them one after another (plotters / routers)
     (canMulti ? '<label style="display:inline-flex;align-items:center;gap:8px;cursor:pointer" title="Tick several jobs, then Start runs them one after another"><span class="lbl" style="font-size:13px;color:var(--text-2)">' + (ui.multi ? ui.picked.length + ' ticked' : 'Select') + '</span><button role="switch" class="sw" aria-checked="' + !!ui.multi + '" data-a="multi" aria-label="Select several jobs"></button></label>' : '') +
     '<button class="tb sm" data-a="import">' + ic(ICON.upload, 16) + 'Import</button></div>' +
-    '<div style="flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:8px;padding:0 12px 12px">' + (list || '<div style="padding:28px 8px;text-align:center;color:var(--text-3)">Queue empty. Send a job from Pathline, or import a .cjob file.</div>') + '</div>' +
+    '<div data-keep="qlist" style="flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:8px;padding:0 12px 12px">' + (list || '<div style="padding:28px 8px;text-align:center;color:var(--text-3)">Queue empty. Send a job from Pathline, or import a .cjob file.</div>') + '</div>' +
     '<div style="display:flex;gap:8px;padding:12px;border-top:1px solid var(--line)"><button class="tb" data-a="remove"' + (!job || job.status === 'running' ? ' disabled' : '') + '>' + ic(ICON.trash, 18) + 'Remove</button></div></aside>' +
 
     '<main class="card qmain">' +
     '<div class="qtop">' +
-    '<div class="qinfo">' +
+    '<div class="qinfo" data-keep="qinfo">' +
     '<div style="display:flex;flex-direction:column;gap:4px"><h1 style="margin:0;font-size:24px;font-weight:600;line-height:1.2">' + esc(shown ? shown.name : 'No job selected') + '</h1>' +
     '<span style="color:var(--text-2)">' + esc(shown ? (shown.material || 'No material') + (cfg().configured ? ' · ' + cfg().name + ' · ' + ctrlName : '') : 'Choose a job from the queue') + '</span></div>' +
     (shownPkg && shownPkg !== 'loading' ? '<div style="display:flex;flex-direction:column;gap:6px">' + procRows(shownPkg) + '</div>' : '') + warn +
@@ -469,7 +469,7 @@ function jogView() {
   const [bw, bh] = c.bed;
   const outside = st.link === 'online' && Number.isFinite(st.pos.x) && (st.pos.x < -0.5 || st.pos.y < -0.5 || st.pos.x > bw + 0.5 || st.pos.y > bh + 0.5);
   return '<div class="view fit jview">' +
-    '<section aria-label="Jog" class="card" style="flex:1 1 auto;min-width:0;min-height:0;overflow-y:auto;padding:20px;display:flex;flex-direction:column;gap:16px"><h2 class="h-sec">Position</h2>' +
+    '<section aria-label="Jog" data-keep="jogpos" class="card" style="flex:1 1 auto;min-width:0;min-height:0;overflow-y:auto;padding:20px;display:flex;flex-direction:column;gap:16px"><h2 class="h-sec">Position</h2>' +
     (outside ? '<div class="warnbox">The head is outside the ' + bw + ' × ' + bh + ' mm bed set in Setup. If the machine is bigger than that, set its work area in Setup → Work area (Read from controller fills it in).</div>' : '') +
     '<div style="display:flex;flex-wrap:wrap;gap:36px">' + [['X', shownPos(st).x], ['Y', shownPos(st).y]].map(([l, v]) => '<div style="display:flex;flex-direction:column;gap:2px"><span class="lbl">' + l + ' <span class="mono">mm</span></span><span class="mono" style="font-size:36px;font-weight:500">' + (Number.isFinite(v) ? v.toFixed(1) : '—') + '</span></div>').join('') + '</div>' +
     '<div style="display:flex;flex-wrap:wrap;align-items:center;gap:28px"><div style="display:grid;grid-template-columns:repeat(3,76px);grid-template-rows:repeat(3,76px);gap:8px">' +
@@ -480,7 +480,7 @@ function jogView() {
     ['0.1', '1', '10', '100'].map((v) => '<button role="radio" class="mono" style="min-width:56px" aria-checked="' + (ui.step === v) + '" data-a="step" data-v="' + v + '">' + v + '</button>').join('') + '</div>' +
     '<span class="lbl" style="min-height:18px">' + (ui.hold && ui.hold.held ? 'Moving ' + ui.hold.axis.toUpperCase() + (ui.hold.dir < 0 ? '−' : '+') + ' at ' + ui.step + ' mm/s' : 'Hold an arrow to keep moving') + '</span></div></div>' +
     camCard(c, st) + '</section>' +
-    '<section aria-label="Machine" class="card" style="flex:0 1 360px;min-width:260px;min-height:0;overflow-y:auto;padding:20px;display:flex;flex-direction:column;gap:12px"><h2 class="h-sec">Machine</h2>' +
+    '<section aria-label="Machine" data-keep="jogmach" class="card" style="flex:0 1 360px;min-width:260px;min-height:0;overflow-y:auto;padding:20px;display:flex;flex-direction:column;gap:12px"><h2 class="h-sec">Machine</h2>' +
     '<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px">' +
     '<button class="tb" style="height:52px" data-a="home">Home</button><button class="tb" style="height:52px" data-a="frame">Frame job</button>' +
     (c.controller === 'ruida' && c.type === 'plotter' && c.f.conveyor ? '<button class="tb" style="height:52px" data-a="feed" title="Advances the material ' + esc(c.feedLen) + ' mm">Conveyor</button>' : '') +
@@ -832,14 +832,18 @@ function render() {
   const ae = document.activeElement;
   const focused = ae && /^(INPUT|SELECT|TEXTAREA)$/.test(ae.tagName) && ae.dataset && (ae.dataset.f || ae.dataset.n);
   if (ui.view === 'setup' && focused) { const h = $app.querySelector('header'); if (h) h.outerHTML = header(); return; }
-  const scroll = $app.querySelector('.view') && ui.drawn === ui.view ? $app.querySelector('.view').scrollTop : 0;
+  // every part that scrolls keeps its place: the screen is redrawn every 0.7 s, and the job's
+  // process list (a test grid has dozens) went back to the top each time, so it couldn't be scrolled
+  const scrollers = '.view, [data-keep], .dlg, pre.log';
+  const keyOf = (el) => el.dataset.keep || el.className;
+  const scroll = {};
+  if (ui.drawn === ui.view) for (const el of $app.querySelectorAll(scrollers)) scroll[keyOf(el)] = el.scrollTop;
   ui.drawn = ui.view;
   const v = ui.view === 'jog' ? jogView() : ui.view === 'history' ? historyView() : ui.view === 'setup' ? setupView() : queueView();
   const t = ui.toast;
   $app.innerHTML = header() + v + dialog() + (t ? '<div class="toast" role="status" style="display:flex;align-items:center;gap:14px">' + esc(t.msg) +
     (t.action ? '<button class="tb sm" data-a="toastAction">' + esc(t.action) + '</button>' : '') + '</div>' : '');
-  const nv = $app.querySelector('.view');
-  if (nv) nv.scrollTop = scroll;
+  for (const el of $app.querySelectorAll(scrollers)) if (keyOf(el) in scroll) el.scrollTop = scroll[keyOf(el)];
   drawCam();
 }
 
