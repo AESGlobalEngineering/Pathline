@@ -31,7 +31,7 @@ async function request(m, method, route, body) {
   const text = await res.text();
   let data = null;
   try { data = text ? JSON.parse(text) : null; } catch (e) { data = { raw: text }; }
-  if (!res.ok) throw new Error((data && data.error) || 'Device answered ' + res.status);
+  if (!res.ok) { const e = new Error((data && data.error) || 'Device answered ' + res.status); e.status = res.status; throw e; }
   return { data, ms: Date.now() - t0 };
 }
 
@@ -41,6 +41,12 @@ const test = async (m) => {
 };
 const machineSettings = async (m) => (await request(m, 'GET', '/machine')).data;
 const status = async (m) => (await request(m, 'GET', '/status')).data;
+// The material settings kept on the machine (see HMI-BRIEF §5.3). null when the
+// HMI doesn't keep them (an HMI from before this was added answers 404).
+async function materials(m) {
+  try { return (await request(m, 'GET', '/materials')).data; } catch (e) { if (e.status === 404) return null; throw e; }
+}
+const putMaterials = async (m, doc) => (await request(m, 'PUT', '/materials', doc)).data;
 
 // Motion and I/O commands the Move panel and Machine menu use.
 const COMMANDS = new Set(['jog', 'home', 'frame', 'io', 'stop', 'pause', 'resume', 'start', 'autofocus', 'testfire', 'feed', 'toolchange']);
@@ -59,4 +65,4 @@ const orderJobs = async (m, ids) => (await request(m, 'POST', '/jobs/order', { i
 // File/folder name without characters Windows refuses.
 const safeName = (s) => String(s || 'job').replace(/[\\/:*?"<>|]+/g, '-').replace(/\s+/g, ' ').trim().slice(0, 80) || 'job';
 
-module.exports = { test, machineSettings, status, command, sendPackage, jobs, removeJob, orderJobs, safeName };
+module.exports = { test, machineSettings, status, materials, putMaterials, command, sendPackage, jobs, removeJob, orderJobs, safeName };

@@ -98,6 +98,19 @@ const routes = {
   'GET /info': () => ({ name: machine.name, type: machine.type, ctrl: machine.ctrl, model: machine.name, firmware: 'emulator 1.0', protocol: 1, bed: machine.bed }),
   'GET /machine': () => machine,
   'GET /status': () => ({ ...st, pos: { ...st.pos }, queued: jobs.filter((j) => j.status === 'queued').length }),
+  // material settings kept on the machine (HMI-BRIEF §5.3): Pathline Prepare
+  // replaces the whole list with PUT and reads it back with GET; kept in
+  // <out>/materials.json so they survive a restart
+  'GET /materials': () => {
+    try { return JSON.parse(fs.readFileSync(path.join(OUT, 'materials.json'), 'utf8').replace(/^﻿/, '')); } catch (e) { return { format: 'pathline-materials', version: 1, materials: [] }; }
+  },
+  'PUT /materials': (b) => {
+    if (b.format !== 'pathline-materials' || !Array.isArray(b.materials)) throw Object.assign(new Error('Not a materials list'), { code: 400 });
+    fs.mkdirSync(OUT, { recursive: true });
+    fs.writeFileSync(path.join(OUT, 'materials.json'), JSON.stringify({ ...b, savedAt: new Date().toISOString() }, null, 2));
+    log('materials', b.materials.length + ' kept');
+    return { ok: true, count: b.materials.length };
+  },
   'GET /jobs': () => jobs.map(({ id, name, status, seconds, receivedAt, finishedAt }) => ({ id, name, status, seconds, receivedAt, finishedAt, progress: id === st.job ? st.progress : status === 'done' ? 1 : 0 })),
   // reorder waiting jobs: { ids: [...] } in the new order
   'POST /jobs/order': (b) => {
@@ -209,7 +222,7 @@ http.createServer(async (req, res) => {
   const fn = routes[route];
   if (!fn) return send(res, 404, { error: 'No route ' + route });
   try {
-    const b = req.method === 'POST' ? await body(req) : {};
+    const b = req.method === 'POST' || req.method === 'PUT' ? await body(req) : {};
     send(res, 200, fn(b) || {});
   } catch (err) {
     send(res, err.code || 500, { error: err.message });

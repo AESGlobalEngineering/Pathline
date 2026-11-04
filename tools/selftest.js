@@ -408,6 +408,16 @@ async function main() {
       await device.removeJob(m, a.id);
       q = (await device.jobs(m)).filter((j) => j.status === 'queued').map((j) => j.name).join(',');
       ok(q === 'B', 'queue remove (' + q + ')');
+      // material settings kept on the machine: empty at first, then whatever was put, unchanged
+      const none = await device.materials(m);
+      ok(none && Array.isArray(none.materials) && none.materials.length === 0, 'machine starts with no materials');
+      const doc = { format: 'pathline-materials', version: 1, machine: { id: m.id }, materials: [{ id: 'mat-1', name: 'Acrylic ×3 · 3 mm', t: 3, updatedAt: '2026-11-04T10:00:00.000Z', processes: [{ name: 'Cut', proc: 'Cut', power: 90, speed: 20, extra: { kept: true } }] }] };
+      await device.putMaterials(m, doc);
+      const back = await device.materials(m);
+      ok(JSON.stringify(back.materials) === JSON.stringify(doc.materials), 'materials come back from the machine unchanged');
+      let bad = null;
+      try { await device.putMaterials(m, { materials: 'no' }); } catch (e) { bad = e; }
+      ok(bad && bad.status === 400, 'machine refuses something that is not a materials list (' + (bad && bad.message) + ')');
       let err = null;
       try { await device.test({ ...m, port: port + 1, timeout: 500 }); } catch (e) { err = e; }
       ok(err && err.offline, 'offline machine reported as offline (' + (err && err.message) + ')');

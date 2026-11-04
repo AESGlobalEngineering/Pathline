@@ -5,6 +5,14 @@
 
 module.exports = [
   {
+    version: '1.5.0', date: '4 Nov 2026',
+    added: [
+      'Material settings are kept on the machine (needs Pathline Run with material storage). Saving the library sends each machine its settings; connecting to a machine brings in newer settings and materials made on another computer. Deleted materials stay deleted.',
+      'Test grid: Create job (was Engrave grid). Send puts the chosen square\'s settings into the process you pick from the list.'
+    ],
+    fixed: []
+  },
+  {
     version: '1.4.0', date: '3 Nov 2026',
     added: [
       'Pathline is now Pathline Prepare. Your machines, materials and settings come across by themselves.',

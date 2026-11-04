@@ -267,7 +267,80 @@ async function syncMachine(id) {
   store.upsert('machines', merged);
   lastSync.set(m.id, Date.now());
   if (win && !win.isDestroyed()) win.webContents.send('machines:updated', merged);
+  // the material settings kept on the machine come along (never fails the sync)
+  await syncMaterials(merged).catch((e) => reports && reports.log('materials', m.name + ': ' + e.message));
   return merged;
+}
+
+// ------------------------------------------------------------------ materials on the machine
+// Each machine keeps the material settings made for it (HMI-BRIEF §5.3), so
+// another computer running Pathline Prepare picks them up from the machine.
+// A material's settings for a machine are stamped presetsAt[machineId] when
+// they change here; on a sync the newer side wins, material by material.
+// Materials deleted here are remembered (settings.removedMaterials) so the
+// machine can't bring them back.
+const isMachineKey = (k) => k !== 'laser' && k !== 'plotter';
+function stampPresets(before, after) {
+  const at = { ...(after.presetsAt || {}) };
+  const was = (before && before.presets) || {};
+  const now = new Date().toISOString();
+  for (const k of Object.keys(after.presets || {})) {
+    if (isMachineKey(k) && JSON.stringify(was[k]) !== JSON.stringify(after.presets[k])) at[k] = now;
+  }
+  return { ...after, presetsAt: at };
+}
+function forgetMaterials(ids) {
+  if (!ids.length) return;
+  const s = store.get('settings');
+  store.set('settings', { ...s, removedMaterials: [...new Set((s.removedMaterials || []).concat(ids))].slice(-500) });
+}
+// what this computer has for one machine (PUT /materials)
+function materialsDoc(m) {
+  return {
+    format: 'pathline-materials', version: 1, machine: { id: m.id, name: m.name, type: m.type },
+    materials: store.get('materials').filter((x) => Array.isArray((x.presets || {})[m.id])).map((x) => ({
+      id: x.id, name: x.name, t: x.t, g: x.g, sw: x.sw, notes: x.notes || '', updatedAt: (x.presetsAt || {})[m.id] || null, processes: x.presets[m.id]
+    }))
+  };
+}
+// the machine's list into the library; true when anything here changed
+function mergeMachineMaterials(m, doc) {
+  const removed = new Set(store.get('settings').removedMaterials || []);
+  let changed = false;
+  for (const r of (doc && Array.isArray(doc.materials) ? doc.materials : [])) {
+    if (!r || !r.id || !Array.isArray(r.processes) || removed.has(r.id)) continue;
+    const cur = store.find('materials', r.id);
+    const at = r.updatedAt || new Date(0).toISOString();
+    if (!cur) {
+      store.upsert('materials', { id: r.id, g: r.g || 'Other', name: r.name || 'Material', t: Number(r.t) || 3, sw: r.sw || '#E1E4E8', m: [m.type], notes: r.notes || '', locked: false, edited: null, jobs: 0, last: null, presets: { [m.id]: r.processes }, presetsAt: { [m.id]: at } });
+      changed = true;
+    } else {
+      const mine = (cur.presetsAt || {})[m.id];
+      if ((!mine || at > mine) && JSON.stringify((cur.presets || {})[m.id]) !== JSON.stringify(r.processes)) {
+        store.upsert('materials', { ...cur, m: cur.m.includes(m.type) ? cur.m : cur.m.concat(m.type), presets: { ...cur.presets, [m.id]: r.processes }, presetsAt: { ...(cur.presetsAt || {}), [m.id]: at } });
+        changed = true;
+      }
+    }
+  }
+  return changed;
+}
+// pull, then push what the machine is missing or has older
+async function syncMaterials(m) {
+  if (!m || m.sim || m.conn !== 'Ethernet' || !String(m.ip || '').trim()) return;
+  const remote = await device.materials(m);
+  if (remote === null) return; // this HMI doesn't keep materials
+  if (mergeMachineMaterials(m, remote) && win && !win.isDestroyed()) win.webContents.send('materials:updated', store.get('materials'));
+  const doc = materialsDoc(m);
+  const key = (d) => JSON.stringify(((d && d.materials) || []).map((x) => [x.id, x.updatedAt]).sort());
+  if (key(doc) !== key(remote)) await device.putMaterials(m, doc);
+}
+// after the library is saved: every machine gets its list (offline ones on their next sync)
+let pushTimer = null;
+function schedulePushMaterials() {
+  clearTimeout(pushTimer);
+  pushTimer = setTimeout(() => {
+    for (const m of store.get('machines')) syncMaterials(m).catch((e) => reports && reports.log('materials', m.name + ': ' + e.message));
+  }, 1500);
 }
 // quietly, in the background (an offline machine is normal); not more than every 30 s unless forced
 function autoSync(id, force) {
@@ -388,9 +461,19 @@ function registerIpc() {
 
   // materials
   handle('materials:list', () => store.get('materials'));
-  handle('materials:save', (mat) => store.upsert('materials', { ...mat, edited: 'Edited ' + new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) }));
-  handle('materials:saveAll', (list) => store.set('materials', list));
-  handle('materials:remove', (id) => { store.remove('materials', id); return store.get('materials'); });
+  handle('materials:save', (mat) => {
+    const saved = store.upsert('materials', stampPresets(store.find('materials', mat.id), { ...mat, edited: 'Edited ' + new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) }));
+    schedulePushMaterials();
+    return saved;
+  });
+  handle('materials:saveAll', (list) => {
+    const gone = store.get('materials').filter((x) => !list.some((y) => y.id === x.id)).map((x) => x.id);
+    const out = store.set('materials', list.map((x) => stampPresets(store.find('materials', x.id), x)));
+    forgetMaterials(gone);
+    schedulePushMaterials();
+    return out;
+  });
+  handle('materials:remove', (id) => { store.remove('materials', id); forgetMaterials([id]); schedulePushMaterials(); return store.get('materials'); });
   handle('materials:create', (type) => {
     const t = 3;
     const mat = { id: CC.uid('mat'), g: 'Other', name: 'New material', t, sw: '#E1E4E8', m: [type || 'laser'], notes: '', locked: false, edited: null, jobs: 0, last: null, presets: { laser: type === 'plotter' ? [] : CC.starterPresets('laser', t), plotter: type === 'plotter' ? CC.starterPresets('plotter', t) : [] } };
@@ -420,9 +503,11 @@ function registerIpc() {
     let added = 0, updated = 0;
     for (const mat of incoming) {
       if (!mat || !mat.id || !mat.name) continue;
-      if (store.find('materials', mat.id)) updated++; else added++;
-      store.upsert('materials', mat);
+      const before = store.find('materials', mat.id);
+      if (before) updated++; else added++;
+      store.upsert('materials', stampPresets(before, mat));
     }
+    schedulePushMaterials();
     return { added, updated };
   });
 

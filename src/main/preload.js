@@ -21,7 +21,9 @@ contextBridge.exposeInMainWorld('api', {
     onUpdated: (fn) => ipcRenderer.on('machines:updated', (_e, m) => fn(m)) },
   materials: {
     list: call('materials:list'), save: call('materials:save'), saveAll: call('materials:saveAll'), remove: call('materials:remove'),
-    create: call('materials:create'), duplicate: call('materials:duplicate'), exportLib: call('materials:export'), importLib: call('materials:import')
+    create: call('materials:create'), duplicate: call('materials:duplicate'), exportLib: call('materials:export'), importLib: call('materials:import'),
+    // the library changed because a machine had newer material settings
+    onUpdated: (fn) => ipcRenderer.on('materials:updated', (_e, list) => fn(list))
   },
   job: {
     current: call('job:current'), update: call('job:update'), undo: call('job:undo'), redo: call('job:redo'), history: call('job:history'),

@@ -770,6 +770,8 @@ class Component extends DCLogic {
     this.poll = setInterval(() => this.pollDevice(), 1500);
     // settings read from a controller in the background (bed, speeds, features, name)
     window.api.machines.onUpdated((m) => this.setState((s) => ({ machines: s.machines.map((x) => (x.id === m.id ? m : x)) })));
+    // material settings pulled from a machine
+    window.api.materials.onUpdated((list) => this.setState({ materials: list }));
     this.onDragOver = (e) => { e.preventDefault(); };
     this.onDrop = (e) => {
       e.preventDefault();

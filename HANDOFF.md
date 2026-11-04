@@ -15,6 +15,16 @@ Latest round (28 Oct, final):
 - **Dark mode bed is grey** (`--bed`, `--sheet`, `--bed-grid*` in theme.css). **ACI 7 shows as white in dark mode** (black in light), as in CAD, and so do the marks drawn on the bed (registration marks, engrave hatching, arrows, start points): see the `--aci7*` and `--ink` tokens, and `LRC.aci.hex/fg/stroke` in app.js. Exports (DXF/SVG/PDF) still use real black.
 - **Sample machines and materials from earlier builds are removed on first start** (main.js, tracked by `settings.samplesRemoved`). This is by exact id (trotec, flatbed, laser2, acr-print-3 … brass-1); anything the operator created stays.
 
+Version 1.5.0 (4 Nov):
+- **Materials on the machine** (main.js, protocol in HMI-BRIEF §5.3; the brief for the Run side is `hmi/RUN-MATERIALS-BRIEF.md`).
+  - `stampPresets(before, after)` stamps `mat.presetsAt[machineId]` whenever a material's presets for that machine change. This happens in `materials:save`, `saveAll` and `import`.
+  - `syncMaterials(m)` runs at the end of every `syncMachine`. It calls `GET /materials` (a 404 means the HMI doesn't keep materials, and nothing is sent), merges with `mergeMachineMaterials` (newer `updatedAt` wins per material; unknown materials are added), then `PUT`s `materialsDoc(m)` if the machine's id/updatedAt list differs.
+  - Saving the library calls `schedulePushMaterials()` (1.5 s debounce, every machine).
+  - Deleted ids go to `settings.removedMaterials` and are never pulled back.
+  - The window hears `materials:updated` (`api.materials.onUpdated`). Materials takes the new list except for materials with unsaved edits; the Job page refreshes its list.
+  - `device.materials` / `device.putMaterials` are the device calls, and errors from the device now carry `status`. The emulator stores the list in `<out>/materials.json` (it ignores a BOM).
+- **Test grid:** the button is now **Create job**. Apply is replaced by a process dropdown (`tgSendTo`; default is the first process of the kind being tested) and **Send**.
+
 Version 1.4.0 (3 Nov):
 - **Renamed Pathline Prepare.**
   - What changed: `productName` and `shortcutName`, window titles, the brand word, dialogs, update, crash and bug-report text, and the release title in `.github/workflows/release.yml`.

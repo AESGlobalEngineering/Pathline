@@ -424,8 +424,9 @@ select.dd:disabled{background-color:var(--sunken);background-repeat:no-repeat;ba
             <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding-top: 12px; border-top: 1px solid var(--line-soft)">
               <span class="mono" style="font-weight: 500">{{tg.pickLabel}}</span>
               <span style="flex: 1"></span>
-              <button class="tb" onClick="{{tg.make}}" title="Create a job with this grid on the Job page">Engrave grid</button>
-              <button class="btn-primary" onClick="{{tg.apply}}" disabled="{{locked}}">Apply to {{tg.targetName}}</button>
+              <button class="tb" onClick="{{tg.make}}" title="Create a job with this grid on the Job page">Create job</button>
+              {{tg.sendTo}}
+              <button class="btn-primary" onClick="{{tg.apply}}" disabled="{{tg.cantSend}}" title="Set the chosen process to this square's settings">Send</button>
             </div>
           </section>
         </sc-if>
@@ -490,6 +491,13 @@ class Component extends DCLogic {
         this.setState({ ready: true, lib: JSON.parse(JSON.stringify(lib)), saved: lib, machines, matId: lib.some((m) => m.id === want) ? want : (lib[0] && lib[0].id), tab: job ? job.machineId : null });
       })
       .catch(LRC.fail);
+    // newer settings from a machine: take them in, except for materials with
+    // edits not saved yet here (those win when they're saved)
+    window.api.materials.onUpdated((list) => this.setState((s) => {
+      const edited = new Set(s.lib.filter((m) => JSON.stringify(m) !== JSON.stringify(s.saved.find((x) => x.id === m.id))).map((m) => m.id));
+      const lib = list.filter((m) => !edited.has(m.id)).map((m) => JSON.parse(JSON.stringify(m))).concat(s.lib.filter((m) => edited.has(m.id)));
+      return { lib, saved: list.map((m) => (edited.has(m.id) ? s.saved.find((x) => x.id === m.id) || m : m)), matId: lib.some((m) => m.id === s.matId) ? s.matId : (lib[0] && lib[0].id) };
+    }));
     this.offNav = LRC.guardNav(() => this.dirty(), () => this.save());
     this.offKeys = LRC.keys({ 'Ctrl+S': () => this.run(() => this.save())() });
   }
@@ -819,6 +827,7 @@ class Component extends DCLogic {
       const speeds = steps(Math.max(0.1, num(rg.sLo, def.sLo)), Math.max(0.1, num(rg.sHi, def.sHi)), num(rg.sN, def.sN), (v) => (v < 10 ? Math.round(v * 10) / 10 : Math.round(v)));
       const setRange = (k) => (e) => { const v = e.target.value; this.setState((s) => ({ tgRange: { ...(s.tgRange || {}), [rangeKey]: { ...((s.tgRange || {})[rangeKey] || {}), [k]: v } }, tgCell: null })); };
       const passes = Math.max(1, Math.min(20, Math.round(num(rg.passes, def.passes))));
+      const sendIdx = rows[S.tgSendTo] ? S.tgSendTo : ti;
       const mid = (n) => Math.floor((n - 1) / 2);
       const cellKey = S.tgCell || mid(powers.length) + '-' + mid(speeds.length);
       const lerp = (a, b, k) => Math.round(a + (b - a) * k);
@@ -829,20 +838,26 @@ class Component extends DCLogic {
         ...rg, setPLo: setRange('pLo'), setPHi: setRange('pHi'), setPN: setRange('pN'), setSLo: setRange('sLo'), setSHi: setRange('sHi'), setSN: setRange('sN'), setPasses: setRange('passes'),
         target: tgProc, targetName: tr.name,
         targets: [{ v: 'Cut', l: 'Cut' }, { v: 'Engrave', l: 'Engrave' }],
-        setTarget: (e) => this.setState({ tgTarget: e.target.value, tgCell: null }),
+        setTarget: (e) => this.setState({ tgTarget: e.target.value, tgCell: null, tgSendTo: null }),
         speeds,
         rows: powers.map((p, ri) => ({ p, cells: speeds.map((sp, ci) => { const id = ri + '-' + ci; const on = id === cellKey; return { on, label: p + '% power, ' + sp + ' mm/s', bg: burn(pk(ri, powers.length) * 0.55 + (1 - pk(ci, speeds.length)) * 0.45), ring: on ? '0 0 0 2px var(--surface), 0 0 0 4px ' + accent : 'none', pick: () => this.setState({ tgCell: id }) }; }) })),
         pickLabel: powers[cr] + ' % · ' + speeds[cc] + ' mm/s' + (passes > 1 ? ' · ' + passes + ' passes' : ''),
+        // Send: the picked square's settings go to the process chosen in the list
+        // (by default the first one of the kind being tested)
         apply: () => {
-          if (ti < 0) return LRC.toast('No ' + tgProc.toLowerCase() + ' process for ' + machine.name + ' yet — add one first');
-          this.patchRows((list) => { list[ti] = { ...list[ti], power: powers[cr], speed: speeds[cc], passes }; return list; });
+          const k = sendIdx;
+          if (k < 0 || !rows[k]) return LRC.toast('No process for ' + machine.name + ' yet — add one first');
+          this.patchRows((list) => { list[k] = { ...list[k], power: powers[cr], speed: speeds[cc], passes }; return list; });
           this.setState({ tgCell: null });
-          LRC.toast(tr.name + ' on ' + machine.name + ' set to ' + powers[cr] + ' % · ' + speeds[cc] + ' mm/s' + (passes > 1 ? ' · ' + passes + ' passes' : '') + ' — save to keep it');
+          LRC.toast(rows[k].name + ' on ' + machine.name + ' set to ' + powers[cr] + ' % · ' + speeds[cc] + ' mm/s' + (passes > 1 ? ' · ' + passes + ' passes' : '') + ' — save to keep it');
         },
+        cantSend: locked || sendIdx < 0,
         make: R(() => this.makeGrid({ ...tBase, passes }, powers, speeds))
       };
       tg.select = React.createElement('select', { className: 'dd', style: { width: 170 }, value: tg.target, onChange: tg.setTarget, 'aria-label': 'Test grid process' },
         tg.targets.map((o) => React.createElement('option', { key: o.v, value: o.v }, o.l)));
+      tg.sendTo = React.createElement('select', { className: 'dd', style: { width: 190 }, value: String(sendIdx), disabled: locked || !rows.length, onChange: (e) => this.setState({ tgSendTo: Number(e.target.value) }), 'aria-label': 'Process to send the settings to' },
+        rows.length ? rows.map((r, k) => React.createElement('option', { key: k, value: String(k) }, r.name)) : [React.createElement('option', { key: 'none', value: '-1' }, 'No processes yet')]);
     }
     const groupSelect = React.createElement('select', { className: 'dd', value: mat.g, disabled: locked, 'aria-label': 'Group', onChange: (e) => { const v = e.target.value; this.patchMat((m) => ({ ...m, g: v })); } },
       groupNames.map((g) => React.createElement('option', { key: g, value: g }, g)));
