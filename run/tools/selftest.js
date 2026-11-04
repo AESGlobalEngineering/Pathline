@@ -314,6 +314,25 @@ async function jogTests() {
   await new Promise((r) => setTimeout(r, 300));
   await m.jogRelease();
   ok(JSON.stringify(sent) === '[["move",100,1600,10],["stop"]]', 'held arrow on an RDD6584: one move to the bed edge at 10 mm/s, then stop on release', JSON.stringify(sent));
+
+  // A job the laser throws away itself (the Trotec: "FPGA Error Received 57", ignore data, buffers
+  // cleared, then idle) is stopped, not done; one it finishes is done
+  for (const fault of [true, false]) {
+    let polls = 0;
+    const tl = {
+      send: async () => { if (fault) tl.fault = { at: Date.now(), text: 'FPGA Error Received 57' }; },
+      poll: async () => ({ state: ++polls < 3 ? 'busy' : 'idle', pos: { x: 10, y: 10, z: 0 } }),
+      abort: async () => {}
+    };
+    const done = [];
+    const ms = new Machine({ ...config.defaults('trotec'), configured: true }, { jobs: [], flush: () => {}, finish: (j, r) => done.push(r), next: () => null }, () => {});
+    ms.link = tl;
+    Object.assign(ms.st, { link: 'online', pos: { x: 10, y: 10, z: 0 } });
+    ms.execute({ id: 'J1', name: 'grid' }, { ctrl: 'trotec', seconds: 4, segments: [{ kind: 'stream', seconds: 4, steps: [{ i: 0, seconds: 4 }] }] });
+    for (let i = 0; i < 40 && ms.run; i++) await new Promise((r) => setTimeout(r, 100));
+    if (fault) ok(done[0] === 'Stopped' && ms.st.state === 'alarm' && /stopped the job itself \(FPGA Error Received 57\)/.test(ms.st.message), 'the laser throws the job away (FPGA error, buffers cleared): stopped, with its reason, not done', JSON.stringify({ done, state: ms.st.state, msg: ms.st.message }));
+    else ok(done[0] === 'Completed' && ms.st.state === 'idle', 'a job the laser finishes: done', JSON.stringify({ done, state: ms.st.state }));
+  }
 }
 
 // ---------------------------------------------------------------- material settings (HMI-BRIEF §5.3)

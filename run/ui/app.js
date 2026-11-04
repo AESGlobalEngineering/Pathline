@@ -105,8 +105,10 @@ const running = () => S && (S.status.state === 'running' || S.status.state === '
 // time, so a path crossing another can't pull it back or on), what's been run is drawn along the
 // job's own lines, and between reports the head moves on along the route (at most 1.5 s ahead).
 // Positions that don't fit the route (a job moved onto registration marks, say) go back to the trace.
-// rate: route seconds per real second, learnt as it runs (the machine needn't match the estimate)
-const follow = { job: null, route: null, k: 0, t: 0, at: 0, miss: 0, doneK: -1, rate: 1, found: false };
+// rate: route seconds per real second, learnt as it runs (the machine needn't match the estimate);
+// at: when the head was at t (the report's own time, not when it reached the screen); shown: where
+// the head is drawn (it eases towards the prediction and never goes back, bar a big correction)
+const follow = { job: null, route: null, k: 0, t: 0, at: 0, miss: 0, doneK: -1, rate: 1, found: false, shown: { t: null, at: 0 } };
 
 function routeOf(pkg) {
   const travel = Number((cfg().trotec || {}).travelSpeed) || 500;
@@ -156,11 +158,16 @@ function routeAt(route, t) {
 // a reported head position: placed on the route, ahead of the last place and within reach in time
 function followHead(st, pkg) {
   if (!st.job || !pkg || pkg === 'loading' || !Number.isFinite(st.pos.x)) { follow.job = null; return; }
-  const now = performance.now();
-  if (follow.job !== st.job) Object.assign(follow, { job: st.job, route: routeOf(pkg), k: 0, t: 0, at: now, miss: 0, doneK: -1, rate: 1, found: false });
+  // when the head was there: the server says how old its position is (it polls the controller,
+  // the screen polls the server: together over a second at times). The same position again (no
+  // newer one from the controller) is no news: taking it as now made the head snap back
+  const now = performance.now() - Math.max(0, Number(st.posAge) || 0);
+  if (follow.job !== st.job) Object.assign(follow, { job: st.job, route: routeOf(pkg), k: 0, t: 0, at: now, miss: 0, doneK: -1, rate: 1, found: false, shown: { t: null, at: 0 }, last: null });
   const R = follow.route;
   if (!R.segs.length) return;
   const P = [st.pos.x, st.pos.y];
+  if (follow.last && follow.last.x === P[0] && follow.last.y === P[1] && Math.abs(follow.last.at - now) < 400) return;
+  follow.last = { x: P[0], y: P[1], at: now };
   // The first time (the screen opened mid-job), or lost for a few reports: anywhere on the route
   // the controller's progress allows (the head waiting where the last run ended can also be where
   // this one ends: the same job again), nearest that progress. Otherwise a few seconds ahead at the
@@ -183,7 +190,7 @@ function followHead(st, pkg) {
   if (best) {
     // the pace: route seconds per real second since the last fix, smoothed (and kept sensible)
     const dt = (now - follow.at) / 1000;
-    if (follow.found && dt > 0.3 && best.t > follow.t) follow.rate = Math.max(0.3, Math.min(4, 0.6 * follow.rate + 0.4 * ((best.t - follow.t) / dt)));
+    if (follow.found && dt > 0.3 && best.t > follow.t) follow.rate = Math.max(0.5, Math.min(2.5, 0.8 * follow.rate + 0.2 * ((best.t - follow.t) / dt)));
     Object.assign(follow, { k: best.k, t: best.t, at: now, miss: 0, found: true });
   } else follow.miss++;
 }
@@ -191,11 +198,19 @@ function followHead(st, pkg) {
 // following this package's run (its route fits the reported positions)?
 const following = (pkg) => !!(follow.job && follow.route && follow.found && S && S.status.job === follow.job && pkg && pkg !== 'loading' && follow.miss < 6 && ui.pkgs[follow.job] === pkg);
 
-// the head as predicted now: on from the last place at the pace learnt (not while paused), never
-// more than 1.5 s on
+// the head as drawn now: the prediction (on from the last place at the pace learnt, not while
+// paused, never more than 2 s on), eased into over a quarter second and never backwards, so a
+// report a little behind the drawing doesn't pull it back; a big difference (more than 2 s of
+// the job behind, 5 s ahead) is jumped to
 function predicted() {
-  const ahead = S.status.state === 'running' ? Math.min(1.5, (performance.now() - follow.at) / 1000) * follow.rate : 0;
-  return routeAt(follow.route, Math.min(follow.route.end, follow.t + ahead));
+  const now = performance.now();
+  const ahead = S.status.state === 'running' ? Math.min(2, (now - follow.at) / 1000) * follow.rate : 0;
+  const target = Math.min(follow.route.end, follow.t + ahead);
+  const sh = follow.shown;
+  if (sh.t === null || target < sh.t - 2 || target > sh.t + 5) sh.t = target;
+  else sh.t = Math.max(sh.t, sh.t + (target - sh.t) * Math.min(1, (now - sh.at) / 250));
+  sh.at = now;
+  return routeAt(follow.route, sh.t);
 }
 
 // what's been run: the cut and engraved parts of the route up to segment k (and point p on it)

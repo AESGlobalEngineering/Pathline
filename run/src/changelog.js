@@ -5,6 +5,14 @@
 
 module.exports = [
   {
+    version: '0.7.10', date: '4 Nov 2026',
+    fixed: [
+      'A dialog\'s buttons always stay in sight at its bottom edge, however long it is. What\'s new after the update to 0.7.8 ran off the screen, and its Got it couldn\'t be reached.',
+      'Trotec: a job the laser throws away itself (an FPGA error, then its buffers cleared) is stopped with the laser\'s reason, not recorded as done. One was marked done 3 s after it started without cutting anything.',
+      'Queue: following a running job is smooth. The head is drawn from when the laser was really there (its position can be over a second old by the time it reaches the screen), the same position reported again no longer pulls it back, and it eases forward instead of jumping.'
+    ]
+  },
+  {
     version: '0.7.9', date: '4 Nov 2026',
     fixed: [
       'Queue: a long list of processes (a test grid) can be scrolled. The screen redraws every 0.7 s and sent it back to the top; now every part that scrolls keeps its place (also the queue list and the Jog page).',

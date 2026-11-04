@@ -7,6 +7,7 @@ module.exports = [
   {
     version: '1.5.1', date: '4 Nov 2026',
     added: [
+      'Test grid: choose what it tests. Power × speed as before; Power correction × speed (how much the laser turns the power down where the head slows: the start of a cut, corners, the end; too little melts the start point); Frequency × power (cuts). Each square is a process with those two settings, the rest as the process has them, and Send sets just those two.',
       'A test grid job with more than one pass now runs the whole grid, then the whole grid again (it used to do each square\'s passes back to back). The labels are engraved once.',
       'Job settings → Run the whole job ×N: repeats the whole job, all of it once before any of it again. The Simulation shows which round it\'s on.'
     ],

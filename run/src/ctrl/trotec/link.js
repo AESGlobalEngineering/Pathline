@@ -211,7 +211,16 @@ class TrotecLink {
       if (got.kind === 'ok') {
         this.id = (id + 1) & 0xff;
         const r = parseReply(got);
-        if (r.text) this.log('trotec: ' + r.text.trim().replace(/\s*\r?\n\s*/g, ' | '));
+        if (r.text) {
+          this.log('trotec: ' + r.text.trim().replace(/\s*\r?\n\s*/g, ' | '));
+          // the laser's own error handling: an FPGA error, then it ignores data and clears its
+          // buffers, throwing away what it was given. A job running then didn't finish (Pathline
+          // Run 0.7.9 called one done 3 s in); machine.js reads this
+          if (/FPGA Error Received [1-9]|IGNORE_DATA|CLEAR_BUFFER_REQUESTED/.test(r.text)) {
+            const why = r.text.split(/\r?\n/).map((l) => l.trim()).find((l) => /FPGA Error Received [1-9]/.test(l)) || 'its buffers cleared';
+            this.fault = { at: Date.now(), text: why };
+          }
+        }
         if (r.status) this.lastReply = r;
         return r;
       }
