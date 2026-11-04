@@ -495,6 +495,13 @@ class Machine {
         }
         this.log('run ' + job.name + ' (' + program.ctrl + ', ' + program.segments.length + ' segments, ' + Math.round(program.seconds) + ' s estimated)');
         total = Math.max(0.001, program.seconds);
+        const since = Date.now();
+        // the laser threw the job away itself (Trotec: an FPGA error, then its buffers cleared):
+        // that's not a finished job, whatever state it's left in
+        const thrownAway = () => {
+          const f = this.link.fault;
+          if (!ctl.aborted && f && f.at >= since) throw new Error('The laser stopped the job itself (' + f.text + ') at ' + Math.round(this.st.progress * 100) + ' %. Check the laser, then start the job again.');
+        };
         for (const seg of program.segments) {
           if (ctl.aborted) break;
           if (seg.kind === 'inspect') { doneSec += seg.seconds; continue; } // only reached with regMarks = ignore
@@ -536,6 +543,7 @@ class Machine {
             // done once idle twice in a row, after it was seen busy (or a moment has passed)
             if (idle >= 2 && (sawBusy || Date.now() - sentAt > 3000)) break;
           }
+          thrownAway();
           doneSec += seg.seconds;
           setProgress(doneSec);
         }
@@ -608,8 +616,10 @@ class Machine {
     return { state: this.st.state };
   }
 
+  // posAge: how long ago (ms) the controller reported the head there (the screen follows a running
+  // job from it: a position can be over a second old by the time it's drawn)
   status() {
-    return { ...this.st, pos: { ...this.st.pos }, io: { ...this.st.io }, queued: this.store.jobs.filter((j) => j.status === 'queued').length };
+    return { ...this.st, pos: { ...this.st.pos }, io: { ...this.st.io }, queued: this.store.jobs.filter((j) => j.status === 'queued').length, posAge: this.posAt ? Date.now() - this.posAt : null };
   }
 }
 
