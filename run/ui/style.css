@@ -160,6 +160,9 @@ body{background:#0E0F11}
 .hmi .toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:200;max-width:min(92vw,640px);padding:12px 18px;border-radius:12px;background:var(--text);color:var(--surface);box-shadow:var(--shadow-dlg);font-size:15px}
 .hmi .scrim{position:fixed;inset:0;z-index:100;background:var(--scrim);display:flex;align-items:center;justify-content:center;padding:16px}
 .hmi .dlg{width:100%;max-width:520px;max-height:90vh;overflow:auto;background:var(--surface);color:var(--text);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow-dlg);padding:22px;display:flex;flex-direction:column;gap:16px;box-sizing:border-box}
+/* a dialog's buttons stay in sight at its bottom edge however long it is (What's new after an
+   update ran off the screen, and its Got it couldn't be reached) */
+.hmi .dlg>div:last-child:has(>button){position:sticky;bottom:-22px;margin:0 -22px -22px;padding:12px 22px 22px;background:var(--surface);border-top:1px solid var(--line-soft);z-index:1}
 .hmi .dlg.wide{max-width:900px}
 .hmi pre.log{margin:0;font:12px/1.5 var(--mono);white-space:pre-wrap;color:var(--text-2);background:var(--sunken);border-radius:8px;padding:12px;max-height:60vh;overflow:auto}
 .hmi .row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,260px);align-items:center;gap:12px;min-height:44px}

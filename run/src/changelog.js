@@ -5,6 +5,12 @@
 
 module.exports = [
   {
+    version: '0.7.10', date: '4 Nov 2026',
+    fixed: [
+      'A dialog\'s buttons always stay in sight at its bottom edge, however long it is. What\'s new after the update to 0.7.8 ran off the screen, and its Got it couldn\'t be reached.'
+    ]
+  },
+  {
     version: '0.7.9', date: '4 Nov 2026',
     fixed: [
       'Queue: a long list of processes (a test grid) can be scrolled. The screen redraws every 0.7 s and sent it back to the top; now every part that scrolls keeps its place (also the queue list and the Jog page).',
