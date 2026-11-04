@@ -135,6 +135,15 @@ async function main() {
       const seq = ops.map((o) => o.ent + o.round).join(' ');
       ok(seq === 'a1 b1 l1 a2 b2 a3 b3', 'repeat runs the whole job, then again; once-only processes once (' + seq + ')');
     }
+    // closed cuts start and finish along an edge, not on a corner (a corner cut from a standstill twice melts)
+    {
+      const sqs = [0, 1, 2].map((i) => ({ id: 'q' + i, aci: 1, paths: [{ p: CC.shapes.rect(20 + i * 40, 20, 30, 30, 0), c: true }] }));
+      const ops = CC.estimate({ ...pj, regMode: 'off', repeat: 1, entities: sqs, cutOrder: { order: 'speed', inside: 'off' } }, laser, { timeline: true }).timeline.filter((o) => o.kind === 'op');
+      const corners = sqs.map((e) => e.paths[0].p);
+      const onCorner = ops.filter((o) => corners.some((c) => c.some((v) => Math.hypot(v[0] - o.path.p[0][0], v[1] - o.path.p[0][1]) < 0.5)));
+      ok(ops.length === 3 && !onCorner.length, 'squares start along an edge, not on a corner (' + ops.map((o) => o.path.p[0].map((v) => v.toFixed(1)).join(',')).join(' · ') + ')');
+      ok(ops.every((o) => Math.abs(CC.polyLen(o.path.p, true) - 120) < 0.01), 'starting along an edge keeps the whole outline (120 mm each)');
+    }
     // overlapping lines are cut once
     {
       const sq = (x) => ({ p: CC.shapes.rect(x, 0, 50, 50, 0), c: true });
@@ -220,12 +229,14 @@ async function main() {
     const tHeat = CC.estimate({ ...twoPass, cutOrder: { inside: 'off', order: 'heat' } }, laser).perProcess[0].time;
     const tSpeed = CC.estimate({ ...twoPass, cutOrder: { inside: 'off', order: 'speed' } }, laser).perProcess[0].time;
     ok(near(tHeat, tSpeed, 1e-6), 'cutting time is the same either way (only travel changes)');
-    // start points: a square entered from its far side should start at the corner nearest the travel path
+    // start points: a square entered from its far side should start on an edge near the travel path (never on a corner)
     const squares = [{ id: 's1', aci: 1, paths: [{ p: [[110, 110], [10, 110], [10, 10], [110, 10]], c: true }] }, { id: 's2', aci: 1, paths: [{ p: [[200, 10], [250, 10], [250, 60], [200, 60]], c: true }] }];
     const st = CC.estimate({ ...pj, entities: squares, cutOrder: { inside: 'off', order: 'file' } }, laser, { timeline: true }).timeline.filter((o) => o.kind === 'op');
-    // from the origin, (110, 10) is on the way to the next part: 110.5 + 90 mm of travel beats 14.1 + 190 mm via (10, 10)
-    ok(st[0].path.p[0][0] === 110 && st[0].path.p[0][1] === 10, 'cut starts where it is most convenient on the travel path: ' + st[0].path.p[0].join(','));
-    ok(st[1].path.p[0][0] === 200 && st[1].path.p[0][1] === 10, 'next cut starts nearest the previous one: ' + st[1].path.p[0].join(','));
+    // from the origin, the corner (110, 10) is on the way to the next part, so the start is on an edge beside it
+    const isCorner = (q, e) => e.paths[0].p.some((v) => Math.hypot(v[0] - q[0], v[1] - q[1]) < 0.5);
+    const s0 = st[0].path.p[0], s1 = st[1].path.p[0];
+    ok(!isCorner(s0, squares[0]) && Math.hypot(s0[0] - 110, s0[1] - 10) <= 26, 'cut starts on an edge near where it is most convenient on the travel path: ' + s0.join(','));
+    ok(!isCorner(s1, squares[1]) && Math.hypot(s1[0] - 200, s1[1] - 10) <= 13, 'next cut starts on an edge nearest the previous one: ' + s1.join(','));
     // too many registration marks blocks sending
     const four = { ...job, entities: job.entities.concat({ id: 'r9', aci: 9, paths: [{ p: CC.shapes.dot(400, 300, 5), c: true }] }) };
     ok(CC.checkJob(four, laser).some((c) => c.block), '4 registration marks for a 3-mark mode blocks sending');

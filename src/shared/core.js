@@ -744,20 +744,52 @@
   // previous cut plus the travel out to the next cut is shortest; open paths
   // may also be cut in reverse when optimising. Two sweeps, as each choice
   // moves its neighbours' best points.
+  // A closed path starts and finishes at the same point, from a standstill, so
+  // that point gets the beam twice while the head is slow: on a corner it
+  // melts. Starts are kept off corners: a point along a straight edge (at
+  // least 1 mm and a quarter of the edge from its ends), or a vertex where the
+  // path hardly turns (on a curve). Only a shape with neither (tiny) starts on
+  // a corner. Each start is { v, t }: t along the segment from vertex v.
+  function startPoints(p) {
+    const n = p.length, out = [];
+    for (let v = 0; v < n; v++) {
+      const a = p[(v + n - 1) % n], b = p[v], c = p[(v + 1) % n];
+      const ux = b[0] - a[0], uy = b[1] - a[1], wx = c[0] - b[0], wy = c[1] - b[1];
+      const lu = Math.hypot(ux, uy), lw = Math.hypot(wx, wy);
+      // a vertex on a curve: the direction changes by less than 20°
+      if (lu > 1e-9 && lw > 1e-9 && (ux * wx + uy * wy) / (lu * lw) > Math.cos(Math.PI / 9)) out.push({ v, t: 0 });
+      if (lw >= 4) {
+        const m = Math.max(1 / lw, 0.25);
+        for (const t of [m, 0.5, 1 - m]) out.push({ v, t });
+      }
+    }
+    return out.length ? out : p.map((_, v) => ({ v, t: 0 }));
+  }
+  const pointOn = (p, s) => {
+    const a = p[s.v], b = p[(s.v + 1) % p.length];
+    return s.t ? [a[0] + (b[0] - a[0]) * s.t, a[1] + (b[1] - a[1]) * s.t] : a;
+  };
+  // the closed path p starting (and ending) at start s
+  const rotateTo = (p, s) => (s.t ? [pointOn(p, s)].concat(p.slice(s.v + 1), p.slice(0, s.v + 1)) : p.slice(s.v).concat(p.slice(0, s.v)));
+
   function refineStarts(list, start, order) {
     const d = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
+    // the start candidates of each closed path, worked out once (from its first shape)
+    const cands = list.map((it) => (it.path.c && it.path.p.length > 2 ? { p: it.path.p, s: startPoints(it.path.p) } : null));
     for (let sweep = 0; sweep < 2; sweep++) {
       let prev = start;
       for (let i = 0; i < list.length; i++) {
         const path = list[i].path, p = path.p;
         const next = list[i + 1] ? list[i + 1].path.p[0] : null;
-        if (path.c && p.length > 2) {
-          let bv = 0, bd = Infinity;
-          for (let v = 0; v < p.length; v++) {
-            const c = d(prev, p[v]) + (next ? d(p[v], next) : 0);
-            if (c < bd) { bd = c; bv = v; }
+        if (cands[i]) {
+          const base = cands[i].p;
+          let bs = null, bd = Infinity;
+          for (const s of cands[i].s) {
+            const q = pointOn(base, s);
+            const c = d(prev, q) + (next ? d(q, next) : 0);
+            if (c < bd) { bd = c; bs = s; }
           }
-          if (bv) list[i] = { ...list[i], path: { ...path, p: p.slice(bv).concat(p.slice(0, bv)) } };
+          list[i] = { ...list[i], path: { ...path, p: rotateTo(base, bs) } };
         } else if (!path.c && order !== 'file' && p.length > 1) {
           const keep = d(prev, p[0]) + (next ? d(p[p.length - 1], next) : 0);
           const flip = d(prev, p[p.length - 1]) + (next ? d(p[0], next) : 0);

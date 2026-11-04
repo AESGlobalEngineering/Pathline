@@ -15,6 +15,13 @@ Latest round (28 Oct, final):
 - **Dark mode bed is grey** (`--bed`, `--sheet`, `--bed-grid*` in theme.css). **ACI 7 shows as white in dark mode** (black in light), as in CAD, and so do the marks drawn on the bed (registration marks, engrave hatching, arrows, start points): see the `--aci7*` and `--ink` tokens, and `LRC.aci.hex/fg/stroke` in app.js. Exports (DXF/SVG/PDF) still use real black.
 - **Sample machines and materials from earlier builds are removed on first start** (main.js, tracked by `settings.samplesRemoved`). This is by exact id (trotec, flatbed, laser2, acr-print-3 … brass-1); anything the operator created stays.
 
+Version 1.5.4 (4 Nov):
+- **Closed cuts start off the corners** (`startPoints`, `pointOn`, `rotateTo`, `refineStarts` in core.js). A closed path's start (which is also its end) is chosen from:
+  - points along straight edges of 4 mm or more, at ¼, ½ and ¾ of the edge and at least 1 mm from each end;
+  - vertices where the path turns less than 20° (on a curve).
+
+  It falls back to plain vertices only when a shape has neither. The cheapest candidate for travel in and out still wins. A start along an edge inserts that point as the path's first vertex. This came from a bug report: square corners melted regardless of power correction. Pathline Run does send power correction to the Trotec (`compile.js`); the double pass over the start corner was the cause.
+
 Version 1.5.3 (4 Nov):
 - **Repeat is always visible.** `checkJob` adds a warn check, "Runs the whole job N times (Job settings)" (`repeat: true`), whenever `job.repeat > 1`; on the Job page that pill opens Job settings. The summary under the estimate ends with "whole job N×". This came from a bug report: a test-grid job with 2 passes was reused for parts and silently cut everything twice.
 
