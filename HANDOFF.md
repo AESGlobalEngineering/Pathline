@@ -17,7 +17,7 @@ Latest round (28 Oct, final):
 
 Version 1.5.4 (4 Nov):
 - **Closed cuts start off the corners** (`startPoints`, `pointOn`, `rotateTo`, `refineStarts` in core.js). A closed path's start (which is also its end) is chosen from:
-  - points along straight edges of 4 mm or more, at ¼, ½ and ¾ of the edge and at least 1 mm from each end;
+  - points along straight edges of 3 mm or more: `START_CLEAR` (1 mm) from each end, and the middle. At cutting speeds the head only slows within a fraction of a millimetre of a corner, so 1 mm is clear of it (1.5.4 first used a quarter of the edge, which put starts 2.5 mm in on 10 mm squares);
   - vertices where the path turns less than 20° (on a curve).
 
   It falls back to plain vertices only when a shape has neither. The cheapest candidate for travel in and out still wins. A start along an edge inserts that point as the path's first vertex. This came from a bug report: square corners melted regardless of power correction. Pathline Run does send power correction to the Trotec (`compile.js`); the double pass over the start corner was the cause.

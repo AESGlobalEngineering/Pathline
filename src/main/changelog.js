@@ -8,7 +8,7 @@ module.exports = [
     version: '1.5.4', date: '4 Nov 2026',
     added: [],
     fixed: [
-      'Corners of squares melted whatever the power correction: a closed cut always started and finished on one of its corners, so that corner was cut twice from a standstill. Closed cuts now start along a straight edge (or on a curve), still on the side nearest the travel path; only a shape too small for that starts on a corner.'
+      'Corners of squares melted whatever the power correction: a closed cut always started and finished on one of its corners, so that corner was cut twice from a standstill. Closed cuts now start 1 mm along a straight edge from the nearest corner (or on a curve), still on the side nearest the travel path; only a shape too small for that starts on a corner.'
     ]
   },
   {

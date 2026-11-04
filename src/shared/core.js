@@ -746,10 +746,12 @@
   // moves its neighbours' best points.
   // A closed path starts and finishes at the same point, from a standstill, so
   // that point gets the beam twice while the head is slow: on a corner it
-  // melts. Starts are kept off corners: a point along a straight edge (at
-  // least 1 mm and a quarter of the edge from its ends), or a vertex where the
-  // path hardly turns (on a curve). Only a shape with neither (tiny) starts on
-  // a corner. Each start is { v, t }: t along the segment from vertex v.
+  // melts. Starts are kept off corners: a point along a straight edge, 1 mm
+  // from either end or at its middle (the head only slows within a fraction of
+  // a millimetre of a corner at cutting speeds), or a vertex where the path
+  // hardly turns (on a curve). Only a shape with neither (tiny) starts on a
+  // corner. Each start is { v, t }: t along the segment from vertex v.
+  const START_CLEAR = 1; // mm between a start and the nearest corner
   function startPoints(p) {
     const n = p.length, out = [];
     for (let v = 0; v < n; v++) {
@@ -758,8 +760,8 @@
       const lu = Math.hypot(ux, uy), lw = Math.hypot(wx, wy);
       // a vertex on a curve: the direction changes by less than 20°
       if (lu > 1e-9 && lw > 1e-9 && (ux * wx + uy * wy) / (lu * lw) > Math.cos(Math.PI / 9)) out.push({ v, t: 0 });
-      if (lw >= 4) {
-        const m = Math.max(1 / lw, 0.25);
+      if (lw >= 3 * START_CLEAR) {
+        const m = START_CLEAR / lw;
         for (const t of [m, 0.5, 1 - m]) out.push({ v, t });
       }
     }
