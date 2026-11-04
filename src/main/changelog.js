@@ -5,6 +5,11 @@
 
 module.exports = [
   {
+    version: '1.5.8', date: '4 Nov 2026',
+    added: [],
+    fixed: ['The Queue tab shows only the active queue: jobs waiting, running or paused. Finished, stopped and failed jobs are no longer listed (and Clear finished is gone).']
+  },
+  {
     version: '1.5.7', date: '4 Nov 2026',
     added: [
       'Thermal map: the material\'s colour (from its name, e.g. Clear or Black, or its swatch) changes how much of the beam it takes. It matters a lot on a fibre laser and only a little on CO2; the panel shows the colour used.'

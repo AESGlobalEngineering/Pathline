@@ -709,9 +709,6 @@
           <sc-if value="{{queueOnline}}" hint-placeholder-val="{{false}}">
             <div style="display: flex; gap: 8px; padding-top: 4px">
               <button class="btn-primary" onClick="{{queueStart}}" disabled="{{queueBusy}}" style="flex: 1; opacity: {{queueOp}}">Start queue</button>
-              <sc-if value="{{hasDone}}" hint-placeholder-val="{{false}}">
-                <button class="tb" onClick="{{queueClear}}" style="flex: 1">Clear finished</button>
-              </sc-if>
             </div>
           </sc-if>
         </div>
@@ -1979,7 +1976,9 @@ class Component extends DCLogic {
     // the queue is the machine controller's own job list (polled with the status)
     // [label, pill background, pill text, .pill variant]
     const STATUS = { queued: ['Waiting', 'var(--sunken)', 'var(--text-2)', ''], running: ['Running', accentSoft, accentFg, 'accent'], done: ['Done', 'var(--ok-soft)', 'var(--ok)', 'ok'], stopped: ['Stopped', 'var(--err-soft)', 'var(--err)', 'err'] };
-    const qList = online && S.devJobs && S.devJobs.mid === machine.id ? S.devJobs.list : [];
+    // only the active queue: jobs waiting, running or paused (not finished, stopped or failed ones)
+    const FINISHED = new Set(['done', 'stopped', 'failed', 'error', 'cancelled', 'canceled', 'aborted']);
+    const qList = (online && S.devJobs && S.devJobs.mid === machine.id ? S.devJobs.list : []).filter((q) => !FINISHED.has(q.status));
     const waitingIds = qList.filter((q) => q.status === 'queued').map((q) => q.id);
     const moveQ = (id, d) => R(() => {
       const o = waitingIds.slice();
@@ -2001,7 +2000,7 @@ class Component extends DCLogic {
     });
     const queueNote = machine.conn !== 'Ethernet' ? machine.name + ' saves jobs locally, so it has no queue to show. Set an Ethernet connection on the Machines page to see the machine’s queue.'
       : !online ? 'Not connected to ' + machine.name + (machine.ip ? ' at ' + machine.ip : '') + ' — the queue shows once the controller answers.'
-        : !qList.length ? 'Nothing in the machine’s queue. Jobs appear here when you send them.' : false;
+        : !qList.length ? 'No jobs waiting on ' + machine.name + '. Jobs appear here when you send them.' : false;
 
     // ---- tools
     const tool = (l, d, id, key, msg) => {
@@ -2094,8 +2093,6 @@ class Component extends DCLogic {
       queueOnline: online && machine.conn === 'Ethernet',
       queueStart: R(() => this.queueAction((mid) => window.api.device.command(mid, 'start', {}), 'Queue started on ' + machine.name)),
       queueBusy: S.queueBusy || !waitingIds.length, queueOp: S.queueBusy || !waitingIds.length ? 0.45 : 1,
-      hasDone: qList.some((q) => q.status === 'done' || q.status === 'stopped'),
-      queueClear: R(() => this.queueAction(async (mid) => { for (const q of qList.filter((x) => x.status === 'done' || x.status === 'stopped')) await window.api.device.removeJob(mid, q.id); }, 'Cleared finished jobs')),
       toolGroups: [
         { items: [tb('Undo (Ctrl+Z)', icons.undo, () => this.undo(), !S.hist.undo), tb('Redo (Ctrl+Y)', icons.redo, () => this.redo(), !S.hist.redo)] },
         { items: [tb('Group (Ctrl+G)', icons.group, () => this.op((j, s) => LRC.ops.group(j, s)), selIds.length < 2), tb('Align left', icons.alignL, () => this.align('left'), noSel), tb('Align centre', icons.alignC, () => this.align('centre'), noSel), tb('Distribute horizontally', icons.distribute, () => this.op((j, s) => LRC.ops.distribute(j, s, 'x')), selIds.length < 3)] },

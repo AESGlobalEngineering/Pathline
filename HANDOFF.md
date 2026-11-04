@@ -15,6 +15,8 @@ Latest round (28 Oct, final):
 - **Dark mode bed is grey** (`--bed`, `--sheet`, `--bed-grid*` in theme.css). **ACI 7 shows as white in dark mode** (black in light), as in CAD, and so do the marks drawn on the bed (registration marks, engrave hatching, arrows, start points): see the `--aci7*` and `--ink` tokens, and `LRC.aci.hex/fg/stroke` in app.js. Exports (DXF/SVG/PDF) still use real black.
 - **Sample machines and materials from earlier builds are removed on first start** (main.js, tracked by `settings.samplesRemoved`). This is by exact id (trotec, flatbed, laser2, acr-print-3 … brass-1); anything the operator created stays.
 
+Version 1.5.8 (4 Nov): the Job page's Queue tab lists only active jobs. `qList` drops statuses in `FINISHED` (done, stopped, failed, error, cancelled, aborted), and the Clear finished button and `queueClear` are gone.
+
 Version 1.5.7 (4 Nov):
 - **Registration marks always start off** (`newJob` in main.js, and switching machine on the Job page).
   - `CC.ensureRegProcess(job)` adds a Registration marks process whenever `regMode` isn't off. It runs in main's `setJob` and the Job page's `commit`.
