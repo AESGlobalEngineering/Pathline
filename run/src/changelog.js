@@ -5,6 +5,12 @@
 
 module.exports = [
   {
+    version: '0.7.9', date: '4 Nov 2026',
+    fixed: [
+      'Queue: a long list of processes (a test grid) can be scrolled. The screen redraws every 0.7 s and sent it back to the top; now every part that scrolls keeps its place (also the queue list and the Jog page).'
+    ]
+  },
+  {
     version: '0.7.8', date: '4 Nov 2026',
     added: [
       'Material settings kept on the machine for Pathline Prepare 1.5.0: Prepare stores the settings it makes for this machine here (GET / PUT /api/v1/materials), so any computer running Prepare that connects gets them. Kept exactly as received, safe from a power cut while saving, and kept through restarts and updates. Setup → Materials shows them, read only.'
@@ -23,8 +29,7 @@ module.exports = [
       'Head camera: the camera got stuck whenever a picture at a shorter exposure followed a long one (the stepped exposures on the checkerboard, auto exposure in the live picture). Pathline Run now waits as long as the last exposure before such a picture: 60 pictures in a row switching between 120 ms and 600 ms, none stuck (before: every switch down). Exposures are kept to 0.6 s at most, the camera\'s time to answer grows with the exposure, and a frame that doesn\'t come no longer leaves the camera busy.',
       'Trotec: cuts no longer slow down at every corner. The beam was switched off and on again round every segment, so the laser stopped at each one (curves are many short segments); now it\'s on for the whole cut. A test job\'s stream went from 10 270 commands to 4 663.',
       'Queue: a job shows only the processes it uses, not every process of its material.',
-      'Queue: Select (several jobs back to back) is only offered for plotters / routers.',
-      'Queue: a long list of processes (a test grid) can be scrolled. The screen redraws every 0.7 s and sent it back to the top; now every part that scrolls keeps its place (also the queue list and the Jog page).'
+      'Queue: Select (several jobs back to back) is only offered for plotters / routers.'
     ]
   },
   {
