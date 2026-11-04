@@ -5,6 +5,13 @@
 
 module.exports = [
   {
+    version: '1.5.1', date: '4 Nov 2026',
+    added: [
+      'Test grid: choose what it tests. Power × speed as before; Power correction × speed (how much the laser turns the power down where the head slows: the start of a cut, corners, the end; too little melts the start point); Frequency × power (cuts). Each square is a process with those two settings, the rest as the process has them, and Send sets just those two.'
+    ],
+    fixed: []
+  },
+  {
     version: '1.5.0', date: '4 Nov 2026',
     added: [
       'Material settings are kept on the machine (needs Pathline Run with material storage). Saving the library sends each machine its settings; connecting to a machine brings in newer settings and materials made on another computer. Deleted materials stay deleted.',

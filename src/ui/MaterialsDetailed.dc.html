@@ -381,8 +381,12 @@ select.dd:disabled{background-color:var(--sunken);background-repeat:no-repeat;ba
           <section aria-label="Test grid" class="card" style="flex: 2 1 480px; min-width: 0; padding: 16px; display: flex; flex-direction: column; gap: 12px">
             <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px">
               <h2 class="h-sec">Test grid</h2>
-              <span class="lbl">Burn a power × speed grid, then pick the best square</span>
+              <span class="lbl">{{tg.blurb}}</span>
               <span style="flex: 1"></span>
+              <label style="display: flex; align-items: center; gap: 8px">
+                <span class="lbl">Test</span>
+                {{tg.varySelect}}
+              </label>
               <label style="display: flex; align-items: center; gap: 8px">
                 <span class="lbl">Process</span>
                 {{tg.select}}
@@ -391,26 +395,26 @@ select.dd:disabled{background-color:var(--sunken);background-repeat:no-repeat;ba
             <!-- the range to test: lowest and highest value, and the number of equal steps between them -->
             <div class="tg-range">
               <span></span><span class="lbl">Low</span><span class="lbl">High</span><span class="lbl">Divisions</span>
-              <span class="lbl">Power</span>
-              <span class="fld"><input class="mono" value="{{tg.pLo}}" onChange="{{tg.setPLo}}" aria-label="Lowest power"><span class="lbl">%</span></span>
-              <span class="fld"><input class="mono" value="{{tg.pHi}}" onChange="{{tg.setPHi}}" aria-label="Highest power"><span class="lbl">%</span></span>
-              <span class="fld"><input class="mono" value="{{tg.pN}}" onChange="{{tg.setPN}}" aria-label="Power divisions"></span>
-              <span class="lbl">Speed</span>
-              <span class="fld"><input class="mono" value="{{tg.sLo}}" onChange="{{tg.setSLo}}" aria-label="Lowest speed"><span class="lbl">mm/s</span></span>
-              <span class="fld"><input class="mono" value="{{tg.sHi}}" onChange="{{tg.setSHi}}" aria-label="Highest speed"><span class="lbl">mm/s</span></span>
-              <span class="fld"><input class="mono" value="{{tg.sN}}" onChange="{{tg.setSN}}" aria-label="Speed divisions"></span>
+              <span class="lbl">{{tg.aName}}</span>
+              <span class="fld"><input class="mono" value="{{tg.aLo}}" onChange="{{tg.setALo}}" aria-label="{{tg.aLoLabel}}"><span class="lbl">{{tg.aUnit}}</span></span>
+              <span class="fld"><input class="mono" value="{{tg.aHi}}" onChange="{{tg.setAHi}}" aria-label="{{tg.aHiLabel}}"><span class="lbl">{{tg.aUnit}}</span></span>
+              <span class="fld"><input class="mono" value="{{tg.aN}}" onChange="{{tg.setAN}}" aria-label="{{tg.aNLabel}}"></span>
+              <span class="lbl">{{tg.bName}}</span>
+              <span class="fld"><input class="mono" value="{{tg.bLo}}" onChange="{{tg.setBLo}}" aria-label="{{tg.bLoLabel}}"><span class="lbl">{{tg.bUnit}}</span></span>
+              <span class="fld"><input class="mono" value="{{tg.bHi}}" onChange="{{tg.setBHi}}" aria-label="{{tg.bHiLabel}}"><span class="lbl">{{tg.bUnit}}</span></span>
+              <span class="fld"><input class="mono" value="{{tg.bN}}" onChange="{{tg.setBN}}" aria-label="{{tg.bNLabel}}"></span>
               <span class="lbl">Passes</span>
               <span class="fld"><input class="mono" value="{{tg.passes}}" onChange="{{tg.setPasses}}" aria-label="Test grid passes"><span class="lbl">×</span></span>
               <span></span><span></span>
             </div>
             <div style="display: flex; flex-direction: column; gap: 6px">
               <div style="display: flex; gap: 6px; align-items: center">
-                <span class="lbl" style="width: 64px; flex: none">Power ↓</span>
-                <sc-for list="{{tg.speeds}}" as="s" hint-placeholder-count="5"><span class="mono lbl" style="flex: 1; text-align: center">{{s}}</span></sc-for>
+                <span class="lbl" style="width: 64px; flex: none">{{tg.aArrow}}</span>
+                <sc-for list="{{tg.cols}}" as="s" hint-placeholder-count="5"><span class="mono lbl" style="flex: 1; text-align: center">{{s}}</span></sc-for>
               </div>
               <sc-for list="{{tg.rows}}" as="row" hint-placeholder-count="5">
                 <div style="display: flex; gap: 6px; align-items: center">
-                  <span class="mono lbl" style="width: 64px; flex: none">{{row.p}} %</span>
+                  <span class="mono lbl" style="width: 64px; flex: none">{{row.label}}</span>
                   <sc-for list="{{row.cells}}" as="c" hint-placeholder-count="5">
                     <button class="tg-cell" onClick="{{c.pick}}" aria-pressed="{{c.on}}" aria-label="{{c.label}}" title="{{c.label}}" style="background: {{c.bg}}; box-shadow: {{c.ring}}"></button>
                   </sc-for>
@@ -418,7 +422,7 @@ select.dd:disabled{background-color:var(--sunken);background-repeat:no-repeat;ba
               </sc-for>
               <div style="display: flex; gap: 6px">
                 <span style="width: 64px; flex: none"></span>
-                <span class="lbl" style="flex: 1; text-align: right">Speed mm/s →</span>
+                <span class="lbl" style="flex: 1; text-align: right">{{tg.bArrow}}</span>
               </div>
             </div>
             <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding-top: 12px; border-top: 1px solid var(--line-soft)">
@@ -591,28 +595,31 @@ class Component extends DCLogic {
       ? { name: 'New process', proc: 'Cut', power: 80, speed: 20, f: 5000, passes: 1, air: 'On', dash: false, dl: 5, gl: 2, out: true, aci: [], adv: {} }
       : { name: 'New process', tool: 'T1 · Knife', speed: 300, passes: 1, dash: false, dl: 5, gl: 2, out: true, aci: [], adv: {} }));
   }
-  // Build a job with one square per power/speed pair, each with its own colour.
-  async makeGrid(base, powers, speeds) {
+  // Build a job with one square per pair of settings (A down, B across: power × speed, power
+  // correction × speed or frequency × power), each square its own process and colour.
+  // cellOf(base, a, b): the process with that square's two settings.
+  async makeGrid(base, A, B, cellOf, what) {
     const mat = this.mat();
     const machine = this.tabMachine();
-    if (!(await LRC.confirm('Create a test grid job?', 'This replaces the job on the Job page with a ' + powers.length + ' × ' + speeds.length + ' grid of 10 mm squares for ' + base.proc.toLowerCase() + ' on ' + mat.name + ' (' + machine.name + '). Save your current job first if you need it.', 'Create grid'))) return;
+    if (!(await LRC.confirm('Create a test grid job?', 'This replaces the job on the Job page with a ' + A.vals.length + ' × ' + B.vals.length + ' grid of 10 mm squares (' + what.toLowerCase() + ') for ' + base.proc.toLowerCase() + ' on ' + mat.name + ' (' + machine.name + '). Save your current job first if you need it.', 'Create grid'))) return;
     const job = await window.api.job.create(machine.id);
     const processes = [], entities = [];
     const cell = 10, gap = 4, x0 = 30, y0 = 20;
     let aci = 10;
-    powers.forEach((p, r) => speeds.forEach((s, c) => {
-      processes.push({ ...JSON.parse(JSON.stringify(base)), name: p + ' % · ' + s + ' mm/s', power: p, speed: s, aci: [aci], out: true, src: 'job' });
+    A.vals.forEach((a, r) => B.vals.forEach((b, c) => {
+      processes.push({ ...cellOf(base, a, b), name: A.label(a) + ' · ' + B.label(b), aci: [aci], out: true, src: 'job' });
       const shape = base.proc === 'Engrave' ? CC.shapes.rect(x0 + c * (cell + gap), y0 + r * (cell + gap), cell, cell, 0) : CC.shapes.rect(x0 + c * (cell + gap) + 1, y0 + r * (cell + gap) + 1, cell - 2, cell - 2, 0);
-      entities.push({ id: CC.uid('e'), name: p + '% / ' + s, type: 'Rectangle', aci, paths: [{ p: shape, c: true }] });
+      entities.push({ id: CC.uid('e'), name: A.short(a) + ' / ' + B.short(b), type: 'Rectangle', aci, paths: [{ p: shape, c: true }] });
       aci++;
     }));
-    // labels: power down the side, speed along the top, marked at low power
+    // labels: A down the side, B along the top, marked at low power
     const labelProc = { name: 'Grid labels', proc: 'Engrave', power: 15, speed: 300, f: 300, passes: 1, air: 'Off', dash: false, dl: 5, gl: 2, out: true, aci: [8], adv: {}, src: 'job' };
     try {
-      for (let r = 0; r < powers.length; r++) entities.push(await LRC.textEntity(powers[r] + '%', 4, 6, y0 + r * (cell + gap) + 3, 8));
-      for (let c = 0; c < speeds.length; c++) entities.push(await LRC.textEntity(String(speeds[c]), 4, x0 + c * (cell + gap), 10, 8));
+      for (let r = 0; r < A.vals.length; r++) entities.push(await LRC.textEntity(A.short(A.vals[r]), 4, 6, y0 + r * (cell + gap) + 3, 8));
+      for (let c = 0; c < B.vals.length; c++) entities.push(await LRC.textEntity(B.short(B.vals[c]), 4, x0 + c * (cell + gap), 10, 8));
     } catch (e) { /* labels are optional */ }
-    await window.api.job.replace({ ...job, name: 'Test grid · ' + mat.name + ' ' + mat.t + ' mm · ' + base.proc, materialId: mat.id, processes: processes.concat(labelProc), entities, regMode: 'off', sheet: { ...job.sheet, on: false } });
+    const kind = what === 'Power × speed' ? '' : ' · ' + what;
+    await window.api.job.replace({ ...job, name: 'Test grid · ' + mat.name + ' ' + mat.t + ' mm · ' + base.proc + kind, materialId: mat.id, processes: processes.concat(labelProc), entities, regMode: 'off', sheet: { ...job.sheet, on: false } });
     location.href = 'MainDetailed.dc.html';
   }
 
@@ -810,52 +817,80 @@ class Component extends DCLogic {
     const ti = isLaser ? rows.findIndex((r) => r.proc === tgProc) : -1;
     const tBase = ti >= 0 ? rows[ti] : CC.defaultPresets('laser', mat.t).find((r) => r.proc === tgProc);
     const tr = isLaser ? { ...tBase, name: ti >= 0 ? rows[ti].name : tgProc } : null;
-    let tg = { rows: [], speeds: [], targets: [] };
+    let tg = { rows: [], cols: [], targets: [] };
     if (tr) {
-      // the range is the user's: low, high and divisions (equal steps between them) for power and speed;
-      // until changed it is centred on the preset (±10 % power, 60–140 % speed, 4 divisions)
-      const p0 = Number(tr.power) || 50, s0 = Number(tr.speed) || 20;
+      // What the grid tests: rows × columns, the process's other settings as they are. Power × speed
+      // finds the settings; power correction × speed and frequency × power tune a cut (power
+      // correction lowers the power where the head is slow: the start, corners, the end).
+      const VARY = { ps: { name: 'Power × speed', a: 'p', b: 's' }, cs: { name: 'Power correction × speed', a: 'c', b: 's' }, fp: { name: 'Frequency × power', a: 'f', b: 'p', cutOnly: true } };
+      const vary = VARY[S.tgVary] && !(VARY[S.tgVary].cutOnly && tgProc !== 'Cut') ? S.tgVary : 'ps';
+      // the range is the user's: low, high and divisions (equal steps between them) for each setting;
+      // until changed it is centred on the preset (±10 % power, 60–140 % speed, 50–150 % frequency,
+      // power correction 0–60 %, 4 divisions)
+      const p0 = Number(tr.power) || 50, s0 = Number(tr.speed) || 20, f0 = Number(tr.f) || 5000;
       const rangeKey = mat.id + '|' + (machine ? machine.id : '') + '|' + tgProc;
-      const def = { pLo: String(Math.max(5, p0 - 10)), pHi: String(Math.min(100, p0 + 10)), pN: '4', sLo: String(Math.max(1, Math.round(s0 * 0.6))), sHi: String(Math.max(1, Math.round(s0 * 1.4))), sN: '4', passes: String(Math.max(1, Number(tr.passes) || 1)) };
+      const def = { pLo: String(Math.max(5, p0 - 10)), pHi: String(Math.min(100, p0 + 10)), pN: '4', sLo: String(Math.max(1, Math.round(s0 * 0.6))), sHi: String(Math.max(1, Math.round(s0 * 1.4))), sN: '4',
+        cLo: '0', cHi: '60', cN: '4', fLo: String(Math.max(500, Math.round(f0 * 0.005) * 100)), fHi: String(Math.round(f0 * 0.015) * 100), fN: '4', passes: String(Math.max(1, Number(tr.passes) || 1)) };
       const rg = { ...def, ...((S.tgRange || {})[rangeKey] || {}) };
       const num = (v, d) => { const n = parseFloat(v); return Number.isFinite(n) ? n : parseFloat(d); };
       const steps = (lo, hi, n, round) => {
         const a = Math.min(lo, hi), b = Math.max(lo, hi), k = Math.max(1, Math.min(9, Math.round(n)));
         return [...new Set(Array.from({ length: k + 1 }, (_, i) => round(a + ((b - a) * i) / k)))];
       };
-      const powers = steps(Math.max(0, Math.min(100, num(rg.pLo, def.pLo))), Math.max(0, Math.min(100, num(rg.pHi, def.pHi))), num(rg.pN, def.pN), (v) => Math.round(v * 10) / 10);
-      const speeds = steps(Math.max(0.1, num(rg.sLo, def.sLo)), Math.max(0.1, num(rg.sHi, def.sHi)), num(rg.sN, def.sN), (v) => (v < 10 ? Math.round(v * 10) / 10 : Math.round(v)));
+      const range = (k, lo, hi, round) => steps(Math.max(lo, Math.min(hi, num(rg[k + 'Lo'], def[k + 'Lo']))), Math.max(lo, Math.min(hi, num(rg[k + 'Hi'], def[k + 'Hi']))), num(rg[k + 'N'], def[k + 'N']), round);
+      // each setting: its name, unit, values, labels (in full; short for the grid's own labels) and
+      // how it goes into a process (power correction is an advanced setting, as text)
+      const AX = {
+        p: { name: 'Power', unit: '%', vals: range('p', 0, 100, (v) => Math.round(v * 10) / 10), label: (v) => v + ' %', short: (v) => v + '%', put: (o, v) => { o.power = v; } },
+        s: { name: 'Speed', unit: 'mm/s', vals: range('s', 0.1, 10000, (v) => (v < 10 ? Math.round(v * 10) / 10 : Math.round(v))), label: (v) => v + ' mm/s', short: (v) => String(v), put: (o, v) => { o.speed = v; } },
+        c: { name: 'Power correction', unit: '%', vals: range('c', 0, 100, (v) => Math.round(v)), label: (v) => 'PC ' + v + ' %', short: (v) => 'PC' + v, put: (o, v) => { o.adv = { ...(o.adv || {}), 'Power correction': String(v) }; } },
+        f: { name: 'Frequency', unit: 'Hz', vals: range('f', 100, 60000, (v) => Math.round(v / 100) * 100), label: (v) => v + ' Hz', short: (v) => (v >= 1000 ? +(v / 1000).toFixed(1) + 'k' : String(v)), put: (o, v) => { o.f = v; } }
+      };
+      const A = { key: VARY[vary].a, ...AX[VARY[vary].a] }, B = { key: VARY[vary].b, ...AX[VARY[vary].b] };
+      // a process with this square's two settings
+      const cellOf = (base, av, bv) => { const o = JSON.parse(JSON.stringify(base)); A.put(o, av); B.put(o, bv); return o; };
       const setRange = (k) => (e) => { const v = e.target.value; this.setState((s) => ({ tgRange: { ...(s.tgRange || {}), [rangeKey]: { ...((s.tgRange || {})[rangeKey] || {}), [k]: v } }, tgCell: null })); };
       const passes = Math.max(1, Math.min(20, Math.round(num(rg.passes, def.passes))));
       const sendIdx = rows[S.tgSendTo] ? S.tgSendTo : ti;
       const mid = (n) => Math.floor((n - 1) / 2);
-      const cellKey = S.tgCell || mid(powers.length) + '-' + mid(speeds.length);
+      const cellKey = S.tgCell || mid(A.vals.length) + '-' + mid(B.vals.length);
       const lerp = (a, b, k) => Math.round(a + (b - a) * k);
       const burn = (k) => 'rgb(' + lerp(240, 74, k) + ', ' + lerp(230, 52, k) + ', ' + lerp(212, 34, k) + ')';
       const [cr, cc] = cellKey.split('-').map(Number);
       const pk = (i, n) => (n > 1 ? i / (n - 1) : 0.5);
+      const picked = A.label(A.vals[cr]) + ' · ' + B.label(B.vals[cc]) + (passes > 1 ? ' · ' + passes + ' passes' : '');
       tg = {
-        ...rg, setPLo: setRange('pLo'), setPHi: setRange('pHi'), setPN: setRange('pN'), setSLo: setRange('sLo'), setSHi: setRange('sHi'), setSN: setRange('sN'), setPasses: setRange('passes'),
+        passes: rg.passes, setPasses: setRange('passes'),
+        aName: A.name, aUnit: A.unit, aLo: rg[A.key + 'Lo'], aHi: rg[A.key + 'Hi'], aN: rg[A.key + 'N'], setALo: setRange(A.key + 'Lo'), setAHi: setRange(A.key + 'Hi'), setAN: setRange(A.key + 'N'),
+        bName: B.name, bUnit: B.unit, bLo: rg[B.key + 'Lo'], bHi: rg[B.key + 'Hi'], bN: rg[B.key + 'N'], setBLo: setRange(B.key + 'Lo'), setBHi: setRange(B.key + 'Hi'), setBN: setRange(B.key + 'N'),
+        aLoLabel: 'Lowest ' + A.name.toLowerCase(), aHiLabel: 'Highest ' + A.name.toLowerCase(), aNLabel: A.name + ' divisions',
+        bLoLabel: 'Lowest ' + B.name.toLowerCase(), bHiLabel: 'Highest ' + B.name.toLowerCase(), bNLabel: B.name + ' divisions',
+        aArrow: A.name + ' ↓', bArrow: B.name + (B.unit === '%' ? '' : ' ' + B.unit) + ' →',
+        blurb: 'Burn a ' + VARY[vary].name.toLowerCase() + ' grid, then pick the best square',
         target: tgProc, targetName: tr.name,
         targets: [{ v: 'Cut', l: 'Cut' }, { v: 'Engrave', l: 'Engrave' }],
         setTarget: (e) => this.setState({ tgTarget: e.target.value, tgCell: null, tgSendTo: null }),
-        speeds,
-        rows: powers.map((p, ri) => ({ p, cells: speeds.map((sp, ci) => { const id = ri + '-' + ci; const on = id === cellKey; return { on, label: p + '% power, ' + sp + ' mm/s', bg: burn(pk(ri, powers.length) * 0.55 + (1 - pk(ci, speeds.length)) * 0.45), ring: on ? '0 0 0 2px var(--surface), 0 0 0 4px ' + accent : 'none', pick: () => this.setState({ tgCell: id }) }; }) })),
-        pickLabel: powers[cr] + ' % · ' + speeds[cc] + ' mm/s' + (passes > 1 ? ' · ' + passes + ' passes' : ''),
-        // Send: the picked square's settings go to the process chosen in the list
-        // (by default the first one of the kind being tested)
+        vary, varies: Object.keys(VARY).filter((k) => !(VARY[k].cutOnly && tgProc !== 'Cut')).map((k) => ({ v: k, l: VARY[k].name })),
+        setVary: (e) => this.setState({ tgVary: e.target.value, tgCell: null }),
+        cols: B.vals.map((v) => (B.unit === '%' ? v + '%' : String(v))),
+        rows: A.vals.map((av, ri) => ({ label: A.label(av), cells: B.vals.map((bv, ci) => { const id = ri + '-' + ci; const on = id === cellKey; return { on, label: A.label(av) + ', ' + B.label(bv), bg: burn(pk(ri, A.vals.length) * 0.55 + (1 - pk(ci, B.vals.length)) * 0.45), ring: on ? '0 0 0 2px var(--surface), 0 0 0 4px ' + accent : 'none', pick: () => this.setState({ tgCell: id }) }; }) })),
+        pickLabel: picked,
+        // Send: the picked square's two settings (and the passes) go to the process chosen in the
+        // list (by default the first one of the kind being tested); nothing else of it changes
         apply: () => {
           const k = sendIdx;
           if (k < 0 || !rows[k]) return LRC.toast('No process for ' + machine.name + ' yet — add one first');
-          this.patchRows((list) => { list[k] = { ...list[k], power: powers[cr], speed: speeds[cc], passes }; return list; });
+          this.patchRows((list) => { list[k] = { ...cellOf(list[k], A.vals[cr], B.vals[cc]), passes }; return list; });
           this.setState({ tgCell: null });
-          LRC.toast(rows[k].name + ' on ' + machine.name + ' set to ' + powers[cr] + ' % · ' + speeds[cc] + ' mm/s' + (passes > 1 ? ' · ' + passes + ' passes' : '') + ' — save to keep it');
+          LRC.toast(rows[k].name + ' on ' + machine.name + ' set to ' + picked + ' — save to keep it');
         },
         cantSend: locked || sendIdx < 0,
-        make: R(() => this.makeGrid({ ...tBase, passes }, powers, speeds))
+        make: R(() => this.makeGrid({ ...tBase, passes }, A, B, cellOf, VARY[vary].name))
       };
       tg.select = React.createElement('select', { className: 'dd', style: { width: 170 }, value: tg.target, onChange: tg.setTarget, 'aria-label': 'Test grid process' },
         tg.targets.map((o) => React.createElement('option', { key: o.v, value: o.v }, o.l)));
+      tg.varySelect = React.createElement('select', { className: 'dd', style: { width: 230 }, value: tg.vary, onChange: tg.setVary, 'aria-label': 'What the test grid tests' },
+        tg.varies.map((o) => React.createElement('option', { key: o.v, value: o.v }, o.l)));
       tg.sendTo = React.createElement('select', { className: 'dd', style: { width: 190 }, value: String(sendIdx), disabled: locked || !rows.length, onChange: (e) => this.setState({ tgSendTo: Number(e.target.value) }), 'aria-label': 'Process to send the settings to' },
         rows.length ? rows.map((r, k) => React.createElement('option', { key: k, value: String(k) }, r.name)) : [React.createElement('option', { key: 'none', value: '-1' }, 'No processes yet')]);
     }
