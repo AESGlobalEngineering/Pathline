@@ -746,12 +746,12 @@
   // moves its neighbours' best points.
   // A closed path starts and finishes at the same point, from a standstill, so
   // that point gets the beam twice while the head is slow: on a corner it
-  // melts. Starts are kept off corners: a point along a straight edge, 1 mm
-  // from either end or at its middle (the head only slows within a fraction of
+  // melts. Starts are kept off corners: a point along a straight edge,
+  // START_CLEAR from either end or at its middle (the head only slows within a fraction of
   // a millimetre of a corner at cutting speeds), or a vertex where the path
   // hardly turns (on a curve). Only a shape with neither (tiny) starts on a
   // corner. Each start is { v, t }: t along the segment from vertex v.
-  const START_CLEAR = 1; // mm between a start and the nearest corner
+  const START_CLEAR = 0.3; // mm between a start and the nearest corner
   function startPoints(p) {
     const n = p.length, out = [];
     for (let v = 0; v < n; v++) {
