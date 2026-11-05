@@ -799,41 +799,131 @@
     const cost = opts.cost || ((d) => d);
     const start = opts.start || [0, 0];
     let list = arrangePaths(items, opts);
+    // every move is expensive: the start points are chosen together for the
+    // whole run (bestStarts), then the order within each group (a nesting
+    // layer or one part's layer) is improved with them, and again
     list = refineStarts(list, start, opts.order || 'file', cost);
-    // take detours out within each group (a nesting layer or one part's
-    // layer), keeping the groups' order, then place the starts again
-    list = twoOptGroups(list, start, cost);
-    return refineStarts(list, start, opts.order || 'file', cost);
+    list = twoOptGroups(list, start, cost, opts.budget || 80);
+    return bestStarts(list, start, cost);
+  }
+  const routeCost = (list, start, cost) => {
+    let s = 0, at = start;
+    for (const it of list) { const p = it.path.p[0]; s += cost(Math.hypot(p[0] - at[0], p[1] - at[1])); at = endOf(it.path); }
+    return s;
+  };
+
+  // The start point of every path in a run, chosen together: a closed path
+  // can start at any of its startPoints (and ends there too); an open path
+  // either way round. Dynamic programming over the run finds the combination
+  // with the least travel for this order (a choice for one path changes the
+  // hops on both sides of it, so choosing one at a time falls short).
+  function bestStarts(list, start, cost) {
+    const n = list.length;
+    if (!n) return list;
+    const opts = list.map((it) => {
+      const p = it.path.p;
+      if (it.path.c && p.length > 2) {
+        let s = startPoints(p);
+        // very finely drawn shapes: every few candidates is plenty
+        if (s.length > 16) { const k = Math.ceil(s.length / 16); s = s.filter((_, i) => i % k === 0); }
+        return s.map((st) => { const q = pointOn(p, st); return { in: q, out: q, make: () => ({ ...it, path: { ...it.path, p: rotateTo(p, st) } }) }; });
+      }
+      if (!it.path.c && p.length > 1) {
+        return [{ in: p[0], out: p[p.length - 1], make: () => it }, { in: p[p.length - 1], out: p[0], make: () => ({ ...it, path: { ...it.path, p: p.slice().reverse() } }) }];
+      }
+      return [{ in: p[0], out: endOf(it.path), make: () => it }];
+    });
+    const hop = (a, b) => cost(Math.hypot(a[0] - b[0], a[1] - b[1]));
+    let dp = opts[0].map((o) => hop(start, o.in));
+    const from = [opts[0].map(() => -1)];
+    for (let i = 1; i < n; i++) {
+      const prev = opts[i - 1], cur = opts[i];
+      const nd = new Array(cur.length), nf = new Array(cur.length);
+      for (let c = 0; c < cur.length; c++) {
+        let best = Infinity, bi = 0;
+        for (let p = 0; p < prev.length; p++) {
+          const v = dp[p] + hop(prev[p].out, cur[c].in);
+          if (v < best) { best = v; bi = p; }
+        }
+        nd[c] = best; nf[c] = bi;
+      }
+      dp = nd; from.push(nf);
+    }
+    let c = 0;
+    for (let k = 1; k < dp.length; k++) if (dp[k] < dp[c]) c = k;
+    const out = new Array(n);
+    for (let i = n - 1; i >= 0; i--) { out[i] = opts[i][c].make(); c = from[i][c]; }
+    return out;
   }
 
   // 2-opt: reverse a stretch of the run order when that makes the travel in
   // and out of it quicker. Closed paths start and end at the same point; open
   // paths in a reversed stretch are cut the other way. Only stretches inside
   // one group (same blk) move, so the inside-first order stays.
-  function twoOptGroups(list, start, cost) {
+  // Local search on the run order of each group, until nothing improves (or
+  // the time budget for the group is used up):
+  //  - 2-opt: reverse a stretch when the travel in and out of it gets quicker;
+  //  - or-opt: move one path, or a chain of 2–3, to the place (either way
+  //    round) where it costs least.
+  // Closed paths start and end at the same point; open paths in a reversed
+  // stretch or chain are cut the other way. Only paths inside one group (same
+  // blk) move, so the inside-first order stays.
+  function twoOptGroups(list, start, cost, budgetMs) {
     const d = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
     const ent = (it) => it.path.p[0];
     const ext = (it) => endOf(it.path);
     const flip = (it) => (it.path.c ? it : { ...it, path: { ...it.path, p: it.path.p.slice().reverse() } });
+    const hop = (a, b) => (a && b ? cost(d(a, b)) : 0);
     const out = list.slice();
+    const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
     let i0 = 0;
     while (i0 < out.length) {
       let i1 = i0;
       while (i1 + 1 < out.length && out[i1 + 1].blk === out[i0].blk) i1++;
-      // stretches of a few hundred paths at most (the passes are n²)
-      if (i1 - i0 >= 2 && i1 - i0 < 400) {
-        for (let pass = 0, better = true; better && pass < 6; pass++) {
+      // groups of up to 1500 paths (each sweep is n²)
+      if (i1 - i0 >= 2 && i1 - i0 < 1500) {
+        const deadline = now() + (budgetMs || 250);
+        const before = (i) => (i === 0 ? start : i > i0 ? ext(out[i - 1]) : i0 > 0 ? ext(out[i0 - 1]) : start);
+        const after = (k) => (k + 1 < out.length ? ent(out[k + 1]) : null);
+        for (let better = true; better && now() < deadline;) {
           better = false;
-          for (let i = i0; i < i1; i++) {
-            const a = i === 0 ? start : ext(out[i - 1]);
+          // 2-opt
+          for (let i = i0; i < i1 && now() < deadline; i++) {
+            const a = before(i);
             for (let k = i + 1; k <= i1; k++) {
-              const b = k + 1 < out.length ? ent(out[k + 1]) : null;
-              const now = cost(d(a, ent(out[i]))) + (b ? cost(d(ext(out[k]), b)) : 0);
-              const rev = cost(d(a, ext(out[k]))) + (b ? cost(d(ent(out[i]), b)) : 0);
-              if (rev < now - 1e-9) {
+              const b = after(k);
+              if (hop(a, ext(out[k])) + hop(ent(out[i]), b) < hop(a, ent(out[i])) + hop(ext(out[k]), b) - 1e-9) {
                 out.splice(i, k - i + 1, ...out.slice(i, k + 1).reverse().map(flip));
                 better = true;
               }
+            }
+          }
+          // or-opt: chains of 1–3 paths moved elsewhere in the group
+          for (let L = 1; L <= 3; L++) {
+            for (let i = i0; i + L - 1 <= i1 && now() < deadline; i++) {
+              const k = i + L - 1;
+              const a = before(i), b = after(k);
+              const seg = out.slice(i, k + 1);
+              // what taking the chain out saves
+              const save = hop(a, ent(seg[0])) + hop(ext(seg[L - 1]), b) - hop(a, b);
+              if (save <= 1e-9) continue;
+              let best = null;
+              for (let j = i0; j <= i1 + 1; j++) {
+                if (j >= i && j <= k + 1) continue;
+                const p = j === i0 ? before(i0) : ext(out[j - 1]);
+                const q = j <= i1 ? ent(out[j]) : after(i1);
+                const base = hop(p, q);
+                const fwd = hop(p, ent(seg[0])) + hop(ext(seg[L - 1]), q) - base;
+                const rev = hop(p, ext(seg[L - 1])) + hop(ent(seg[0]), q) - base;
+                const c = Math.min(fwd, rev);
+                if (c < save - 1e-9 && (!best || c < best.c)) best = { j, c, rev: rev < fwd };
+              }
+              if (!best) continue;
+              const moved = best.rev ? seg.slice().reverse().map(flip) : seg;
+              out.splice(i, L);
+              const at = best.j > k ? best.j - L : best.j;
+              out.splice(at, 0, ...moved);
+              better = true;
             }
           }
         }

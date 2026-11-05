@@ -15,6 +15,12 @@ Latest round (28 Oct, final):
 - **Dark mode bed is grey** (`--bed`, `--sheet`, `--bed-grid*` in theme.css). **ACI 7 shows as white in dark mode** (black in light), as in CAD, and so do the marks drawn on the bed (registration marks, engrave hatching, arrows, start points): see the `--aci7*` and `--ink` tokens, and `LRC.aci.hex/fg/stroke` in app.js. Exports (DXF/SVG/PDF) still use real black.
 - **Sample machines and materials from earlier builds are removed on first start** (main.js, tracked by `settings.samplesRemoved`). This is by exact id (trotec, flatbed, laser2, acr-print-3 … brass-1); anything the operator created stays.
 
+Version 1.6.2 (5 Nov):
+- `twoOptGroups(list, start, cost, budgetMs)` now alternates 2-opt and or-opt (chains of 1–3 moved, either way round) until nothing improves or the time budget per group runs out. The default is 80 ms; groups of up to 1500 paths.
+- `bestStarts(list, start, cost)` finishes `orderPaths`. Dynamic programming picks every closed path's start (up to 16 `startPoints` each) and every open path's direction together, for the least total travel for that order.
+- Tried on the owner's X8 job (376 shapes, 381 moves, travel ≈ 161 s against a measured 160 s): only about 1 % better. The route is near the best the geometry allows: 376 separate shapes, hops mostly 2–40 mm, each limited by the jerk. A full joint search (3 rounds, 64 candidates) gained under 1 % more and took 3.4 s, so it was dropped.
+- **The real lever is on the Run side:** beam-off travel with Throughput jerk (40 000) would take this route's travel from 161 s to about 124 s, and with acc 1000 to about 94 s. See `hmi/RUN-TRAVEL-BRIEF.md`.
+
 Version 1.6.1 (5 Nov):
 - `nestDepth` judges an open path at its middle point, so an open line inside a closed shape is nested in it. With Per part or All insides it is cut with the holes, before the outline (previously depth 0, grouped with the outline).
 - `partOrder(units, start)` orders the parts in Per part mode by the gap between their boxes (plus 1 % of the centre distance to break ties), greedy and then 2-opt. It replaces `sequence(units…)`, whose unit `exit` was the first hole's end.

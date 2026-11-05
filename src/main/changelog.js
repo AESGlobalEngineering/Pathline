@@ -5,6 +5,13 @@
 
 module.exports = [
   {
+    version: '1.6.2', date: '5 Nov 2026',
+    added: [
+      'The route search keeps improving the order until nothing gets quicker (it also moves single shapes and short chains to better places), and the start points of all closed cuts are chosen together for the whole route.'
+    ],
+    fixed: []
+  },
+  {
     version: '1.6.1', date: '5 Nov 2026',
     added: [
       'Parts are visited in the order that crosses the least gap between them (Per part), instead of by where their first hole is; the head leaves a part from its outline, which now faces the next part.'
