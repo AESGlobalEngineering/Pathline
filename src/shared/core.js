@@ -283,7 +283,28 @@
     for (let i = 0; i < n; i++) t += segTime(L[i], vj[i], vj[i + 1], v, a);
     return t;
   }
-  const travelTime = (d, v, a) => segTime(d, 0, 0, v, a);
+  // Rest-to-rest move of distance d with top speed v, acceleration a and jerk
+  // j (S-curve: the acceleration itself builds up at most j mm/s³). Short
+  // moves never reach a or v and take (32 d / j)^⅓, whatever the top speed:
+  // on the Trotec (700 mm/s, 500 mm/s², 5000 mm/s³, Ruby's Standard) a 7 mm
+  // hop takes 0.35 s, which is what the machine does.
+  function jerkTime(d, v, a, j) {
+    if (d <= 0) return 0;
+    let tj = a / j;
+    // the top speed is reached before full acceleration: a lower peak acceleration
+    if (v < a * tj) { a = Math.sqrt(v * j); tj = a / j; }
+    const ta = v / a - tj; // time at full acceleration while speeding up (≥ 0)
+    const tAcc = 2 * tj + ta; // speeding up from rest to v
+    const dMin = v * tAcc; // speeding up and slowing down again
+    if (d >= dMin) return 2 * tAcc + (d - dMin) / v;
+    // never reaches v; does it reach full acceleration?
+    const t1 = Math.cbrt(d / (2 * j));
+    if (j * t1 <= a) return 4 * t1;
+    const tc = (-3 * tj + Math.sqrt(tj * tj + (4 * d) / a)) / 2;
+    return 2 * (tc + 2 * tj);
+  }
+  // A travel move from rest to rest; with j (jerk) the S-curve, otherwise trapezoidal.
+  const travelTime = (d, v, a, j) => (j > 0 && a > 0 ? jerkTime(d, v, a, j) : segTime(d, 0, 0, v, a));
 
   // Raster engraving: for each scan line, the head sweeps from the leftmost to
   // the rightmost crossing (plus overscan to accelerate) — even-odd fill for
@@ -737,7 +758,52 @@
    * travel path (see refineStarts).
    */
   function orderPaths(items, opts) {
-    return refineStarts(arrangePaths(items, opts), opts.start || [0, 0], opts.order || 'file');
+    // cost(d): seconds for a travel move of d mm (default: the distance itself)
+    const cost = opts.cost || ((d) => d);
+    const start = opts.start || [0, 0];
+    let list = arrangePaths(items, opts);
+    list = refineStarts(list, start, opts.order || 'file', cost);
+    // take detours out within each group (a nesting layer or one part's
+    // layer), keeping the groups' order, then place the starts again
+    list = twoOptGroups(list, start, cost);
+    return refineStarts(list, start, opts.order || 'file', cost);
+  }
+
+  // 2-opt: reverse a stretch of the run order when that makes the travel in
+  // and out of it quicker. Closed paths start and end at the same point; open
+  // paths in a reversed stretch are cut the other way. Only stretches inside
+  // one group (same blk) move, so the inside-first order stays.
+  function twoOptGroups(list, start, cost) {
+    const d = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
+    const ent = (it) => it.path.p[0];
+    const ext = (it) => endOf(it.path);
+    const flip = (it) => (it.path.c ? it : { ...it, path: { ...it.path, p: it.path.p.slice().reverse() } });
+    const out = list.slice();
+    let i0 = 0;
+    while (i0 < out.length) {
+      let i1 = i0;
+      while (i1 + 1 < out.length && out[i1 + 1].blk === out[i0].blk) i1++;
+      // stretches of a few hundred paths at most (the passes are n²)
+      if (i1 - i0 >= 2 && i1 - i0 < 400) {
+        for (let pass = 0, better = true; better && pass < 6; pass++) {
+          better = false;
+          for (let i = i0; i < i1; i++) {
+            const a = i === 0 ? start : ext(out[i - 1]);
+            for (let k = i + 1; k <= i1; k++) {
+              const b = k + 1 < out.length ? ent(out[k + 1]) : null;
+              const now = cost(d(a, ent(out[i]))) + (b ? cost(d(ext(out[k]), b)) : 0);
+              const rev = cost(d(a, ext(out[k]))) + (b ? cost(d(ent(out[i]), b)) : 0);
+              if (rev < now - 1e-9) {
+                out.splice(i, k - i + 1, ...out.slice(i, k + 1).reverse().map(flip));
+                better = true;
+              }
+            }
+          }
+        }
+      }
+      i0 = i1 + 1;
+    }
+    return out;
   }
 
   // Pick each closed path's start (= end) point so the travel in from the
@@ -774,8 +840,10 @@
   // the closed path p starting (and ending) at start s
   const rotateTo = (p, s) => (s.t ? [pointOn(p, s)].concat(p.slice(s.v + 1), p.slice(0, s.v + 1)) : p.slice(s.v).concat(p.slice(0, s.v)));
 
-  function refineStarts(list, start, order) {
-    const d = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
+  function refineStarts(list, start, order, cost) {
+    // the travel time of a hop (default: its length)
+    const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
+    const d = cost ? (a, b) => cost(dist(a, b)) : dist;
     // the start candidates of each closed path, worked out once (from its first shape)
     const cands = list.map((it) => (it.path.c && it.path.p.length > 2 ? { p: it.path.p, s: startPoints(it.path.p) } : null));
     for (let sweep = 0; sweep < 2; sweep++) {
@@ -871,7 +939,15 @@
         if (home) parts.get(home).push(it);
         else loose.push([it]);
       }
-      const units = [...parts.values()].concat(loose).map((list) => {
+      // a part with no holes has nothing to protect: its pieces (several once
+      // shared lines are merged) go in freely with the other such pieces, so
+      // touching parts are cut as continuous lines; parts with holes stay whole
+      const whole = [], free = [];
+      for (const list of [...parts.values()].concat(loose)) {
+        if (list.every((it) => !(it.depth > 0))) free.push(...list.map((it) => [it]));
+        else whole.push(list);
+      }
+      const units = whole.concat(free).map((list) => {
         const b = EMPTY_BOX();
         list.forEach((it) => { growBox(b, it.path.box.x0, it.path.box.y0); growBox(b, it.path.box.x1, it.path.box.y1); });
         return {
@@ -881,7 +957,10 @@
         };
       });
       let partNo = 0;
+      const freeSet = new Set(free.map((l) => l[0]));
       for (const u of sequence(units, at, order)) {
+        // free pieces next to each other share a group, so the 2-opt pass can reorder them
+        if (u.list.length === 1 && freeSet.has(u.list[0])) { emit(u.list, out, 'free' + partNo); continue; }
         partNo++;
         // inside the part: deepest holes first, outline last
         const byDepth = u.list.slice().sort((a, b) => (b.depth || 0) - (a.depth || 0) || a.n - b.n);
@@ -908,7 +987,9 @@
   }
 
   const DEFAULTS = {
-    laser: { speed: 1000, acc: 10000 },
+    // a machine that doesn't report its motion is taken as slow: the Trotec's measured
+    // travel (Ruby's Standard: 700 mm/s, 500 mm/s², jerk 5000 mm/s³)
+    laser: { speed: 700, acc: 500, jerk: 5000 },
     plotter: { speed: 1000, acc: 8000, toolDown: 0.15, toolUp: 0.12, toolChange: 8, feedSpeed: 200, feedSettle: 3, dashLift: 0.08 }
   };
 
@@ -1051,6 +1132,12 @@
     const o = info.origin || 'tl';
     const home = [o.includes('r') ? bedSize[0] : 0, o.includes('b') ? bedSize[1] : 0];
     const vTravel = Math.min(vMax, Number(info.travelSpeed) || vMax);
+    // travel between cuts: top speed, acceleration and, when known, jerk (an
+    // S-curve; short hops then cost ~0.35 s each however fast the top speed)
+    const accTravel = Number(info.travelAcc) || acc;
+    const jerk = Number(info.jerk) || (info.acc ? 0 : D.jerk || 0);
+    const moveT = (d) => travelTime(d, vTravel, accTravel, jerk);
+    let moves = 0;
     let at = home;
     let first = true;
     let curTool = null;
@@ -1065,8 +1152,9 @@
     const travelTo = (pt, bedNo, proc, kind) => {
       const d = Math.hypot(pt[0] - at[0], pt[1] - at[1]);
       if (d < 1e-6) return;
-      const dur = travelTime(d, vTravel, acc);
+      const dur = moveT(d);
       const leg = kind || (first ? 'fromOrigin' : 'between');
+      if (leg === 'between') moves++;
       first = false;
       travel += d;
       travelT += dur;
@@ -1163,7 +1251,7 @@
     // between passes is paid once per round instead of once per item).
     function backToBack(units, startOf, endOf, passes, dwell) {
       if (passes < 2) return true;
-      const tt = (a, b) => travelTime(Math.hypot(a[0] - b[0], a[1] - b[1]), vTravel, acc);
+      const tt = (a, b) => moveT(Math.hypot(a[0] - b[0], a[1] - b[1]));
       let item = 0, group = 0, p = at;
       for (const u of units) { item += tt(p, startOf(u)) + (passes - 1) * (dwell + tt(endOf(u), startOf(u))); p = endOf(u); }
       p = at;
@@ -1257,7 +1345,7 @@
         }));
         ordered = orderPaths(items, {
           nest: isLaser ? proc.proc === 'Cut' : /Knife/.test(proc.tool || ''),
-          inside: cut.inside, order: 'speed', start: at
+          inside: cut.inside, order: 'speed', start: at, cost: moveT
         });
         cache.set(key, ordered);
       }
@@ -1300,8 +1388,8 @@
       total: t,
       perProcess: per.filter((p) => p.ops > 0),
       travel, travelTime: travelT, travelLegs: trav, home, cutOrder: cut, inspectTime, dwellTime, marks: marks.length,
-      cutLen, engArea, toolChanges, feeds, beds: nBeds, procOrder: order, repeats,
-      machine: { speed: vMax, acc },
+      cutLen, engArea, toolChanges, feeds, beds: nBeds, procOrder: order, repeats, moves,
+      machine: { speed: vMax, acc, travelSpeed: vTravel, travelAcc: accTravel, jerk },
       timeline: opts.timeline ? timeline : undefined
     };
   }

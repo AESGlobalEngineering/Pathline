@@ -700,15 +700,15 @@ class Component extends DCLogic {
       { l: 'Cut inside shapes first', opts: [['part', 'Per part'], ['all', 'All insides'], ['off', 'Off']].map(([v, l]) => ({ l, on: co.inside === v, ...seg(co.inside === v), pick: () => setOrder({ inside: v }) })) }
     ];
     const stats = isLaser
-      ? [{ l: 'Travel distance', v: CC.fmtLen(est.travel) }, { l: 'Cut length', v: CC.fmtLen(est.cutLen) }, { l: 'Engraved area', v: CC.fmtArea(est.engArea) }]
-      : [{ l: 'Travel distance', v: CC.fmtLen(est.travel) }, { l: 'Cut length', v: CC.fmtLen(est.cutLen) }, { l: 'Tool changes', v: String(est.toolChanges) }, { l: 'Beds', v: String(est.beds) }];
+      ? [{ l: 'Moves between cuts', v: String(est.moves || 0) }, { l: 'Travel distance', v: CC.fmtLen(est.travel) }, { l: 'Cut length', v: CC.fmtLen(est.cutLen) }, { l: 'Engraved area', v: CC.fmtArea(est.engArea) }]
+      : [{ l: 'Moves between cuts', v: String(est.moves || 0) }, { l: 'Travel distance', v: CC.fmtLen(est.travel) }, { l: 'Cut length', v: CC.fmtLen(est.cutLen) }, { l: 'Tool changes', v: String(est.toolChanges) }, { l: 'Beds', v: String(est.beds) }];
     const checks = CC.checkJob(job, machine).map((c) => ({ l: c.l, icon: c.ok ? icons.check : icons.warn, cls: c.ok ? 'ok' : c.warn ? 'warn' : 'err', bg: c.ok ? 'var(--ok-soft)' : c.warn ? 'var(--warn-soft)' : 'var(--err-soft)', fg: c.ok ? 'var(--ok)' : c.warn ? 'var(--warn)' : 'var(--err)' }));
     const marker = ((sim.total ? t / T : 0) * 100).toFixed(2) + '%';
 
     return {
       accent, icons, isLaser, isPlotter: !isLaser, modes, beds, thermal, multiBed: nBeds > 1, speeds, toggles, procs, noProcs: !procs.length,
       jobName: job.name + (job.dirty ? ' · unsaved' : ''),
-      machLine: machine.name + ' · max ' + est.machine.speed + ' mm/s · accel ' + est.machine.acc + ' mm/s²',
+      machLine: machine.name + ' · travel ' + Math.round(est.machine.travelSpeed) + ' mm/s · ' + Math.round(est.machine.travelAcc) + ' mm/s²' + (est.machine.jerk ? ' · jerk ' + Math.round(est.machine.jerk) + ' mm/s³' : ''),
       scene,
       now: { name: nowName, step: nowStep, col: nowCol, x: head.x.toFixed(1), y: head.y.toFixed(1) },
       bar, marker,

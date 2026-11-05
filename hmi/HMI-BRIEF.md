@@ -198,7 +198,8 @@ Return any subset. Missing keys keep Pathline's current value. Pathline reads th
 |---|---|
 | `name` | **The machine's name in Pathline** (from Pathline 1.2.6; if `/machine` has no `name`, the one in `/info` is used). Pathline shows it read-only, so the name is set on the HMI. |
 | `bed: [w, h]` | Canvas size, "job inside bed" check, frame limits |
-| `speed`, `acc` | **Time estimate** (max travel speed mm/s, acceleration mm/s²) |
+| `speed`, `acc` | **Time estimate** (max speed mm/s, acceleration mm/s²; `acc` also sets how much the head slows at corners while cutting) |
+| `travelSpeed`, `travelAcc`, `jerk` (optional, from Pathline Prepare 1.6.0) | **Travel between cuts:** top speed, acceleration and jerk (mm/s³, how fast the acceleration can build). With `jerk` Prepare times every travel move as an S-curve, so a short hop costs what it really does (on the Trotec at Ruby's Standard, 700 mm/s, 500 mm/s², 5000 mm/s³: a 7 mm hop takes 0.35 s). It also uses that time, not distance, to choose the order and start points. Without them it uses `speed`/`acc`, so equivalent values (e.g. 700 mm/s and 250 mm/s²) still give close totals. |
 | `origin` (`tl`/`tr`/`bl`/`br`) | Start/return corner in the estimate |
 | `units`, `home`, `prefix` | Shown in Pathline; `prefix` is put in front of saved job file names |
 | Laser: `source`, `power` (W), `lens`, `pwm`, `minPower`, `focus`, `airDefault`, `lid`, `exhaust` | Shown read-only; `power` also drives the thermal map |

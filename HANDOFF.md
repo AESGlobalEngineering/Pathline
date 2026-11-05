@@ -15,6 +15,16 @@ Latest round (28 Oct, final):
 - **Dark mode bed is grey** (`--bed`, `--sheet`, `--bed-grid*` in theme.css). **ACI 7 shows as white in dark mode** (black in light), as in CAD, and so do the marks drawn on the bed (registration marks, engrave hatching, arrows, start points): see the `--aci7*` and `--ink` tokens, and `LRC.aci.hex/fg/stroke` in app.js. Exports (DXF/SVG/PDF) still use real black.
 - **Sample machines and materials from earlier builds are removed on first start** (main.js, tracked by `settings.samplesRemoved`). This is by exact id (trotec, flatbed, laser2, acr-print-3 … brass-1); anything the operator created stays.
 
+Version 1.6.0 (5 Nov):
+- **Travel model:** `jerkTime(d, v, a, j)` gives a rest-to-rest S-curve. Short hops take (32·d/j)^⅓, and 7 mm at 5000 mm/s³ is 0.355 s, matching the Trotec measurements the Run session made (700 mm/s, 500 mm/s², 5000 mm/s³, Ruby's Standard; its jobs matched within 1–4 %).
+  - `travelTime(d, v, a, j)` uses the S-curve when `j` is given, otherwise the trapezoid.
+  - In `estimateIn`, travel uses `info.travelSpeed`, `info.travelAcc` (else `acc`) and `info.jerk`. A laser that reports no `acc` gets `DEFAULTS.laser` (700 / 500 / jerk 5000). Run currently sends equivalent 700 mm/s and 250 mm/s² without jerk, which the trapezoid matches closely.
+  - `est.moves` counts travel moves between cuts, and `est.machine` carries the travel figures.
+- **Optimising by time:** `orderPaths` takes `cost(d)` (the estimator passes the travel time). Within the existing order rules, the pipeline is `refineStarts` → `twoOptGroups` (2-opt within each `blk` group of up to 400 paths, reversing open paths in a flipped stretch) → `refineStarts` again. Only paths within one group move, so inside-first is kept.
+  - Per part: parts with no holes become free single pieces (blk `free…`) and can chain across touching parts. Parts with holes keep holes → outline.
+  - Measured: a 200-object real job saves 3–4 % travel (it is within one move of the minimum: about 84 separate runs per process, from the line network's odd vertices). 48 touching squares with Per part go from 33 to 19 moves (15.6 → 9.8 s); with Off they were already at the minimum of 12.
+- HMI-BRIEF §5 documents `travelSpeed`, `travelAcc` and `jerk`.
+
 Version 1.5.8 (4 Nov): the Job page's Queue tab lists only active jobs. `qList` drops statuses in `FINISHED` (done, stopped, failed, error, cancelled, aborted), and the Clear finished button and `queueClear` are gone.
 
 Version 1.5.7 (4 Nov):

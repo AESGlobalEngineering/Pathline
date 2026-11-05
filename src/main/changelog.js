@@ -5,6 +5,16 @@
 
 module.exports = [
   {
+    version: '1.6.0', date: '5 Nov 2026',
+    added: [
+      'Travel is timed as the machine really moves: with the jerk limit a machine reports (the Trotec: 700 mm/s, 500 mm/s², 5000 mm/s³), every short hop costs about a third of a second, however fast the top speed. A machine that reports nothing is taken as that slow.',
+      'The cut order keeps its rules (engraving before cutting out, inside-first as set, By process / Fastest / Ordered) and within them minimises travel time instead of distance: start points, direction and order are chosen by time, and a final pass removes detours.',
+      'Per part: parts with no holes (e.g. touching squares) are cut as continuous lines instead of one by one. 48 touching squares go from 33 moves to 19.',
+      'Simulation shows the number of moves between cuts and the travel figures used.'
+    ],
+    fixed: []
+  },
+  {
     version: '1.5.8', date: '4 Nov 2026',
     added: [],
     fixed: ['The Queue tab shows only the active queue: jobs waiting, running or paused. Finished, stopped and failed jobs are no longer listed (and Clear finished is gone).']
