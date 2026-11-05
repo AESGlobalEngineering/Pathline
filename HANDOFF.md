@@ -15,6 +15,12 @@ Latest round (28 Oct, final):
 - **Dark mode bed is grey** (`--bed`, `--sheet`, `--bed-grid*` in theme.css). **ACI 7 shows as white in dark mode** (black in light), as in CAD, and so do the marks drawn on the bed (registration marks, engrave hatching, arrows, start points): see the `--aci7*` and `--ink` tokens, and `LRC.aci.hex/fg/stroke` in app.js. Exports (DXF/SVG/PDF) still use real black.
 - **Sample machines and materials from earlier builds are removed on first start** (main.js, tracked by `settings.samplesRemoved`). This is by exact id (trotec, flatbed, laser2, acr-print-3 … brass-1); anything the operator created stays.
 
+Version 1.6.3 (5 Nov):
+- **The route minimises travel distance, at the owner's request** ("travel as little as possible; punish travel, reward cutting"). The route cost is `routeCost(d) = d + ROUTE_MOVE_MM` (5 mm per move; 0 for a join). It is passed to `orderPaths` instead of the travel time; `moveT` still times the estimate. The search budget is 150 ms per group. `estimate(…, { routeCost, routeBudget })` can override both (used for experiments).
+- Checked on the X8 job (All insides): the hole route is 6058 mm against 6015 mm for the same holes solved as a standalone shortest-tour problem (2-opt + or-opt to convergence, centre to centre), so within 1 %.
+  - Travel by purpose: to the 3 registration marks 1.25 m, marks → first cut 0.6 m (All insides starts with the deepest holes), between holes 5.7 m, outlines 0.6 m.
+  - Inside-first is the biggest remaining factor: All insides 8.2 m, Per part 7.7 m, Off 6.5 m.
+
 Version 1.6.2 (5 Nov):
 - `twoOptGroups(list, start, cost, budgetMs)` now alternates 2-opt and or-opt (chains of 1–3 moved, either way round) until nothing improves or the time budget per group runs out. The default is 80 ms; groups of up to 1500 paths.
 - `bestStarts(list, start, cost)` finishes `orderPaths`. Dynamic programming picks every closed path's start (up to 16 `startPoints` each) and every open path's direction together, for the least total travel for that order.

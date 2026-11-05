@@ -258,11 +258,10 @@ async function main() {
     // start points: a square entered from its far side should start on an edge near the travel path (never on a corner)
     const squares = [{ id: 's1', aci: 1, paths: [{ p: [[110, 110], [10, 110], [10, 10], [110, 10]], c: true }] }, { id: 's2', aci: 1, paths: [{ p: [[200, 10], [250, 10], [250, 60], [200, 60]], c: true }] }];
     const st = CC.estimate({ ...pj, entities: squares, cutOrder: { inside: 'off', order: 'file' } }, laser, { timeline: true }).timeline.filter((o) => o.kind === 'op');
-    // travel time, not distance, decides: one short hop from the origin then one long one (via the corner at 10, 10)
-    // is quicker than two medium hops (via 110, 10), because every move costs its acceleration
+    // the route travels as little as possible: the corner (110, 10) is on the way to the next part, so the start is beside it
     const isCorner = (q, e) => e.paths[0].p.some((v) => Math.hypot(v[0] - q[0], v[1] - q[1]) < 0.05);
     const s0 = st[0].path.p[0], s1 = st[1].path.p[0];
-    ok(!isCorner(s0, squares[0]) && Math.hypot(s0[0] - 10, s0[1] - 10) <= 26, 'cut starts on an edge where the travel is quickest: ' + s0.join(','));
+    ok(!isCorner(s0, squares[0]) && Math.hypot(s0[0] - 110, s0[1] - 10) <= 26, 'cut starts on an edge where the travel is shortest: ' + s0.join(','));
     ok(!isCorner(s1, squares[1]) && Math.hypot(s1[0] - 200, s1[1] - 10) <= 13, 'next cut starts on an edge nearest the previous one: ' + s1.join(','));
     // too many registration marks blocks sending
     const four = { ...job, entities: job.entities.concat({ id: 'r9', aci: 9, paths: [{ p: CC.shapes.dot(400, 300, 5), c: true }] }) };

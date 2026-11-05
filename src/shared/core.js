@@ -1264,6 +1264,11 @@
     const accTravel = Number(info.travelAcc) || acc;
     const jerk = Number(info.jerk) || (info.acc ? 0 : D.jerk || 0);
     const moveT = (d) => travelTime(d, vTravel, accTravel, jerk);
+    // the route itself is chosen to travel as little as possible: distance,
+    // plus a fixed charge for every move so carrying straight on into the next
+    // cut always wins (moveT still gives the time)
+    const ROUTE_MOVE_MM = 5;
+    const routeCost = (d) => (d > 0.01 ? d + ROUTE_MOVE_MM : d);
     let moves = 0;
     let at = home;
     let first = true;
@@ -1472,7 +1477,7 @@
         }));
         ordered = orderPaths(items, {
           nest: isLaser ? proc.proc === 'Cut' : /Knife/.test(proc.tool || ''),
-          inside: cut.inside, order: 'speed', start: at, cost: moveT
+          inside: cut.inside, order: 'speed', start: at, cost: opts.routeCost || routeCost, budget: opts.routeBudget || 150
         });
         cache.set(key, ordered);
       }
