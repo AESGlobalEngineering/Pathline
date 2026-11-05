@@ -152,6 +152,20 @@ async function main() {
       const seq = ops.map((o) => o.ent + o.round).join(' ');
       ok(seq === 'a1 b1 l1 a2 b2 a3 b3', 'repeat runs the whole job, then again; once-only processes once (' + seq + ')');
     }
+    // print and cut: the first cut is next to the last registration mark read, in every inside-first mode
+    {
+      const dot = (id, x, y) => ({ id, aci: 5, paths: [{ p: CC.shapes.ellipse(x, y, 2.5, 2.5), c: true }] });
+      const part = (k, x, y) => [{ id: 'o' + k, aci: 1, paths: [{ p: CC.shapes.rect(x, y, 120, 60, 0), c: true }] }, { id: 'h' + k, aci: 1, paths: [{ p: CC.shapes.ellipse(x + 30, y + 30, 8, 8), c: true }] },
+        { id: 'n' + k, aci: 1, paths: [{ p: CC.shapes.ellipse(x + 30, y + 30, 2, 2), c: true }] }, { id: 'q' + k, aci: 1, paths: [{ p: CC.shapes.rect(x + 80, y + 20, 20, 20, 0), c: true }] }];
+      const ents = [dot('m1', 10, 10), dot('m2', 10, 300), dot('m3', 600, 10)].concat(part(0, 30, 30), part(1, 450, 30), part(2, 30, 200), part(3, 450, 200));
+      const procs = [{ name: 'Cut', proc: 'Cut', power: 80, speed: 20, f: 5000, passes: 1, out: true, aci: [1] }, { ...CC.regProcess(), aci: [5] }];
+      for (const inside of ['all', 'part', 'off']) {
+        const tl = CC.estimate({ ...pj, regMode: 'linear', repeat: 1, entities: ents, processes: procs, cutOrder: { order: 'speed', inside } }, laser, { timeline: true }).timeline;
+        const last = tl.filter((o) => o.kind === 'inspect').pop(), first = tl.find((o) => o.kind === 'op');
+        const hop = Math.hypot(first.path.p[0][0] - last.at[0], first.path.p[0][1] - last.at[1]);
+        ok(hop < 200, inside + ': print and cut starts cutting next to the last mark read (' + Math.round(hop) + ' mm from it)');
+      }
+    }
     // open lines inside a part are inside it: cut with its holes, before its outline
     {
       const part = [{ id: 'o', aci: 1, paths: [{ p: CC.shapes.rect(10, 10, 100, 60, 0), c: true }] }, { id: 'h', aci: 1, paths: [{ p: CC.shapes.ellipse(30, 40, 6, 6), c: true }] },

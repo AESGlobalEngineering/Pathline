@@ -5,6 +5,14 @@
 
 module.exports = [
   {
+    version: '1.6.4', date: '5 Nov 2026',
+    added: [],
+    fixed: [
+      'Print and cut: after reading the registration marks the head went back across the bed for the first cut (on the X8 job from the top-right mark to a part at the top left, 607 mm). Cutting now starts next to the last mark read.',
+      'All insides cut a hole that sits inside another hole first wherever it was in the job; now it is cut just before the hole around it, and the holes are otherwise taken in the order that travels least. On the X8 job: travel 8.2 m → 7.8 m (All insides) and 6.5 m → 6.3 m (Off).'
+    ]
+  },
+  {
     version: '1.6.3', date: '5 Nov 2026',
     added: [
       'The route travels as little as possible: order, start points and direction are chosen by travel distance, with a charge for every move so carrying straight on into the next cut always wins (it used to choose by travel time, which let long hops through). On the X8 job: 6 % less travel distance; the route between its 371 holes is within 1 % of the shortest possible.'

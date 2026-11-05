@@ -758,6 +758,27 @@
    * is ignored. Closed paths then start wherever is most convenient on the
    * travel path (see refineStarts).
    */
+  // The order to read registration marks in (up to 6, every order tried): the
+  // least travel from the origin through all of them, ending nearest `end`
+  // (where the work begins, so the job then runs from that end).
+  function markOrder(list, home, end) {
+    if (list.length < 2 || list.length > 6) return list;
+    const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
+    let best = list, bd = Infinity;
+    const perm = (done, left) => {
+      if (!left.length) {
+        let d = dist(home, [done[0].x, done[0].y]);
+        for (let i = 1; i < done.length; i++) d += dist([done[i - 1].x, done[i - 1].y], [done[i].x, done[i].y]);
+        d += dist([done[done.length - 1].x, done[done.length - 1].y], end);
+        if (d < bd - 1e-9) { bd = d; best = done; }
+        return;
+      }
+      left.forEach((m, i) => perm(done.concat([m]), left.filter((_, k) => k !== i)));
+    };
+    perm([], list);
+    return best;
+  }
+
   // The order to visit parts in. The head leaves a part from its outline, and
   // the outline's start is placed afterwards on the side facing the next part,
   // so the hop between two parts is about the gap between their boxes (none
@@ -1042,11 +1063,46 @@
     };
     const out = [];
     if (inside === 'all') {
-      const layers = new Map();
-      items.forEach((it) => { if (!layers.has(it.depth)) layers.set(it.depth, []); layers.get(it.depth).push(it); });
-      for (const d of [...layers.keys()].sort((a, b) => b - a)) {
-        emit(sequence(layers.get(d).map(pathUnit), at, order).map((u) => u.it), out, 'd' + d);
+      // every hole before any outline. A hole and whatever is inside it go
+      // together (the inner ones first); the holes are then taken in the
+      // order that travels least, with no job-wide "deepest first" layer
+      // (which sent the head to a tiny inner shape wherever it was)
+      const holes = items.filter((it) => it.depth > 0);
+      const outlines = items.filter((it) => !(it.depth > 0));
+      const tops = [...new Set(holes.filter((it) => it.depth === 1 && it.shape.c).map((it) => it.shape))];
+      const groups = new Map(tops.map((s) => [s, []]));
+      const alone = [];
+      for (const it of holes) {
+        if (groups.has(it.shape)) { groups.get(it.shape).push(it); continue; }
+        // the smallest depth-1 hole around it
+        const [x, y] = it.shape.c ? it.shape.p[0] : it.shape.p[Math.floor(it.shape.p.length / 2)];
+        let home = null;
+        for (const s of tops) {
+          const b = s.box;
+          if (s === it.shape || x < b.x0 || x > b.x1 || y < b.y0 || y > b.y1 || s.area <= (it.shape.area || 0)) continue;
+          if (pointInPoly(x, y, s.p) && (!home || s.area < home.area)) home = s;
+        }
+        if (home) groups.get(home).push(it);
+        else alone.push(it);
       }
+      // single holes (most of them) go in one run the 2-opt pass can reorder;
+      // a hole with something inside is a fixed little sequence, deepest first
+      const units = [...groups.values()].filter((l) => l.length).concat(alone.map((it) => [it])).map((list) => {
+        const b = EMPTY_BOX();
+        list.forEach((it) => { growBox(b, it.path.box.x0, it.path.box.y0); growBox(b, it.path.box.x1, it.path.box.y1); });
+        const sorted = list.slice().sort((p, q) => (q.depth || 0) - (p.depth || 0) || p.n - q.n);
+        return {
+          list: sorted, box: b, cx: (b.x0 + b.x1) / 2, cy: (b.y0 + b.y1) / 2, r: Math.hypot(b.x1 - b.x0, b.y1 - b.y0) / 2,
+          entry: (a) => entryOf(sorted[0].path, a).d,
+          exit: () => endOf(sorted[sorted.length - 1].path)
+        };
+      });
+      let k = 0;
+      for (const u of sequence(units, at, order)) {
+        if (u.list.length === 1) emit(u.list, out, 'holes');
+        else { k++; u.list.forEach((it) => emit([it], out, 'nest' + k + 'd' + it.depth)); }
+      }
+      emit(sequence(outlines.map(pathUnit), at, order).map((u) => u.it), out, 'outlines');
       return out;
     }
     if (inside === 'part') {
@@ -1192,9 +1248,19 @@
         if (!groups.has(o)) groups.set(o, []);
         groups.get(o).push(e);
       }
-      // parts nearest next, from the machine origin
+      // parts nearest next, from where the head is when cutting begins: the
+      // machine origin, or the last registration mark read (the same order
+      // the estimate reads them in)
       const bedSize = bedOf(machine), o = ((machine && machine.info) || {}).origin || 'tl';
-      let at = [o.includes('r') ? bedSize[0] : 0, o.includes('b') ? bedSize[1] : 0];
+      const home = [o.includes('r') ? bedSize[0] : 0, o.includes('b') ? bedSize[1] : 0];
+      let at = home;
+      if (isLaser) {
+        const cutEnts = ents.filter((e) => procOf(e) !== undefined);
+        let near = home, nd = Infinity;
+        for (const e of cutEnts) { const b = entityBox(e); const q = [Math.max(b.x0, Math.min(home[0], b.x1)), Math.max(b.y0, Math.min(home[1], b.y1))]; const d = Math.hypot(q[0] - home[0], q[1] - home[1]); if (d < nd) { nd = d; near = q; } }
+        const read = markOrder(regMarks(job, machine), home, near);
+        if (read.length) at = [read[read.length - 1].x, read[read.length - 1].y];
+      }
       const left = [...groups.values()].map((list) => { const b = boxOf(list); return { list, c: [(b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2] }; });
       // within a part: engraving (and marking), then its holes, then its
       // outlines (Per part); with All insides every outline waits until every
@@ -1333,25 +1399,8 @@
     };
     // read the marks in the order with the least travel that ends nearest
     // where the work begins, so the job then runs from that end
-    const marks = (() => {
-      const list = isLaser ? regMarks(job, machine) : [];
-      if (list.length < 2 || list.length > 6) return list;
-      const end = workStart();
-      const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
-      let best = list, bd = Infinity;
-      const perm = (done, left) => {
-        if (!left.length) {
-          let d = dist(home, [done[0].x, done[0].y]);
-          for (let i = 1; i < done.length; i++) d += dist([done[i - 1].x, done[i - 1].y], [done[i].x, done[i].y]);
-          d += dist([done[done.length - 1].x, done[done.length - 1].y], end);
-          if (d < bd - 1e-9) { bd = d; best = done; }
-          return;
-        }
-        left.forEach((m, i) => perm(done.concat([m]), left.filter((_, k) => k !== i)));
-      };
-      perm([], list);
-      return best;
-    })();
+    const marks = markOrder(isLaser ? regMarks(job, machine) : [], home, workStart());
+
     marks.forEach((m, i) => {
       travelTo([m.x, m.y], 0, -1);
       inspectTime += markTime;

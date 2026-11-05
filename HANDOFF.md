@@ -15,6 +15,11 @@ Latest round (28 Oct, final):
 - **Dark mode bed is grey** (`--bed`, `--sheet`, `--bed-grid*` in theme.css). **ACI 7 shows as white in dark mode** (black in light), as in CAD, and so do the marks drawn on the bed (registration marks, engrave hatching, arrows, start points): see the `--aci7*` and `--ink` tokens, and `LRC.aci.hex/fg/stroke` in app.js. Exports (DXF/SVG/PDF) still use real black.
 - **Sample machines and materials from earlier builds are removed on first start** (main.js, tracked by `settings.samplesRemoved`). This is by exact id (trotec, flatbed, laser2, acr-print-3 … brass-1); anything the operator created stays.
 
+Version 1.6.4 (5 Nov):
+- **Print and cut starts next to the last mark.** `markOrder(list, home, end)` (shared) picks the mark reading order. Fastest's part-by-part plan in `estimate()` now starts its part order from the last mark read, worked out the same way as `estimateIn` (end = the cut point nearest the origin), not from the machine origin. On the X8 job the hop from the last mark (top right) to cut 1 was 607 mm and is now 59 mm.
+- **All insides without a job-wide depth layer.** Each depth-1 hole is grouped with what's inside it (deepest first, blk `nest<k>d<depth>`). Single holes share blk `holes`, which the 2-opt pass reorders freely, and outlines come last (blk `outlines`). Before, all depth-2 shapes in the job went first wherever they were.
+- X8 travel: All insides 8.2 → 7.8 m, Per part 7.7 m, Off 6.5 → 6.3 m. Self-test: print and cut's first cut is within 200 mm of the last mark in every mode.
+
 Version 1.6.3 (5 Nov):
 - **The route minimises travel distance, at the owner's request** ("travel as little as possible; punish travel, reward cutting"). The route cost is `routeCost(d) = d + ROUTE_MOVE_MM` (5 mm per move; 0 for a join). It is passed to `orderPaths` instead of the travel time; `moveT` still times the estimate. The search budget is 150 ms per group. `estimate(…, { routeCost, routeBudget })` can override both (used for experiments).
 - Checked on the X8 job (All insides): the hole route is 6058 mm against 6015 mm for the same holes solved as a standalone shortest-tour problem (2-opt + or-opt to convergence, centre to centre), so within 1 %.
