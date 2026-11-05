@@ -15,6 +15,11 @@ Latest round (28 Oct, final):
 - **Dark mode bed is grey** (`--bed`, `--sheet`, `--bed-grid*` in theme.css). **ACI 7 shows as white in dark mode** (black in light), as in CAD, and so do the marks drawn on the bed (registration marks, engrave hatching, arrows, start points): see the `--aci7*` and `--ink` tokens, and `LRC.aci.hex/fg/stroke` in app.js. Exports (DXF/SVG/PDF) still use real black.
 - **Sample machines and materials from earlier builds are removed on first start** (main.js, tracked by `settings.samplesRemoved`). This is by exact id (trotec, flatbed, laser2, acr-print-3 … brass-1); anything the operator created stays.
 
+Version 1.6.1 (5 Nov):
+- `nestDepth` judges an open path at its middle point, so an open line inside a closed shape is nested in it. With Per part or All insides it is cut with the holes, before the outline (previously depth 0, grouped with the outline).
+- `partOrder(units, start)` orders the parts in Per part mode by the gap between their boxes (plus 1 % of the centre distance to break ties), greedy and then 2-opt. It replaces `sequence(units…)`, whose unit `exit` was the first hole's end.
+- Measured on a rebuilt copy of the owner's sample (8 touching rounded parts, each with 2 circles, a 10-line burst and a 4 × 3 square grid), travel against 1.6.0: Per part 88.3 → 79.5 s, All insides 81.7 → 78.2 s, Off 75.4 s unchanged. What's left with Per part is structural: touching parts share an edge cut once, so an outline is an open U whose ends sit on one side.
+
 Version 1.6.0 (5 Nov):
 - **Travel model:** `jerkTime(d, v, a, j)` gives a rest-to-rest S-curve. Short hops take (32·d/j)^⅓, and 7 mm at 5000 mm/s³ is 0.355 s, matching the Trotec measurements the Run session made (700 mm/s, 500 mm/s², 5000 mm/s³, Ruby's Standard; its jobs matched within 1–4 %).
   - `travelTime(d, v, a, j)` uses the S-curve when `j` is given, otherwise the trapezoid.

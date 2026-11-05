@@ -152,6 +152,15 @@ async function main() {
       const seq = ops.map((o) => o.ent + o.round).join(' ');
       ok(seq === 'a1 b1 l1 a2 b2 a3 b3', 'repeat runs the whole job, then again; once-only processes once (' + seq + ')');
     }
+    // open lines inside a part are inside it: cut with its holes, before its outline
+    {
+      const part = [{ id: 'o', aci: 1, paths: [{ p: CC.shapes.rect(10, 10, 100, 60, 0), c: true }] }, { id: 'h', aci: 1, paths: [{ p: CC.shapes.ellipse(30, 40, 6, 6), c: true }] },
+        { id: 'l1', aci: 1, paths: [{ p: [[60, 30], [90, 50]], c: false }] }, { id: 'l2', aci: 1, paths: [{ p: [[60, 50], [90, 30]], c: false }] }];
+      for (const inside of ['part', 'all']) {
+        const seq = CC.estimate({ ...pj, regMode: 'off', repeat: 1, entities: part, cutOrder: { order: 'speed', inside } }, laser, { timeline: true }).timeline.filter((o) => o.kind === 'op').map((o) => o.ent);
+        ok(seq[seq.length - 1] === 'o' && seq.length === 4, inside + ': lines inside a part are cut before its outline (' + seq.join(' ') + ')');
+      }
+    }
     // closed cuts start and finish along an edge, not on a corner (a corner cut from a standstill twice melts)
     {
       const sqs = [0, 1, 2].map((i) => ({ id: 'q' + i, aci: 1, paths: [{ p: CC.shapes.rect(20 + i * 40, 20, 30, 30, 0), c: true }] }));

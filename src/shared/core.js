@@ -579,8 +579,9 @@
 
   // ---------------------------------------------------------------- path ordering
   function nestDepth(path, all) {
-    if (!path.c) return 0;
-    const [x, y] = path.p[0];
+    // an open line inside a closed shape is inside it too (cut before that
+    // shape's outline): judged at its middle point
+    const [x, y] = path.c ? path.p[0] : path.p[Math.floor(path.p.length / 2)];
     let d = 0;
     for (const o of all) {
       if (o === path || !o.c || o.area <= path.area) continue;
@@ -757,6 +758,42 @@
    * is ignored. Closed paths then start wherever is most convenient on the
    * travel path (see refineStarts).
    */
+  // The order to visit parts in. The head leaves a part from its outline, and
+  // the outline's start is placed afterwards on the side facing the next part,
+  // so the hop between two parts is about the gap between their boxes (none
+  // for touching parts), not the distance between their first holes. Nearest
+  // by that gap (then by centre distance), then 2-opt on the same measure.
+  function partOrder(units, start) {
+    if (units.length < 2) return units;
+    const gap = (a, b) => Math.hypot(Math.max(0, a.box.x0 - b.box.x1, b.box.x0 - a.box.x1), Math.max(0, a.box.y0 - b.box.y1, b.box.y0 - a.box.y1));
+    const cen = (a, b) => Math.hypot(a.cx - b.cx, a.cy - b.cy);
+    // the gap matters most; centre distance breaks ties between touching parts
+    const cost = (a, b) => gap(a, b) + 0.01 * cen(a, b);
+    const fromStart = (u) => Math.hypot(Math.max(0, u.box.x0 - start[0], start[0] - u.box.x1), Math.max(0, u.box.y0 - start[1], start[1] - u.box.y1)) + 0.01 * Math.hypot(u.cx - start[0], u.cy - start[1]);
+    const left = units.slice(), out = [];
+    let cur = null;
+    while (left.length) {
+      let bi = 0, bd = Infinity;
+      left.forEach((u, i) => { const c = cur ? cost(cur, u) : fromStart(u); if (c < bd) { bd = c; bi = i; } });
+      cur = left.splice(bi, 1)[0];
+      out.push(cur);
+    }
+    if (out.length < 400) {
+      const link = (i, j) => (i < 0 ? fromStart(out[j]) : cost(out[i], out[j]));
+      for (let pass = 0, better = true; better && pass < 6; pass++) {
+        better = false;
+        for (let i = 0; i < out.length - 1; i++) {
+          for (let k = i + 1; k < out.length; k++) {
+            const now = link(i - 1, i) + (k + 1 < out.length ? cost(out[k], out[k + 1]) : 0);
+            const rev = (i === 0 ? fromStart(out[k]) : cost(out[i - 1], out[k])) + (k + 1 < out.length ? cost(out[i], out[k + 1]) : 0);
+            if (rev < now - 1e-9) { out.splice(i, k - i + 1, ...out.slice(i, k + 1).reverse()); better = true; }
+          }
+        }
+      }
+    }
+    return out;
+  }
+
   function orderPaths(items, opts) {
     // cost(d): seconds for a travel move of d mm (default: the distance itself)
     const cost = opts.cost || ((d) => d);
@@ -958,7 +995,7 @@
       });
       let partNo = 0;
       const freeSet = new Set(free.map((l) => l[0]));
-      for (const u of sequence(units, at, order)) {
+      for (const u of partOrder(units, at)) {
         // free pieces next to each other share a group, so the 2-opt pass can reorder them
         if (u.list.length === 1 && freeSet.has(u.list[0])) { emit(u.list, out, 'free' + partNo); continue; }
         partNo++;

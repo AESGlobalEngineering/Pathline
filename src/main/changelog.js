@@ -5,6 +5,15 @@
 
 module.exports = [
   {
+    version: '1.6.1', date: '5 Nov 2026',
+    added: [
+      'Parts are visited in the order that crosses the least gap between them (Per part), instead of by where their first hole is; the head leaves a part from its outline, which now faces the next part.'
+    ],
+    fixed: [
+      'Open lines inside a part (e.g. a burst of crossing lines) counted as outside it: they were cut with the outline instead of with the holes, could come after the outline, and made the head zig-zag inside the part. They are now cut with the holes, before the outline.'
+    ]
+  },
+  {
     version: '1.6.0', date: '5 Nov 2026',
     added: [
       'Travel is timed as the machine really moves: with the jerk limit a machine reports (the Trotec: 700 mm/s, 500 mm/s², 5000 mm/s³), every short hop costs about a third of a second, however fast the top speed. A machine that reports nothing is taken as that slow.',
