@@ -824,7 +824,7 @@
     // whole run (bestStarts), then the order within each group (a nesting
     // layer or one part's layer) is improved with them, and again
     list = refineStarts(list, start, opts.order || 'file', cost);
-    list = twoOptGroups(list, start, cost, opts.budget || 80);
+    list = twoOptGroups(list, start, cost, opts.budget == null ? 80 : opts.budget);
     return bestStarts(list, start, cost);
   }
   const routeCost = (list, start, cost) => {
@@ -903,7 +903,7 @@
       while (i1 + 1 < out.length && out[i1 + 1].blk === out[i0].blk) i1++;
       // groups of up to 1500 paths (each sweep is n²)
       if (i1 - i0 >= 2 && i1 - i0 < 1500) {
-        const deadline = now() + (budgetMs || 250);
+        const deadline = now() + (budgetMs == null ? 250 : budgetMs);
         const before = (i) => (i === 0 ? start : i > i0 ? ext(out[i - 1]) : i0 > 0 ? ext(out[i0 - 1]) : start);
         const after = (k) => (k + 1 < out.length ? ent(out[k + 1]) : null);
         for (let better = true; better && now() < deadline;) {
@@ -1526,7 +1526,7 @@
         }));
         ordered = orderPaths(items, {
           nest: isLaser ? proc.proc === 'Cut' : /Knife/.test(proc.tool || ''),
-          inside: cut.inside, order: 'speed', start: at, cost: opts.routeCost || routeCost, budget: opts.routeBudget || 150
+          inside: cut.inside, order: 'speed', start: at, cost: opts.routeCost || routeCost, budget: opts.quick ? 0 : opts.routeBudget || 150
         });
         cache.set(key, ordered);
       }

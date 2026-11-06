@@ -751,6 +751,16 @@ class Component extends DCLogic {
   componentDidMount() {
     const api = window.api;
     window.__page = this; // lets the test harness drive the page
+    // going to another page: hand over edits not sent yet first (that page reads the job from main)
+    this.onNavClick = (e) => {
+      const a = e.target.closest && e.target.closest('a[href]');
+      if (!a || !this._sync || a.getAttribute('href').startsWith('#')) return;
+      e.preventDefault(); e.stopPropagation();
+      this.flushJob().then(() => { location.href = a.href; });
+    };
+    document.addEventListener('click', this.onNavClick, true);
+    this.onPageHide = () => this.flushJob();
+    window.addEventListener('pagehide', this.onPageHide);
     Promise.all([api.job.current(), api.machines.list(), api.materials.list(), api.job.recent(), api.job.history(), api.settings.get(), api.machines.placeholder()])
       .then(([job, machines, materials, recent, hist, settings, none]) => {
         // no machines set up yet: lay the job out on the stand-in bed
@@ -792,6 +802,10 @@ class Component extends DCLogic {
   componentWillUnmount() {
     this.offKeys && this.offKeys();
     clearInterval(this.poll);
+    this.componentWillUnmountEstimate();
+    this.flushJob();
+    window.removeEventListener('pagehide', this.onPageHide);
+    document.removeEventListener('click', this.onNavClick, true);
     window.removeEventListener('dragover', this.onDragOver);
     window.removeEventListener('drop', this.onDrop);
     document.removeEventListener('pointerdown', this.onDocDown, true);
@@ -824,10 +838,26 @@ class Component extends DCLogic {
     const patch = { job };
     if (sel) patch.sel = sel;
     this.setState(patch);
-    return window.api.job.update(job, opts || { record: true })
+    // the main process keeps the job too (undo, other pages, saving). Handing
+    // over a large job takes a while, so it goes once a burst of edits pauses
+    // (quick nudges become one undo step); flushJob() sends it at once.
+    const record = !!(opts || { record: true }).record;
+    this._sync = { job, record: (this._sync && this._sync.record) || record };
+    clearTimeout(this._syncTimer);
+    this._syncTimer = setTimeout(() => this.flushJob(), 300);
+    if (!this._syncDone) this._syncDone = new Promise((resolve) => { this._syncResolve = resolve; });
+    return this._syncDone;
+  }
+  flushJob() {
+    clearTimeout(this._syncTimer);
+    const s = this._sync, resolve = this._syncResolve;
+    this._sync = null; this._syncDone = null; this._syncResolve = null;
+    if (!s) return Promise.resolve();
+    return window.api.job.update(s.job, { record: s.record })
       .then(() => window.api.job.history())
       .then((hist) => this.setState({ hist }))
-      .catch(LRC.fail);
+      .catch(LRC.fail)
+      .then(() => resolve && resolve());
   }
   run(fn) {
     return (...a) => {
@@ -871,7 +901,7 @@ class Component extends DCLogic {
     }
     return job;
   }
-  refreshHist() { window.api.job.history().then((hist) => this.setState({ hist })); }
+  refreshHist() { this.flushJob().then(() => window.api.job.history()).then((hist) => this.setState({ hist })); }
   async importFiles() {
     const res = await window.api.job.importDialog();
     if (res && res.length) this.placeImports(res);
@@ -938,8 +968,9 @@ class Component extends DCLogic {
     if (!this.state.sel.length) { LRC.toast('Select one or more objects first'); return false; }
     return true;
   }
-  undo() { window.api.job.undo().then((job) => { if (job) this.setState({ job, sel: this.state.sel.filter((id) => job.entities.some((e) => e.id === id)) }); this.refreshHist(); }).catch(LRC.fail); }
-  redo() { window.api.job.redo().then((job) => { if (job) this.setState({ job }); this.refreshHist(); }).catch(LRC.fail); }
+  // edits not handed over yet go first, so undo steps back from the latest
+  undo() { this.flushJob().then(() => window.api.job.undo()).then((job) => { if (job) this.setState({ job, sel: this.state.sel.filter((id) => job.entities.some((e) => e.id === id)) }); this.refreshHist(); }).catch(LRC.fail); }
+  redo() { this.flushJob().then(() => window.api.job.redo()).then((job) => { if (job) this.setState({ job }); this.refreshHist(); }).catch(LRC.fail); }
   copy(cut) {
     if (!this.needSel()) return;
     LRC.clip.set(LRC.ops.selected(this.state.job, this.state.sel));
@@ -1323,7 +1354,8 @@ class Component extends DCLogic {
     if (!(await this.checkOverrides('sending'))) return;
     const s = this.state;
     const m = this.machine();
-    const est = this.estimate();
+    // the full estimate for what's about to be sent (not a stand-in)
+    const est = this._est && this._est.job === s.job && this._est.m === m ? this._est.r : CC.estimate(s.job, m);
     const checks = CC.checkJob(s.job, m);
     const job = s.job;
     const res = await LRC.sendDialog({
@@ -1385,7 +1417,7 @@ class Component extends DCLogic {
       Escape: () => { this.closeMenus(); this.setState({ sel: [], tool: 'select', sheetOpen: false }); },
       ArrowLeft: nudge(-1, 0), ArrowRight: nudge(1, 0), ArrowUp: nudge(0, -1), ArrowDown: nudge(0, 1),
       'Shift+ArrowLeft': nudge(-10, 0), 'Shift+ArrowRight': nudge(10, 0), 'Shift+ArrowUp': nudge(0, -10), 'Shift+ArrowDown': nudge(0, 10),
-      'Ctrl+R': () => { location.href = 'SimulationDetailed.dc.html'; }, 'Ctrl+M': () => { location.href = 'MaterialsDetailed.dc.html'; },
+      'Ctrl+R': () => { this.flushJob().then(() => { location.href = 'SimulationDetailed.dc.html'; }); }, 'Ctrl+M': () => { this.flushJob().then(() => { location.href = 'MaterialsDetailed.dc.html'; }); },
       'Ctrl+/': () => this.showShortcuts(), F1: () => this.showShortcuts(),
       V: () => this.setState({ tool: 'select' }), L: () => this.setState({ tool: 'line' }), R: () => this.setState({ tool: 'rect' }), E: () => this.setState({ tool: 'ellipse' }),
       P: () => this.setState({ tool: 'polygon' }), T: () => this.setState({ tool: 'text' }), M: () => this.setState({ tool: 'measure' }),
@@ -1408,13 +1440,54 @@ class Component extends DCLogic {
   }
 
   // ---------------------------------------------------------------- estimate
+  // The time estimate. On a large job the full estimate (route search
+  // included) takes most of a second, so it runs in a worker: until the
+  // answer for this job arrives the page shows the last one (or, for a job
+  // just opened, a quick one), and redraws when it comes.
   estimate() {
     const job = this.state.job, m = this.machine();
     if (this._est && this._est.job === job && this._est.m === m) return this._est.r;
-    const r = CC.estimate(job, m);
-    this._est = { job, m, r };
+    this.estimateLater(job, m);
+    if (this._shown && this._shown.jobId === job.id) return this._shown.r;
+    // nothing to show for this job yet: a quick one now (no long route search)
+    const r = CC.estimate(this.cutOnly(job), m, { quick: true });
+    this._shown = { jobId: job.id, r };
     return r;
   }
+  // only what is cut matters to the estimate: leave out objects in colours no
+  // process sends (a job's artwork layers can be most of its points)
+  cutOnly(job) {
+    const sent = new Set(job.processes.filter((p) => p.out !== false).flatMap((p) => p.aci || []));
+    return { ...job, entities: job.entities.filter((e) => sent.has(e.aci)) };
+  }
+  estimateLater(job, m) {
+    if (this._estWant && this._estWant.job === job && this._estWant.m === m) return;
+    this._estWant = { job, m };
+    clearTimeout(this._estTimer);
+    // wait for a pause in the edits, then hand the latest job to the worker
+    this._estTimer = setTimeout(() => {
+      if (!this._worker) {
+        try {
+          this._worker = new Worker('estimate-worker.js');
+          this._worker.onmessage = (e) => this.estimateDone(e.data);
+        } catch (err) { this._worker = null; }
+      }
+      const want = this._estWant;
+      const id = (this._estId = (this._estId || 0) + 1);
+      this._estPending = { id, job: want.job, m: want.m };
+      if (this._worker) this._worker.postMessage({ id, job: this.cutOnly(want.job), machine: want.m });
+      else this.estimateDone({ id, est: CC.estimate(want.job, want.m) });
+    }, 200);
+  }
+  estimateDone(data) {
+    const p = this._estPending;
+    if (!p || data.id !== p.id || data.error) return;
+    this._est = { job: p.job, m: p.m, r: data.est };
+    this._shown = { jobId: p.job.id, r: data.est };
+    // redraw with it if the job is still the one it was worked out for
+    if (this.state.job === p.job) this.setState({ estTick: p.id });
+  }
+  componentWillUnmountEstimate() { clearTimeout(this._estTimer); if (this._worker) this._worker.terminate(); }
 
   renderVals() {
     // theme tokens (theme.css): accent fills, accent text/icons on surfaces, accent tint

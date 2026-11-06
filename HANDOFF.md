@@ -15,6 +15,17 @@ Latest round (28 Oct, final):
 - **Dark mode bed is grey** (`--bed`, `--sheet`, `--bed-grid*` in theme.css). **ACI 7 shows as white in dark mode** (black in light), as in CAD, and so do the marks drawn on the bed (registration marks, engrave hatching, arrows, start points): see the `--aci7*` and `--ink` tokens, and `LRC.aci.hex/fg/stroke` in app.js. Exports (DXF/SVG/PDF) still use real black.
 - **Sample machines and materials from earlier builds are removed on first start** (main.js, tracked by `settings.samplesRemoved`). This is by exact id (trotec, flatbed, laser2, acr-print-3 … brass-1); anything the operator created stays.
 
+Version 1.6.5 (6 Nov):
+- **Job page speed on large jobs.** Measured on the owner's PCB Cover job: 4176 objects and about 140 000 points, 150 of them cut. An edit used to take 984 ms: about 725 ms for the estimate and about 200 ms to send the 15 MB job to main. It now takes about 20 ms.
+  - The estimate runs in `src/ui/estimate-worker.js` (a Worker that loads core.js).
+    - `MainDetailed.estimate()` returns the cached full result for this job object. Otherwise it returns the last one shown for this job id, or, for a job just opened, `CC.estimate(…, { quick: true })` (no route search).
+    - It asks the worker 200 ms after the last change (`estimateLater`) and redraws on the answer (`estimateDone`).
+    - The worker only gets the entities in colours a process sends (`cutOnly`).
+    - The Send dialog uses the full estimate (computed directly if not ready).
+  - `commit()` updates the page at once and hands the job to main 300 ms after the last change (`flushJob`); edits in one burst become one undo step. `flushJob()` runs before undo/redo/history, on clicks on links to other pages, on Ctrl+R/Ctrl+M, on pagehide and on unmount. `commit()` still returns a promise, which resolves once the job is handed over.
+  - `estimate(…, { quick })` sets the route search budget to 0. `twoOptGroups`/`orderPaths` now respect a 0 budget; before, `|| 80` turned 0 into 80.
+- PCB Cover's route was checked: Per part, 149 moves, 6.1 m, 62 s of travel (the least time of the three modes). Through the shapes' centres the app's route is 4822 mm against 4741 mm for the best tour found with no time limit (within 2 %).
+
 Version 1.6.4 (5 Nov):
 - **Print and cut starts next to the last mark.** `markOrder(list, home, end)` (shared) picks the mark reading order. Fastest's part-by-part plan in `estimate()` now starts its part order from the last mark read, worked out the same way as `estimateIn` (end = the cut point nearest the origin), not from the machine origin. On the X8 job the hop from the last mark (top right) to cut 1 was 607 mm and is now 59 mm.
 - **All insides without a job-wide depth layer.** Each depth-1 hole is grouped with what's inside it (deepest first, blk `nest<k>d<depth>`). Single holes share blk `holes`, which the 2-opt pass reorders freely, and outlines come last (blk `outlines`). Before, all depth-2 shapes in the job went first wherever they were.

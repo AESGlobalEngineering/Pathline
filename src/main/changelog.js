@@ -5,6 +5,13 @@
 
 module.exports = [
   {
+    version: '1.6.5', date: '6 Nov 2026',
+    added: [],
+    fixed: [
+      'The Job page lagged on large jobs: every change waited for the full time estimate and for the whole job to be handed to the background. On a 4176-object job a nudge took nearly a second; now about 20 ms. The estimate is worked out in the background (the time updates a moment later), and quick edits in a row are handed over together (so they undo as one step).'
+    ]
+  },
+  {
     version: '1.6.4', date: '5 Nov 2026',
     added: [],
     fixed: [
