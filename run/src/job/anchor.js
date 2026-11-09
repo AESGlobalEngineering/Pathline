@@ -15,6 +15,17 @@ function box(pkg) {
   return Number.isFinite(b[0]) ? b : null;
 }
 
+// the point that goes to the head: the job's top-left corner, or for print and cut its top-left
+// registration mark (the operator puts the head on the mark; the corner of everything was ~14 and
+// 17 mm off it on the X8 sheet, so the camera looked 22 mm from each mark)
+function ref(pkg) {
+  let best = null;
+  for (const s of pkg.toolpath || []) if (s.type === 'inspect' && Array.isArray(s.at) && (!best || s.at[0] + s.at[1] < best[0] + best[1])) best = s.at;
+  if (best) return [best[0], best[1]];
+  const b = box(pkg);
+  return b ? [b[0], b[1]] : null;
+}
+
 // a copy of pkg moved by dx, dy
 function shift(pkg, dx, dy) {
   const pt = ([x, y]) => [+(x + dx).toFixed(4), +(y + dy).toFixed(4)];
@@ -32,24 +43,26 @@ function shift(pkg, dx, dy) {
   return out;
 }
 
-// pkg placed with its top-left corner at anchor {x, y}; null anchor = as sent
+// pkg placed with its reference point (ref) at anchor {x, y}; null anchor = as sent
 function apply(pkg, anchor) {
   if (!anchor) return pkg;
-  const b = box(pkg);
-  if (!b) return pkg;
-  const out = shift(pkg, anchor.x - b[0], anchor.y - b[1]);
-  out.anchor = { x: anchor.x, y: anchor.y, dx: anchor.x - b[0], dy: anchor.y - b[1] };
+  const r = ref(pkg);
+  if (!r) return pkg;
+  const out = shift(pkg, anchor.x - r[0], anchor.y - r[1]);
+  out.anchor = { x: anchor.x, y: anchor.y, dx: anchor.x - r[0], dy: anchor.y - r[1] };
   return out;
 }
 
 // throws (409) when the job, anchored at {x, y}, would leave the bed
 function check(pkg, at, bed) {
   const b = box(pkg);
-  if (!b) throw Object.assign(new Error('This job has nothing to place'), { code: 409 });
+  const r = ref(pkg);
+  if (!b || !r) throw Object.assign(new Error('This job has nothing to place'), { code: 409 });
   const w = b[2] - b[0], h = b[3] - b[1];
-  if (at.x < -0.01 || at.y < -0.01 || at.x + w > bed[0] + 0.5 || at.y + h > bed[1] + 0.5) {
-    throw Object.assign(new Error('Anchored at the head (X ' + at.x.toFixed(1) + ', Y ' + at.y.toFixed(1) + '), the job (' + w.toFixed(0) + ' × ' + h.toFixed(0) + ' mm) would leave the bed. Move the head towards the back left and try again.'), { code: 409 });
+  const x0 = at.x + b[0] - r[0], y0 = at.y + b[1] - r[1];
+  if (x0 < -0.01 || y0 < -0.01 || x0 + w > bed[0] + 0.5 || y0 + h > bed[1] + 0.5) {
+    throw Object.assign(new Error('Anchored at the head (X ' + at.x.toFixed(1) + ', Y ' + at.y.toFixed(1) + '), the job (' + w.toFixed(0) + ' × ' + h.toFixed(0) + ' mm) would leave the bed. Move the head ' + (x0 < 0 || y0 < 0 ? 'away from the back left' : 'towards the back left') + ' and try again.'), { code: 409 });
   }
 }
 
-module.exports = { box, shift, apply, check };
+module.exports = { box, ref, shift, apply, check };

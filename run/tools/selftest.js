@@ -195,6 +195,9 @@ console.log('Trotec job stream');
   ok(fast.seconds < std.seconds - 5, 'Fastest travel is estimated quicker', fast.seconds.toFixed(1) + ' vs ' + std.seconds.toFixed(1));
   const mv = config.machineView({ ...cfg, configured: true });
   ok(mv.travelSpeed === 700 && mv.acc > 150 && mv.acc < 400, 'Pathline is told the travel as it really is (700 mm/s, ≈ 260 mm/s² over a short move)', mv.travelSpeed + ' mm/s, ' + mv.acc + ' mm/s²');
+  ok(mv.travelAcc === 500 && mv.jerk === 5000, 'and the real travel acceleration and jerk, for Prepare 1.6.0 on (500 mm/s², 5000 mm/s³)', mv.travelAcc + ', ' + mv.jerk);
+  const mvF = config.machineView({ ...cfg, configured: true, trotec: { ...cfg.trotec, travel: 'fastest' } });
+  ok(mvF.travelSpeed === 1000 && mvF.travelAcc === 1000 && mvF.jerk === 20000, 'Fastest travel: Prepare is told 1000 mm/s, 1000 mm/s², 20000 mm/s³', mvF.travelSpeed + ', ' + mvF.travelAcc + ', ' + mvF.jerk);
 }
 
 console.log('Ruida encoding');
@@ -247,16 +250,42 @@ console.log('Example job: ' + example.job.name);
 console.log('Anchor to toolhead');
 {
   const anchor = require('../src/job/anchor');
-  const b0 = anchor.box(example);
-  const moved = anchor.apply(example, { x: 300, y: 150 });
+  const plain = { ...example, toolpath: example.toolpath.filter((s) => s.type !== 'inspect') };
+  const b0 = anchor.box(plain);
+  const moved = anchor.apply(plain, { x: 300, y: 150 });
   const b1 = anchor.box(moved);
   ok(Math.abs(b1[0] - 300) < 1e-6 && Math.abs(b1[1] - 150) < 1e-6, 'job\'s top-left corner moves to the head (300, 150)', b1.join(', '));
   ok(Math.abs((b1[2] - b1[0]) - (b0[2] - b0[0])) < 1e-6, 'size unchanged');
   const dx = 300 - b0[0];
   ok(Math.abs(moved.entities[0].paths[0].p[0][0] - (example.entities[0].paths[0].p[0][0] + dx)) < 1e-3, 'shapes move with it (preview)');
-  ok(example.toolpath[3].p === undefined || anchor.box(example)[0] === b0[0], 'the original package is untouched');
+  ok(anchor.box(plain)[0] === b0[0], 'the original package is untouched');
+  // print and cut: the top-left registration mark goes to the head (the operator puts the head on
+  // it), not the corner of everything, which the cuts can reach past (14 and 17 mm on the X8 sheet)
+  const pc = JSON.parse(JSON.stringify(example));
+  pc.toolpath.push({ type: 'cut', process: pc.toolpath.find((s) => s.type === 'cut').process, p: [[2, 3], [5, 3]] });
+  const tlMark = pc.toolpath.filter((s) => s.type === 'inspect').map((s) => s.at).sort((u, v) => u[0] + u[1] - v[0] - v[1])[0];
+  const pcMoved = anchor.apply(pc, { x: 300, y: 150 });
+  const tlAfter = pcMoved.toolpath.filter((s) => s.type === 'inspect').map((s) => s.at).sort((u, v) => u[0] + u[1] - v[0] - v[1])[0];
+  ok(Math.abs(tlAfter[0] - 300) < 1e-3 && Math.abs(tlAfter[1] - 150) < 1e-3 && anchor.box(pc)[0] < tlMark[0], 'print and cut: the top-left mark goes to the head, with cuts further out than the marks', tlAfter.join(', '));
   let e3 = null; try { anchor.check(example, { x: 700, y: 400 }, [813, 508]); } catch (e) { e3 = e; }
   ok(e3 && e3.code === 409 && /leave the bed/.test(e3.message), 'anchoring where the job would leave the bed is refused', e3 && e3.message);
+  // the switch as a job arrives: on for print and cut, off otherwise; back to that after each run
+  const Store = require('../src/store');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pl-anchor-'));
+  const st = new Store(tmp);
+  const withMarks = { ...example, toolpath: [{ type: 'inspect', mark: 1, of: 3, at: [13, 13], d: 6 }].concat(example.toolpath.filter((s) => s.type !== 'inspect')) };
+  const noMarks = { ...example, toolpath: example.toolpath.filter((s) => s.type !== 'inspect') };
+  const a = st.add(withMarks, [], 'pathline'), n = st.add(noMarks, [], 'pathline');
+  ok(a.anchorAtStart === true && n.anchorAtStart === false, 'Anchor to toolhead starts on for a print and cut job, off for one without marks', a.anchorAtStart + ' / ' + n.anchorAtStart);
+  st.setAnchor(a.id, null, false); st.setAnchor(n.id, null, true);
+  st.finish(st.get(a.id), 'Completed', new Date().toISOString(), false);
+  st.finish(st.get(n.id), 'Completed', new Date().toISOString(), false);
+  ok(st.get(a.id).anchorAtStart === true && st.get(n.id).anchorAtStart === false, 'after a run, the switch is back to the job\'s own default (whatever it was set to for that run)');
+  const r1 = st.requeue(a.id, false);
+  ok(r1.anchorAtStart === true && !r1.anchor, 'run again from History: print and cut starts anchored again, at the head when Start is pressed');
+  const st2 = new Store(tmp);
+  ok(st2.get(n.id).anchorAtStart === false && st2.get(a.id).anchorAtStart === true, 'restarting the app keeps the defaults');
+  fs.rmSync(tmp, { recursive: true, force: true });
 }
 
 console.log('Network address commands (not run)');
@@ -564,10 +593,11 @@ async function serverTests() {
         'Start anchors the job where the head is then', JSON.stringify({ head: s0.pos, anchor: during.anchor, go: go.data }));
       await idle();
       const after = await jobOf(id);
-      ok(after.status === 'done' && !after.anchor && !after.anchorAtStart, 'after the run the job is as Pathline placed it again', JSON.stringify(after));
-      await local('POST', '/jobs/' + id + '/anchor', {});
+      // (the example is a print and cut job: its switch starts on)
+      ok(after.status === 'done' && !after.anchor && after.anchorAtStart === true, 'after the run the job keeps no position, the switch back to its default (on: print and cut)', JSON.stringify(after));
+      await local('POST', '/jobs/' + id + '/anchor', { clear: true });
       const re = await local('POST', '/jobs/' + id + '/requeue', {});
-      ok(re.status === 200 && !re.data.anchor && !re.data.anchorAtStart, 'run again from History: not anchored', JSON.stringify(re.data));
+      ok(re.status === 200 && !re.data.anchor && re.data.anchorAtStart === true, 'run again from History: no position kept, the switch at its default', JSON.stringify(re.data));
       await local('POST', '/jobs/' + id + '/anchor', {});
       await call('POST', '/stop');
       const kept = await local('POST', '/jobs/' + id + '/requeue', { keepAnchor: true });
@@ -964,8 +994,15 @@ async function visionTests() {
     // (corners on the bump stay where the bump put them: the machine error is what's checked)
     const worstIn = (r) => Math.max(...r.points.filter((p) => !p.out).map((p) => Math.hypot(p.res[0], p.res[1])));
     ok(chk.status === 200 && worstIn(chk.data) < worstIn(cal.data) / 3 && Math.abs(chk.data.scaleX) < 0.2, 'with the bed map on: worst ' + worstIn(chk.data).toFixed(3) + ' mm off the bump (was ' + worstIn(cal.data).toFixed(3) + '), X travel ' + (chk.data.scaleX || 0).toFixed(2) + ' mm/m', JSON.stringify(chk.data).slice(0, 200));
+    // print and cut jobs arrive with Anchor to toolhead on; these look for the marks where the job
+    // has them, so it's switched off
+    const unanchored = async (pkg) => {
+      const r = await call('POST', 'v1/jobs', pkg);
+      await call('POST', 'local/jobs/' + r.data.id + '/anchor', { clear: true });
+      return r;
+    };
     // print and cut: the example job's marks read, the job moved onto them and run
-    const q = await call('POST', 'v1/jobs', example);
+    const q = await unanchored(example);
     await new Promise((r) => setTimeout(r, 500));
     const st = await call('POST', 'v1/start', { id: q.data.id });
     let s;
@@ -983,7 +1020,7 @@ async function visionTests() {
     const moved = JSON.parse(JSON.stringify(example));
     for (const t of moved.toolpath) if (t.type === 'inspect') t.at = [t.at[0] - 40, t.at[1]];
     const waitFor = async (fn, n = 200) => { let x; for (let i = 0; i < n; i++) { await new Promise((r) => setTimeout(r, 100)); x = (await call('GET', 'v1/status')).data; if (fn(x)) break; } return x; };
-    const q2 = await call('POST', 'v1/jobs', moved);
+    const q2 = await unanchored(moved);
     await new Promise((r) => setTimeout(r, 300));
     await call('POST', 'v1/start', { id: q2.data.id });
     let w = await waitFor((x) => x.markWait || x.state === 'idle' || x.state === 'alarm');
@@ -1002,7 +1039,7 @@ async function visionTests() {
     const late = await call('POST', 'v1/marks/accept');
     ok(late.status === 409, 'Accept with no mark waiting is refused', JSON.stringify(late.data));
     // Stop while waiting: stopped, not an alarm
-    const q3 = await call('POST', 'v1/jobs', moved);
+    const q3 = await unanchored(moved);
     await new Promise((r) => setTimeout(r, 300));
     await call('POST', 'v1/start', { id: q3.data.id });
     w = await waitFor((x) => x.markWait || x.state === 'idle' || x.state === 'alarm');
@@ -1010,12 +1047,23 @@ async function visionTests() {
     const after = await waitFor((x) => x.state === 'idle' || x.state === 'alarm');
     const jogAfter = await call('POST', 'v1/jog', { x: 500, y: 300 });
     ok(!!w.markWait && after.state === 'idle' && after.message === 'Stopped' && !after.markWait && jogAfter.status === 200, 'Stop while a mark waits: the job stops (no alarm), the machine is free again', JSON.stringify(after));
+    // as it arrives (Anchor to toolhead on): the laser head put over the job's top-left corner on
+    // the sheet, Start, the job moved there, and the camera finds all three marks by itself
+    const q5 = await call('POST', 'v1/jobs', example);
+    const j5 = (await call('GET', 'local/state')).data.jobs.find((j) => j.id === q5.data.id);
+    const tl = require('../src/job/anchor').ref(example); // (its top-left mark)
+    const onSheet = sheet2([tl[0], tl[1]]);
+    await jogTo(onSheet[0], onSheet[1]);
+    await call('POST', 'v1/start', { id: q5.data.id });
+    const w5 = await waitFor((x) => x.markWait || x.state === 'idle' || x.state === 'alarm');
+    if (w5.markWait) await call('POST', 'v1/stop');
+    ok(j5 && j5.anchorAtStart === true && w5.state === 'idle' && w5.progress === 1 && !w5.markWait, 'print and cut anchored at the head (on as it arrives): the marks found by themselves, the job ran', JSON.stringify({ atStart: j5 && j5.anchorAtStart, w5 }));
     // a sheet that doesn't match the job (mark 3 printed 10 mm nearer than the job has it): the
     // marks are found, but they're not as far apart as the job's, so it stops before cutting
     const wrong = JSON.parse(JSON.stringify(example));
     const m3 = wrong.toolpath.find((t) => t.type === 'inspect' && t.mark === 3);
     m3.at = [m3.at[0] + 10, m3.at[1]];
-    const q4 = await call('POST', 'v1/jobs', wrong);
+    const q4 = await unanchored(wrong);
     await new Promise((r) => setTimeout(r, 300));
     await call('POST', 'v1/start', { id: q4.data.id });
     const ws = await waitFor((x) => x.markWait || x.state === 'idle' || x.state === 'alarm');

@@ -202,7 +202,9 @@ function followHead(st, pkg) {
   // this one ends: the same job again), nearest that progress. Otherwise a few seconds ahead at the
   // pace learnt.
   const wide = !follow.found || follow.miss >= 3;
-  const hint = (Number(st.progress) || 0) * R.end, tol = Math.max(15, 0.3 * R.end);
+  // (the progress follows the job closely now: within 10 % of the job, at least 5 s, of it. With
+  // 30 % and 15 s, J0043's first report was placed 15 s on)
+  const hint = (Number(st.progress) || 0) * R.end, tol = Math.max(5, 0.1 * R.end);
   const from = wide ? 0 : follow.k;
   const reach = wide ? hint + tol : follow.t + 3 + (2 * Math.max(1, follow.rate) * (now - follow.at)) / 1000;
   let best = null;
@@ -212,8 +214,10 @@ function followHead(st, pkg) {
     u = Math.max(!wide && k === follow.k ? Math.min(1, (follow.t - g.t0) / g.dt) : 0, Math.min(1, u));
     const d = Math.hypot(g.a[0] + dx * u - P[0], g.a[1] + dy * u - P[1]), t = g.t0 + u * g.dt;
     if (wide && Math.abs(t - hint) > tol) continue;
-    // (searching wide, of the places that fit, the one nearest the progress reported)
-    const score = wide ? d + Math.abs(t - hint) * 0.01 : d;
+    // (searching wide, of the places that fit, the one nearest the progress reported: a second of
+    // the job away counts as a mm off. At 0.01 mm a second, the first report, on the way to the
+    // first cut, was put 15 s on where the path passes close by: the head drawn 40–50 mm off for 3 s)
+    const score = wide ? d + Math.abs(t - hint) : d;
     if (d < 4 && (!best || score < best.score - 0.01)) best = { k, t, d, score };
   }
   if (best) {
@@ -231,13 +235,23 @@ const following = (pkg) => !!(follow.job && follow.route && follow.found && S &&
 // paused, never more than 2 s on), eased into over a quarter second and never backwards, so a
 // report a little behind the drawing doesn't pull it back; a big difference (more than 2 s of
 // the job behind, 5 s ahead) is jumped to
+// Only a correction is eased (a new report moving the prediction): the gap it opens closes over
+// ~0.2 s while the head moves on at the prediction's pace. Easing towards the prediction itself
+// kept the drawing ~0.2 s (6–8 mm) behind the head the whole job (J0043, 9 Nov).
 function predicted() {
   const now = performance.now();
   const ahead = S.status.state === 'running' ? Math.min(2, (now - follow.at) / 1000) * follow.rate : 0;
   const target = Math.min(follow.route.end, follow.t + ahead);
   const sh = follow.shown;
-  if (sh.t === null || target < sh.t - 2 || target > sh.t + 5) sh.t = target;
-  else sh.t = Math.max(sh.t, sh.t + (target - sh.t) * Math.min(1, (now - sh.at) / 250));
+  if (sh.t === null || target < sh.t - 2 || target > sh.t + 5) { sh.t = target; sh.gap = 0; }
+  else {
+    // a new report: carry on from where the drawing is (no jump), then close the gap
+    let gap = sh.fix !== follow.at ? sh.t - target : sh.gap || 0;
+    gap *= Math.exp(-Math.max(0, now - (sh.at || now)) / 200);
+    sh.t = Math.max(sh.t, target + gap); // never backwards
+    sh.gap = sh.t - target;
+  }
+  sh.fix = follow.at;
   sh.at = now;
   return routeAt(follow.route, sh.t);
 }
@@ -254,6 +268,30 @@ function doneD(k0, k1, p) {
   }
   return d;
 }
+
+// The running job's time left, counting down a second a second: from the server's figure (the
+// estimate × progress left) it moved in uneven steps with each refresh, and stood still while a
+// long part was cut. The count runs on its own, kept within 2 s of the server's figure; it stops
+// while the job is paused or its marks are read (no progress yet)
+function remaining() {
+  const st = S.status;
+  const job = S.jobs.find((j) => j.id === st.job);
+  if (!job) return 0;
+  const server = (job.seconds || 0) * (1 - (Number(st.progress) || 0));
+  const now = performance.now();
+  const r = ui.remain;
+  if (!r || r.job !== st.job || r.total !== job.seconds) { ui.remain = { job: st.job, total: job.seconds, v: server, at: now }; return server; }
+  const moving = st.state === 'running' && st.progress > 0;
+  let v = r.v - (moving ? (now - r.at) / 1000 : 0);
+  v = Math.max(0, Math.min(server + 2, Math.max(server - 2, v)));
+  Object.assign(r, { v, at: now });
+  return v;
+}
+setInterval(() => {
+  if (!S || !running() || ui.view !== 'queue') return;
+  const el = document.getElementById('remain');
+  if (el) { const t = hms(remaining()); if (el.textContent !== t) el.textContent = t; }
+}, 250);
 
 // between redraws: the head, its crosshair and the run so far move on (about 30 times a second)
 let lastFrame = 0;
@@ -293,7 +331,8 @@ function bedSvg(pkg, opts = {}) {
   // zoomed in, the head ring and markers keep their size on screen
   const r = Math.max(W, H) / 70 / (opts.head ? ui.zoom.k : 1);
   // where an anchored job's top-left corner was pinned (green, as in the design)
-  if (opts.big && pkg && pkg.anchor) {
+  // (pkg is 'loading' while it's fetched: a string, whose old .anchor() method is always there)
+  if (opts.big && pkg && pkg !== 'loading' && pkg.anchor) {
     body += '<circle cx="' + pkg.anchor.x + '" cy="' + pkg.anchor.y + '" r="' + r * 0.6 + '" fill="var(--bed)" stroke="#30A46C" stroke-width="' + r / 4 + '"/>';
   }
   // print and cut: where the camera found the registration marks (green rings)
@@ -623,9 +662,12 @@ function queueView() {
       const on = !!(job && (job.anchorAtStart || job.anchor));
       const off = !job || isRun;
       const here = Number.isFinite(st.pos.x) ? ' (now X ' + shownPos(st).x.toFixed(1) + ', Y ' + shownPos(st).y.toFixed(1) + ' mm)' : '';
-      const note = !on ? 'Moves the job so its top-left corner starts at the head'
+      // print and cut: the top-left corner is the top-left registration mark
+      const marks = !!(shownPkg && shownPkg !== 'loading' && (shownPkg.toolpath || []).some((s) => s.type === 'inspect'));
+      const note = !on ? (marks ? 'Off: the camera looks for the marks where Pathline placed the job' : 'Moves the job so its top-left corner starts at the head')
         : job.anchor ? 'The job\'s top-left corner starts at X ' + job.anchor.x.toFixed(1) + ', Y ' + job.anchor.y.toFixed(1) + ' mm'
-          : 'Its top-left corner goes where the head is when you press Start' + here;
+          : marks ? 'Put the laser head over the top-left registration mark, then press Start' + here
+            : 'Its top-left corner goes where the head is when you press Start' + here;
       return '<div style="display:flex;align-items:center;gap:12px;min-height:44px"><button role="switch" class="sw" aria-checked="' + on + '" data-a="anchor"' + (on ? ' data-v="clear"' : '') + ' aria-label="Anchor to toolhead"' + (off ? ' disabled' : '') + '></button>' +
         '<span style="display:flex;flex-direction:column;gap:2px;line-height:1.3"><span style="font-size:16px">Anchor to toolhead</span>' +
         '<span class="lbl">' + note + '</span></span></div>';
@@ -637,7 +679,7 @@ function queueView() {
     '<div class="qbed"><div class="viewport" style="position:relative;flex:1;min-height:0;border:1px solid var(--line);border-radius:10px;overflow:hidden">' +
     '<div style="position:absolute;inset:50px 8px 8px">' + bedSvg(shownPkg, { big: true, head: true }) + '</div>' +
     headReadout(st, isRun) + bedTools() + '</div>' +
-    (shown && shownPkg && shownPkg.anchor ? '<span class="lbl" style="display:flex;align-items:center;gap:8px"><span style="width:10px;height:10px;border-radius:50%;border:2px solid #30A46C;background:var(--bed);flex:none"></span>Anchored: the job\'s top-left corner is at the toolhead position X ' + shownPkg.anchor.x.toFixed(1) + ', Y ' + shownPkg.anchor.y.toFixed(1) + ' mm</span>' : '') +
+    (shown && shownPkg && shownPkg !== 'loading' && shownPkg.anchor ? '<span class="lbl" style="display:flex;align-items:center;gap:8px"><span style="width:10px;height:10px;border-radius:50%;border:2px solid #30A46C;background:var(--bed);flex:none"></span>Anchored: the job\'s top-left corner is at the toolhead position X ' + shownPkg.anchor.x.toFixed(1) + ', Y ' + shownPkg.anchor.y.toFixed(1) + ' mm</span>' : '') +
     '</div></div>' +
 
     '<div class="qrun">' +
@@ -649,7 +691,7 @@ function queueView() {
     '<div style="display:flex;align-items:center;gap:12px"><div role="progressbar" aria-label="Job progress" aria-valuenow="' + Math.round(frac * 100) + '" aria-valuemin="0" aria-valuemax="100" style="flex:1;height:14px;border-radius:7px;background:var(--sunken);box-shadow:inset 0 0 0 1px var(--line);overflow:hidden"><div style="height:100%;width:' + (frac * 100).toFixed(1) + '%;background:var(--accent)"></div></div>' +
     '<span class="mono" style="min-width:52px;text-align:right;font-size:18px;font-weight:500;color:' + (isRun ? 'var(--text)' : 'var(--text-3)') + '">' + Math.floor(frac * 100) + ' %</span></div>' +
     '<div style="display:flex;justify-content:space-between;gap:8px"><span style="color:var(--text-2)">' + esc(isRun ? (st.state === 'paused' ? 'Paused' : 'Running') + ' · ' + st.message : /^(Finished|Stopped)/.test(st.message) ? st.message : 'Not started') + '</span><span class="mono" style="color:var(--text-2)">' + (isRun ? hms(frac * total) + ' / ' + hms(total) : 'Estimated ' + hms(total)) + '</span></div></div>' +
-    '<div class="qremain" style="display:flex;flex-direction:column;align-items:flex-end"><span class="lbl">' + (isRun ? 'Remaining' : 'Estimated time') + '</span><span class="mono" style="font-size:44px;font-weight:500;line-height:1">' + hms(isRun ? total * (1 - frac) : total) + '</span></div>' +
+    '<div class="qremain" style="display:flex;flex-direction:column;align-items:flex-end"><span class="lbl">' + (isRun ? 'Remaining' : 'Estimated time') + '</span><span class="mono" id="remain" style="font-size:44px;font-weight:500;line-height:1">' + hms(isRun ? remaining() : total) + '</span></div>' +
     '</div></main></div>';
 }
 
@@ -1139,11 +1181,14 @@ const H = {
     let b = jobBox(ui.pkgs[id]);
     if (!b) throw new Error('Select a job to frame');
     // anchored to the head, not started yet: where it will go if Start is pressed now (its
-    // top-left corner, registration marks included, at the head)
+    // top-left corner at the head, registration marks included; print and cut: its top-left mark,
+    // as src/job/anchor.js)
     const j = S.jobs.find((x) => x.id === id);
     if (j && j.anchorAtStart && !j.anchor && Number.isFinite(S.status.pos.x)) {
-      let x0 = b[0], y0 = b[1];
+      let x0 = b[0], y0 = b[1], mark = null;
       for (const s of ui.pkgs[id].toolpath || []) if (s.at) { x0 = Math.min(x0, s.at[0]); y0 = Math.min(y0, s.at[1]); }
+      for (const s of ui.pkgs[id].toolpath || []) if (s.type === 'inspect' && s.at && (!mark || s.at[0] + s.at[1] < mark[0] + mark[1])) mark = s.at;
+      if (mark) { x0 = mark[0]; y0 = mark[1]; }
       const dx = S.status.pos.x - x0, dy = S.status.pos.y - y0;
       b = [b[0] + dx, b[1] + dy, b[2] + dx, b[3] + dy];
     }

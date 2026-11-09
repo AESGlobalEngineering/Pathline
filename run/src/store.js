@@ -20,9 +20,22 @@ class Store {
     this.history = this.read('history.json', []);
     // a job that was running when the app stopped didn't finish
     for (const j of this.jobs) if (j.status === 'running') j.status = 'stopped';
-    // jobs that have run keep no anchor (it was for that run: run again, as Pathline placed them)
-    for (const j of this.jobs) if (j.status !== 'queued') { j.anchor = null; j.anchorAtStart = false; }
+    // jobs that have run keep no anchor (it was for that run: run again, the switch as it starts
+    // for that job); queued before the switch had a default, they get it
+    for (const j of this.jobs) {
+      if (j.status !== 'queued') { j.anchor = null; j.anchorAtStart = this.anchorDefault(j.id); } else if (j.anchorAtStart === undefined) j.anchorAtStart = this.anchorDefault(j.id);
+    }
     this.seq = this.jobs.concat(this.history).reduce((n, j) => Math.max(n, Number(String(j.id).replace(/\D/g, '')) || 0), 0);
+  }
+
+  // Anchor to toolhead as a job starts out: on for print and cut (put the head over its top-left
+  // mark, the camera finds the marks from there wherever the sheet lies), off otherwise (the job
+  // runs where Pathline placed it)
+  anchorDefault(idOrPkg) {
+    try {
+      const pkg = typeof idOrPkg === 'string' ? this.pkg(idOrPkg) : idOrPkg;
+      return !!(pkg && (pkg.toolpath || []).some((s) => s.type === 'inspect'));
+    } catch (e) { return false; }
   }
 
   read(name, d) {
@@ -53,7 +66,8 @@ class Store {
       id, name: (pkg.job && pkg.job.name) || id, status: 'queued', progress: 0,
       seconds: Number.isFinite(seconds) ? seconds : (pkg.estimate && pkg.estimate.totalSeconds) || 0,
       material: pkg.material ? pkg.material.name + (pkg.material.thickness ? ' ' + pkg.material.thickness + ' mm' : '') : '',
-      receivedAt: new Date().toISOString(), finishedAt: null, warnings: warnings || [], source: source || 'pathline', runs: 0
+      receivedAt: new Date().toISOString(), finishedAt: null, warnings: warnings || [], source: source || 'pathline', runs: 0,
+      anchor: null, anchorAtStart: this.anchorDefault(clean)
     };
     this.jobs.push(job);
     this.prune();
@@ -71,9 +85,9 @@ class Store {
     return anchor.apply(this.pkg(id), j && j.anchor);
   }
 
-  // at: where the job's top-left corner goes (taken when the job starts); atStart: the operator
-  // switched Anchor to toolhead on (the position is taken at Start). Both last one run: finish()
-  // clears them, so a job run again, from the queue or from History, runs where Pathline placed it
+  // at: where the job's top-left corner goes (taken when the job starts); atStart: Anchor to
+  // toolhead is on (the position is taken at Start). Both last one run: finish() puts them back
+  // to the job's default (anchorDefault), for a job run again from the queue or from History
   setAnchor(id, at, atStart) {
     const j = this.get(id);
     if (!j) return null;
@@ -113,8 +127,8 @@ class Store {
       seconds: Math.round((Date.parse(job.finishedAt) - Date.parse(startedAt)) / 1000), result
     });
     if (removeDone && result === 'Completed') job.hidden = true;
-    // anchored for that run only: run again, it goes where Pathline placed it
-    job.anchor = null; job.anchorAtStart = false;
+    // anchored for that run only: run again, the switch is back as the job started out
+    job.anchor = null; job.anchorAtStart = this.anchorDefault(job.id);
     this.prune();
     this.flush();
   }
@@ -137,9 +151,9 @@ class Store {
     if (j) {
       if (j.status === 'running') return j;
       j.status = 'queued'; j.progress = 0; j.hidden = false; j.finishedAt = null;
-      // from History: as Pathline placed it. Start on a completed job kept in the queue keeps an
-      // anchor switched on for it since it finished (keepAnchor)
-      if (!keepAnchor) { j.anchor = null; j.anchorAtStart = false; }
+      // from History: the switch as the job started out. Start on a completed job kept in the
+      // queue keeps the switch as it was set since it finished (keepAnchor)
+      if (!keepAnchor) { j.anchor = null; j.anchorAtStart = this.anchorDefault(j.id); }
       this.jobs.splice(this.jobs.indexOf(j), 1);
       this.jobs.push(j);
       this.flush();

@@ -121,6 +121,10 @@ function machineView(cfg) {
     const lim = motion.travelLimits(cfg, P, (cfg.trotec && cfg.trotec.travelSpeed) || 700);
     base.acc = motion.equivalentAcc(lim);
     base.travelSpeed = lim.v;
+    // the real figures, for Prepare 1.6.0 on (HMI-BRIEF §5): it times every move as an S-curve
+    // with them (older ones read acc above)
+    base.travelAcc = lim.a;
+    base.jerk = lim.j;
   }
   // the Trotec's head camera: Pathline offers print and cut (registration marks) when it's on
   const v = cfg.vision || {};

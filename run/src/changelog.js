@@ -8,6 +8,7 @@ module.exports = [
     version: '0.7.11', date: '5 Nov 2026',
     added: [
       'Print and cut: a registration mark that isn\'t where the camera expects it no longer stops the job. Pathline Run opens Jog with the camera picture beside the arrows: jog until the mark is in the red circle and press Accept, and the camera finds its centre from there and reads the other marks itself. Stop job ends it.',
+      'Anchor to toolhead starts on for a print and cut job and off for any other. A print and cut job puts its top-left registration mark at the head: put the laser head over that mark and press Start, and the camera finds the marks from there wherever the sheet lies. (It put the corner of the whole job there, which the cuts can reach past: on the X8 sheet every mark was looked for 22 mm away.) Switch it off to look for the marks where Pathline placed the job.',
       'Trotec: Setup → Controller → Travel between cuts. Most moves between cuts are a few mm, and how sharply the head starts and stops decides how long they take, not the travel speed. Standard is what Ruby sends; Faster (Ruby\'s own positioning jerk) takes about 4 % off a job of many small parts, Fastest about 10 %.'
     ],
     fixed: [
@@ -15,6 +16,10 @@ module.exports = [
       'Queue: the progress bar follows the cutting time. It had jumped to about half way, then sat at 100 % for minutes.',
       'Trotec: cutting is timed at each process\'s set speed (the planner holds it through corners and curves). Prepare\'s own cutting time ran about 15 % long, so the X8 sheet showed 10 min 37 s for 9 min 26 s; Pathline Run now estimates 9 min 21 s. The progress bar moves on with each part the laser reports finished.',
       'Queue: following a print and cut job. Once the marks are read the bed view shows the job where it was moved to, and follows the head along it. It had followed the job where Prepare placed it, about 150 mm away on the X8 sheet: no position fitted, so the head jumped between raw positions twice a second.',
+      'Queue: the head drawn during a job is where the head is. It trailed by about 0.2 s (6–8 mm) all the time, and a job\'s first position, on the way to the first cut, could be placed 15 s on where the path passes close by.',
+      'Queue: Remaining counts down a second at a time, kept within 2 s of the job\'s progress, instead of in uneven steps that stopped while a long part was cut.',
+      'Queue: a job selected while its picture loaded could stop the page updating for a moment.',
+      'Trotec: Prepare 1.6.0 and later are told the real travel acceleration and jerk, so their estimates and cut order follow Travel between cuts.',
       'Trotec: while the laser\'s buffer is full, a position check got the last position again, shown as if new: the head held still, then jumped. Repeated positions now keep their own time, and a refusal that still reports where the head is is used.',
       'Queue: following a running job is smoother. Trotec data goes in smaller packets (as Ruby sends them): the laser only answers a packet, with where the head is, once it has room for it, which with large packets could be a second or two. The screen also asks for the head\'s position four times a second while a job runs, and times the moves between cuts as the machine makes them.',
       '"Remove completed job from queue" off keeps completed jobs in the queue, marked Done. Start runs one again. Before, the switch had no effect.',
