@@ -283,7 +283,28 @@
     for (let i = 0; i < n; i++) t += segTime(L[i], vj[i], vj[i + 1], v, a);
     return t;
   }
-  const travelTime = (d, v, a) => segTime(d, 0, 0, v, a);
+  // Rest-to-rest move of distance d with top speed v, acceleration a and jerk
+  // j (S-curve: the acceleration itself builds up at most j mm/s³). Short
+  // moves never reach a or v and take (32 d / j)^⅓, whatever the top speed:
+  // on the Trotec (700 mm/s, 500 mm/s², 5000 mm/s³, Ruby's Standard) a 7 mm
+  // hop takes 0.35 s, which is what the machine does.
+  function jerkTime(d, v, a, j) {
+    if (d <= 0) return 0;
+    let tj = a / j;
+    // the top speed is reached before full acceleration: a lower peak acceleration
+    if (v < a * tj) { a = Math.sqrt(v * j); tj = a / j; }
+    const ta = v / a - tj; // time at full acceleration while speeding up (≥ 0)
+    const tAcc = 2 * tj + ta; // speeding up from rest to v
+    const dMin = v * tAcc; // speeding up and slowing down again
+    if (d >= dMin) return 2 * tAcc + (d - dMin) / v;
+    // never reaches v; does it reach full acceleration?
+    const t1 = Math.cbrt(d / (2 * j));
+    if (j * t1 <= a) return 4 * t1;
+    const tc = (-3 * tj + Math.sqrt(tj * tj + (4 * d) / a)) / 2;
+    return 2 * (tc + 2 * tj);
+  }
+  // A travel move from rest to rest; with j (jerk) the S-curve, otherwise trapezoidal.
+  const travelTime = (d, v, a, j) => (j > 0 && a > 0 ? jerkTime(d, v, a, j) : segTime(d, 0, 0, v, a));
 
   // Raster engraving: for each scan line, the head sweeps from the leftmost to
   // the rightmost crossing (plus overscan to accelerate) — even-odd fill for
@@ -558,8 +579,9 @@
 
   // ---------------------------------------------------------------- path ordering
   function nestDepth(path, all) {
-    if (!path.c) return 0;
-    const [x, y] = path.p[0];
+    // an open line inside a closed shape is inside it too (cut before that
+    // shape's outline): judged at its middle point
+    const [x, y] = path.c ? path.p[0] : path.p[Math.floor(path.p.length / 2)];
     let d = 0;
     for (const o of all) {
       if (o === path || !o.c || o.area <= path.area) continue;
@@ -736,8 +758,200 @@
    * is ignored. Closed paths then start wherever is most convenient on the
    * travel path (see refineStarts).
    */
+  // The order to read registration marks in (up to 6, every order tried): the
+  // least travel from the origin through all of them, ending nearest `end`
+  // (where the work begins, so the job then runs from that end).
+  function markOrder(list, home, end) {
+    if (list.length < 2 || list.length > 6) return list;
+    const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
+    let best = list, bd = Infinity;
+    const perm = (done, left) => {
+      if (!left.length) {
+        let d = dist(home, [done[0].x, done[0].y]);
+        for (let i = 1; i < done.length; i++) d += dist([done[i - 1].x, done[i - 1].y], [done[i].x, done[i].y]);
+        d += dist([done[done.length - 1].x, done[done.length - 1].y], end);
+        if (d < bd - 1e-9) { bd = d; best = done; }
+        return;
+      }
+      left.forEach((m, i) => perm(done.concat([m]), left.filter((_, k) => k !== i)));
+    };
+    perm([], list);
+    return best;
+  }
+
+  // The order to visit parts in. The head leaves a part from its outline, and
+  // the outline's start is placed afterwards on the side facing the next part,
+  // so the hop between two parts is about the gap between their boxes (none
+  // for touching parts), not the distance between their first holes. Nearest
+  // by that gap (then by centre distance), then 2-opt on the same measure.
+  function partOrder(units, start) {
+    if (units.length < 2) return units;
+    const gap = (a, b) => Math.hypot(Math.max(0, a.box.x0 - b.box.x1, b.box.x0 - a.box.x1), Math.max(0, a.box.y0 - b.box.y1, b.box.y0 - a.box.y1));
+    const cen = (a, b) => Math.hypot(a.cx - b.cx, a.cy - b.cy);
+    // the gap matters most; centre distance breaks ties between touching parts
+    const cost = (a, b) => gap(a, b) + 0.01 * cen(a, b);
+    const fromStart = (u) => Math.hypot(Math.max(0, u.box.x0 - start[0], start[0] - u.box.x1), Math.max(0, u.box.y0 - start[1], start[1] - u.box.y1)) + 0.01 * Math.hypot(u.cx - start[0], u.cy - start[1]);
+    const left = units.slice(), out = [];
+    let cur = null;
+    while (left.length) {
+      let bi = 0, bd = Infinity;
+      left.forEach((u, i) => { const c = cur ? cost(cur, u) : fromStart(u); if (c < bd) { bd = c; bi = i; } });
+      cur = left.splice(bi, 1)[0];
+      out.push(cur);
+    }
+    if (out.length < 400) {
+      const link = (i, j) => (i < 0 ? fromStart(out[j]) : cost(out[i], out[j]));
+      for (let pass = 0, better = true; better && pass < 6; pass++) {
+        better = false;
+        for (let i = 0; i < out.length - 1; i++) {
+          for (let k = i + 1; k < out.length; k++) {
+            const now = link(i - 1, i) + (k + 1 < out.length ? cost(out[k], out[k + 1]) : 0);
+            const rev = (i === 0 ? fromStart(out[k]) : cost(out[i - 1], out[k])) + (k + 1 < out.length ? cost(out[i], out[k + 1]) : 0);
+            if (rev < now - 1e-9) { out.splice(i, k - i + 1, ...out.slice(i, k + 1).reverse()); better = true; }
+          }
+        }
+      }
+    }
+    return out;
+  }
+
   function orderPaths(items, opts) {
-    return refineStarts(arrangePaths(items, opts), opts.start || [0, 0], opts.order || 'file');
+    // cost(d): seconds for a travel move of d mm (default: the distance itself)
+    const cost = opts.cost || ((d) => d);
+    const start = opts.start || [0, 0];
+    let list = arrangePaths(items, opts);
+    // every move is expensive: the start points are chosen together for the
+    // whole run (bestStarts), then the order within each group (a nesting
+    // layer or one part's layer) is improved with them, and again
+    list = refineStarts(list, start, opts.order || 'file', cost);
+    list = twoOptGroups(list, start, cost, opts.budget == null ? 80 : opts.budget);
+    return bestStarts(list, start, cost);
+  }
+  const routeCost = (list, start, cost) => {
+    let s = 0, at = start;
+    for (const it of list) { const p = it.path.p[0]; s += cost(Math.hypot(p[0] - at[0], p[1] - at[1])); at = endOf(it.path); }
+    return s;
+  };
+
+  // The start point of every path in a run, chosen together: a closed path
+  // can start at any of its startPoints (and ends there too); an open path
+  // either way round. Dynamic programming over the run finds the combination
+  // with the least travel for this order (a choice for one path changes the
+  // hops on both sides of it, so choosing one at a time falls short).
+  function bestStarts(list, start, cost) {
+    const n = list.length;
+    if (!n) return list;
+    const opts = list.map((it) => {
+      const p = it.path.p;
+      if (it.path.c && p.length > 2) {
+        let s = startPoints(p);
+        // very finely drawn shapes: every few candidates is plenty
+        if (s.length > 16) { const k = Math.ceil(s.length / 16); s = s.filter((_, i) => i % k === 0); }
+        return s.map((st) => { const q = pointOn(p, st); return { in: q, out: q, make: () => ({ ...it, path: { ...it.path, p: rotateTo(p, st) } }) }; });
+      }
+      if (!it.path.c && p.length > 1) {
+        return [{ in: p[0], out: p[p.length - 1], make: () => it }, { in: p[p.length - 1], out: p[0], make: () => ({ ...it, path: { ...it.path, p: p.slice().reverse() } }) }];
+      }
+      return [{ in: p[0], out: endOf(it.path), make: () => it }];
+    });
+    const hop = (a, b) => cost(Math.hypot(a[0] - b[0], a[1] - b[1]));
+    let dp = opts[0].map((o) => hop(start, o.in));
+    const from = [opts[0].map(() => -1)];
+    for (let i = 1; i < n; i++) {
+      const prev = opts[i - 1], cur = opts[i];
+      const nd = new Array(cur.length), nf = new Array(cur.length);
+      for (let c = 0; c < cur.length; c++) {
+        let best = Infinity, bi = 0;
+        for (let p = 0; p < prev.length; p++) {
+          const v = dp[p] + hop(prev[p].out, cur[c].in);
+          if (v < best) { best = v; bi = p; }
+        }
+        nd[c] = best; nf[c] = bi;
+      }
+      dp = nd; from.push(nf);
+    }
+    let c = 0;
+    for (let k = 1; k < dp.length; k++) if (dp[k] < dp[c]) c = k;
+    const out = new Array(n);
+    for (let i = n - 1; i >= 0; i--) { out[i] = opts[i][c].make(); c = from[i][c]; }
+    return out;
+  }
+
+  // 2-opt: reverse a stretch of the run order when that makes the travel in
+  // and out of it quicker. Closed paths start and end at the same point; open
+  // paths in a reversed stretch are cut the other way. Only stretches inside
+  // one group (same blk) move, so the inside-first order stays.
+  // Local search on the run order of each group, until nothing improves (or
+  // the time budget for the group is used up):
+  //  - 2-opt: reverse a stretch when the travel in and out of it gets quicker;
+  //  - or-opt: move one path, or a chain of 2–3, to the place (either way
+  //    round) where it costs least.
+  // Closed paths start and end at the same point; open paths in a reversed
+  // stretch or chain are cut the other way. Only paths inside one group (same
+  // blk) move, so the inside-first order stays.
+  function twoOptGroups(list, start, cost, budgetMs) {
+    const d = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
+    const ent = (it) => it.path.p[0];
+    const ext = (it) => endOf(it.path);
+    const flip = (it) => (it.path.c ? it : { ...it, path: { ...it.path, p: it.path.p.slice().reverse() } });
+    const hop = (a, b) => (a && b ? cost(d(a, b)) : 0);
+    const out = list.slice();
+    const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
+    let i0 = 0;
+    while (i0 < out.length) {
+      let i1 = i0;
+      while (i1 + 1 < out.length && out[i1 + 1].blk === out[i0].blk) i1++;
+      // groups of up to 1500 paths (each sweep is n²)
+      if (i1 - i0 >= 2 && i1 - i0 < 1500) {
+        const deadline = now() + (budgetMs == null ? 250 : budgetMs);
+        const before = (i) => (i === 0 ? start : i > i0 ? ext(out[i - 1]) : i0 > 0 ? ext(out[i0 - 1]) : start);
+        const after = (k) => (k + 1 < out.length ? ent(out[k + 1]) : null);
+        for (let better = true; better && now() < deadline;) {
+          better = false;
+          // 2-opt
+          for (let i = i0; i < i1 && now() < deadline; i++) {
+            const a = before(i);
+            for (let k = i + 1; k <= i1; k++) {
+              const b = after(k);
+              if (hop(a, ext(out[k])) + hop(ent(out[i]), b) < hop(a, ent(out[i])) + hop(ext(out[k]), b) - 1e-9) {
+                out.splice(i, k - i + 1, ...out.slice(i, k + 1).reverse().map(flip));
+                better = true;
+              }
+            }
+          }
+          // or-opt: chains of 1–3 paths moved elsewhere in the group
+          for (let L = 1; L <= 3; L++) {
+            for (let i = i0; i + L - 1 <= i1 && now() < deadline; i++) {
+              const k = i + L - 1;
+              const a = before(i), b = after(k);
+              const seg = out.slice(i, k + 1);
+              // what taking the chain out saves
+              const save = hop(a, ent(seg[0])) + hop(ext(seg[L - 1]), b) - hop(a, b);
+              if (save <= 1e-9) continue;
+              let best = null;
+              for (let j = i0; j <= i1 + 1; j++) {
+                if (j >= i && j <= k + 1) continue;
+                const p = j === i0 ? before(i0) : ext(out[j - 1]);
+                const q = j <= i1 ? ent(out[j]) : after(i1);
+                const base = hop(p, q);
+                const fwd = hop(p, ent(seg[0])) + hop(ext(seg[L - 1]), q) - base;
+                const rev = hop(p, ext(seg[L - 1])) + hop(ent(seg[0]), q) - base;
+                const c = Math.min(fwd, rev);
+                if (c < save - 1e-9 && (!best || c < best.c)) best = { j, c, rev: rev < fwd };
+              }
+              if (!best) continue;
+              const moved = best.rev ? seg.slice().reverse().map(flip) : seg;
+              out.splice(i, L);
+              const at = best.j > k ? best.j - L : best.j;
+              out.splice(at, 0, ...moved);
+              better = true;
+            }
+          }
+        }
+      }
+      i0 = i1 + 1;
+    }
+    return out;
   }
 
   // Pick each closed path's start (= end) point so the travel in from the
@@ -746,12 +960,12 @@
   // moves its neighbours' best points.
   // A closed path starts and finishes at the same point, from a standstill, so
   // that point gets the beam twice while the head is slow: on a corner it
-  // melts. Starts are kept off corners: a point along a straight edge, 1 mm
-  // from either end or at its middle (the head only slows within a fraction of
+  // melts. Starts are kept off corners: a point along a straight edge,
+  // START_CLEAR from either end or at its middle (the head only slows within a fraction of
   // a millimetre of a corner at cutting speeds), or a vertex where the path
   // hardly turns (on a curve). Only a shape with neither (tiny) starts on a
   // corner. Each start is { v, t }: t along the segment from vertex v.
-  const START_CLEAR = 1; // mm between a start and the nearest corner
+  const START_CLEAR = 0.1; // mm between a start and the nearest corner
   function startPoints(p) {
     const n = p.length, out = [];
     for (let v = 0; v < n; v++) {
@@ -774,8 +988,10 @@
   // the closed path p starting (and ending) at start s
   const rotateTo = (p, s) => (s.t ? [pointOn(p, s)].concat(p.slice(s.v + 1), p.slice(0, s.v + 1)) : p.slice(s.v).concat(p.slice(0, s.v)));
 
-  function refineStarts(list, start, order) {
-    const d = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
+  function refineStarts(list, start, order, cost) {
+    // the travel time of a hop (default: its length)
+    const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
+    const d = cost ? (a, b) => cost(dist(a, b)) : dist;
     // the start candidates of each closed path, worked out once (from its first shape)
     const cands = list.map((it) => (it.path.c && it.path.p.length > 2 ? { p: it.path.p, s: startPoints(it.path.p) } : null));
     for (let sweep = 0; sweep < 2; sweep++) {
@@ -847,11 +1063,46 @@
     };
     const out = [];
     if (inside === 'all') {
-      const layers = new Map();
-      items.forEach((it) => { if (!layers.has(it.depth)) layers.set(it.depth, []); layers.get(it.depth).push(it); });
-      for (const d of [...layers.keys()].sort((a, b) => b - a)) {
-        emit(sequence(layers.get(d).map(pathUnit), at, order).map((u) => u.it), out, 'd' + d);
+      // every hole before any outline. A hole and whatever is inside it go
+      // together (the inner ones first); the holes are then taken in the
+      // order that travels least, with no job-wide "deepest first" layer
+      // (which sent the head to a tiny inner shape wherever it was)
+      const holes = items.filter((it) => it.depth > 0);
+      const outlines = items.filter((it) => !(it.depth > 0));
+      const tops = [...new Set(holes.filter((it) => it.depth === 1 && it.shape.c).map((it) => it.shape))];
+      const groups = new Map(tops.map((s) => [s, []]));
+      const alone = [];
+      for (const it of holes) {
+        if (groups.has(it.shape)) { groups.get(it.shape).push(it); continue; }
+        // the smallest depth-1 hole around it
+        const [x, y] = it.shape.c ? it.shape.p[0] : it.shape.p[Math.floor(it.shape.p.length / 2)];
+        let home = null;
+        for (const s of tops) {
+          const b = s.box;
+          if (s === it.shape || x < b.x0 || x > b.x1 || y < b.y0 || y > b.y1 || s.area <= (it.shape.area || 0)) continue;
+          if (pointInPoly(x, y, s.p) && (!home || s.area < home.area)) home = s;
+        }
+        if (home) groups.get(home).push(it);
+        else alone.push(it);
       }
+      // single holes (most of them) go in one run the 2-opt pass can reorder;
+      // a hole with something inside is a fixed little sequence, deepest first
+      const units = [...groups.values()].filter((l) => l.length).concat(alone.map((it) => [it])).map((list) => {
+        const b = EMPTY_BOX();
+        list.forEach((it) => { growBox(b, it.path.box.x0, it.path.box.y0); growBox(b, it.path.box.x1, it.path.box.y1); });
+        const sorted = list.slice().sort((p, q) => (q.depth || 0) - (p.depth || 0) || p.n - q.n);
+        return {
+          list: sorted, box: b, cx: (b.x0 + b.x1) / 2, cy: (b.y0 + b.y1) / 2, r: Math.hypot(b.x1 - b.x0, b.y1 - b.y0) / 2,
+          entry: (a) => entryOf(sorted[0].path, a).d,
+          exit: () => endOf(sorted[sorted.length - 1].path)
+        };
+      });
+      let k = 0;
+      for (const u of sequence(units, at, order)) {
+        if (u.list.length === 1) emit(u.list, out, 'holes');
+        else { k++; u.list.forEach((it) => emit([it], out, 'nest' + k + 'd' + it.depth)); }
+      }
+      emit(sequence(outlines.map(pathUnit), at, order).map((u) => u.it), out, 'outlines');
       return out;
     }
     if (inside === 'part') {
@@ -871,7 +1122,15 @@
         if (home) parts.get(home).push(it);
         else loose.push([it]);
       }
-      const units = [...parts.values()].concat(loose).map((list) => {
+      // a part with no holes has nothing to protect: its pieces (several once
+      // shared lines are merged) go in freely with the other such pieces, so
+      // touching parts are cut as continuous lines; parts with holes stay whole
+      const whole = [], free = [];
+      for (const list of [...parts.values()].concat(loose)) {
+        if (list.every((it) => !(it.depth > 0))) free.push(...list.map((it) => [it]));
+        else whole.push(list);
+      }
+      const units = whole.concat(free).map((list) => {
         const b = EMPTY_BOX();
         list.forEach((it) => { growBox(b, it.path.box.x0, it.path.box.y0); growBox(b, it.path.box.x1, it.path.box.y1); });
         return {
@@ -881,7 +1140,10 @@
         };
       });
       let partNo = 0;
-      for (const u of sequence(units, at, order)) {
+      const freeSet = new Set(free.map((l) => l[0]));
+      for (const u of partOrder(units, at)) {
+        // free pieces next to each other share a group, so the 2-opt pass can reorder them
+        if (u.list.length === 1 && freeSet.has(u.list[0])) { emit(u.list, out, 'free' + partNo); continue; }
         partNo++;
         // inside the part: deepest holes first, outline last
         const byDepth = u.list.slice().sort((a, b) => (b.depth || 0) - (a.depth || 0) || a.n - b.n);
@@ -908,7 +1170,9 @@
   }
 
   const DEFAULTS = {
-    laser: { speed: 1000, acc: 10000 },
+    // a machine that doesn't report its motion is taken as slow: the Trotec's measured
+    // travel (Ruby's Standard: 700 mm/s, 500 mm/s², jerk 5000 mm/s³)
+    laser: { speed: 700, acc: 500, jerk: 5000 },
     plotter: { speed: 1000, acc: 8000, toolDown: 0.15, toolUp: 0.12, toolChange: 8, feedSpeed: 200, feedSettle: 3, dashLift: 0.08 }
   };
 
@@ -984,9 +1248,19 @@
         if (!groups.has(o)) groups.set(o, []);
         groups.get(o).push(e);
       }
-      // parts nearest next, from the machine origin
+      // parts nearest next, from where the head is when cutting begins: the
+      // machine origin, or the last registration mark read (the same order
+      // the estimate reads them in)
       const bedSize = bedOf(machine), o = ((machine && machine.info) || {}).origin || 'tl';
-      let at = [o.includes('r') ? bedSize[0] : 0, o.includes('b') ? bedSize[1] : 0];
+      const home = [o.includes('r') ? bedSize[0] : 0, o.includes('b') ? bedSize[1] : 0];
+      let at = home;
+      if (isLaser) {
+        const cutEnts = ents.filter((e) => procOf(e) !== undefined);
+        let near = home, nd = Infinity;
+        for (const e of cutEnts) { const b = entityBox(e); const q = [Math.max(b.x0, Math.min(home[0], b.x1)), Math.max(b.y0, Math.min(home[1], b.y1))]; const d = Math.hypot(q[0] - home[0], q[1] - home[1]); if (d < nd) { nd = d; near = q; } }
+        const read = markOrder(regMarks(job, machine), home, near);
+        if (read.length) at = [read[read.length - 1].x, read[read.length - 1].y];
+      }
       const left = [...groups.values()].map((list) => { const b = boxOf(list); return { list, c: [(b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2] }; });
       // within a part: engraving (and marking), then its holes, then its
       // outlines (Per part); with All insides every outline waits until every
@@ -1051,6 +1325,17 @@
     const o = info.origin || 'tl';
     const home = [o.includes('r') ? bedSize[0] : 0, o.includes('b') ? bedSize[1] : 0];
     const vTravel = Math.min(vMax, Number(info.travelSpeed) || vMax);
+    // travel between cuts: top speed, acceleration and, when known, jerk (an
+    // S-curve; short hops then cost ~0.35 s each however fast the top speed)
+    const accTravel = Number(info.travelAcc) || acc;
+    const jerk = Number(info.jerk) || (info.acc ? 0 : D.jerk || 0);
+    const moveT = (d) => travelTime(d, vTravel, accTravel, jerk);
+    // the route itself is chosen to travel as little as possible: distance,
+    // plus a fixed charge for every move so carrying straight on into the next
+    // cut always wins (moveT still gives the time)
+    const ROUTE_MOVE_MM = 5;
+    const routeCost = (d) => (d > 0.01 ? d + ROUTE_MOVE_MM : d);
+    let moves = 0;
     let at = home;
     let first = true;
     let curTool = null;
@@ -1065,8 +1350,9 @@
     const travelTo = (pt, bedNo, proc, kind) => {
       const d = Math.hypot(pt[0] - at[0], pt[1] - at[1]);
       if (d < 1e-6) return;
-      const dur = travelTime(d, vTravel, acc);
+      const dur = moveT(d);
       const leg = kind || (first ? 'fromOrigin' : 'between');
+      if (leg === 'between') moves++;
       first = false;
       travel += d;
       travelT += dur;
@@ -1113,25 +1399,8 @@
     };
     // read the marks in the order with the least travel that ends nearest
     // where the work begins, so the job then runs from that end
-    const marks = (() => {
-      const list = isLaser ? regMarks(job, machine) : [];
-      if (list.length < 2 || list.length > 6) return list;
-      const end = workStart();
-      const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
-      let best = list, bd = Infinity;
-      const perm = (done, left) => {
-        if (!left.length) {
-          let d = dist(home, [done[0].x, done[0].y]);
-          for (let i = 1; i < done.length; i++) d += dist([done[i - 1].x, done[i - 1].y], [done[i].x, done[i].y]);
-          d += dist([done[done.length - 1].x, done[done.length - 1].y], end);
-          if (d < bd - 1e-9) { bd = d; best = done; }
-          return;
-        }
-        left.forEach((m, i) => perm(done.concat([m]), left.filter((_, k) => k !== i)));
-      };
-      perm([], list);
-      return best;
-    })();
+    const marks = markOrder(isLaser ? regMarks(job, machine) : [], home, workStart());
+
     marks.forEach((m, i) => {
       travelTo([m.x, m.y], 0, -1);
       inspectTime += markTime;
@@ -1163,7 +1432,7 @@
     // between passes is paid once per round instead of once per item).
     function backToBack(units, startOf, endOf, passes, dwell) {
       if (passes < 2) return true;
-      const tt = (a, b) => travelTime(Math.hypot(a[0] - b[0], a[1] - b[1]), vTravel, acc);
+      const tt = (a, b) => moveT(Math.hypot(a[0] - b[0], a[1] - b[1]));
       let item = 0, group = 0, p = at;
       for (const u of units) { item += tt(p, startOf(u)) + (passes - 1) * (dwell + tt(endOf(u), startOf(u))); p = endOf(u); }
       p = at;
@@ -1257,7 +1526,7 @@
         }));
         ordered = orderPaths(items, {
           nest: isLaser ? proc.proc === 'Cut' : /Knife/.test(proc.tool || ''),
-          inside: cut.inside, order: 'speed', start: at
+          inside: cut.inside, order: 'speed', start: at, cost: opts.routeCost || routeCost, budget: opts.quick ? 0 : opts.routeBudget || 150
         });
         cache.set(key, ordered);
       }
@@ -1300,8 +1569,8 @@
       total: t,
       perProcess: per.filter((p) => p.ops > 0),
       travel, travelTime: travelT, travelLegs: trav, home, cutOrder: cut, inspectTime, dwellTime, marks: marks.length,
-      cutLen, engArea, toolChanges, feeds, beds: nBeds, procOrder: order, repeats,
-      machine: { speed: vMax, acc },
+      cutLen, engArea, toolChanges, feeds, beds: nBeds, procOrder: order, repeats, moves,
+      machine: { speed: vMax, acc, travelSpeed: vTravel, travelAcc: accTravel, jerk },
       timeline: opts.timeline ? timeline : undefined
     };
   }
@@ -1469,6 +1738,39 @@
     const key = thermalKey(mat);
     return key ? { key, ...THERMAL[key] } : null;
   }
+  // The material's colour, from its name (clear, black, white…) or else its
+  // swatch: { label, dark 0–1, clear }. null when neither says (the default
+  // swatch is not a colour).
+  const DEFAULT_SWATCH = '#e1e4e8';
+  function colourOf(mat) {
+    const n = (((mat && mat.name) || '') + ' ' + ((mat && mat.notes) || '')).toLowerCase();
+    if (/clear|transparent|crystal/.test(n)) return { label: 'Clear', dark: 0, clear: true };
+    if (/frost|translucent|opal/.test(n)) return { label: 'Translucent', dark: 0.1, clear: true };
+    if (/black/.test(n)) return { label: 'Black', dark: 1 };
+    if (/white/.test(n)) return { label: 'White', dark: 0 };
+    const named = [['grey', 0.5], ['gray', 0.5], ['red', 0.55], ['blue', 0.65], ['green', 0.6], ['yellow', 0.2], ['orange', 0.35], ['brown', 0.7], ['silver', 0.3], ['gold', 0.35]].find(([w]) => new RegExp('\\b' + w + '\\b').test(n));
+    if (named) return { label: named[0][0].toUpperCase() + named[0].slice(1), dark: named[1] };
+    const sw = String((mat && mat.sw) || '').toLowerCase();
+    const m = sw.match(/^#([0-9a-f]{6})$/);
+    if (!m || sw === DEFAULT_SWATCH) return null;
+    const [r, g, b] = [0, 2, 4].map((i) => parseInt(m[1].slice(i, i + 2), 16) / 255);
+    const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    return { label: 'Swatch ' + sw.toUpperCase(), dark: Math.round((1 - lum) * 100) / 100 };
+  }
+  // Beam absorption for a material and its colour. At CO2's 10.6 µm plastics,
+  // wood and paper absorb whatever their colour, so colour moves it only a
+  // little (±3 %); at fibre's 1.06 µm a clear or white sheet lets most of the
+  // beam through or reflects it and a black one takes most of it. Bare metals
+  // reflect either way (no colour).
+  const BARE_METAL = new Set(['ss304', 'ss316', 'mildsteel', 'aluminium', 'brass']);
+  function absorptionOf(props, mat, fibre) {
+    const base = fibre ? props.aFiber : props.aCO2;
+    const col = BARE_METAL.has(props.key) ? null : colourOf(mat);
+    if (!col) return { absorb: base, colour: null };
+    if (!fibre) return { absorb: Math.min(0.98, Math.max(0.02, base + (col.dark - 0.5) * 0.06)), colour: col };
+    const lo = col.clear ? 0.03 : 0.08, hi = 0.9;
+    return { absorb: Math.round((lo + (hi - lo) * col.dark) * 100) / 100, colour: col };
+  }
 
   /**
    * Heat build-up in the sheet during a job. The sheet is split into cells;
@@ -1483,7 +1785,8 @@
     const props = thermalOf(material);
     if (!props) return null;
     const fibre = /fib/i.test(info.source || '');
-    const absorb = fibre ? props.aFiber : props.aCO2;
+    // the material's colour changes how much of the beam it takes (mostly on fibre)
+    const { absorb, colour } = absorptionOf(props, material, fibre);
     const rated = Number(info.power) || 80;
     const t_m = Math.max(0.1, Number(material && material.t) || 3) / 1000;
     // Every laser has a robust extraction system, so the sheet is cooled by
@@ -1548,7 +1851,7 @@
       if (time - snaps[snaps.length - 1].time >= 5) snaps.push({ time, T: T.slice(), peak, peakAt });
     };
     const api = {
-      nx, ny, dx, x0, y0, T0, props, absorb, fibre, cellMm: dx,
+      nx, ny, dx, x0, y0, T0, props, absorb, colour, fibre, cellMm: dx,
       get T() { return T; }, get time() { return time; }, get peak() { return peak; }, get peakAt() { return peakAt; },
       // advance (or rewind to a snapshot and advance) to time t
       to(t) {
@@ -1592,6 +1895,18 @@
   }
   // A new reg-mark process (added when reg marks are switched on).
   const regProcess = () => ({ name: 'Registration marks', proc: REG_PROC, power: 0, speed: 0, f: 0, passes: 1, dash: false, dl: 5, gl: 2, out: true, aci: [], adv: {}, src: 'job' });
+  // A job's processes after taking a material's presets: the job's own
+  // Registration marks process (and its colours) stays, and presets never bring one
+  function withPresets(job, presets) {
+    const reg = ((job && job.processes) || []).find(isRegProc);
+    const list = (presets || []).filter((p) => !isRegProc(p));
+    return reg ? list.concat(reg) : list;
+  }
+  // Registration marks on means the job has a Registration marks process to give colours to
+  function ensureRegProcess(job) {
+    if (!job || !job.regMode || job.regMode === 'off' || (job.processes || []).some(isRegProc)) return job;
+    return { ...job, processes: (job.processes || []).concat(regProcess()) };
+  }
 
   // ---------------------------------------------------------------- job checks
   function checkJob(job, machine) {
@@ -1653,8 +1968,8 @@
     uid, EMPTY_BOX, growBox, entityBox, boxOf, boxValid, boxW, boxH,
     mapEntity, translate, scaleAbout, rotateAbout, polyLen, polyArea, pointInPoly, distToEntity, isClosedPts, cleanPath, shapes,
     processOrder, processOfAci, toolSlot, toolRank, polyTime, travelTime, rasterSpans, orderPaths,
-    estimate, headAt, fmtDuration, fmtLen, fmtArea, checkJob, regMarks, regMarkAci, regProcess, isRegProc, REG_PROC, REG_NEEDED,
+    estimate, headAt, fmtDuration, fmtLen, fmtArea, checkJob, regMarks, regMarkAci, regProcess, withPresets, ensureRegProcess, isRegProc, REG_PROC, REG_NEEDED,
     cutOrderOf, CUT_ORDER_DEFAULT, commonLines, bedOf, bedCount, defaultPresets, DEFAULTS,
-    rasterIslands, engraveScan, ENGRAVE_DIRS, DPI_STEPS, starterPresets, nestRects, THERMAL, thermalKey, thermalOf, thermalSim, metalPresets, presetsFor
+    rasterIslands, engraveScan, ENGRAVE_DIRS, DPI_STEPS, starterPresets, nestRects, THERMAL, thermalKey, thermalOf, colourOf, absorptionOf, thermalSim, metalPresets, presetsFor
   };
 });

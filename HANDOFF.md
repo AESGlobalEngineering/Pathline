@@ -15,9 +15,69 @@ Latest round (28 Oct, final):
 - **Dark mode bed is grey** (`--bed`, `--sheet`, `--bed-grid*` in theme.css). **ACI 7 shows as white in dark mode** (black in light), as in CAD, and so do the marks drawn on the bed (registration marks, engrave hatching, arrows, start points): see the `--aci7*` and `--ink` tokens, and `LRC.aci.hex/fg/stroke` in app.js. Exports (DXF/SVG/PDF) still use real black.
 - **Sample machines and materials from earlier builds are removed on first start** (main.js, tracked by `settings.samplesRemoved`). This is by exact id (trotec, flatbed, laser2, acr-print-3 … brass-1); anything the operator created stays.
 
+Version 1.6.5 (6 Nov):
+- **Job page speed on large jobs.** Measured on the owner's PCB Cover job: 4176 objects and about 140 000 points, 150 of them cut. An edit used to take 984 ms: about 725 ms for the estimate and about 200 ms to send the 15 MB job to main. It now takes about 20 ms.
+  - The estimate runs in `src/ui/estimate-worker.js` (a Worker that loads core.js).
+    - `MainDetailed.estimate()` returns the cached full result for this job object. Otherwise it returns the last one shown for this job id, or, for a job just opened, `CC.estimate(…, { quick: true })` (no route search).
+    - It asks the worker 200 ms after the last change (`estimateLater`) and redraws on the answer (`estimateDone`).
+    - The worker only gets the entities in colours a process sends (`cutOnly`).
+    - The Send dialog uses the full estimate (computed directly if not ready).
+  - `commit()` updates the page at once and hands the job to main 300 ms after the last change (`flushJob`); edits in one burst become one undo step. `flushJob()` runs before undo/redo/history, on clicks on links to other pages, on Ctrl+R/Ctrl+M, on pagehide and on unmount. `commit()` still returns a promise, which resolves once the job is handed over.
+  - `estimate(…, { quick })` sets the route search budget to 0. `twoOptGroups`/`orderPaths` now respect a 0 budget; before, `|| 80` turned 0 into 80.
+- PCB Cover's route was checked: Per part, 149 moves, 6.1 m, 62 s of travel (the least time of the three modes). Through the shapes' centres the app's route is 4822 mm against 4741 mm for the best tour found with no time limit (within 2 %).
+
+Version 1.6.4 (5 Nov):
+- **Print and cut starts next to the last mark.** `markOrder(list, home, end)` (shared) picks the mark reading order. Fastest's part-by-part plan in `estimate()` now starts its part order from the last mark read, worked out the same way as `estimateIn` (end = the cut point nearest the origin), not from the machine origin. On the X8 job the hop from the last mark (top right) to cut 1 was 607 mm and is now 59 mm.
+- **All insides without a job-wide depth layer.** Each depth-1 hole is grouped with what's inside it (deepest first, blk `nest<k>d<depth>`). Single holes share blk `holes`, which the 2-opt pass reorders freely, and outlines come last (blk `outlines`). Before, all depth-2 shapes in the job went first wherever they were.
+- X8 travel: All insides 8.2 → 7.8 m, Per part 7.7 m, Off 6.5 → 6.3 m. Self-test: print and cut's first cut is within 200 mm of the last mark in every mode.
+
+Version 1.6.3 (5 Nov):
+- **The route minimises travel distance, at the owner's request** ("travel as little as possible; punish travel, reward cutting"). The route cost is `routeCost(d) = d + ROUTE_MOVE_MM` (5 mm per move; 0 for a join). It is passed to `orderPaths` instead of the travel time; `moveT` still times the estimate. The search budget is 150 ms per group. `estimate(…, { routeCost, routeBudget })` can override both (used for experiments).
+- Checked on the X8 job (All insides): the hole route is 6058 mm against 6015 mm for the same holes solved as a standalone shortest-tour problem (2-opt + or-opt to convergence, centre to centre), so within 1 %.
+  - Travel by purpose: to the 3 registration marks 1.25 m, marks → first cut 0.6 m (All insides starts with the deepest holes), between holes 5.7 m, outlines 0.6 m.
+  - Inside-first is the biggest remaining factor: All insides 8.2 m, Per part 7.7 m, Off 6.5 m.
+
+Version 1.6.2 (5 Nov):
+- `twoOptGroups(list, start, cost, budgetMs)` now alternates 2-opt and or-opt (chains of 1–3 moved, either way round) until nothing improves or the time budget per group runs out. The default is 80 ms; groups of up to 1500 paths.
+- `bestStarts(list, start, cost)` finishes `orderPaths`. Dynamic programming picks every closed path's start (up to 16 `startPoints` each) and every open path's direction together, for the least total travel for that order.
+- Tried on the owner's X8 job (376 shapes, 381 moves, travel ≈ 161 s against a measured 160 s): only about 1 % better. The route is near the best the geometry allows: 376 separate shapes, hops mostly 2–40 mm, each limited by the jerk. A full joint search (3 rounds, 64 candidates) gained under 1 % more and took 3.4 s, so it was dropped.
+- **The real lever is on the Run side:** beam-off travel with Throughput jerk (40 000) would take this route's travel from 161 s to about 124 s, and with acc 1000 to about 94 s. See `hmi/RUN-TRAVEL-BRIEF.md`.
+
+Version 1.6.1 (5 Nov):
+- `nestDepth` judges an open path at its middle point, so an open line inside a closed shape is nested in it. With Per part or All insides it is cut with the holes, before the outline (previously depth 0, grouped with the outline).
+- `partOrder(units, start)` orders the parts in Per part mode by the gap between their boxes (plus 1 % of the centre distance to break ties), greedy and then 2-opt. It replaces `sequence(units…)`, whose unit `exit` was the first hole's end.
+- Measured on a rebuilt copy of the owner's sample (8 touching rounded parts, each with 2 circles, a 10-line burst and a 4 × 3 square grid), travel against 1.6.0: Per part 88.3 → 79.5 s, All insides 81.7 → 78.2 s, Off 75.4 s unchanged. What's left with Per part is structural: touching parts share an edge cut once, so an outline is an open U whose ends sit on one side.
+
+Version 1.6.0 (5 Nov):
+- **Travel model:** `jerkTime(d, v, a, j)` gives a rest-to-rest S-curve. Short hops take (32·d/j)^⅓, and 7 mm at 5000 mm/s³ is 0.355 s, matching the Trotec measurements the Run session made (700 mm/s, 500 mm/s², 5000 mm/s³, Ruby's Standard; its jobs matched within 1–4 %).
+  - `travelTime(d, v, a, j)` uses the S-curve when `j` is given, otherwise the trapezoid.
+  - In `estimateIn`, travel uses `info.travelSpeed`, `info.travelAcc` (else `acc`) and `info.jerk`. A laser that reports no `acc` gets `DEFAULTS.laser` (700 / 500 / jerk 5000). Run currently sends equivalent 700 mm/s and 250 mm/s² without jerk, which the trapezoid matches closely.
+  - `est.moves` counts travel moves between cuts, and `est.machine` carries the travel figures.
+- **Optimising by time:** `orderPaths` takes `cost(d)` (the estimator passes the travel time). Within the existing order rules, the pipeline is `refineStarts` → `twoOptGroups` (2-opt within each `blk` group of up to 400 paths, reversing open paths in a flipped stretch) → `refineStarts` again. Only paths within one group move, so inside-first is kept.
+  - Per part: parts with no holes become free single pieces (blk `free…`) and can chain across touching parts. Parts with holes keep holes → outline.
+  - Measured: a 200-object real job saves 3–4 % travel (it is within one move of the minimum: about 84 separate runs per process, from the line network's odd vertices). 48 touching squares with Per part go from 33 to 19 moves (15.6 → 9.8 s); with Off they were already at the minimum of 12.
+- HMI-BRIEF §5 documents `travelSpeed`, `travelAcc` and `jerk`.
+
+Version 1.5.8 (4 Nov): the Job page's Queue tab lists only active jobs. `qList` drops statuses in `FINISHED` (done, stopped, failed, error, cancelled, aborted), and the Clear finished button and `queueClear` are gone.
+
+Version 1.5.7 (4 Nov):
+- **Registration marks always start off** (`newJob` in main.js, and switching machine on the Job page).
+  - `CC.ensureRegProcess(job)` adds a Registration marks process whenever `regMode` isn't off. It runs in main's `setJob` and the Job page's `commit`.
+  - `CC.withPresets(job, presets)` is used wherever processes are replaced by a material's presets (new job, Choose material, Use for current job, switching machine type). It keeps the job's own Registration marks process (with its colours) and drops any that a preset brings.
+  - Choosing a material no longer counts the registration process as a job override.
+  - The Registration marks process has no Advanced section (`sel.showAdv`).
+- **Thermal map colour:** `CC.colourOf(mat)` reads the colour from the material's name or notes (clear, translucent, black, white, common colour words), else from its swatch (the default `#E1E4E8` is not a colour). `CC.absorptionOf(props, mat, fibre)`:
+  - CO2: base ±3 % by darkness.
+  - Fibre: 0.03 (clear) / 0.08 (white) up to 0.9 (black).
+  - Bare metals: no colour.
+
+  `thermalSim` returns `colour`, and the Simulation's thermal panel shows it, with a note on how much colour matters for the source.
+
+Version 1.5.6 (4 Nov): `START_CLEAR` 0.1 mm, set by the owner (1.5.5 had 0.3 mm, 1.5.4 had 1 mm).
+
 Version 1.5.4 (4 Nov):
 - **Closed cuts start off the corners** (`startPoints`, `pointOn`, `rotateTo`, `refineStarts` in core.js). A closed path's start (which is also its end) is chosen from:
-  - points along straight edges of 3 mm or more: `START_CLEAR` (1 mm) from each end, and the middle. At cutting speeds the head only slows within a fraction of a millimetre of a corner, so 1 mm is clear of it (1.5.4 first used a quarter of the edge, which put starts 2.5 mm in on 10 mm squares);
+  - points along straight edges of 3 mm or more: `START_CLEAR` (0.1 mm since 1.5.5, set by the owner) from each end, and the middle. 1.5.4 first used a quarter of the edge, which put starts 2.5 mm in on 10 mm squares. The start distance doesn't change how slowly the machine takes a corner: that's the controller's motion planning;
   - vertices where the path turns less than 20° (on a curve).
 
   It falls back to plain vertices only when a shape has neither. The cheapest candidate for travel in and out still wins. A start along an edge inserts that point as the path's first vertex. This came from a bug report: square corners melted regardless of power correction. Pathline Run does send power correction to the Trotec (`compile.js`); the double pass over the start corner was the cause.

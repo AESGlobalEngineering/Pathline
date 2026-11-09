@@ -126,6 +126,23 @@ async function main() {
       ok(idx(rPart, 'h0') < idx(rPart, 'o0') && idx(rPart, 'h1') < idx(rPart, 'o1') && (idx(rPart, 'o0') < idx(rPart, 'h1') || idx(rPart, 'o1') < idx(rPart, 'h0')), 'fastest, per part: each part finished before the next (' + rPart.join(' ') + ')');
       ok(rOff.length === 6 && idx(rOff, 'g0') < idx(rOff, 'o0') && idx(rOff, 'g1') < idx(rOff, 'o1'), 'fastest, inside-first off: still engraves before cutting out (' + rOff.join(' ') + ')');
     }
+    // registration marks: on means a Registration marks process; presets keep the job's own and never bring one
+    {
+      const cut = { name: 'Cut', proc: 'Cut', aci: [1] }, reg = { ...CC.regProcess(), aci: [5] };
+      ok(CC.ensureRegProcess({ regMode: 'linear', processes: [cut] }).processes.some(CC.isRegProc), 'marks on adds a Registration marks process');
+      ok(!CC.ensureRegProcess({ regMode: 'off', processes: [cut] }).processes.some(CC.isRegProc), 'marks off adds nothing');
+      const kept = CC.withPresets({ processes: [cut, reg] }, [{ name: 'New cut', proc: 'Cut', aci: [1] }, { ...CC.regProcess(), aci: [9] }]);
+      ok(kept.length === 2 && kept[1].aci[0] === 5, 'material presets keep the job\'s registration marks (and their colour)');
+    }
+    // thermal map: colour matters on a fibre laser, barely on CO2
+    {
+      const clear = { name: 'Clear acrylic', g: 'Acrylic', t: 3 }, black = { name: 'Black acrylic', g: 'Acrylic', t: 3 };
+      const P = CC.thermalOf(clear);
+      const f = (m, fib) => CC.absorptionOf(P, m, fib).absorb;
+      ok(f(black, true) > 5 * f(clear, true), 'fibre: black acrylic takes far more of the beam than clear (' + f(black, true) + ' vs ' + f(clear, true) + ')');
+      ok(Math.abs(f(black, false) - f(clear, false)) <= 0.0601, 'CO2: colour changes absorption only a little (' + f(black, false) + ' vs ' + f(clear, false) + ')');
+      ok(CC.absorptionOf(CC.thermalOf({ name: 'Black stainless 304' }), { name: 'Black stainless 304' }, true).colour === null, 'bare metal has no colour');
+    }
     // repeat: the whole job once, then again; a process marked once isn't repeated
     {
       const sq = (id, x, aci) => ({ id, aci, paths: [{ p: CC.shapes.rect(x, 10, 20, 20, 0), c: true }] });
@@ -135,12 +152,35 @@ async function main() {
       const seq = ops.map((o) => o.ent + o.round).join(' ');
       ok(seq === 'a1 b1 l1 a2 b2 a3 b3', 'repeat runs the whole job, then again; once-only processes once (' + seq + ')');
     }
+    // print and cut: the first cut is next to the last registration mark read, in every inside-first mode
+    {
+      const dot = (id, x, y) => ({ id, aci: 5, paths: [{ p: CC.shapes.ellipse(x, y, 2.5, 2.5), c: true }] });
+      const part = (k, x, y) => [{ id: 'o' + k, aci: 1, paths: [{ p: CC.shapes.rect(x, y, 120, 60, 0), c: true }] }, { id: 'h' + k, aci: 1, paths: [{ p: CC.shapes.ellipse(x + 30, y + 30, 8, 8), c: true }] },
+        { id: 'n' + k, aci: 1, paths: [{ p: CC.shapes.ellipse(x + 30, y + 30, 2, 2), c: true }] }, { id: 'q' + k, aci: 1, paths: [{ p: CC.shapes.rect(x + 80, y + 20, 20, 20, 0), c: true }] }];
+      const ents = [dot('m1', 10, 10), dot('m2', 10, 300), dot('m3', 600, 10)].concat(part(0, 30, 30), part(1, 450, 30), part(2, 30, 200), part(3, 450, 200));
+      const procs = [{ name: 'Cut', proc: 'Cut', power: 80, speed: 20, f: 5000, passes: 1, out: true, aci: [1] }, { ...CC.regProcess(), aci: [5] }];
+      for (const inside of ['all', 'part', 'off']) {
+        const tl = CC.estimate({ ...pj, regMode: 'linear', repeat: 1, entities: ents, processes: procs, cutOrder: { order: 'speed', inside } }, laser, { timeline: true }).timeline;
+        const last = tl.filter((o) => o.kind === 'inspect').pop(), first = tl.find((o) => o.kind === 'op');
+        const hop = Math.hypot(first.path.p[0][0] - last.at[0], first.path.p[0][1] - last.at[1]);
+        ok(hop < 200, inside + ': print and cut starts cutting next to the last mark read (' + Math.round(hop) + ' mm from it)');
+      }
+    }
+    // open lines inside a part are inside it: cut with its holes, before its outline
+    {
+      const part = [{ id: 'o', aci: 1, paths: [{ p: CC.shapes.rect(10, 10, 100, 60, 0), c: true }] }, { id: 'h', aci: 1, paths: [{ p: CC.shapes.ellipse(30, 40, 6, 6), c: true }] },
+        { id: 'l1', aci: 1, paths: [{ p: [[60, 30], [90, 50]], c: false }] }, { id: 'l2', aci: 1, paths: [{ p: [[60, 50], [90, 30]], c: false }] }];
+      for (const inside of ['part', 'all']) {
+        const seq = CC.estimate({ ...pj, regMode: 'off', repeat: 1, entities: part, cutOrder: { order: 'speed', inside } }, laser, { timeline: true }).timeline.filter((o) => o.kind === 'op').map((o) => o.ent);
+        ok(seq[seq.length - 1] === 'o' && seq.length === 4, inside + ': lines inside a part are cut before its outline (' + seq.join(' ') + ')');
+      }
+    }
     // closed cuts start and finish along an edge, not on a corner (a corner cut from a standstill twice melts)
     {
       const sqs = [0, 1, 2].map((i) => ({ id: 'q' + i, aci: 1, paths: [{ p: CC.shapes.rect(20 + i * 40, 20, 30, 30, 0), c: true }] }));
       const ops = CC.estimate({ ...pj, regMode: 'off', repeat: 1, entities: sqs, cutOrder: { order: 'speed', inside: 'off' } }, laser, { timeline: true }).timeline.filter((o) => o.kind === 'op');
       const corners = sqs.map((e) => e.paths[0].p);
-      const onCorner = ops.filter((o) => corners.some((c) => c.some((v) => Math.hypot(v[0] - o.path.p[0][0], v[1] - o.path.p[0][1]) < 0.5)));
+      const onCorner = ops.filter((o) => corners.some((c) => c.some((v) => Math.hypot(v[0] - o.path.p[0][0], v[1] - o.path.p[0][1]) < 0.05)));
       ok(ops.length === 3 && !onCorner.length, 'squares start along an edge, not on a corner (' + ops.map((o) => o.path.p[0].map((v) => v.toFixed(1)).join(',')).join(' · ') + ')');
       ok(ops.every((o) => Math.abs(CC.polyLen(o.path.p, true) - 120) < 0.01), 'starting along an edge keeps the whole outline (120 mm each)');
     }
@@ -232,10 +272,10 @@ async function main() {
     // start points: a square entered from its far side should start on an edge near the travel path (never on a corner)
     const squares = [{ id: 's1', aci: 1, paths: [{ p: [[110, 110], [10, 110], [10, 10], [110, 10]], c: true }] }, { id: 's2', aci: 1, paths: [{ p: [[200, 10], [250, 10], [250, 60], [200, 60]], c: true }] }];
     const st = CC.estimate({ ...pj, entities: squares, cutOrder: { inside: 'off', order: 'file' } }, laser, { timeline: true }).timeline.filter((o) => o.kind === 'op');
-    // from the origin, the corner (110, 10) is on the way to the next part, so the start is on an edge beside it
-    const isCorner = (q, e) => e.paths[0].p.some((v) => Math.hypot(v[0] - q[0], v[1] - q[1]) < 0.5);
+    // the route travels as little as possible: the corner (110, 10) is on the way to the next part, so the start is beside it
+    const isCorner = (q, e) => e.paths[0].p.some((v) => Math.hypot(v[0] - q[0], v[1] - q[1]) < 0.05);
     const s0 = st[0].path.p[0], s1 = st[1].path.p[0];
-    ok(!isCorner(s0, squares[0]) && Math.hypot(s0[0] - 110, s0[1] - 10) <= 26, 'cut starts on an edge near where it is most convenient on the travel path: ' + s0.join(','));
+    ok(!isCorner(s0, squares[0]) && Math.hypot(s0[0] - 110, s0[1] - 10) <= 26, 'cut starts on an edge where the travel is shortest: ' + s0.join(','));
     ok(!isCorner(s1, squares[1]) && Math.hypot(s1[0] - 200, s1[1] - 10) <= 13, 'next cut starts on an edge nearest the previous one: ' + s1.join(','));
     // too many registration marks blocks sending
     const four = { ...job, entities: job.entities.concat({ id: 'r9', aci: 9, paths: [{ p: CC.shapes.dot(400, 300, 5), c: true }] }) };

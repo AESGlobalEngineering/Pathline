@@ -470,7 +470,7 @@
                     </sc-for>
                   </div>
 
-                  <sc-if value="{{isLaser}}" hint-placeholder-val="{{true}}">
+                  <sc-if value="{{sel.showAdv}}" hint-placeholder-val="{{true}}">
                     <button class="btn-link" onClick="{{toggleAdv}}" aria-expanded="{{advOpen}}" style="align-self: flex-start">
                       <svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="transform: rotate({{advRot}})"><path d="{{icons.chev}}"></path></svg>Advanced
                     </button>
@@ -709,9 +709,6 @@
           <sc-if value="{{queueOnline}}" hint-placeholder-val="{{false}}">
             <div style="display: flex; gap: 8px; padding-top: 4px">
               <button class="btn-primary" onClick="{{queueStart}}" disabled="{{queueBusy}}" style="flex: 1; opacity: {{queueOp}}">Start queue</button>
-              <sc-if value="{{hasDone}}" hint-placeholder-val="{{false}}">
-                <button class="tb" onClick="{{queueClear}}" style="flex: 1">Clear finished</button>
-              </sc-if>
             </div>
           </sc-if>
         </div>
@@ -754,6 +751,16 @@ class Component extends DCLogic {
   componentDidMount() {
     const api = window.api;
     window.__page = this; // lets the test harness drive the page
+    // going to another page: hand over edits not sent yet first (that page reads the job from main)
+    this.onNavClick = (e) => {
+      const a = e.target.closest && e.target.closest('a[href]');
+      if (!a || !this._sync || a.getAttribute('href').startsWith('#')) return;
+      e.preventDefault(); e.stopPropagation();
+      this.flushJob().then(() => { location.href = a.href; });
+    };
+    document.addEventListener('click', this.onNavClick, true);
+    this.onPageHide = () => this.flushJob();
+    window.addEventListener('pagehide', this.onPageHide);
     Promise.all([api.job.current(), api.machines.list(), api.materials.list(), api.job.recent(), api.job.history(), api.settings.get(), api.machines.placeholder()])
       .then(([job, machines, materials, recent, hist, settings, none]) => {
         // no machines set up yet: lay the job out on the stand-in bed
@@ -795,6 +802,10 @@ class Component extends DCLogic {
   componentWillUnmount() {
     this.offKeys && this.offKeys();
     clearInterval(this.poll);
+    this.componentWillUnmountEstimate();
+    this.flushJob();
+    window.removeEventListener('pagehide', this.onPageHide);
+    document.removeEventListener('click', this.onNavClick, true);
     window.removeEventListener('dragover', this.onDragOver);
     window.removeEventListener('drop', this.onDrop);
     document.removeEventListener('pointerdown', this.onDocDown, true);
@@ -822,13 +833,31 @@ class Component extends DCLogic {
   }
   // Apply a job change; record:true adds an undo step.
   commit(job, opts, sel) {
+    // registration marks on always come with their process (as the main process keeps it)
+    job = CC.ensureRegProcess(job);
     const patch = { job };
     if (sel) patch.sel = sel;
     this.setState(patch);
-    return window.api.job.update(job, opts || { record: true })
+    // the main process keeps the job too (undo, other pages, saving). Handing
+    // over a large job takes a while, so it goes once a burst of edits pauses
+    // (quick nudges become one undo step); flushJob() sends it at once.
+    const record = !!(opts || { record: true }).record;
+    this._sync = { job, record: (this._sync && this._sync.record) || record };
+    clearTimeout(this._syncTimer);
+    this._syncTimer = setTimeout(() => this.flushJob(), 300);
+    if (!this._syncDone) this._syncDone = new Promise((resolve) => { this._syncResolve = resolve; });
+    return this._syncDone;
+  }
+  flushJob() {
+    clearTimeout(this._syncTimer);
+    const s = this._sync, resolve = this._syncResolve;
+    this._sync = null; this._syncDone = null; this._syncResolve = null;
+    if (!s) return Promise.resolve();
+    return window.api.job.update(s.job, { record: s.record })
       .then(() => window.api.job.history())
       .then((hist) => this.setState({ hist }))
-      .catch(LRC.fail);
+      .catch(LRC.fail)
+      .then(() => resolve && resolve());
   }
   run(fn) {
     return (...a) => {
@@ -872,7 +901,7 @@ class Component extends DCLogic {
     }
     return job;
   }
-  refreshHist() { window.api.job.history().then((hist) => this.setState({ hist })); }
+  refreshHist() { this.flushJob().then(() => window.api.job.history()).then((hist) => this.setState({ hist })); }
   async importFiles() {
     const res = await window.api.job.importDialog();
     if (res && res.length) this.placeImports(res);
@@ -939,8 +968,9 @@ class Component extends DCLogic {
     if (!this.state.sel.length) { LRC.toast('Select one or more objects first'); return false; }
     return true;
   }
-  undo() { window.api.job.undo().then((job) => { if (job) this.setState({ job, sel: this.state.sel.filter((id) => job.entities.some((e) => e.id === id)) }); this.refreshHist(); }).catch(LRC.fail); }
-  redo() { window.api.job.redo().then((job) => { if (job) this.setState({ job }); this.refreshHist(); }).catch(LRC.fail); }
+  // edits not handed over yet go first, so undo steps back from the latest
+  undo() { this.flushJob().then(() => window.api.job.undo()).then((job) => { if (job) this.setState({ job, sel: this.state.sel.filter((id) => job.entities.some((e) => e.id === id)) }); this.refreshHist(); }).catch(LRC.fail); }
+  redo() { this.flushJob().then(() => window.api.job.redo()).then((job) => { if (job) this.setState({ job }); this.refreshHist(); }).catch(LRC.fail); }
   copy(cut) {
     if (!this.needSel()) return;
     LRC.clip.set(LRC.ops.selected(this.state.job, this.state.sel));
@@ -1123,8 +1153,8 @@ class Component extends DCLogic {
       const bed = CC.bedOf(m);
       job = {
         ...job, machineType: m.type, materialId: mat.id,
-        processes: presets.map((p) => ({ ...JSON.parse(JSON.stringify(p)), src: 'preset' })),
-        regMode: m.type === 'laser' && m.info && m.info.f && m.info.f.camera ? job.regMode || 'linear' : 'off',
+        processes: CC.withPresets(job, presets.map((p) => ({ ...JSON.parse(JSON.stringify(p)), src: 'preset' }))),
+        regMode: m.type === 'laser' && m.info && m.info.f && m.info.f.camera ? job.regMode || 'off' : 'off',
         sheet: { ...job.sheet, w: Math.min(job.sheet.w, bed[0]), h: Math.min(job.sheet.h, bed[1]) },
         entities: job.entities.map((e) => ({ ...e, bed: m.type === 'laser' ? 0 : e.bed || 0 }))
       };
@@ -1151,10 +1181,10 @@ class Component extends DCLogic {
     const type = this.machine().type;
     this.setState({ matOpen: false });
     if (!mat) return;
-    const overrides = s.job.processes.some((p) => p.src === 'job');
+    const overrides = s.job.processes.some((p) => p.src === 'job' && !CC.isRegProc(p));
     if (overrides && !(await LRC.confirm('Switch material?', 'This job has process settings saved for this job only. Switching to ' + mat.name + ' replaces them with its presets.', 'Switch'))) return;
     const presets = CC.presetsFor(mat, this.machine()).map((p) => ({ ...JSON.parse(JSON.stringify(p)), src: 'preset' }));
-    this.commit({ ...s.job, materialId: mat.id, processes: presets.length ? presets : s.job.processes }, { record: true });
+    this.commit({ ...s.job, materialId: mat.id, processes: presets.length ? CC.withPresets(s.job, presets) : s.job.processes }, { record: true });
     this.setState({ edit: {}, procSel: 0 });
     const settings = await window.api.settings.get();
     window.api.settings.set({ currentMaterial: { ...(settings.currentMaterial || {}), [type]: mat.id } });
@@ -1324,7 +1354,8 @@ class Component extends DCLogic {
     if (!(await this.checkOverrides('sending'))) return;
     const s = this.state;
     const m = this.machine();
-    const est = this.estimate();
+    // the full estimate for what's about to be sent (not a stand-in)
+    const est = this._est && this._est.job === s.job && this._est.m === m ? this._est.r : CC.estimate(s.job, m);
     const checks = CC.checkJob(s.job, m);
     const job = s.job;
     const res = await LRC.sendDialog({
@@ -1386,7 +1417,7 @@ class Component extends DCLogic {
       Escape: () => { this.closeMenus(); this.setState({ sel: [], tool: 'select', sheetOpen: false }); },
       ArrowLeft: nudge(-1, 0), ArrowRight: nudge(1, 0), ArrowUp: nudge(0, -1), ArrowDown: nudge(0, 1),
       'Shift+ArrowLeft': nudge(-10, 0), 'Shift+ArrowRight': nudge(10, 0), 'Shift+ArrowUp': nudge(0, -10), 'Shift+ArrowDown': nudge(0, 10),
-      'Ctrl+R': () => { location.href = 'SimulationDetailed.dc.html'; }, 'Ctrl+M': () => { location.href = 'MaterialsDetailed.dc.html'; },
+      'Ctrl+R': () => { this.flushJob().then(() => { location.href = 'SimulationDetailed.dc.html'; }); }, 'Ctrl+M': () => { this.flushJob().then(() => { location.href = 'MaterialsDetailed.dc.html'; }); },
       'Ctrl+/': () => this.showShortcuts(), F1: () => this.showShortcuts(),
       V: () => this.setState({ tool: 'select' }), L: () => this.setState({ tool: 'line' }), R: () => this.setState({ tool: 'rect' }), E: () => this.setState({ tool: 'ellipse' }),
       P: () => this.setState({ tool: 'polygon' }), T: () => this.setState({ tool: 'text' }), M: () => this.setState({ tool: 'measure' }),
@@ -1409,13 +1440,60 @@ class Component extends DCLogic {
   }
 
   // ---------------------------------------------------------------- estimate
+  // The time estimate. On a large job the full estimate (route search
+  // included) takes most of a second, so it runs in a worker: until the
+  // answer for this job arrives the page shows the last one (or, for a job
+  // just opened, a quick one), and redraws when it comes.
   estimate() {
     const job = this.state.job, m = this.machine();
     if (this._est && this._est.job === job && this._est.m === m) return this._est.r;
-    const r = CC.estimate(job, m);
-    this._est = { job, m, r };
+    this.estimateLater(job, m);
+    if (this._shown && this._shown.jobId === job.id) return this._shown.r;
+    // nothing to show for this job yet: a quick one now (no long route search)
+    const r = CC.estimate(this.cutOnly(job), m, { quick: true });
+    this._shown = { jobId: job.id, r };
     return r;
   }
+  // only what is cut matters to the estimate: leave out objects in colours no
+  // process sends (a job's artwork layers can be most of its points)
+  cutOnly(job) {
+    const sent = new Set(job.processes.filter((p) => p.out !== false).flatMap((p) => p.aci || []));
+    return { ...job, entities: job.entities.filter((e) => sent.has(e.aci)) };
+  }
+  estimateLater(job, m) {
+    if (this._estWant && this._estWant.job === job && this._estWant.m === m) return;
+    this._estWant = { job, m };
+    clearTimeout(this._estTimer);
+    // wait for a pause in the edits, then hand the latest job to the worker
+    this._estTimer = setTimeout(() => {
+      if (this._worker === undefined || this._worker === null) {
+        try {
+          this._worker = new Worker('estimate-worker.js');
+          this._worker.onmessage = (e) => this.estimateDone(e.data);
+          // a worker that can't start: work it out here instead, from now on
+          this._worker.onerror = () => {
+            this._worker = false;
+            const p = this._estPending;
+            if (p) this.estimateDone({ id: p.id, est: CC.estimate(p.job, p.m) });
+          };
+        } catch (err) { this._worker = null; }
+      }
+      const want = this._estWant;
+      const id = (this._estId = (this._estId || 0) + 1);
+      this._estPending = { id, job: want.job, m: want.m };
+      if (this._worker) this._worker.postMessage({ id, job: this.cutOnly(want.job), machine: want.m });
+      else this.estimateDone({ id, est: CC.estimate(want.job, want.m) });
+    }, 200);
+  }
+  estimateDone(data) {
+    const p = this._estPending;
+    if (!p || data.id !== p.id || data.error) return;
+    this._est = { job: p.job, m: p.m, r: data.est };
+    this._shown = { jobId: p.job.id, r: data.est };
+    // redraw with it if the job is still the one it was worked out for
+    if (this.state.job === p.job) this.setState({ estTick: p.id });
+  }
+  componentWillUnmountEstimate() { clearTimeout(this._estTimer); if (this._worker) this._worker.terminate(); }
 
   renderVals() {
     // theme tokens (theme.css): accent fills, accent text/icons on surfaces, accent tint
@@ -1648,6 +1726,8 @@ class Component extends DCLogic {
         Direction: { v: { down: 'Top down', up: 'Bottom up', fastest: 'Fastest' }[scan.dir], set: (o) => this.setEdit('dir', { 'Top down': 'down', 'Bottom up': 'up', 'Fastest': 'fastest' }[o]) },
         Scan: { v: scan.uni ? 'One way' : 'Both ways', set: (o) => this.setEdit('uni', o === 'One way') }
       };
+      // Advanced settings: laser processes only, and never for registration marks
+      sel.showAdv = isLaser;
       sel.adv = ADV.map(([kind, l, d, u]) => {
         if (SCAN[l]) {
           const k = selIdx + '|' + l, open = S.openPick === k;
@@ -1668,6 +1748,7 @@ class Component extends DCLogic {
         // reg marks are read by the camera: only their colours matter
         Object.assign(sel, { sliders: [], nums: [], showLinks: false, status: 'Registration marks', statusBg: 'var(--sunken)', statusFg: 'var(--text-2)' });
         sel.adv = [];
+        sel.showAdv = false;
       }
       const selOpts = isLaser ? ['Cut', 'Engrave'].concat(regOnNow ? [CC.REG_PROC] : []) : ['T1 · Knife', 'T2 · V-cut 45°', 'T3 · Crease wheel', 'T4 · Pen'];
       sel.selectOpen = S.procOpen;
@@ -1974,7 +2055,9 @@ class Component extends DCLogic {
     // the queue is the machine controller's own job list (polled with the status)
     // [label, pill background, pill text, .pill variant]
     const STATUS = { queued: ['Waiting', 'var(--sunken)', 'var(--text-2)', ''], running: ['Running', accentSoft, accentFg, 'accent'], done: ['Done', 'var(--ok-soft)', 'var(--ok)', 'ok'], stopped: ['Stopped', 'var(--err-soft)', 'var(--err)', 'err'] };
-    const qList = online && S.devJobs && S.devJobs.mid === machine.id ? S.devJobs.list : [];
+    // only the active queue: jobs waiting, running or paused (not finished, stopped or failed ones)
+    const FINISHED = new Set(['done', 'stopped', 'failed', 'error', 'cancelled', 'canceled', 'aborted']);
+    const qList = (online && S.devJobs && S.devJobs.mid === machine.id ? S.devJobs.list : []).filter((q) => !FINISHED.has(q.status));
     const waitingIds = qList.filter((q) => q.status === 'queued').map((q) => q.id);
     const moveQ = (id, d) => R(() => {
       const o = waitingIds.slice();
@@ -1996,7 +2079,7 @@ class Component extends DCLogic {
     });
     const queueNote = machine.conn !== 'Ethernet' ? machine.name + ' saves jobs locally, so it has no queue to show. Set an Ethernet connection on the Machines page to see the machine’s queue.'
       : !online ? 'Not connected to ' + machine.name + (machine.ip ? ' at ' + machine.ip : '') + ' — the queue shows once the controller answers.'
-        : !qList.length ? 'Nothing in the machine’s queue. Jobs appear here when you send them.' : false;
+        : !qList.length ? 'No jobs waiting on ' + machine.name + '. Jobs appear here when you send them.' : false;
 
     // ---- tools
     const tool = (l, d, id, key, msg) => {
@@ -2089,8 +2172,6 @@ class Component extends DCLogic {
       queueOnline: online && machine.conn === 'Ethernet',
       queueStart: R(() => this.queueAction((mid) => window.api.device.command(mid, 'start', {}), 'Queue started on ' + machine.name)),
       queueBusy: S.queueBusy || !waitingIds.length, queueOp: S.queueBusy || !waitingIds.length ? 0.45 : 1,
-      hasDone: qList.some((q) => q.status === 'done' || q.status === 'stopped'),
-      queueClear: R(() => this.queueAction(async (mid) => { for (const q of qList.filter((x) => x.status === 'done' || x.status === 'stopped')) await window.api.device.removeJob(mid, q.id); }, 'Cleared finished jobs')),
       toolGroups: [
         { items: [tb('Undo (Ctrl+Z)', icons.undo, () => this.undo(), !S.hist.undo), tb('Redo (Ctrl+Y)', icons.redo, () => this.redo(), !S.hist.redo)] },
         { items: [tb('Group (Ctrl+G)', icons.group, () => this.op((j, s) => LRC.ops.group(j, s)), selIds.length < 2), tb('Align left', icons.alignL, () => this.align('left'), noSel), tb('Align centre', icons.alignC, () => this.align('centre'), noSel), tb('Distribute horizontally', icons.distribute, () => this.op((j, s) => LRC.ops.distribute(j, s, 'x')), selIds.length < 3)] },

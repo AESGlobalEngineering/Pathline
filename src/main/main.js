@@ -99,8 +99,9 @@ function newJob(machineId) {
     sheet: m.type === 'laser'
       ? { on: false, w: Math.min(600, bed[0]), h: Math.min(400, bed[1]), x: 0, y: 0 }
       : { on: false, w: Math.min(1220, bed[0]), h: Math.min(800, bed[1]), x: 0, y: 0 },
-    regMode: m.type === 'laser' && m.info && m.info.f && m.info.f.camera ? 'linear' : 'off',
-    processes: presetsFor(mat, m).map((p) => ({ ...p, src: 'preset' })),
+    // registration marks start off; the operator turns them on for a print-and-cut job
+    regMode: 'off',
+    processes: CC.withPresets(null, presetsFor(mat, m)).map((p) => ({ ...p, src: 'preset' })),
     entities: [], beds: 1, cutOrder: { ...CC.CUT_ORDER_DEFAULT },
     createdAt: new Date().toISOString()
   };
@@ -115,8 +116,9 @@ function setJob(job, opts) {
     if (session.undo.length > 60) session.undo.shift();
     session.redo = [];
   }
-  session.job = job;
-  return job;
+  // registration marks on always come with their process (whatever replaced the processes)
+  session.job = CC.ensureRegProcess(job);
+  return session.job;
 }
 function currentJob() {
   if (!session.job) session.job = newJob();

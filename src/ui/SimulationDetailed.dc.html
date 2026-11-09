@@ -469,6 +469,7 @@ class Component extends DCLogic {
             { l: 'Under the head', v: deg(model.at(head.x, head.y)) },
             { l: 'Hottest now', v: deg(model.max()) },
             { l: 'Peak', v: deg(model.peak) + (model.peak > model.T0 + 0.5 ? ' at ' + fmt(model.peakAt) : '') },
+            { l: 'Colour', v: model.colour ? model.colour.label : 'not given' },
             { l: 'Beam absorbed', v: Math.round(model.absorb * 100) + ' %' }
           ],
           legend: 'linear-gradient(90deg, ' + [0, 0.1, 0.35, 0.65, 1].map((f) => { const c = this.heatCol(f); return 'rgba(' + c[0] + ', ' + c[1] + ', ' + c[2] + ', ' + Math.max(0.15, c[3] / 255).toFixed(2) + ') ' + f * 100 + '%'; }).join(', ') + ')',
@@ -476,7 +477,9 @@ class Component extends DCLogic {
           overCol: 'rgb(' + this.heatCol(1.2).slice(0, 3).join(', ') + ')',
           limit: deg(pr.limit) + ' · ' + pr.limitLabel,
           warn: over > 0 ? 'Over ' + deg(pr.limit) + ' now across ' + CC.fmtArea(overArea) + ' — ' + pr.limitLabel : model.peak >= pr.limit ? 'Went over ' + deg(pr.limit) + ' at ' + fmt(model.peakAt) + ' — ' + pr.limitLabel : '',
-          note: 'Approximate: averages over ' + model.dx.toFixed(1) + ' mm cells from the material, its thickness and the laser power, with forced airflow from the extraction. The spot under the beam is far hotter.'
+          note: 'Approximate: averages over ' + model.dx.toFixed(1) + ' mm cells from the material, its colour, its thickness and the laser power, with forced airflow from the extraction. The spot under the beam is far hotter. '
+            + (model.fibre ? 'On a fibre laser colour matters a lot: clear and white sheet let most of the beam through, black takes most of it.' : 'On a CO2 laser colour changes little: plastics, wood and paper take nearly all of the 10.6 µm beam whatever their colour.')
+            + (model.colour ? '' : ' Put the colour in the material\'s name (e.g. Clear, Black) or set its swatch.')
         };
         thermal.hasWarn = !!thermal.warn;
       }
@@ -697,15 +700,15 @@ class Component extends DCLogic {
       { l: 'Cut inside shapes first', opts: [['part', 'Per part'], ['all', 'All insides'], ['off', 'Off']].map(([v, l]) => ({ l, on: co.inside === v, ...seg(co.inside === v), pick: () => setOrder({ inside: v }) })) }
     ];
     const stats = isLaser
-      ? [{ l: 'Travel distance', v: CC.fmtLen(est.travel) }, { l: 'Cut length', v: CC.fmtLen(est.cutLen) }, { l: 'Engraved area', v: CC.fmtArea(est.engArea) }]
-      : [{ l: 'Travel distance', v: CC.fmtLen(est.travel) }, { l: 'Cut length', v: CC.fmtLen(est.cutLen) }, { l: 'Tool changes', v: String(est.toolChanges) }, { l: 'Beds', v: String(est.beds) }];
+      ? [{ l: 'Moves between cuts', v: String(est.moves || 0) }, { l: 'Travel distance', v: CC.fmtLen(est.travel) }, { l: 'Cut length', v: CC.fmtLen(est.cutLen) }, { l: 'Engraved area', v: CC.fmtArea(est.engArea) }]
+      : [{ l: 'Moves between cuts', v: String(est.moves || 0) }, { l: 'Travel distance', v: CC.fmtLen(est.travel) }, { l: 'Cut length', v: CC.fmtLen(est.cutLen) }, { l: 'Tool changes', v: String(est.toolChanges) }, { l: 'Beds', v: String(est.beds) }];
     const checks = CC.checkJob(job, machine).map((c) => ({ l: c.l, icon: c.ok ? icons.check : icons.warn, cls: c.ok ? 'ok' : c.warn ? 'warn' : 'err', bg: c.ok ? 'var(--ok-soft)' : c.warn ? 'var(--warn-soft)' : 'var(--err-soft)', fg: c.ok ? 'var(--ok)' : c.warn ? 'var(--warn)' : 'var(--err)' }));
     const marker = ((sim.total ? t / T : 0) * 100).toFixed(2) + '%';
 
     return {
       accent, icons, isLaser, isPlotter: !isLaser, modes, beds, thermal, multiBed: nBeds > 1, speeds, toggles, procs, noProcs: !procs.length,
       jobName: job.name + (job.dirty ? ' · unsaved' : ''),
-      machLine: machine.name + ' · max ' + est.machine.speed + ' mm/s · accel ' + est.machine.acc + ' mm/s²',
+      machLine: machine.name + ' · travel ' + Math.round(est.machine.travelSpeed) + ' mm/s · ' + Math.round(est.machine.travelAcc) + ' mm/s²' + (est.machine.jerk ? ' · jerk ' + Math.round(est.machine.jerk) + ' mm/s³' : ''),
       scene,
       now: { name: nowName, step: nowStep, col: nowCol, x: head.x.toFixed(1), y: head.y.toFixed(1) },
       bar, marker,

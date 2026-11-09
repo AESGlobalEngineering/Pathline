@@ -5,6 +5,80 @@
 
 module.exports = [
   {
+    version: '1.6.5', date: '6 Nov 2026',
+    added: [],
+    fixed: [
+      'The Job page lagged on large jobs: every change waited for the full time estimate and for the whole job to be handed to the background. On a 4176-object job a nudge took nearly a second; now about 20 ms. The estimate is worked out in the background (the time updates a moment later), and quick edits in a row are handed over together (so they undo as one step).'
+    ]
+  },
+  {
+    version: '1.6.4', date: '5 Nov 2026',
+    added: [],
+    fixed: [
+      'Print and cut: after reading the registration marks the head went back across the bed for the first cut (on the X8 job from the top-right mark to a part at the top left, 607 mm). Cutting now starts next to the last mark read.',
+      'All insides cut a hole that sits inside another hole first wherever it was in the job; now it is cut just before the hole around it, and the holes are otherwise taken in the order that travels least. On the X8 job: travel 8.2 m → 7.8 m (All insides) and 6.5 m → 6.3 m (Off).'
+    ]
+  },
+  {
+    version: '1.6.3', date: '5 Nov 2026',
+    added: [
+      'The route travels as little as possible: order, start points and direction are chosen by travel distance, with a charge for every move so carrying straight on into the next cut always wins (it used to choose by travel time, which let long hops through). On the X8 job: 6 % less travel distance; the route between its 371 holes is within 1 % of the shortest possible.'
+    ],
+    fixed: []
+  },
+  {
+    version: '1.6.2', date: '5 Nov 2026',
+    added: [
+      'The route search keeps improving the order until nothing gets quicker (it also moves single shapes and short chains to better places), and the start points of all closed cuts are chosen together for the whole route.'
+    ],
+    fixed: []
+  },
+  {
+    version: '1.6.1', date: '5 Nov 2026',
+    added: [
+      'Parts are visited in the order that crosses the least gap between them (Per part), instead of by where their first hole is; the head leaves a part from its outline, which now faces the next part.'
+    ],
+    fixed: [
+      'Open lines inside a part (e.g. a burst of crossing lines) counted as outside it: they were cut with the outline instead of with the holes, could come after the outline, and made the head zig-zag inside the part. They are now cut with the holes, before the outline.'
+    ]
+  },
+  {
+    version: '1.6.0', date: '5 Nov 2026',
+    added: [
+      'Travel is timed as the machine really moves: with the jerk limit a machine reports (the Trotec: 700 mm/s, 500 mm/s², 5000 mm/s³), every short hop costs about a third of a second, however fast the top speed. A machine that reports nothing is taken as that slow.',
+      'The cut order keeps its rules (engraving before cutting out, inside-first as set, By process / Fastest / Ordered) and within them minimises travel time instead of distance: start points, direction and order are chosen by time, and a final pass removes detours.',
+      'Per part: parts with no holes (e.g. touching squares) are cut as continuous lines instead of one by one. 48 touching squares go from 33 moves to 19.',
+      'Simulation shows the number of moves between cuts and the travel figures used.'
+    ],
+    fixed: []
+  },
+  {
+    version: '1.5.8', date: '4 Nov 2026',
+    added: [],
+    fixed: ['The Queue tab shows only the active queue: jobs waiting, running or paused. Finished, stopped and failed jobs are no longer listed (and Clear finished is gone).']
+  },
+  {
+    version: '1.5.7', date: '4 Nov 2026',
+    added: [
+      'Thermal map: the material\'s colour (from its name, e.g. Clear or Black, or its swatch) changes how much of the beam it takes. It matters a lot on a fibre laser and only a little on CO2; the panel shows the colour used.'
+    ],
+    fixed: [
+      'Registration marks were switched on (Full linear) by default for a new job on a machine with a camera, and when switching to one. They now always start off.',
+      'With registration marks on, the Registration marks process sometimes didn\'t show (e.g. after choosing a material or a new job). It now always does, and keeps its colours when the material changes.',
+      'The Registration marks process no longer has an Advanced section.'
+    ]
+  },
+  {
+    version: '1.5.6', date: '4 Nov 2026',
+    added: [],
+    fixed: ['Closed cuts start 0.1 mm from the corner (was 0.3 mm).']
+  },
+  {
+    version: '1.5.5', date: '4 Nov 2026',
+    added: [],
+    fixed: ['Closed cuts start 0.3 mm from the corner (was 1 mm).']
+  },
+  {
     version: '1.5.4', date: '4 Nov 2026',
     added: [],
     fixed: [
