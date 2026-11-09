@@ -451,7 +451,9 @@ class ProcessCamera {
         const r = await this.call('grab', [timeout], (timeout + exp / 1000) * 3 + 8000, 'taking a picture');
         return { w: r.w, h: r.h, half: r.half, data: new Uint8Array(r.data) };
       } catch (e) {
-        if (k || !/didn't answer|couldn't get a frame|incomplete|camera process stopped/.test(e.message)) throw e;
+        // also any Vimba X call that failed ("couldn't start capturing (Vimba error -22)" after the
+        // USB link dropped out: it then failed every time until Pathline Run was restarted)
+        if (k || !/didn't answer|couldn't|incomplete|camera process stopped/.test(e.message)) throw e;
         this.log('camera: ' + e.message.split('. If')[0] + ': resetting the camera');
         this.stuck = true;
         this.opened = false;

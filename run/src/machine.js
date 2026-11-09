@@ -7,6 +7,7 @@
 const { makeLink, controller } = require('./ctrl');
 const plan = require('./job/plan');
 const validate = require('./job/validate');
+const anchorJob = require('./job/anchor');
 const fitting = require('./vision/fit');
 const { Vision } = require('./vision/vision');
 
@@ -45,7 +46,7 @@ class Machine {
     const link = makeLink(this.cfg, this.log);
     this.link = link;
     // status the link reads on its own (e.g. while a Trotec's buffer is full during a job)
-    link.onPoll = (p) => { if (this.link === link) this.apply(p); };
+    link.onPoll = (p) => { if (this.link === link) { this.apply(p); if (this.onPos) this.onPos(p); } };
     // where an RDD6584's head homes and parks: the server keeps it in the setup
     link.onHome = (h) => { if (this.onHome) this.onHome(h); };
     try {
@@ -108,7 +109,8 @@ class Machine {
   }
 
   apply(p) {
-    if (p.pos && Number.isFinite(p.pos.x)) { this.st.pos = p.pos; this.posAt = Date.now(); }
+    // (when the controller reported it: a Trotec repeats its last answer while its buffer is full)
+    if (p.pos && Number.isFinite(p.pos.x)) { this.st.pos = p.pos; this.posAt = p.at || Date.now(); }
     if (p.mpos) this.st.mpos = p.mpos;
     this.st.interlock = !!p.interlock;
     // (camera work keeps its own progress message)
@@ -131,13 +133,14 @@ class Machine {
   busy() { return !!this.run || this.st.state === 'framing' || !!this.framing || !!this.hold || !!this.camBusy; }
 
   // opts.lidOpenOk: moves with the beam off (jog, hold, home) are allowed with the lid open
+  // opts.markJog: a jog, allowed while a print-and-cut job waits for a mark to be found by hand
   guard(opts = {}) {
     if (!this.cfg.configured) throw busyErr('No machine is set up in Pathline Run yet');
     if (this.st.link !== 'online') throw busyErr('The machine isn\'t connected: ' + this.st.message);
-    if (this.run) throw busyErr('A job is running');
+    if (this.run && !(opts.markJog && this.markWait)) throw busyErr('A job is running');
     if (this.hold) throw busyErr('The head is being jogged');
     if (this.camBusy) throw busyErr('The camera is busy: ' + this.camBusy);
-    if (this.busy()) throw busyErr('The machine is framing');
+    if (this.st.state === 'framing' || this.framing) throw busyErr('The machine is framing');
     if (this.st.state === 'alarm') throw busyErr('Alarm: ' + this.st.message + '. Clear it on the HMI first.');
     if (this.st.interlock && !opts.lidOpenOk) throw busyErr('Lid is open');
   }
@@ -155,7 +158,7 @@ class Machine {
   }
 
   async jog(b) {
-    this.guard({ lidOpenOk: true }); // beam off: the head may move with the lid open
+    this.guard({ lidOpenOk: true, markJog: true }); // beam off: the head may move with the lid open
     let x = this.st.pos.x, y = this.st.pos.y;
     if (b.x !== undefined || b.y !== undefined) {
       if (b.x !== undefined) x = Number(b.x);
@@ -209,7 +212,7 @@ class Machine {
       return { holding: true };
     }
     if (this.hold) await this.jogRelease(); // another arrow: stop this move first
-    this.guard({ lidOpenOk: true });
+    this.guard({ lidOpenOk: true, markJog: true });
     if (!Number.isFinite(this.st.pos.x) || !Number.isFinite(this.st.pos.y)) throw busyErr('The head position isn\'t known yet');
     const at = { x: this.st.pos.x, y: this.st.pos.y };
     const h = { axis, dir, speed, until, at, range: this.jogRange(axis), ideal: at[axis], last: Date.now(), busy: false, moved: false, t0: Date.now(), start: at[axis] };
@@ -243,7 +246,7 @@ class Machine {
   async holdTick() {
     const h = this.hold;
     if (!h || h.busy) return;
-    if (Date.now() > h.until || this.run || this.framing || this.st.link !== 'online' || this.st.state === 'alarm') { this.jogRelease(); return; }
+    if (Date.now() > h.until || (this.run && !this.markWait) || this.framing || this.st.link !== 'online' || this.st.state === 'alarm') { this.jogRelease(); return; }
     // one long move under way: only follow where the head is
     if (h.continuous) {
       h.busy = true;
@@ -435,6 +438,17 @@ class Machine {
       this.batch = [];
     }
     if (!job) return { state: this.st.state, message: 'Nothing queued' };
+    // Anchor to toolhead switched on: the job's top-left corner goes where the head is now, as
+    // Start is pressed (not where it was when the switch was turned on)
+    if (job.anchorAtStart) {
+      if (this.st.link === 'online') { try { this.apply(await this.link.poll()); } catch (e) { /* the last position */ } }
+      const pos = this.st.pos;
+      if (this.st.link !== 'online' || !pos || !Number.isFinite(pos.x)) throw busyErr('"' + job.name + '" is anchored to the toolhead, but the head position isn\'t known');
+      const at = { x: +pos.x.toFixed(3), y: +pos.y.toFixed(3) };
+      try { anchorJob.check(this.store.pkg(job.id), at, this.cfg.bed); } catch (e) { throw busyErr('"' + job.name + '": ' + e.message); }
+      this.store.setAnchor(job.id, at);
+      this.log('anchored ' + job.name + ' at the head, X ' + at.x + ' Y ' + at.y);
+    }
     // as placed: moved to the head if the operator anchored it there
     const pkg = this.store.runPkg(job.id);
     // queued before Pathline Run checked for this: don't "complete" a job that does nothing
@@ -459,7 +473,21 @@ class Machine {
       this.execute(job, null, async (ctl, status) => {
         const r = await this.vision.readMarks(pkg, ctl, status);
         this.st.marks = r.found;
-        try { return this.compile(Vision.corrected(pkg, r.f), opts); } catch (e) { throw new Error('Couldn\'t convert "' + job.name + '" after reading its marks: ' + e.message); }
+        // the job as moved onto the marks: the screen follows the head along this one (the
+        // package as sent sat ~150 mm away on the X8 sheet: no position fitted it, the head jumped)
+        const placed = Vision.corrected(pkg, r.f);
+        if (this.run && this.run.job === job) {
+          const sh = pkg.sheet;
+          const shown = { ...placed };
+          if (sh && [sh.x, sh.y, sh.w, sh.h].every(Number.isFinite)) {
+            const c = [[sh.x, sh.y], [sh.x + sh.w, sh.y], [sh.x + sh.w, sh.y + sh.h], [sh.x, sh.y + sh.h]].map((q) => r.f(q));
+            const xs = c.map((q) => q[0]), ys = c.map((q) => q[1]);
+            shown.sheet = { ...sh, x: Math.min(...xs), y: Math.min(...ys), w: Math.max(...xs) - Math.min(...xs), h: Math.max(...ys) - Math.min(...ys) };
+          }
+          this.run.placed = shown;
+          this.st.placed = job.id + ':' + Date.now();
+        }
+        try { return this.compile(placed, opts); } catch (e) { throw new Error('Couldn\'t convert "' + job.name + '" after reading its marks: ' + e.message); }
       });
       return { state: 'running', job: job.id };
     }
@@ -480,6 +508,12 @@ class Machine {
     Object.assign(this.st, { state: 'running', job: job.id, progress: 0, message: prepare ? 'Reading registration marks' : 'Running ' + job.name });
     let total = 1;
     let doneSec = 0;
+    const timeline = []; // [ms since the stream started, x, y, marker, state, 'p' for a status check while the buffer was full]
+    let since = Date.now();
+    const record = (p, how) => {
+      if (timeline.length < 20000) timeline.push([(p.at || Date.now()) - since, p.pos ? p.pos.x : null, p.pos ? p.pos.y : null, p.marker === undefined ? null : p.marker, p.state, how]);
+    };
+    this.onPos = (p) => record(p, 'p');
     const setProgress = (sec) => {
       this.st.progress = Math.max(this.st.progress, Math.min(0.999, sec / total));
       job.progress = this.st.progress;
@@ -495,7 +529,9 @@ class Machine {
         }
         this.log('run ' + job.name + ' (' + program.ctrl + ', ' + program.segments.length + ' segments, ' + Math.round(program.seconds) + ' s estimated)');
         total = Math.max(0.001, program.seconds);
-        const since = Date.now();
+        // the controller's own estimate (as converted, after any registration marks) is the one shown
+        if (program.estimated) job.seconds = Math.round(program.seconds);
+        since = Date.now();
         // the laser threw the job away itself (Trotec: an FPGA error, then its buffers cleared):
         // that's not a finished job, whatever state it's left in
         const thrownAway = () => {
@@ -521,13 +557,23 @@ class Machine {
           let last = Date.now();
           let sawBusy = false;
           const markerSec = (m) => seg.steps.filter((s) => s.i + 1 <= m).reduce((a, s) => a + s.seconds, 0);
+          const stepSec = (m) => { const s = seg.steps.find((x) => x.marker === m); return s ? s.seconds : 0; };
+          let mark = null; // the last marker reported, and the working time when it came
           const follow = (p) => {
             this.apply(p);
             const now = Date.now();
             if (p.state === 'busy') { sawBusy = true; active += ((now - last) / 1000) * (this.link.timeScale || 1); }
             last = now;
-            const est = p.marker ? Math.max(markerSec(p.marker), Math.min(active, seg.seconds)) : Math.min(active, seg.seconds);
-            setProgress(doneSec + est);
+            // Progress: the marker set after each step is reported as the head finishes that step
+            // (the positions saved in data/runs, 5 Nov: the head is at the next step's start when a
+            // marker first shows). So the steps done, then the time since, up to the next step's own
+            // time. Before the first marker: the time worked, up to the first step's time
+            if (p.marker && seg.steps.some((s) => s.marker === p.marker)) {
+              if (!mark || mark.m !== p.marker) mark = { m: p.marker, at: active };
+            }
+            const est = mark ? markerSec(mark.m) + Math.min(active - mark.at, stepSec(mark.m + 1)) : Math.min(active, seg.steps.length ? seg.steps[0].seconds : seg.seconds);
+            setProgress(doneSec + Math.min(est, seg.seconds));
+            record(p, '');
             if (p.state === 'paused' && !ctl.paused) this.st.message = p.interlock ? 'Paused: lid open' : 'Paused on the machine';
           };
           await this.link.send(seg, { ...ctl, get aborted() { return ctl.aborted; }, onReply: follow });
@@ -550,16 +596,24 @@ class Machine {
         if (ctl.aborted) result = 'Stopped';
       } catch (e) {
         result = 'Stopped';
-        this.log('job failed: ' + e.message);
+        this.log((ctl.aborted ? 'job stopped: ' : 'job failed: ') + e.message);
         await this.link.abort().catch(() => {});
-        this.st.state = 'alarm';
-        this.st.message = e.message;
+        // Stop pressed (while reading marks, say) is not an alarm
+        if (!ctl.aborted) {
+          this.st.state = 'alarm';
+          this.st.message = e.message;
+        }
       }
       // RDD6584: after a job the head parks at home, so measure from there
       if (result === 'Completed' && program && program.knife && this.link.learnHome) await this.link.learnHome().catch(() => {});
       this.store.finish(job, result, startedAt, this.cfg.removeDone);
+      if (timeline.length && this.store.saveRun) this.store.saveRun(job, { startedAt, result, estimate: program ? program.seconds : null, steps: program ? program.segments.filter((s) => s.kind === 'stream').flatMap((s) => s.steps) : [], timeline });
       this.run = null;
+      this.onPos = null;
       this.st.job = null;
+      this.st.placed = null;
+      // the registration marks found belong to this run: off the bed view with it
+      this.st.marks = null;
       if (this.st.state !== 'alarm') {
         this.st.state = 'idle';
         this.st.message = result === 'Completed' ? 'Finished ' + job.name : 'Stopped';
@@ -596,6 +650,41 @@ class Machine {
     this.st.state = 'running';
     this.st.message = 'Running ' + this.run.job.name;
     return { state: 'running' };
+  }
+
+  // ------------------------------------------------------------ print and cut by hand
+  // A registration mark wasn't found where it should be. The job waits, beam off: the screen opens
+  // Jog with the camera picture, the user jogs the camera over the mark and presses Accept, and the
+  // dot finder takes over from there. Resolves with where the camera then looks (bed mm); Stop ends it.
+  async waitForMark(info, ctl) {
+    const w = { accepted: false, at: null };
+    this.markWait = w;
+    this.st.markWait = { mark: info.mark, of: info.of, near: info.near.map((v) => +v.toFixed(2)), again: !!info.again };
+    this.st.message = 'Mark ' + info.mark + ' of ' + info.of + (info.again ? ' still not found' : ' not found') + ': jog the camera over it, then Accept';
+    try {
+      while (!w.accepted) {
+        if (ctl.aborted) throw busyErr('Stopped');
+        await sleep(150);
+      }
+    } finally {
+      this.markWait = null;
+      this.st.markWait = null;
+    }
+    await this.jogRelease();
+    return w.at;
+  }
+
+  // Accept (Jog page): the mark is under the camera's crosshair
+  async markAccept() {
+    const w = this.markWait;
+    if (!w) throw busyErr('No registration mark is waiting to be found');
+    if (this.hold) await this.jogRelease();
+    await this.waitIdle(10000, 150);
+    const p = this.st.pos;
+    if (!Number.isFinite(p.x) || !Number.isFinite(p.y)) throw busyErr('The head position isn\'t known yet');
+    w.at = this.vision.cameraAt([p.x, p.y]);
+    w.accepted = true;
+    return { accepted: true, at: w.at };
   }
 
   // always accepted, in every state

@@ -71,6 +71,12 @@ function start(opts = {}) {
   }
 
   const store = new Store(DATA);
+  // jobs queued before the Trotec timed its own travel: its estimate for them too
+  if (cfg.configured && cfg.controller === 'trotec') {
+    for (const j of store.jobs.filter((x) => x.status === 'queued' || x.status === 'done')) {
+      try { const p = controller('trotec').compile(plan.build(store.runPkg(j.id)), cfg); if (p.estimated) j.seconds = Math.round(p.seconds); } catch (e) { /* keeps Pathline's */ }
+    }
+  }
   // --sim: the head camera is simulated too, over a made-up bed: a 50 mm checkerboard laid at
   // 1.5° with a bump in it, and the example job's three registration marks printed on a sheet
   // that's shifted and turned a little, all lit unevenly (25 … 100 % across the picture); the
@@ -164,9 +170,12 @@ function start(opts = {}) {
     needMachine();
     const warnings = validate.check(pkg, cfg);
     // convert now, so a job the controller can't take is refused at send time
-    try { controller(cfg.controller).compile(plan.build(pkg), cfg); } catch (e) { throw err(400, 'Can\'t convert this job for ' + CONTROLLERS[cfg.controller].label + ': ' + e.message); }
-    const job = store.add(pkg, warnings, source);
-    log('received ' + job.name + ' · ' + (pkg.processes || []).length + ' processes · ' + ((pkg.estimate && pkg.estimate.total) || '?') + (warnings.length ? ' · ' + warnings.join('; ') : ''));
+    let program;
+    try { program = controller(cfg.controller).compile(plan.build(pkg), cfg); } catch (e) { throw err(400, 'Can\'t convert this job for ' + CONTROLLERS[cfg.controller].label + ': ' + e.message); }
+    // the Trotec times its own travel (as the machine really moves): its estimate replaces Pathline's
+    const seconds = program && program.estimated ? Math.round(program.seconds) : null;
+    const job = store.add(pkg, warnings, source, seconds);
+    log('received ' + job.name + ' · ' + (pkg.processes || []).length + ' processes · ' + ((pkg.estimate && pkg.estimate.total) || '?') + (seconds !== null ? ' (here ' + Math.floor(seconds / 60) + ' min ' + String(seconds % 60).padStart(2, '0') + ' s)' : '') + (warnings.length ? ' · ' + warnings.join('; ') : ''));
     return job;
   }
 
@@ -186,6 +195,8 @@ function start(opts = {}) {
     'POST /resume': () => machine.resume(),
     'POST /stop': () => machine.stop(),
     'POST /jog': (b) => machine.jog(b),
+    // print and cut: the mark the job is waiting for is under the camera's crosshair
+    'POST /marks/accept': () => machine.markAccept(),
     'POST /home': () => machine.home(),
     'POST /frame': (b) => machine.frame(b.box),
     'POST /io': (b) => machine.io(b),
@@ -238,7 +249,9 @@ function start(opts = {}) {
       app: pkgJson.version, update: updates.status(), here: isLocalReq(req), config: cfg, status: machine.status(), info: machine.info, ruidaModels: ruidaModels.MODELS,
       fromController: machine.ctrl || null,
       camera: { open: !!machine.vision.camera, info: machine.vision.camera ? machine.vision.camera.info || null : null, busy: machine.camBusy || null, exposure: machine.vision.exposureNow(), defaults: VisionDefaults },
-      jobs: store.jobs.filter((j) => !j.hidden), history: store.history.slice(0, 100), controllers: Object.keys(CONTROLLERS)
+      jobs: store.jobs.filter((j) => !j.hidden), history: store.history.slice(0, 100), controllers: Object.keys(CONTROLLERS),
+      // how the Trotec travels between cuts (the screen times the running job's route with it)
+      motion: cfg.controller === 'trotec' ? require('./ctrl/trotec/motion').travelLimits(cfg, require('./ctrl/trotec/compile').PLANNER.Standard, (cfg.trotec && cfg.trotec.travelSpeed) || 700) : null
     }),
     'GET /log': () => logLines,
     'GET /ports': async () => {
@@ -404,32 +417,37 @@ function start(opts = {}) {
         }
         if (isLocal && (m = route.match(/^GET \/jobs\/([^/]+)\/package$/))) {
           const id = decodeURIComponent(m[1]);
+          // running print and cut: the job as moved onto the marks it found (status.placed says when)
+          const run = machine.run;
+          if (run && run.placed && run.job.id === id) return send(res, 200, { ...run.placed, placed: machine.st.placed });
           return send(res, 200, store.get(id) ? store.runPkg(id) : store.pkg(id));
         }
-        // anchor the job's top-left corner to where the head is now ({ clear: true } puts it back)
+        // anchor the job's top-left corner to the head: where the head is when Start is pressed
+        // (machine.start takes the position), for that run only. { clear: true } puts it back
         if (isLocal && (m = route.match(/^POST \/jobs\/([^/]+)\/anchor$/))) {
           const id = decodeURIComponent(m[1]);
           const j = store.get(id);
           if (!j) return send(res, 404, { error: 'No job ' + id });
           if (j.status === 'running') return send(res, 409, { error: 'The job is running' });
           const b = await body(req, 1024);
-          if (b.clear) { store.setAnchor(id, null); log('anchor cleared for ' + j.name); return send(res, 200, { anchor: null }); }
-          if (machine.st.link !== 'online') return send(res, 409, { error: 'The machine isn\'t connected, so the head position isn\'t known' });
-          const at = { x: +machine.st.pos.x.toFixed(3), y: +machine.st.pos.y.toFixed(3) };
-          anchor.check(store.pkg(id), at, cfg.bed);
-          store.setAnchor(id, at);
-          log('anchored ' + j.name + ' at the head, X ' + at.x + ' Y ' + at.y);
-          return send(res, 200, { anchor: at });
+          if (b.clear) { store.setAnchor(id, null, false); log('anchor cleared for ' + j.name); return send(res, 200, { anchor: null, atStart: false }); }
+          store.setAnchor(id, null, true);
+          log(j.name + ' will start at the head when it\'s started');
+          return send(res, 200, { anchor: null, atStart: true });
         }
         if (isLocal && (m = route.match(/^GET \/jobs\/([^/]+)\/export$/))) {
           const f = exportJob(decodeURIComponent(m[1]), url.searchParams.get('format'), url.searchParams.get('ctrl'));
           res.writeHead(200, { 'content-type': f.type, 'content-disposition': 'attachment; filename="' + encodeURIComponent(f.name) + '"; filename*=UTF-8\'\'' + encodeURIComponent(f.name) });
           return res.end(f.data);
         }
-        if (isLocal && (m = route.match(/^POST \/jobs\/([^/]+)\/requeue$/))) return send(res, 200, store.requeue(decodeURIComponent(m[1])));
+        if (isLocal && (m = route.match(/^POST \/jobs\/([^/]+)\/requeue$/))) {
+          const b = await body(req, 1024);
+          return send(res, 200, store.requeue(decodeURIComponent(m[1]), !!b.keepAnchor));
+        }
         // the head camera's picture for the screen: 4 bytes (width, height as 16-bit), then grey bytes
         if (isLocal && route === 'GET /camera/frame') {
-          if (machine.camBusy || machine.run) return send(res, 409, { error: 'The camera is busy' });
+          // during a job only while it waits for a mark to be found by hand
+          if (machine.camBusy || (machine.run && !machine.markWait)) return send(res, 409, { error: 'The camera is busy' });
           const f = await machine.vision.preview(Math.min(960, Number(url.searchParams.get('size')) || 480));
           const head = Buffer.alloc(4);
           head.writeUInt16BE(f.w, 0); head.writeUInt16BE(f.h, 2);

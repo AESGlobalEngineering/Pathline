@@ -146,6 +146,18 @@ class Vision {
     return raw || !this.cfg.mapOn ? l : fitting.correct(this.cfg.map, l);
   }
 
+  // where the camera looks with the head (laser) at `head`: laserFor the other way round (the bed
+  // map's correction is small and smooth, so a few rounds settle it)
+  cameraAt(head) {
+    const o = this.cfg.offset;
+    let p = [head[0] - o[0], head[1] - o[1]];
+    for (let k = 0; k < 4; k++) {
+      const l = this.laserFor(p);
+      p = [p[0] + head[0] - l[0], p[1] + head[1] - l[1]];
+    }
+    return p;
+  }
+
   async moveCamera(p, opts = {}) {
     const [x, y] = this.laserFor(p, opts.raw);
     const [W, H] = this.m.cfg.bed;
@@ -181,19 +193,70 @@ class Vision {
     return null;
   }
 
+  // The last picture looked at for a mark, kept for finding out why a mark was missed: half size,
+  // grey bytes after a 4-byte header (width, height as 16-bit), gzipped, in the data folder's
+  // marks/ (the last job's only), with what was looked for and found beside it
+  saveMarkFrame(name, info) {
+    try {
+      const dir = this.m.store && this.m.store.dir && require('path').join(this.m.store.dir, 'marks');
+      if (!dir || !this.last) return;
+      const fs = require('fs');
+      fs.mkdirSync(dir, { recursive: true });
+      const s = detect.shrink(this.last.img, Math.max(this.last.img.w, this.last.img.h) / 2);
+      const b = Buffer.alloc(4 + s.w * s.h);
+      b.writeUInt16BE(s.w, 0); b.writeUInt16BE(s.h, 2);
+      for (let i = 0; i < s.w * s.h; i++) b[4 + i] = Math.round(s.data[i]);
+      fs.writeFileSync(require('path').join(dir, name + '.bin.gz'), require('zlib').gzipSync(b));
+      fs.writeFileSync(require('path').join(dir, name + '.json'), JSON.stringify({ ...info, head: this.last.at, exposure: this.exposureNow(), pixel: this.pixelSize(), half: true }, null, 1));
+    } catch (e) { this.log('mark picture not kept: ' + e.message); }
+  }
+
+  clearMarkFrames() {
+    try {
+      const dir = this.m.store && this.m.store.dir && require('path').join(this.m.store.dir, 'marks');
+      if (dir) require('fs').rmSync(dir, { recursive: true, force: true });
+    } catch (e) { /* nothing to clear */ }
+  }
+
   // ---------------------------------------------------------------- print and cut
   // Reads the job's registration marks in Pathline's order; returns the fit (design → found).
   async readMarks(pkg, ctl = {}, status = () => {}) {
     const steps = (pkg.toolpath || []).filter((s) => s.type === 'inspect');
     const E = [], D = [];
+    this.clearMarkFrames();
     for (const s of steps) {
-      // predict from the marks found so far (shift with one, + rotation and scale with more)
-      const pred = E.length ? fitting.fit(E, D, E.length === 1 ? 'shift' : 'similar')(s.at) : s.at;
+      // predict from the marks found so far: the shift from one; shift and rotation from two (their
+      // scale is one distance, and carried 740 mm out to the third mark it put a 6 % stretch's
+      // worth, 45 mm, into the prediction); the full fit from three
+      const pred = E.length ? fitting.fit(E, D, E.length === 1 ? 'shift' : E.length === 2 ? 'rigid' : 'affine')(s.at) : s.at;
       status('Reading mark ' + s.mark + ' of ' + s.of);
-      const r = await this.measure(pred, 'dot', { d: s.d, ctl, whiteRing: true });
-      if (!r) throw err('Registration mark ' + s.mark + ' not found near ' + pred.map((v) => v.toFixed(1)).join(', ') + ' mm. Check the sheet, the light and Setup → Camera.');
+      let r = await this.measure(pred, 'dot', { d: s.d, ctl, whiteRing: true });
+      this.saveMarkFrame('mark' + s.mark, { mark: s.mark, design: s.at, expected: pred, d: s.d, found: r ? r.found : null, hit: r ? r.hit : null });
+      // not where it should be: the job waits while the user jogs the camera over it (Jog page),
+      // then the dot finder looks again from there. Put there by hand, the dot nearest the
+      // crosshair counts even without clean white round it (artwork close by may be why it was missed)
+      for (let again = false; !r; again = true) {
+        this.log('mark ' + s.mark + (again ? ' still not found' : ' not found near ' + pred.map((v) => v.toFixed(1)).join(', ') + ' mm') + ': waiting for the camera to be jogged over it');
+        const at = await this.m.waitForMark({ mark: s.mark, of: s.of, near: pred, again }, ctl);
+        status('Reading mark ' + s.mark + ' of ' + s.of + ' where the camera was put');
+        r = await this.measure(at, 'dot', { d: s.d, ctl, whiteRing: false });
+        this.saveMarkFrame('mark' + s.mark + '-hand' + (again ? '2' : ''), { mark: s.mark, design: s.at, expected: pred, camera: at, d: s.d, found: r ? r.found : null, hit: r ? r.hit : null });
+        if (r) this.log('mark ' + s.mark + ': found by hand, ' + Math.hypot(r.found[0] - pred[0], r.found[1] - pred[1]).toFixed(2) + ' mm from where it was expected; the camera was put ' + Math.hypot(r.found[0] - at[0], r.found[1] - at[1]).toFixed(2) + ' mm from it');
+      }
       E.push(s.at); D.push(r.found);
       this.log('mark ' + s.mark + ': expected ' + s.at.map((v) => v.toFixed(2)).join(', ') + ', found ' + r.found.map((v) => v.toFixed(3)).join(', ') + ' (' + r.tries + ' frame' + (r.tries > 1 ? 's' : '') + ')');
+    }
+    // the marks found must be as far apart as the job's: a dot that isn't the mark (a hole in the
+    // bed through clear acrylic, artwork) bent the job 5 % one way and 6 % the other, and it was cut
+    // off the print. Over 1 % (2 mm at least) out: stop before anything is cut
+    for (let i = 0; i < E.length; i++) {
+      for (let j = i + 1; j < E.length; j++) {
+        const de = Math.hypot(E[j][0] - E[i][0], E[j][1] - E[i][1]), dd = Math.hypot(D[j][0] - D[i][0], D[j][1] - D[i][1]);
+        if (Math.abs(dd - de) > Math.max(2, 0.01 * de)) {
+          this.log('print and cut: marks ' + steps[i].mark + ' and ' + steps[j].mark + ' found ' + dd.toFixed(1) + ' mm apart, ' + de.toFixed(1) + ' mm in the job: stopped');
+          throw err('Registration marks ' + steps[i].mark + ' and ' + steps[j].mark + ' were found ' + dd.toFixed(1) + ' mm apart, but they are ' + de.toFixed(1) + ' mm apart in the job. One of them wasn\'t the mark (or the sheet isn\'t this job\'s). Nothing was cut.');
+        }
+      }
     }
     const type = fitting.typeFor(pkg.regMarks && pkg.regMarks.mode, E.length);
     const f = fitting.fit(E, D, type);

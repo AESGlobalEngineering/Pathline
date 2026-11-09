@@ -1,12 +1,36 @@
 // Plan → Trotec data-lane command stream. The command sequences copy what
 // Ruby sends (TROTEC_PROTOCOL.md §4.4–4.7): power as DEFINEPOWERLEVELS +
 // SELECTPOWERLEVEL, speed as CutVelocity / raster velocity in position units
-// per second, cuts as MOVEXY per segment, raster lines as MOVEX± with a b/w
-// switch table.
+// per second, cuts as MOVEXY per straight segment and cubic Béziers for curves, raster lines as
+// MOVEX± with a b/w switch table.
 'use strict';
 
 const { TT, KEY, listing } = require('./sf');
+const { fitArcs } = require('./arcs');
+const { travelLimits, moveTime } = require('./motion');
 const { scanLines, trace } = require('../../job/plan');
+
+const COMMIT_EVERY = 200;
+
+// An arc from `from` (on its circle) as cubic Béziers of at most 45° (Ruby's piece size): each
+// [c1x, c1y, c2x, c2y, ex, ey] in mm. Control points at 4/3·tan(θ/4)·r along the tangents; the
+// curve then stays within 5·10⁻⁶·r of the circle (5 µm at a 1 m radius). The last piece ends
+// exactly on the polyline's point.
+function bezierPieces(from, m) {
+  const [cx, cy] = m.c, r = m.r, s = Math.sign(m.sweep);
+  const n = Math.max(1, Math.ceil(Math.abs(m.sweep) / (Math.PI / 4) - 1e-9));
+  const th = m.sweep / n, k = (4 / 3) * Math.tan(Math.abs(th) / 4) * r;
+  let a = Math.atan2(from[1] - cy, from[0] - cx);
+  let p = from;
+  const out = [];
+  for (let i = 1; i <= n; i++) {
+    const b = a + th;
+    const e = i === n ? m.to : [cx + r * Math.cos(b), cy + r * Math.sin(b)];
+    out.push([p[0] - s * k * Math.sin(a), p[1] + s * k * Math.cos(a), e[0] + s * k * Math.sin(b), e[1] - s * k * Math.cos(b), e[0], e[1]]);
+    a = b; p = e;
+  }
+  return out;
+}
 
 // Path-planner sets from Ruby's PathPlanningParameter.json (Q500): keys 256–263.
 // [arc, bezier, vector, chord, kappa, tanAcc idle, tanAcc cut, jerk, interp]
@@ -41,6 +65,7 @@ function settings(cfg) {
     overscan: t.overscan !== undefined ? t.overscan : 10,
     pcCut: t.cutPowerCorrection !== undefined ? t.cutPowerCorrection : 15,
     pcEngrave: t.engravePowerCorrection !== undefined ? t.engravePowerCorrection : 20,
+    arcs: t.arcs !== false,
     bed: cfg.bed
   };
 }
@@ -50,6 +75,9 @@ const units = (S) => ({
   x: (mm) => Math.floor((mm + S.off[0]) / S.unit + 1e-6),
   y: (mm) => Math.floor((mm + S.off[1]) / S.unit + 1e-6),
   v: (mmps) => Math.round(Math.min(mmps, S.max) / S.unit),
+  // unrounded, for the doubles of a Bézier
+  fx: (mm) => (mm + S.off[0]) / S.unit,
+  fy: (mm) => (mm + S.off[1]) / S.unit,
   toMm: (ux, uy) => [ux * S.unit - S.off[0], uy * S.unit - S.off[1]]
 });
 
@@ -124,26 +152,54 @@ function compile(plan, cfg) {
     st.proc = p;
   };
 
+  // where the head is (for the travel time; the job starts from home)
+  let head = [0, 0];
   const cut = (step) => {
     const p = step.proc;
     setupCut(p);
     const P = PLANNER[st.planner];
+    // travel between cuts: the planner set's idle limits, or a faster profile (motion.js)
+    const T = travelLimits(cfg, P, S.travel);
+    let travelSec = 0;
+    let cutSec = 0;
+    const speed = Math.min(p.speed, S.max);
     for (const run of step.runs) {
+      for (let k = 1; k < run.length; k++) cutSec += Math.hypot(run[k][0] - run[k - 1][0], run[k][1] - run[k - 1][1]) / speed;
       // travel with the beam off
       out(TT.selectPowerLevel(0), TT.commit());
-      out(TT.setParam64(KEY.MaxTangentialAcc, P[5]), TT.commit());
+      out(TT.setParam64(KEY.MaxTangentialAcc, T.a), TT.commit());
+      if (T.j !== P[7]) out(TT.setParam64(KEY.MaxTangentialJerk, T.j), TT.commit());
       st.vel = null;
-      velocity(U.v(S.travel));
+      velocity(U.v(T.v));
       out(TT.moveXY(U.x(run[0][0]), U.y(run[0][1])), TT.commit());
+      travelSec += moveTime(Math.hypot(run[0][0] - head[0], run[0][1] - head[1]), Math.min(T.v, S.max), T.a, T.j);
+      head = run[run.length - 1];
+      if (T.j !== P[7]) out(TT.setParam64(KEY.MaxTangentialJerk, P[7]), TT.commit());
       out(TT.setParam64(KEY.MaxTangentialAcc, P[6]), TT.commit());
       velocity(U.v(p.speed));
       // the beam on once for the whole run, off at its end (the next travel, or end()). Off and
       // on again round every segment made the Trotec stop at each one: corners and curves (many
       // short segments) crawled
       out(TT.selectPowerLevel(2));
-      for (let k = 1; k < run.length; k++) out(TT.moveXY(U.x(run[k][0]), U.y(run[k][1])), TT.commit());
+      // curves as cubic Béziers in 45° pieces, as Ruby sends them on this Q500: the planner lets a
+      // curve keep several times the speed of the same radius as short straight segments (see
+      // arcs.js). One COMMIT for the run, as Ruby commits once per cut item, but at least every
+      // COMMIT_EVERY commands
+      const moves = S.arcs ? fitArcs(run) : run.slice(1).map((q) => ({ to: q }));
+      let at = run[0], sent = 0;
+      for (const m of moves) {
+        const cmds = m.c ? bezierPieces(at, m).map((b) => TT.cubicBezier(U.fx(b[0]), U.fy(b[1]), U.fx(b[2]), U.fy(b[3]), U.fx(b[4]), U.fy(b[5])))
+          : [TT.moveXY(U.x(m.to[0]), U.y(m.to[1]))];
+        for (const c of cmds) {
+          out(c);
+          if (++sent % COMMIT_EVERY === 0) out(TT.commit());
+        }
+        at = m.to;
+      }
+      if (sent % COMMIT_EVERY) out(TT.commit());
       out(TT.selectPowerLevel(0), TT.commit());
     }
+    return travelSec + cutSec;
   };
 
   const engrave = (step) => {
@@ -178,16 +234,22 @@ function compile(plan, cfg) {
       continue;
     }
     begin();
-    if (step.op === 'cut') cut(step);
+    // the step's time. A cut is timed here: the cutting at its set speed (the planner holds it,
+    // corners and curves included: on the X8 sheet Pathline's own cutting time ran ~15 % long) and
+    // the travel to each cut as the planner really moves (Pathline times that at 2000 mm/s with no
+    // jerk limit). Engraving keeps Pathline's time
+    let sec = step.seconds;
+    if (step.op === 'cut') sec = cut(step);
     else if (step.op === 'engrave') engrave(step);
     out(TT.progressMarker(step.i + 1));
-    seg.steps.push({ i: step.i, marker: step.i + 1, seconds: step.seconds });
-    seg.seconds += step.seconds;
+    seg.steps.push({ i: step.i, marker: step.i + 1, seconds: sec });
+    seg.seconds += sec;
     seg.trace.push(...trace(step));
   }
   end();
   for (const s of segments) if (s.kind === 'stream') s.data = Buffer.concat(s.cmds);
-  return { ctrl: 'trotec', name: plan.name, segments, seconds: plan.seconds, warnings };
+  const seconds = segments.reduce((a, s) => a + (s.seconds || 0), 0);
+  return { ctrl: 'trotec', name: plan.name, segments, seconds, estimated: true, warnings };
 }
 
 // File to save: the data-lane bytes of every stream, plus a readable listing.

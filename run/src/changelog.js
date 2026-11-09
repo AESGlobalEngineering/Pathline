@@ -5,6 +5,30 @@
 
 module.exports = [
   {
+    version: '0.7.11', date: '5 Nov 2026',
+    added: [
+      'Print and cut: a registration mark that isn\'t where the camera expects it no longer stops the job. Pathline Run opens Jog with the camera picture beside the arrows: jog until the mark is in the red circle and press Accept, and the camera finds its centre from there and reads the other marks itself. Stop job ends it.',
+      'Trotec: Setup → Controller → Travel between cuts. Most moves between cuts are a few mm, and how sharply the head starts and stops decides how long they take, not the travel speed. Standard is what Ruby sends; Faster (Ruby\'s own positioning jerk) takes about 4 % off a job of many small parts, Fastest about 10 %.'
+    ],
+    fixed: [
+      'Trotec: time estimates match the machine. Pathline Prepare timed the moves between cuts at 2000 mm/s and 20000 mm/s², with no jerk limit, so a job estimated at 7 min 02 s took 9 min 26 s. Pathline Run now times them as the Trotec\'s path planner moves them (within 1–4 % of every job run since curves went in), shows that estimate, and tells Prepare the real travel speed and acceleration.',
+      'Queue: the progress bar follows the cutting time. It had jumped to about half way, then sat at 100 % for minutes.',
+      'Trotec: cutting is timed at each process\'s set speed (the planner holds it through corners and curves). Prepare\'s own cutting time ran about 15 % long, so the X8 sheet showed 10 min 37 s for 9 min 26 s; Pathline Run now estimates 9 min 21 s. The progress bar moves on with each part the laser reports finished.',
+      'Queue: following a print and cut job. Once the marks are read the bed view shows the job where it was moved to, and follows the head along it. It had followed the job where Prepare placed it, about 150 mm away on the X8 sheet: no position fitted, so the head jumped between raw positions twice a second.',
+      'Trotec: while the laser\'s buffer is full, a position check got the last position again, shown as if new: the head held still, then jumped. Repeated positions now keep their own time, and a refusal that still reports where the head is is used.',
+      'Queue: following a running job is smoother. Trotec data goes in smaller packets (as Ruby sends them): the laser only answers a packet, with where the head is, once it has room for it, which with large packets could be a second or two. The screen also asks for the head\'s position four times a second while a job runs, and times the moves between cuts as the machine makes them.',
+      '"Remove completed job from queue" off keeps completed jobs in the queue, marked Done. Start runs one again. Before, the switch had no effect.',
+      'The registration marks found for a print and cut job no longer stay on the bed view after the job.',
+      'Queue: Anchor to toolhead and Remove completed job from queue sit at the top, under the job\'s name, instead of below its processes.',
+      'Anchor to toolhead takes the head\'s position when you press Start, not when the switch is turned on, so you can switch it on and then jog to the sheet. Frame shows where it will go from where the head is. It lasts for that run: a job run again, from the queue or from History, goes where Pathline placed it unless you switch it on again.',
+      'Print and cut: the camera finds printed marks by itself again, also on clear acrylic in uneven light. It judged "dark" against nearly the whole picture (for a 6 mm mark), and wanted the white round a mark evenly lit; the Trotec\'s lamp lights it twice as bright on one side.',
+      'Print and cut: marks found further apart or closer together than the job has them (by over 1 %) stop the job before anything is cut, saying which. A dot that wasn\'t the mark had stretched a job 6 % and it was cut off the print.',
+      'Head camera: after its USB link dropped out ("couldn\'t start capturing", Vimba error -22) it failed every time until Pathline Run was restarted. It\'s now reset and tried again.',
+      'A job with registration marks no longer says Pathline Run has no camera.',
+      'Trotec: curves cut at speed. Rounded corners, circles and holes arrive from Prepare as many short straight segments, and the Trotec takes straight segments round a curve at about a third of the speed it allows an arc. Pathline Run now finds the stretches that lie on a circle and sends them as curves, the way Ruby does; straight sides and sharp corners are sent as before. The cut is also handed over in one piece instead of a segment at a time.'
+    ]
+  },
+  {
     version: '0.7.10', date: '4 Nov 2026',
     fixed: [
       'A dialog\'s buttons always stay in sight at its bottom edge, however long it is. What\'s new after the update to 0.7.8 ran off the screen, and its Got it couldn\'t be reached.',

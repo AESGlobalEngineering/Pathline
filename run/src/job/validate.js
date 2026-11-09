@@ -59,7 +59,9 @@ function check(pkg, cfg) {
   if (pkg.toolpath.some((s) => s.type === 'inspect')) {
     warnings.push(cfg.regMarks === 'ignore'
       ? 'Registration marks are skipped: the job runs without print-and-cut correction'
-      : 'Uses registration marks. Pathline Run has no camera yet, so it won\'t start unless Setup → Job defaults → Registration marks is set to "Skip"');
+      : cfg.controller === 'trotec' && cfg.vision && cfg.vision.enabled
+        ? 'Uses registration marks: the head camera reads them before the job runs'
+        : 'Uses registration marks. The head camera is off, so it won\'t start unless the camera is turned on (Setup → Camera) or Setup → Job defaults → Registration marks is set to "Skip"');
   }
   const blocked = (pkg.checks || []).find((c) => c && c.block);
   if (blocked) throw bad('Pathline blocked this job: ' + blocked.l);

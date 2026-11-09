@@ -47,7 +47,7 @@ const BASE = {
   manual: [],                    // settings typed in Setup over the controller's own ('bed.0', 'speed' …)
   knifeHome: null,               // RDD6584: where the head homes and parks, controller mm (learnt)
   vision: { enabled: false },    // the Trotec's head camera (vision/vision.js DEFAULTS for the rest)
-  trotec: { unit: 0.010125, offset: [14.833125, 9.527625], laserSource: 5, travelSpeed: 700, maxSpeed: 2000, airOutput: 4, overscan: 10, cutPowerCorrection: 15, engravePowerCorrection: 20 },
+  trotec: { unit: 0.010125, offset: [14.833125, 9.527625], laserSource: 5, travelSpeed: 700, maxSpeed: 2000, travel: 'standard', airOutput: 4, overscan: 10, cutPowerCorrection: 15, engravePowerCorrection: 20 },
   type: 'laser',                 // 'laser' or 'plotter' (Trotec: always laser; Ruida: from the model)
   ruida: { model: 'RDC6442G', magic: 0x88, origin: 'tr' },
   // plotters only
@@ -111,6 +111,16 @@ function machineView(cfg) {
       feedLen: cfg.feedLen, timing: cfg.timing,
       f: { conveyor: !!cfg.f.conveyor, vacuum: !!cfg.f.vacuum, pointer: !!cfg.f.pointer, camera: false, detect: false }
     };
+  }
+  // the Trotec: travel as it really moves (motion.js). Pathline times travel at one acceleration
+  // with no jerk limit, so it gets the acceleration that takes as long over a short move; with the
+  // Q500's 20000 mm/s² and 2000 mm/s it put 20 s on travel that took 160
+  if (cfg.controller === 'trotec') {
+    const motion = require('./ctrl/trotec/motion');
+    const P = require('./ctrl/trotec/compile').PLANNER.Standard;
+    const lim = motion.travelLimits(cfg, P, (cfg.trotec && cfg.trotec.travelSpeed) || 700);
+    base.acc = motion.equivalentAcc(lim);
+    base.travelSpeed = lim.v;
   }
   // the Trotec's head camera: Pathline offers print and cut (registration marks) when it's on
   const v = cfg.vision || {};

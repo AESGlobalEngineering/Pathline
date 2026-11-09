@@ -70,6 +70,84 @@ console.log('Trotec job stream');
   ok(sides.length === 4 && lvl(sides[0]).v[0] === 2 && between === 0 && after && after.v[0] === 0, 'beam on (level 2) once for the 4 sides, off after the last', JSON.stringify({ sides: sides.length, between, after: after && after.v }));
 }
 {
+  // curves go as ARCXY (Ruby's MoveBezier3AsArc), straight segments and corners stay MOVEXY
+  const { fitArcs } = require('../src/ctrl/trotec/arcs');
+  const ring = (cx, cy, r, n, a0 = 0, sweep = 2 * Math.PI) => Array.from({ length: n + 1 }, (_, k) => [cx + r * Math.cos(a0 + (sweep * k) / n), cy + r * Math.sin(a0 + (sweep * k) / n)]);
+  const kinds = (m) => m.map((x) => (x.c ? 'A' : 'L')).join('');
+  const circle = ring(200, 200, 10, 24);
+  const fc = fitArcs(circle);
+  ok(kinds(fc) === 'AA' && fc.every((a) => Math.abs(a.r - 10) < 1e-6 && Math.abs(Math.abs(a.sweep) - Math.PI) < 1e-6), '24-segment Ø20 circle → 2 arcs of 180°', kinds(fc));
+  ok(kinds(fitArcs(ring(50, 50, 1, 24))) === 'AA', 'small hole (24 segments of 0.26 mm, 15° each) → arcs');
+  // 40 × 30 rounded rectangle, 3 mm corners as 6 segments each, starting where the top edge begins
+  const rr = [];
+  const corner = (cx, cy, a0) => ring(cx, cy, 3, 6, a0, Math.PI / 2);
+  rr.push(...corner(137, 103, Math.PI), ...corner(137 + 34, 103, -Math.PI / 2), ...corner(137 + 34, 103 + 24, 0), ...corner(137, 103 + 24, Math.PI / 2));
+  rr.push(rr[0]);
+  ok(kinds(fitArcs(rr)).replace(/^L/, '') === 'ALALALA' || kinds(fitArcs(rr)) === 'ALALALAL', 'rounded rectangle → 4 arcs + 4 lines', kinds(fitArcs(rr)));
+  const zig = Array.from({ length: 40 }, (_, k) => [k, k % 2 ? 0.2 : 0]);
+  ok(/^L+$/.test(kinds(fitArcs(zig))), 'zig-zag stays as straight segments');
+  ok(/^L+$/.test(kinds(fitArcs(ring(300, 300, 20, 8)))) && /^L+$/.test(kinds(fitArcs(ring(300, 300, 20, 6)))), 'octagon and hexagon keep their corners');
+  ok(/^L+$/.test(kinds(fitArcs(ring(300, 300, 50, 18)))), '18-gon (20° corners) stays a polygon');
+  ok(/^L+$/.test(kinds(fitArcs([[0, 0], [10, 0], [20, 0], [30, 0], [40, 0]]))), 'a straight line split in 4 stays straight');
+
+  // compiled: curves go as CUBIC_BEZIER_ABSOLUTE (E0) in 45° pieces, as Ruby sends them on the
+  // Q500 (vision capture 2026-10-28); each must end on the shape and bulge onto its circle
+  const cfg = config.defaults('trotec');
+  const U = trotec.units(trotec.settings(cfg));
+  const pkgOf = (pts, closed) => ({
+    format: 'lrc-job-package', version: 1, job: { name: 'arcs' }, machine: { type: 'laser' },
+    processes: [{ index: 0, name: 'Cut', proc: 'Cut', power: 45, speed: 22, f: 5000, passes: 1, air: 'On', adv: {} }],
+    entities: [], toolpath: [{ type: 'cut', process: 0, closed, seconds: 4, p: pts }]
+  });
+  const run = (pts, closed) => sf.decodeData(trotec.compile(plan.build(pkgOf(pts, closed)), cfg).segments[0].data);
+  // the largest distance from the circle (cx, cy, r in mm) over each Bézier, from where the head is
+  const offCircle = (cmds, cx, cy, r) => {
+    let at = null, worst = 0, n = 0;
+    for (const c of cmds) {
+      if (c.name === 'MOVEXY') at = c.v.slice();
+      else if (c.name === 'CUBIC_BEZIER_ABS') {
+        const v = c.v;
+        for (let t = 0.1; t < 1; t += 0.1) {
+          const u = 1 - t, b = (i) => u * u * u * at[i] + 3 * u * u * t * v[i] + 3 * u * t * t * v[2 + i] + t * t * t * v[4 + i];
+          const mm = U.toMm(b(0), b(1));
+          worst = Math.max(worst, Math.abs(Math.hypot(mm[0] - cx, mm[1] - cy) - r));
+        }
+        at = [v[4], v[5]]; n++;
+      }
+    }
+    return { worst, n, at };
+  };
+  const ca = run(circle.slice(0, 24), true);
+  const cb = offCircle(ca, 200, 200, 10);
+  ok(cb.n === 8 && cb.worst < 0.012 && Math.hypot(...U.toMm(cb.at[0], cb.at[1]).map((v, i) => v - [210, 200][i])) < 0.001, 'Ø20 circle: 8 Béziers of 45°, on the circle, back to its start', cb.n + ' pieces, ' + (cb.worst * 1000).toFixed(1) + ' µm off');
+  ok(!ca.some((c) => c.name === 'ARCXY'), 'no ARCXY sent (its direction is unconfirmed; Ruby sends Béziers on the Q500)');
+  // a quarter arc from (100, 100) about (100, 110) to (110, 110): 2 pieces bulging the right way
+  const q = run(ring(100, 110, 10, 12, -Math.PI / 2, Math.PI / 2), false);
+  const qb = offCircle(q, 100, 110, 10);
+  // (measured from the start MOVEXY, which is in whole position units: up to 14 µm off)
+  ok(qb.n === 2 && qb.worst < 0.015 && Math.hypot(...U.toMm(qb.at[0], qb.at[1]).map((v, i) => v - [110, 110][i])) < 0.001, 'quarter arc: 2 Béziers ending at (110, 110), on the circle', qb.n + ' pieces, ' + (qb.worst * 1000).toFixed(1) + ' µm');
+  // a 500 mm radius (Prepare: 1.4° segments), 90° of it: 45° pieces stay on the circle
+  const big = offCircle(run(ring(600, 600, 500, 64, 0, Math.PI / 2), false), 600, 600, 500);
+  ok(big.n === 2 && big.worst < 0.015, 'R500 quarter as 2 Béziers on the circle', big.n + ' pieces, ' + (big.worst * 1000).toFixed(1) + ' µm');
+  const rc = run(rr.slice(0, -1), true);
+  const names = rc.slice(rc.findIndex((c) => c.name === 'SELECTPOWERLEVEL' && c.v[0] === 2)).filter((c) => c.name === 'MOVEXY' || c.name === 'CUBIC_BEZIER_ABS').map((c) => (c.name === 'MOVEXY' ? 'L' : 'B')).join('');
+  ok(/^L?(B{2}L){3}B{2}L?$/.test(names), 'rounded rectangle compiles to its straight sides + 2 Béziers per corner', names);
+  const lvls = rc.filter((c) => c.name === 'SELECTPOWERLEVEL').map((c) => c.v[0]).join('');
+  ok(/^0+20+$/.test(lvls), 'beam on once through lines and arcs', lvls);
+  // one COMMIT per run, at least every 200 moves (Ruby commits per cut item)
+  const long = run(Array.from({ length: 1001 }, (_, k) => [10 + k * 0.5, 10 + (k % 2) * 0.5]), false);
+  const from = long.findIndex((c) => c.name === 'SELECTPOWERLEVEL' && c.v[0] === 2);
+  const to = long.findIndex((c, i) => i > from && c.name === 'SELECTPOWERLEVEL');
+  const commits = long.slice(from, to).filter((c) => c.name === 'COMMIT').length;
+  ok(commits === 5, '1000-segment cut: a COMMIT every 200 moves, not after each', commits);
+  const short = run(rr.slice(0, -1), true);
+  const s2 = short.findIndex((c) => c.name === 'SELECTPOWERLEVEL' && c.v[0] === 2);
+  const sc = short.slice(s2, short.findIndex((c, i) => i > s2 && c.name === 'SELECTPOWERLEVEL'));
+  ok(sc.filter((c) => c.name === 'COMMIT').length === 1 && sc[sc.length - 1].name === 'COMMIT', 'a short cut: one COMMIT, after its last move', sc.map((c) => c.name).join(' '));
+  const off = sf.decodeData(trotec.compile(plan.build(pkgOf(circle.slice(0, 24), true)), { ...cfg, trotec: { ...(cfg.trotec || {}), arcs: false } }).segments[0].data);
+  ok(!off.some((c) => c.name === 'ARCXY') && off.filter((c) => c.name === 'MOVEXY').length === 25, 'trotec.arcs: false sends segments only');
+}
+{
   // engrave: 20 × 20 mm box at 500 DPI (capture §4.7: 417 lines, 10 mm run-up, 1975 units on)
   const cfg = config.defaults('trotec');
   const box = [100, 100, 120, 120];
@@ -89,6 +167,34 @@ console.log('Trotec job stream');
   ok(lens[0].name === 'MOVEX_PLUS' && lens[1].name === 'MOVEX_MINUS', 'bidirectional lines alternate');
   const ys = cmds.filter((c) => c.name === 'MOVEXY').map((c) => c.v[1]);
   ok(ys[0] > ys[ys.length - 1], 'direction "up" starts at the front (largest Y)');
+}
+{
+  // travel between cuts: the planner's S-curve (motion.js), the profiles, and Run's own estimate
+  const motion = require('../src/ctrl/trotec/motion');
+  const t7 = motion.moveTime(7, 700, 500, 5000);
+  ok(Math.abs(t7 - 0.355) < 0.01, 'a 7 mm hop at Standard (500 mm/s², jerk 5000) takes ≈ 0.35 s', t7.toFixed(3));
+  ok(Math.abs(motion.moveTime(7, 2000, 500, 5000) - t7) < 1e-9, 'the travel speed doesn\'t change a short hop');
+  ok(Math.abs(motion.moveTime(2000, 700, 500, 5000) - (2000 / 700 + 700 / 500 + 500 / 5000)) < 1e-6, 'a long move: cruise at 700 mm/s plus the two ramps (1050 mm of them)');
+  const cfg = config.defaults('trotec');
+  // 50 small squares 5 mm apart, 22 mm/s, Pathline's 4 s each for the cutting
+  const sq = (x, y) => [[x, y], [x + 3, y], [x + 3, y + 3], [x, y + 3]];
+  const pkg = {
+    format: 'lrc-job-package', version: 1, job: { name: 'squares' }, machine: { type: 'laser' },
+    processes: [{ index: 0, name: 'Cut', proc: 'Cut', power: 45, speed: 22, f: 5000, passes: 1, air: 'On', adv: {} }],
+    entities: [], toolpath: Array.from({ length: 50 }, (_, k) => ({ type: 'cut', process: 0, closed: true, seconds: 4, p: sq(100 + (k % 10) * 8, 100 + Math.floor(k / 10) * 8) }))
+  };
+  const std = trotec.compile(plan.build(pkg), cfg);
+  const jerks = (p) => sf.decodeData(p.segments[0].data).filter((c) => c.name === 'SET_NEW_PARAMETER64' && c.v[0] === 262).map((c) => c.v[1]);
+  // (Pathline's 4 s per square is ignored: on the X8 sheet its cutting time ran ~15 % long)
+  const cutS = (50 * 12) / 22;
+  ok(std.estimated && std.seconds > cutS + 50 * 0.3 && std.seconds < cutS + 50 * 0.6, 'estimate: each cut at its set speed plus each hop as the planner moves it', std.seconds.toFixed(1) + ' s');
+  ok(jerks(std).every((j) => j === 5000), 'Standard travel: Ruby\'s planner values only (jerk 5000)', jerks(std).join(','));
+  const fast = trotec.compile(plan.build(pkg), { ...cfg, trotec: { ...cfg.trotec, travel: 'fastest' } });
+  const fj = jerks(fast);
+  ok(fj.includes(20000) && fj[fj.length - 1] === 5000 && fj.filter((j) => j === 20000).length === 50, 'Fastest: jerk 20000 for each travel, back to 5000 before cutting', fj.slice(0, 4).join(','));
+  ok(fast.seconds < std.seconds - 5, 'Fastest travel is estimated quicker', fast.seconds.toFixed(1) + ' vs ' + std.seconds.toFixed(1));
+  const mv = config.machineView({ ...cfg, configured: true });
+  ok(mv.travelSpeed === 700 && mv.acc > 150 && mv.acc < 400, 'Pathline is told the travel as it really is (700 mm/s, ≈ 260 mm/s² over a short move)', mv.travelSpeed + ' mm/s, ' + mv.acc + ' mm/s²');
 }
 
 console.log('Ruida encoding');
@@ -432,6 +538,42 @@ async function serverTests() {
     ok(sb.data.job === three[0] && stOf(three[0]) === 'done' && stOf(three[2]) === 'done' && stOf(three[1]) === 'queued',
       'chosen jobs (1st and 3rd of three) run back to back; the 2nd stays queued', three.map(stOf).join(', '));
 
+    // Anchor to toolhead: the head's position when Start is pressed, not when the switch went on;
+    // for that run only (run again or from History, the job goes where Pathline placed it)
+    {
+      const local = async (m, r, b) => {
+        const res = await fetch('http://127.0.0.1:' + port + '/api/local' + r, { method: m, headers: { 'content-type': 'application/json' }, body: b ? JSON.stringify(b) : undefined });
+        return { status: res.status, data: await res.json().catch(() => null) };
+      };
+      // idle twice in a row, after a moment for the move to start
+      const idle = async () => { let n = 0; await new Promise((r) => setTimeout(r, 400)); for (let i = 0; i < 200; i++) { await new Promise((r) => setTimeout(r, 250)); const s2 = (await call('GET', '/status')).data; n = s2.state === 'idle' ? n + 1 : 0; if (n >= 2) return s2; } return null; };
+      const jobOf = async (id) => (await local('GET', '/state')).data.jobs.find((j) => j.id === id) || {};
+      // three[1] is still queued
+      const id = three[1];
+      await local('PUT', '/config', { removeDone: false }); // (kept in the queue, to look at afterwards)
+      await call('POST', '/home'); await idle();
+      const sw = await local('POST', '/jobs/' + id + '/anchor', {});
+      const before = await jobOf(id);
+      ok(sw.status === 200 && sw.data.atStart && !before.anchor, 'switching Anchor to toolhead on takes no position yet', JSON.stringify(sw.data));
+      await call('POST', '/jog', { axis: 'x', distance: 40 }); await idle();
+      await call('POST', '/jog', { axis: 'y', distance: 25 });
+      const s0 = await idle();
+      const go = await call('POST', '/start', { id });
+      const during = await jobOf(id);
+      ok(go.status === 200 && during.anchor && Math.abs(during.anchor.x - s0.pos.x) < 0.01 && Math.abs(during.anchor.y - s0.pos.y) < 0.01,
+        'Start anchors the job where the head is then', JSON.stringify({ head: s0.pos, anchor: during.anchor, go: go.data }));
+      await idle();
+      const after = await jobOf(id);
+      ok(after.status === 'done' && !after.anchor && !after.anchorAtStart, 'after the run the job is as Pathline placed it again', JSON.stringify(after));
+      await local('POST', '/jobs/' + id + '/anchor', {});
+      const re = await local('POST', '/jobs/' + id + '/requeue', {});
+      ok(re.status === 200 && !re.data.anchor && !re.data.anchorAtStart, 'run again from History: not anchored', JSON.stringify(re.data));
+      await local('POST', '/jobs/' + id + '/anchor', {});
+      await call('POST', '/stop');
+      const kept = await local('POST', '/jobs/' + id + '/requeue', { keepAnchor: true });
+      ok(kept.data.anchorAtStart === true, 'Start on a completed job keeps an anchor switched on for it since');
+    }
+
     const checker = path.join(__dirname, '..', '..', 'hmi-handoff', 'tools', 'check-hmi.js');
     if (fs.existsSync(checker)) {
       const res = await new Promise((resolve) => {
@@ -482,19 +624,28 @@ async function linkTests() {
         const p = t.packet;
         if (!p.data.length) dev.noData++;
         if (p.data.length && p.id !== dev.expect) { dev.refused++; s.write(sf.packet(p.id, null, null, 0xa0)); continue; }
+        const answers = () => {
+          const ans = [];
+          for (const op of p.imm) {
+            if (op === 0x10) ans.push(0x11, dev.busy ? 4 : 3, 0xff, 0, 0);
+            else if (op === 0x2c) { const b = Buffer.alloc(9); b[0] = 0x2d; b.writeInt32BE(dev.pos[0], 1); b.writeInt32BE(dev.pos[1], 5); ans.push(...b); }
+            else if (op === 0xa4) ans.push(0xa5, 0, 0);
+            else { if (op === 0x02) dev.abort = true; ans.push(op + 1); }
+          }
+          return Buffer.from(ans);
+        };
         // refuse the first few real data packets once with "buffer full", like a busy machine
-        if (p.data.length > 1 && dev.full > 0) { dev.full--; s.write(sf.packet(p.id, null, null, 0x90)); continue; }
+        // (dev.fullAnswers: the refusal answers the immediate section, the head moving meanwhile)
+        if (p.data.length > 1 && dev.full > 0) {
+          dev.full--;
+          if (dev.fullAnswers) dev.pos = [dev.pos[0] + 1000, dev.pos[1]];
+          s.write(sf.packet(p.id, dev.fullAnswers ? answers() : null, null, 0x90));
+          continue;
+        }
         if (p.data.length) dev.expect = (dev.expect + 1) & 0xff;
         dev.packets++; dev.ids.push(p.id); dev.data += p.data.length;
         for (const c of sf.decodeData(p.data)) if (c.name === 'MOVEXY') dev.pos = c.v;
-        const ans = [];
-        for (const op of p.imm) {
-          if (op === 0x10) ans.push(0x11, 3, 0xff, 0, 0);
-          else if (op === 0x2c) { const b = Buffer.alloc(9); b[0] = 0x2d; b.writeInt32BE(dev.pos[0], 1); b.writeInt32BE(dev.pos[1], 5); ans.push(...b); }
-          else if (op === 0xa4) ans.push(0xa5, 0, 0);
-          else { if (op === 0x02) dev.abort = true; ans.push(op + 1); }
-        }
-        s.write(sf.packet(p.id, Buffer.from(ans), null, 0x80));
+        s.write(sf.packet(p.id, answers(), null, 0x80));
       }
     });
   });
@@ -523,6 +674,20 @@ async function linkTests() {
     const total = prog.segments.filter((x) => x.kind === 'stream').reduce((a, s) => a + s.data.length, 0);
     ok(dev.data - before === total, 'whole example streamed (' + total + ' bytes), after 3 "buffer full" retries', (dev.data - before) + ' bytes');
     ok(dev.ids.every((id, i) => i === 0 || id === ((dev.ids[i - 1] + 1) & 0xff) || id === 0), 'packet ids count up without gaps, apart from the restart at 0 (' + dev.packets + ' packets)');
+    // a "buffer full" refusal that answers status and position: each one is a fresh head position
+    const seen = [];
+    tl.onPoll = (v) => seen.push(v);
+    Object.assign(dev, { full: 3, fullAnswers: true, busy: true });
+    const t0 = Date.now();
+    await tl.moveTo(20, 20);
+    ok(seen.length >= 3 && seen.every((v) => v.state === 'busy' && v.at >= t0) && new Set(seen.map((v) => v.pos.x)).size === seen.length,
+      'buffer full with answers: the head position from each refusal, stamped when it came', seen.length + ' positions: ' + seen.map((v) => v.pos.x.toFixed(1)).join(', '));
+    // a status check refused for buffer room gets the last answer, with that answer's own time
+    Object.assign(dev, { full: 0, fullAnswers: false, busy: false });
+    const last = tl.lastReply;
+    const old = tl.view({ ...last, at: last.at - 5000 });
+    ok(old.at === last.at - 5000, 'a repeated answer keeps its own time (the screen doesn\'t take it as news)');
+    tl.onPoll = null;
     await tl.abort();
     ok(dev.abort, 'abort reaches the controller');
   } catch (e) { ok(false, 'Trotec link', e.stack); }
@@ -705,6 +870,18 @@ async function visionTests() {
       'real camera, board half in shadow: ' + one.length + ' corners at one exposure, ' + (Ls ? Ls.n : 0) + ' on the grid with the exposure stepped 1×, 3×, 9×', JSON.stringify(Ls && Ls.points).slice(0, 300));
   }
   {
+    // a real printed mark (6 mm, black on a printed white disc, on clear acrylic) from the Q500's
+    // camera at a third of full size, 9 mm off centre, the lamp lighting the disc 135 on one side and
+    // 68 on the other. Pathline Run 0.7.10 never found it: its dark-mask box was 90 % of the picture,
+    // and its white-ring test wanted the ring within 30 % of its brightest
+    const detect = require('../src/vision/detect');
+    const mb = zlib.gunzipSync(fs.readFileSync(path.join(__dirname, '..', 'test', 'fixtures', 'camera-mark-clear-acrylic.bin.gz')));
+    const mk = { w: mb.readUInt16BE(0), h: mb.readUInt16BE(2), data: new Uint8Array(mb.subarray(4)) };
+    const px3 = 0.0136 * 3, d6 = 6;
+    const hit = detect.findDots(mk, { minD: (d6 * 0.5) / px3, maxD: (d6 * 1.6) / px3, whiteRing: true })[0];
+    ok(hit && Math.hypot(hit.x - 652, hit.y - 304) < 3 && Math.abs(hit.d * px3 - 6.5) < 0.5, 'real mark on clear acrylic, unevenly lit: found with its white ring (' + (hit ? (hit.d * px3).toFixed(2) + ' mm across' : 'NOT FOUND') + ')', JSON.stringify(hit));
+  }
+  {
     // the laser's calibration mark as the Trotec cuts it: three thin rings (r 1, 1.5, 2 mm at
     // 13.6 µm a pixel), not a filled disc, on grey scrap in uneven light. As rings they're no dot;
     // with their holes filled they're the 4 mm disc, centred on the rings
@@ -797,6 +974,56 @@ async function visionTests() {
     const fitLine = (log.match(/print and cut: .*/) || [''])[0];
     const rot = Number((fitLine.match(/rotation (-?[\d.]+)°/) || [])[1]);
     ok(st.status === 200 && s.state === 'idle' && s.progress === 1 && Math.abs(rot - 0.3) < 0.1, 'print and cut: 3 marks read, sheet turned ' + rot + '° (0.3), job run', fitLine + ' / ' + JSON.stringify(s));
+
+    // the sheet laid 40 mm away from where the job expects it: mark 1 isn't found, the job waits,
+    // the camera is jogged over the real mark by hand (jogs and the camera picture allowed
+    // meanwhile), Accept, the dot finder takes it from there, and marks 2 and 3 follow by themselves
+    // where the sim's sheet puts a design point (server.js: shifted 0.8, −0.5 mm and turned 0.3°)
+    const sheet2 = (p) => { const a = (0.3 * Math.PI) / 180; return [0.8 + p[0] * Math.cos(a) - p[1] * Math.sin(a), -0.5 + p[0] * Math.sin(a) + p[1] * Math.cos(a)]; };
+    const moved = JSON.parse(JSON.stringify(example));
+    for (const t of moved.toolpath) if (t.type === 'inspect') t.at = [t.at[0] - 40, t.at[1]];
+    const waitFor = async (fn, n = 200) => { let x; for (let i = 0; i < n; i++) { await new Promise((r) => setTimeout(r, 100)); x = (await call('GET', 'v1/status')).data; if (fn(x)) break; } return x; };
+    const q2 = await call('POST', 'v1/jobs', moved);
+    await new Promise((r) => setTimeout(r, 300));
+    await call('POST', 'v1/start', { id: q2.data.id });
+    let w = await waitFor((x) => x.markWait || x.state === 'idle' || x.state === 'alarm');
+    ok(w.markWait && w.markWait.mark === 1 && w.state === 'running' && /jog the camera over it/.test(w.message), 'sheet 40 mm off: mark 1 not found, the job waits for it to be found by hand', JSON.stringify(w));
+    const offNow = (await call('GET', 'local/state')).data.config.vision.offset;
+    const real = sheet2(example.toolpath.find((t) => t.type === 'inspect' && t.mark === 1).at);
+    const jg = await call('POST', 'v1/jog', { x: real[0] + offNow[0] + 2, y: real[1] + offNow[1] - 1.5 }); // near it, not exactly on it
+    const fr = await fetch('http://127.0.0.1:' + port + '/api/local/camera/frame?size=240');
+    ok(jg.status === 200 && fr.status === 200, 'while it waits: jog allowed (' + jg.status + '), camera picture shown (' + fr.status + ')', JSON.stringify(jg.data));
+    await new Promise((r) => setTimeout(r, 400));
+    const acc = await call('POST', 'v1/marks/accept');
+    w = await waitFor((x) => x.state === 'idle' || x.state === 'alarm');
+    const log2 = (await call('GET', 'local/log')).data.join('\n');
+    const byHand = (log2.match(/mark 1: found by hand, ([\d.]+) mm/) || [])[1];
+    ok(acc.status === 200 && w.state === 'idle' && w.progress === 1 && Math.abs(Number(byHand) - 40) < 1.5, 'Accept: the dot finder found mark 1 from there (' + byHand + ' mm from where expected), 2 and 3 by themselves, the job ran', JSON.stringify(acc.data) + ' / ' + JSON.stringify(w));
+    const late = await call('POST', 'v1/marks/accept');
+    ok(late.status === 409, 'Accept with no mark waiting is refused', JSON.stringify(late.data));
+    // Stop while waiting: stopped, not an alarm
+    const q3 = await call('POST', 'v1/jobs', moved);
+    await new Promise((r) => setTimeout(r, 300));
+    await call('POST', 'v1/start', { id: q3.data.id });
+    w = await waitFor((x) => x.markWait || x.state === 'idle' || x.state === 'alarm');
+    await call('POST', 'v1/stop');
+    const after = await waitFor((x) => x.state === 'idle' || x.state === 'alarm');
+    const jogAfter = await call('POST', 'v1/jog', { x: 500, y: 300 });
+    ok(!!w.markWait && after.state === 'idle' && after.message === 'Stopped' && !after.markWait && jogAfter.status === 200, 'Stop while a mark waits: the job stops (no alarm), the machine is free again', JSON.stringify(after));
+    // a sheet that doesn't match the job (mark 3 printed 10 mm nearer than the job has it): the
+    // marks are found, but they're not as far apart as the job's, so it stops before cutting
+    const wrong = JSON.parse(JSON.stringify(example));
+    const m3 = wrong.toolpath.find((t) => t.type === 'inspect' && t.mark === 3);
+    m3.at = [m3.at[0] + 10, m3.at[1]];
+    const q4 = await call('POST', 'v1/jobs', wrong);
+    await new Promise((r) => setTimeout(r, 300));
+    await call('POST', 'v1/start', { id: q4.data.id });
+    const ws = await waitFor((x) => x.markWait || x.state === 'idle' || x.state === 'alarm');
+    if (ws.markWait) await call('POST', 'v1/stop');
+    ok(ws.state === 'alarm' && /found [\d.]+ mm apart, but they are [\d.]+ mm apart in the job.*Nothing was cut/.test(ws.message) && !ws.progress, 'marks not as far apart as the job\'s: stopped before cutting', JSON.stringify(ws));
+    const kept = fs.existsSync(path.join(data, 'marks', 'mark1.bin.gz')) && fs.existsSync(path.join(data, 'marks', 'mark3.json'));
+    ok(kept, 'the pictures looked at for the marks are kept (data/marks)', fs.existsSync(path.join(data, 'marks')) ? fs.readdirSync(path.join(data, 'marks')).join(', ') : 'no marks folder');
+    await call('POST', 'v1/alarm/clear');
   } catch (e) { ok(false, 'head camera', e.stack + '\n' + out.slice(-1500)); }
   srv.kill();
 }

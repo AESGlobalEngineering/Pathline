@@ -74,8 +74,11 @@ function fillHoles(mask, w, h) {
 function findDots(img, opts = {}) {
   const { w, h, data } = img;
   const minD = opts.minD || 8, maxD = opts.maxD || Math.min(w, h) * 0.8;
-  // the box must be well bigger than a dot, so a dot's middle is compared with paper round it
-  const win = opts.window || Math.max(15, Math.min(Math.min(w, h), Math.round(opts.maxD ? maxD * 2.5 : Math.min(w, h) / 3)));
+  // the box must be well bigger than a dot, so a dot's middle is compared with paper round it,
+  // but not much more: about 2.4 × the dot (1.5 × the largest allowed). At 2.5 × the largest (4 × a
+  // 6 mm mark, 90 % of the real camera's picture) the "local" light was nearly the whole picture's,
+  // and a printed mark on clear acrylic was never found
+  const win = opts.window || Math.max(15, Math.min(Math.min(w, h), Math.round(opts.maxD ? maxD * 1.5 : Math.min(w, h) / 3)));
   let dark;
   if (opts.global) { const t = opts.threshold || otsu(data); dark = new Uint8Array(w * h); for (let i = 0; i < w * h; i++) dark[i] = data[i] < t ? 1 : 0; }
   else dark = darkMask(img, win);
@@ -120,8 +123,11 @@ function findDots(img, opts = {}) {
   return keep;
 }
 
-// Is the ring just outside a dot (1.3 … 1.9 × its radius) plain white? Its darkest tenth must be
-// close to its brightest tenth (light may slope across it, a little), and the dot well darker.
+// Is the ring just outside a dot (1.3 … 1.9 × its radius) plain white? The dot must be well darker
+// than the ring, and the ring's darkest tenth nearer the ring's middle than the dot: dark artwork
+// touching the ring brings its darkest tenth down to the dot's level. The light may fall across the
+// ring very unevenly (the Trotec's lamp: a printed white disc round a mark read 135 on one side,
+// 68 on the other); judging the darkest tenth against the brightest, as before, ruled that out.
 function whiteRound(img, dot) {
   const { w, h, data } = img;
   const R = dot.d / 2, r1 = R * 1.3, r2 = R * 1.9;
@@ -134,8 +140,8 @@ function whiteRound(img, dot) {
     if (r >= r1 && r <= r2) ring.push(v); else if (r <= R * 0.6) inner.push(v);
   }
   const q = (a, f) => a.sort((m, n) => m - n)[Math.min(a.length - 1, Math.floor(a.length * f))];
-  const lo = q(ring, 0.1), hi = q(ring, 0.9), mid = q(ring, 0.5), dark = q(inner, 0.5);
-  return lo >= hi * 0.7 && dark <= mid * 0.55;
+  const lo = q(ring, 0.1), mid = q(ring, 0.5), dark = q(inner, 0.5);
+  return dark <= mid * 0.55 && lo - dark >= 0.4 * (mid - dark);
 }
 
 // A dot's centre without the light's slope: fit the paper round it as a tilted plane

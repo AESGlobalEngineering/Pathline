@@ -135,6 +135,13 @@ const TT = {
   frequency: (hz) => cmd(0x80, u16(Math.max(0, Math.min(65535, Math.round(hz))))),
   powerCorrectionOn: () => cmd(0x94),
   moveXY: (x, y) => cmd(0x9e, i32(x), i32(y)),
+  // arc from where the head is, about the centre (cx, cy), through `centi` hundredths of a degree.
+  // Ruby (Device.dll CalculateArcAngleAndSend) sends −sweep, its sweep turning from +X towards +Y
+  // in position units, so a positive angle here turns from +Y towards +X
+  arcXY: (cx, cy, centi) => cmd(0xa2, i32(cx), i32(cy), i32(centi)),
+  // cubic Bézier from where the head is: control points 1 and 2, then the end, in position units
+  // as doubles. What Ruby sends for curves on the Q500 (vision capture 2026-10-28, 45° pieces)
+  cubicBezier: (c1x, c1y, c2x, c2y, ex, ey) => cmd(0xe0, f64(c1x), f64(c1y), f64(c2x), f64(c2y), f64(ex), f64(ey)),
   moveZ: (z) => cmd(0xa6, i32(z)),
   moveXPlus: (n) => cmd(0x8c, i32(n)),
   moveXMinus: (n) => cmd(0x8a, i32(n)),
@@ -161,7 +168,8 @@ const TT_NAMES = {
   0x44: ['DEFINEPOWERLEVELS', 'levels'], 0x46: ['SELECTPOWERLEVEL', 1], 0x80: ['ACTIVATEFREQUENCEMODE', 2],
   0x85: ['SAVE_TO_CONFIG', 0], 0x86: ['COMMIT', 0], 0x8a: ['MOVEX_MINUS', 4], 0x8c: ['MOVEX_PLUS', 4],
   0x8e: ['MOVEY_MINUS', 4], 0x90: ['MOVEY_PLUS', 4], 0x94: ['POWERCORRECTION_ON', 0], 0x96: ['POWERCORRECTION_OFF', 0],
-  0x9e: ['MOVEXY', 8], 0x9f: ['EMPTY_MOVEXY', 8], 0xa0: ['RMOVEXY', 8], 0xa6: ['MOVEZ', 4], 0xa8: ['RMOVEZ', 4],
+  0x9e: ['MOVEXY', 8], 0x9f: ['EMPTY_MOVEXY', 8], 0xa0: ['RMOVEXY', 8], 0xa2: ['ARCXY', 12], 0xa4: ['RARCXY', 12],
+  0xa6: ['MOVEZ', 4], 0xa8: ['RMOVEZ', 4], 0xd5: ['BEZIER_ABS', 48], 0xe0: ['CUBIC_BEZIER_ABS', 48],
   0xab: ['SWITCHPOINTTABLE_BW', 'u32len'], 0xaa: ['SWITCHPOINTTABLE_GRAY', 'u32len'], 0xac: ['FAVORITDISTANCES', 'fav'],
   0xae: ['ACTIVATEPPIMODE', 2], 0xb8: ['WAIT', 2], 0xd2: ['SET_PROGRESS_MARKER', 2], 0xd3: ['SOFTWARE_FEATURES', 4],
   0xd8: ['SET_NEW_PARAMETER64', 10]
@@ -181,6 +189,8 @@ function decodeData(buf) {
     const a = buf.subarray(o + 1, o + 1 + n);
     const c = { op, name: def[0], args: a };
     if (op === 0x9e || op === 0x9f || op === 0xa0) c.v = [a.readInt32BE(0), a.readInt32BE(4)];
+    else if (op === 0xa2 || op === 0xa4) c.v = [a.readInt32BE(0), a.readInt32BE(4), a.readInt32BE(8)];
+    else if (op === 0xe0) c.v = [0, 1, 2, 3, 4, 5].map((k) => a.readDoubleBE(k * 8));
     else if (op === 0x8a || op === 0x8c || op === 0xa6) c.v = [a.readInt32BE(0)];
     else if (op === 0x1a) c.v = [a[0], a.readUInt32BE(1)];
     else if (op === 0x1c) c.v = [a[0], a.readUInt16BE(1)];

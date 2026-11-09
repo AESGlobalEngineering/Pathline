@@ -69,9 +69,16 @@ async function refresh() {
     if (S && ui.draft && JSON.stringify(ui.draft) === JSON.stringify(S.config) && JSON.stringify(next.config) !== JSON.stringify(S.config)) ui.draft = null;
     S = next;
     S.offline = false;
+    // a job anchored (at Start) or put back (after its run): show it where it now sits
+    for (const j of S.jobs) {
+      const p = ui.pkgs[j.id];
+      if (p && p !== 'loading' && JSON.stringify(j.anchor ? [j.anchor.x, j.anchor.y] : null) !== JSON.stringify(p.anchor ? [p.anchor.x, p.anchor.y] : null)) delete ui.pkgs[j.id];
+    }
     followUpdate(S.update);
     // trace the head while a job runs (a new job starts a new trace)
     const st = S.status;
+    // print and cut: once the marks are read the job is moved onto them; show and follow it there
+    if (st.job) { const p = ui.pkgs[st.job]; if (p && p !== 'loading' && (p.placed || null) !== (st.placed || null)) { delete ui.pkgs[st.job]; follow.job = null; } }
     if (st.job !== ui.trail.job) ui.trail = { job: st.job, pts: [] }; // a new job, or none: start again
     if (st.job && Number.isFinite(st.pos.x)) {
       const last = ui.trail.pts[ui.trail.pts.length - 1];
@@ -81,6 +88,12 @@ async function refresh() {
     // and along the job's own paths (its package is needed for that, shown or not)
     if (st.job && !ui.pkgs[st.job]) { const id = st.job; ui.pkgs[id] = 'loading'; call('GET', LOCAL('/jobs/' + id + '/package')).then((p) => { ui.pkgs[id] = p; }).catch(() => { delete ui.pkgs[id]; }); }
     followHead(st, ui.pkgs[st.job]);
+    // print and cut: a mark wasn't found. Open Jog with the camera picture on, once for each mark
+    // (the user may go elsewhere and come back)
+    const mw = st.markWait;
+    const key = mw ? st.job + ':' + mw.mark : null;
+    if (key && key !== ui.markShown) { ui.view = 'jog'; ui.live = true; ui.camErr = null; ui.navOpen = false; }
+    ui.markShown = key;
   } catch (e) { if (S) S.offline = true; }
   const queue = visibleQueue();
   if (!queue.some((j) => j.id === ui.sel)) {
@@ -93,7 +106,9 @@ async function refresh() {
   }
   render();
 }
-const visibleQueue = () => (S ? S.jobs.filter((j) => j.status === 'queued' || j.status === 'running') : []);
+// the queue: queued and running jobs, and with "Remove completed job from queue" off, completed
+// ones too (Start runs one again). The server already leaves out the ones it removed.
+const visibleQueue = () => (S ? S.jobs.filter((j) => j.status === 'queued' || j.status === 'running' || (j.status === 'done' && !S.config.removeDone)) : []);
 const cfg = () => S.config;
 const running = () => S && (S.status.state === 'running' || S.status.state === 'paused');
 
@@ -110,12 +125,24 @@ const running = () => S && (S.status.state === 'running' || S.status.state === '
 // the head is drawn (it eases towards the prediction and never goes back, bar a big correction)
 const follow = { job: null, route: null, k: 0, t: 0, at: 0, miss: 0, doneK: -1, rate: 1, found: false, shown: { t: null, at: 0 } };
 
+// rest-to-rest time over d mm at speed v, acceleration a, jerk j (as src/ctrl/trotec/motion.js)
+function moveTime(d, v, a, j) {
+  if (!(d > 0)) return 0;
+  const ramp = (u) => { const t = u <= (a * a) / j ? 2 * Math.sqrt(u / j) : u / a + a / j; return { t, s: (u * t) / 2 }; };
+  const top = ramp(v);
+  if (2 * top.s <= d) return 2 * top.t + (d - 2 * top.s) / v;
+  let lo = 0, hi = v;
+  for (let k = 0; k < 30; k++) { const m = (lo + hi) / 2; if (2 * ramp(m).s > d) hi = m; else lo = m; }
+  return 2 * ramp(lo).t;
+}
+
 function routeOf(pkg) {
-  const travel = Number((cfg().trotec || {}).travelSpeed) || 500;
+  // travel as the machine moves it (the server's motion limits; a plain speed if there are none)
+  const M = S.motion || { v: Number((cfg().trotec || {}).travelSpeed) || 500, a: 5000, j: 1e6 };
   const segs = [];
   let t = 0, cur = null;
   const add = (a, b, dt, kind, step) => { segs.push({ a, b, t0: t, dt: Math.max(dt, 1e-3), kind, step }); t += Math.max(dt, 1e-3); };
-  const go = (p, step) => { if (cur && Math.hypot(p[0] - cur[0], p[1] - cur[1]) > 0.01) add(cur, p, Math.hypot(p[0] - cur[0], p[1] - cur[1]) / travel, 'travel', step); cur = p; };
+  const go = (p, step) => { if (cur && Math.hypot(p[0] - cur[0], p[1] - cur[1]) > 0.01) add(cur, p, moveTime(Math.hypot(p[0] - cur[0], p[1] - cur[1]), M.v, M.a, M.j), 'travel', step); cur = p; };
   (pkg.toolpath || []).forEach((s, i) => {
     let pts = null, kind = 'cut';
     if (Array.isArray(s.p) && s.p.length > 1) pts = s.closed ? s.p.concat([s.p[0]]) : s.p;
@@ -135,7 +162,9 @@ function routeOf(pkg) {
     const proc = (pkg.processes || []).find((p) => p.index === s.process) || {};
     let len = 0;
     for (let k = 1; k < pts.length; k++) len += Math.hypot(pts[k][0] - pts[k - 1][0], pts[k][1] - pts[k - 1][1]);
-    const secs = s.seconds || len / (Number(proc.speed) || 20);
+    // a cut at its set speed (as the machine runs it; Pathline's own time ran ~15 % long), engraving
+    // at Pathline's time
+    const secs = kind === 'cut' && Number(proc.speed) > 0 ? len / Number(proc.speed) : s.seconds || len / (Number(proc.speed) || 20);
     for (let k = 1; k < pts.length; k++) {
       // engraving: the beam is on along a row, the step between rows is part of the scan
       const dl = Math.hypot(pts[k][0] - pts[k - 1][0], pts[k][1] - pts[k - 1][1]);
@@ -561,6 +590,7 @@ function queueView() {
       '<span style="display:flex;flex-direction:column;gap:1px;line-height:1.3"><span style="font-weight:600">' + (i + 1) + '. ' + esc(j.name) + '</span>' +
       '<span class="lbl">' + esc(j.material || '—') + '</span><span class="lbl mono">' + stamp(j.receivedAt) + ' · ' + short(j.seconds) + '</span></span></button>' + tick +
       (j.status === 'running' ? '<span class="pill accent" style="position:absolute;top:16px;right:16px;box-shadow:var(--shadow-1)">Running</span>'
+        : j.status === 'done' ? '<span class="pill ok" style="position:absolute;top:16px;right:16px;box-shadow:var(--shadow-1)">Done' + (j.runs > 1 ? ' ×' + j.runs : '') + '</span>'
         : '<div class="ord"><button class="ib" data-a="up" data-v="' + j.id + '" aria-label="Move up"' + (i === 0 ? ' disabled' : '') + '>' + ic(ICON.chevUp, 18) + '</button><button class="ib" data-a="down" data-v="' + j.id + '" aria-label="Move down"' + (i === q.length - 1 ? ' disabled' : '') + '>' + ic(ICON.chevDown, 18) + '</button></div>') +
       '</div>';
   }).join('');
@@ -585,17 +615,24 @@ function queueView() {
     '<div class="qinfo" data-keep="qinfo">' +
     '<div style="display:flex;flex-direction:column;gap:4px"><h1 style="margin:0;font-size:24px;font-weight:600;line-height:1.2">' + esc(shown ? shown.name : 'No job selected') + '</h1>' +
     '<span style="color:var(--text-2)">' + esc(shown ? (shown.material || 'No material') + (cfg().configured ? ' · ' + cfg().name + ' · ' + ctrlName : '') : 'Choose a job from the queue') + '</span></div>' +
-    (shownPkg && shownPkg !== 'loading' ? '<div style="display:flex;flex-direction:column;gap:6px">' + procRows(shownPkg) + '</div>' : '') + warn +
-    '<div style="display:flex;align-items:center;gap:12px;min-height:44px"><button role="switch" class="sw" aria-checked="' + !!cfg().removeDone + '" data-a="removeDone" aria-label="Remove completed job from queue"></button><span style="font-size:16px">Remove completed job from queue</span></div>' +
-    // pin the job's top-left corner to where the head is now
-    // (switching it on uses the head position at that moment; off puts the job back where Pathline placed it)
+    // the two switches first, always in the same place (the material's processes below can be long)
+    '<div style="display:flex;flex-direction:column;gap:2px;padding-bottom:8px;border-bottom:1px solid var(--line-soft)">' +
+    // pin the job's top-left corner to the head: where the head is when Start is pressed, for that
+    // run only (off puts the job back where Pathline placed it)
     (() => {
-      const on = !!(job && job.anchor);
-      const off = !job || isRun || (!on && st.link !== 'online');
+      const on = !!(job && (job.anchorAtStart || job.anchor));
+      const off = !job || isRun;
+      const here = Number.isFinite(st.pos.x) ? ' (now X ' + shownPos(st).x.toFixed(1) + ', Y ' + shownPos(st).y.toFixed(1) + ' mm)' : '';
+      const note = !on ? 'Moves the job so its top-left corner starts at the head'
+        : job.anchor ? 'The job\'s top-left corner starts at X ' + job.anchor.x.toFixed(1) + ', Y ' + job.anchor.y.toFixed(1) + ' mm'
+          : 'Its top-left corner goes where the head is when you press Start' + here;
       return '<div style="display:flex;align-items:center;gap:12px;min-height:44px"><button role="switch" class="sw" aria-checked="' + on + '" data-a="anchor"' + (on ? ' data-v="clear"' : '') + ' aria-label="Anchor to toolhead"' + (off ? ' disabled' : '') + '></button>' +
         '<span style="display:flex;flex-direction:column;gap:2px;line-height:1.3"><span style="font-size:16px">Anchor to toolhead</span>' +
-        '<span class="lbl">' + (on ? 'The job\'s top-left corner starts at X ' + job.anchor.x.toFixed(1) + ', Y ' + job.anchor.y.toFixed(1) + ' mm' : 'Moves the job so its top-left corner starts at the head') + '</span></span></div>';
+        '<span class="lbl">' + note + '</span></span></div>';
     })() +
+    '<div style="display:flex;align-items:center;gap:12px;min-height:44px"><button role="switch" class="sw" aria-checked="' + !!cfg().removeDone + '" data-a="removeDone" aria-label="Remove completed job from queue"></button><span style="font-size:16px">Remove completed job from queue</span></div>' +
+    '</div>' +
+    (shownPkg && shownPkg !== 'loading' ? '<div style="display:flex;flex-direction:column;gap:6px">' + procRows(shownPkg) + '</div>' : '') + warn +
     '</div>' +
     '<div class="qbed"><div class="viewport" style="position:relative;flex:1;min-height:0;border:1px solid var(--line);border-radius:10px;overflow:hidden">' +
     '<div style="position:absolute;inset:50px 8px 8px">' + bedSvg(shownPkg, { big: true, head: true }) + '</div>' +
@@ -632,18 +669,31 @@ function jogView() {
   // the head outside the bed set in Setup: usually the bed is set smaller than the machine
   const [bw, bh] = c.bed;
   const outside = st.link === 'online' && Number.isFinite(st.pos.x) && (st.pos.x < -0.5 || st.pos.y < -0.5 || st.pos.x > bw + 0.5 || st.pos.y > bh + 0.5);
-  return '<div class="view fit jview">' +
-    '<section aria-label="Jog" data-keep="jogpos" class="card" style="flex:1 1 auto;min-width:0;min-height:0;overflow-y:auto;padding:20px;display:flex;flex-direction:column;gap:16px"><h2 class="h-sec">Position</h2>' +
-    (outside ? '<div class="warnbox">The head is outside the ' + bw + ' × ' + bh + ' mm bed set in Setup. If the machine is bigger than that, set its work area in Setup → Work area (Read from controller fills it in).</div>' : '') +
-    '<div style="display:flex;flex-wrap:wrap;gap:36px">' + [['X', shownPos(st).x], ['Y', shownPos(st).y]].map(([l, v]) => '<div style="display:flex;flex-direction:column;gap:2px"><span class="lbl">' + l + ' <span class="mono">mm</span></span><span class="mono" style="font-size:36px;font-weight:500">' + (Number.isFinite(v) ? v.toFixed(1) : '—') + '</span></div>').join('') + '</div>' +
-    '<div style="display:flex;flex-wrap:wrap;align-items:center;gap:28px"><div style="display:grid;grid-template-columns:repeat(3,76px);grid-template-rows:repeat(3,76px);gap:8px">' +
+  const mw = st.markWait;
+  // print and cut waiting for a mark: what to do, Accept and Stop
+  const markBox = mw ? '<div role="alert" class="warnbox" style="display:flex;flex-wrap:wrap;align-items:center;gap:12px 16px">' +
+    '<div style="flex:1 1 260px;min-width:0;display:flex;flex-direction:column;gap:4px"><strong>Registration mark ' + mw.mark + ' of ' + mw.of + (mw.again ? ' still not found' : ' not found') + '</strong>' +
+    '<span>' + (mw.again ? 'There was no mark under the crosshair. ' : 'It wasn\'t near X ' + mw.near[0].toFixed(1) + ', Y ' + mw.near[1].toFixed(1) + ' mm. ') + 'Jog the camera until the mark is in the red circle, then press Accept: the camera finds its centre from there.</span></div>' +
+    '<button class="tb" data-a="markAccept" style="height:56px;padding:0 28px;background:var(--go);border-color:var(--go);color:#fff;font-weight:600">Accept</button>' +
+    '<button class="tb" data-a="stop" style="height:56px;padding:0 20px;color:var(--err)">Stop job</button></div>' : '';
+  const coords = '<div style="display:flex;flex-wrap:wrap;gap:36px">' + [['X', shownPos(st).x], ['Y', shownPos(st).y]].map(([l, v]) => '<div style="display:flex;flex-direction:column;gap:2px"><span class="lbl">' + l + ' <span class="mono">mm</span></span><span class="mono" style="font-size:' + (mw ? 24 : 36) + 'px;font-weight:500">' + (Number.isFinite(v) ? v.toFixed(1) : '—') + '</span></div>').join('') + '</div>';
+  // the arrows (home in the middle, not while a job waits for a mark) and the step / speed
+  const pad = '<div style="display:grid;grid-template-columns:repeat(3,76px);grid-template-rows:repeat(3,76px);gap:8px">' +
     '<span></span>' + arrow('y-', ICON.up, 'Jog Y minus') + '<span></span>' +
-    arrow('x-', ICON.left, 'Jog X minus') + btn('home', ICON.home, 'Home') + arrow('x+', ICON.right, 'Jog X plus') +
-    '<span></span>' + arrow('y+', ICON.down, 'Jog Y plus') + '<span></span></div>' +
-    '<div style="display:flex;flex-direction:column;gap:6px"><span class="lbl">Tap: step in mm · Hold: speed in mm/s</span><div role="radiogroup" aria-label="Step size, or speed while held" class="seg">' +
+    arrow('x-', ICON.left, 'Jog X minus') + (mw ? '<span></span>' : btn('home', ICON.home, 'Home')) + arrow('x+', ICON.right, 'Jog X plus') +
+    '<span></span>' + arrow('y+', ICON.down, 'Jog Y plus') + '<span></span></div>';
+  const steps = '<div style="display:flex;flex-direction:column;gap:6px"><span class="lbl">Tap: step in mm · Hold: speed in mm/s</span><div role="radiogroup" aria-label="Step size, or speed while held" class="seg">' +
     ['0.1', '1', '10', '100'].map((v) => '<button role="radio" class="mono" style="min-width:56px" aria-checked="' + (ui.step === v) + '" data-a="step" data-v="' + v + '">' + v + '</button>').join('') + '</div>' +
-    '<span class="lbl" style="min-height:18px">' + (ui.hold && ui.hold.held ? 'Moving ' + ui.hold.axis.toUpperCase() + (ui.hold.dir < 0 ? '−' : '+') + ' at ' + ui.step + ' mm/s' : 'Hold an arrow to keep moving') + '</span></div></div>' +
-    camCard(c, st) + '</section>' +
+    '<span class="lbl" style="min-height:18px">' + (ui.hold && ui.hold.held ? 'Moving ' + ui.hold.axis.toUpperCase() + (ui.hold.dir < 0 ? '−' : '+') + ' at ' + ui.step + ' mm/s' : 'Hold an arrow to keep moving') + '</span></div>';
+  // a mark to find by hand: the camera picture beside the arrows, both in sight at once
+  const body = mw
+    ? '<div style="display:flex;flex-wrap:wrap;gap:20px;align-items:flex-start">' + camPicture(c) +
+      '<div style="display:flex;flex-direction:column;gap:14px">' + coords + pad + steps + '</div></div>'
+    : '<h2 class="h-sec">Position</h2>' +
+      (outside ? '<div class="warnbox">The head is outside the ' + bw + ' × ' + bh + ' mm bed set in Setup. If the machine is bigger than that, set its work area in Setup → Work area (Read from controller fills it in).</div>' : '') +
+      coords + '<div style="display:flex;flex-wrap:wrap;align-items:center;gap:28px">' + pad + steps + '</div>' + camCard(c, st);
+  return '<div class="view fit jview">' +
+    '<section aria-label="Jog" data-keep="jogpos" class="card" style="flex:1 1 auto;min-width:0;min-height:0;overflow-y:auto;padding:20px;display:flex;flex-direction:column;gap:16px">' + markBox + body + '</section>' +
     '<section aria-label="Machine" data-keep="jogmach" class="card" style="flex:0 1 360px;min-width:260px;min-height:0;overflow-y:auto;padding:20px;display:flex;flex-direction:column;gap:12px"><h2 class="h-sec">Machine</h2>' +
     '<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px">' +
     '<button class="tb" style="height:52px" data-a="home">Home</button><button class="tb" style="height:52px" data-a="frame">Frame job</button>' +
@@ -660,13 +710,19 @@ function jogView() {
 }
 
 // Jog → Camera (Trotec with the head camera on): the live picture, and camera ↔ laser moves
+// the live picture itself, with its centre crosshair (drawCam)
+function camPicture(c) {
+  if (c.controller !== 'trotec' || !c.vision || !c.vision.enabled) return '<div class="errbox">The head camera is off (Setup → Camera)</div>';
+  const busy = S.camera.busy;
+  return '<div style="position:relative;width:min(320px,100%);aspect-ratio:1;border-radius:10px;overflow:hidden;background:var(--sunken);box-shadow:inset 0 0 0 1px var(--line)">' +
+    (ui.live && ui.cam ? '<canvas id="camview" style="display:block;width:100%;height:100%"></canvas>'
+      : '<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:16px;text-align:center" class="lbl">' + esc(busy ? busy : ui.camErr ? ui.camErr : ui.live ? 'Opening the camera…' : 'Camera picture off') + '</div>') + '</div>';
+}
+
 function camCard(c, st) {
   if (c.controller !== 'trotec' || !c.vision || !c.vision.enabled) return '';
   const busy = S.camera.busy;
-  return '<div class="hr"></div><div style="display:flex;flex-wrap:wrap;gap:16px;align-items:flex-start">' +
-    '<div style="position:relative;width:min(320px,100%);aspect-ratio:1;border-radius:10px;overflow:hidden;background:var(--sunken);box-shadow:inset 0 0 0 1px var(--line)">' +
-    (ui.live && ui.cam ? '<canvas id="camview" style="display:block;width:100%;height:100%"></canvas>'
-      : '<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:16px;text-align:center" class="lbl">' + esc(busy ? busy : ui.camErr ? ui.camErr : ui.live ? 'Opening the camera…' : 'Camera picture off') + '</div>') + '</div>' +
+  return '<div class="hr"></div><div style="display:flex;flex-wrap:wrap;gap:16px;align-items:flex-start">' + camPicture(c) +
     '<div style="display:flex;flex-direction:column;gap:8px;min-width:200px">' +
     '<h2 class="h-sec">Camera</h2>' +
     '<div style="display:flex;align-items:center;gap:10px"><button role="switch" class="sw" aria-checked="' + !!ui.live + '" data-a="camLive" aria-label="Camera picture"></button><span>Live picture</span></div>' +
@@ -816,6 +872,10 @@ function setupView() {
       num('Power correction, cut', 'trotec.cutPowerCorrection', '%', 'Unless the process sets one') + num('Power correction, engrave', 'trotec.engravePowerCorrection', '%') +
       num('Laser source code', 'trotec.laserSource', '', '5 = CO2 (Q500 DC)') + num('Air assist output', 'trotec.airOutput'),
     'From the factory calibration in the controller (TROTEC_PROTOCOL.md §0). Change only if your machine differs.'));
+    tabs.Controller.push(card('Travel between cuts', seg('Travel', 'trotec.travel', [['standard', 'Standard'], ['faster', 'Faster'], ['fastest', 'Fastest']]),
+      'How sharply the head starts and stops between cuts. Most moves between cuts are a few mm, so this matters far more than the travel speed. ' +
+      'Standard is what Ruby sends (500 mm/s², jerk 5000). Faster doubles the jerk, as Ruby itself uses for positioning: about 4 % off a job of many small parts (the X8 screens). ' +
+      'Fastest (1000 mm/s², jerk 20000, 1000 mm/s) is beyond what Ruby sends: about 10 % off. After changing it, check a print and cut job or the bed check still lines up.'));
   } else {
     tabs.Controller.push(card('Ruida', seg('Machine origin', 'ruida.origin', [['tl', 'Top left'], ['tr', 'Top right'], ['bl', 'Bottom left'], ['br', 'Bottom right']]) +
       num('Swizzle magic', 'ruida.magic', '', 'Set by the model (136 = 0x88 for most). Pathline Run also detects it from the controller\'s first reply.') +
@@ -1029,7 +1089,7 @@ function drawCam() {
   ctx.beginPath(); ctx.arc(w / 2, h / 2, w / 12, 0, Math.PI * 2); ctx.stroke();
 }
 async function camLoop() {
-  const on = S && S.config.controller === 'trotec' && S.config.vision && S.config.vision.enabled && ui.view === 'jog' && ui.live && !S.camera.busy && S.status.state !== 'running';
+  const on = S && S.config.controller === 'trotec' && S.config.vision && S.config.vision.enabled && ui.view === 'jog' && ui.live && !S.camera.busy && (S.status.state !== 'running' || !!S.status.markWait);
   if (on) {
     try {
       const r = await fetch(LOCAL('/camera/frame') + '?size=480', { cache: 'no-store' });
@@ -1063,6 +1123,10 @@ const H = {
       ui.multi = false; ui.picked = [];
       return;
     }
+    // a completed job kept in the queue: queue it again first
+    const sel = S.jobs.find((j) => j.id === ui.sel);
+    // (keeping Anchor to toolhead if it was switched on for this run)
+    if (sel && sel.status === 'done') { await call('POST', LOCAL('/jobs/' + encodeURIComponent(sel.id) + '/requeue'), { keepAnchor: true }); await refresh(); }
     // Start runs the next queued job: put the selected one first
     const ids = visibleQueue().filter((j) => j.status === 'queued').map((j) => j.id);
     if (ui.sel && ids[0] !== ui.sel) await call('POST', API('/jobs/order'), { ids: [ui.sel].concat(ids.filter((i) => i !== ui.sel)) });
@@ -1072,8 +1136,17 @@ const H = {
   stop: act(async () => call('POST', API('/stop'), {})),
   frame: act(async () => {
     const id = running() ? S.status.job : ui.sel;
-    const b = jobBox(ui.pkgs[id]);
+    let b = jobBox(ui.pkgs[id]);
     if (!b) throw new Error('Select a job to frame');
+    // anchored to the head, not started yet: where it will go if Start is pressed now (its
+    // top-left corner, registration marks included, at the head)
+    const j = S.jobs.find((x) => x.id === id);
+    if (j && j.anchorAtStart && !j.anchor && Number.isFinite(S.status.pos.x)) {
+      let x0 = b[0], y0 = b[1];
+      for (const s of ui.pkgs[id].toolpath || []) if (s.at) { x0 = Math.min(x0, s.at[0]); y0 = Math.min(y0, s.at[1]); }
+      const dx = S.status.pos.x - x0, dy = S.status.pos.y - y0;
+      b = [b[0] + dx, b[1] + dy, b[2] + dx, b[3] + dy];
+    }
     await call('POST', API('/frame'), { box: b });
   }),
   removeDone: act(async () => call('PUT', LOCAL('/config'), { removeDone: !cfg().removeDone })),
@@ -1081,6 +1154,8 @@ const H = {
   // head camera
   camLive: () => { ui.live = !ui.live; ui.camErr = null; if (!ui.live) ui.cam = null; render(); },
   camGoto: act(async (v) => call('POST', LOCAL('/camera/goto'), { to: v })),
+  // print and cut: the waiting mark is under the crosshair; back to the queue to watch the job
+  markAccept: act(async () => { await call('POST', API('/marks/accept'), {}); ui.view = 'queue'; }),
   camCalibrate: act(async () => {
     const r = await call('POST', LOCAL('/camera/calibrate'), {});
     toast('Camera calibrated on ' + r.corners + ' corners: pixel size ' + (r.pixel * 1000).toFixed(2) + ' µm, picture turned ' + r.rotation.toFixed(2) + '°' + (r.mirrored ? ' (mirrored)' : '') + ': saved', { ms: 8000 });
@@ -1107,7 +1182,7 @@ const H = {
     if (!ui.sel) return;
     const r = await call('POST', LOCAL('/jobs/' + ui.sel + '/anchor'), v === 'clear' ? { clear: true } : {});
     delete ui.pkgs[ui.sel]; // reload the preview where it now sits
-    toast(r.anchor ? 'Anchored: the job starts at X ' + r.anchor.x.toFixed(1) + ', Y ' + r.anchor.y.toFixed(1) + ' mm' : 'Anchor cleared: the job runs where Pathline placed it');
+    toast(r.atStart ? 'Anchored: the job starts where the head is when you press Start' : 'Anchor cleared: the job runs where Pathline placed it');
   }),
   jog: act(async (v) => call('POST', API('/jog'), { axis: v[0], distance: (v[1] === '-' ? -1 : 1) * Number(ui.step) })),
   step: (v) => { ui.step = v; render(); },
@@ -1392,3 +1467,14 @@ refresh().then(() => {
   }
 });
 setInterval(refresh, 700);
+// while a job runs and the queue is shown: the head's position alone, four times a second, in
+// between (the whole state every 0.7 s left the head up to 1.5 s behind; the drawing moves on its own)
+let statusBusy = false;
+setInterval(async () => {
+  if (statusBusy || !S || S.offline || !running() || ui.view !== 'queue') return;
+  statusBusy = true;
+  try {
+    const st = await call('GET', API('/status'));
+    if (S && st.job && st.job === S.status.job) { S.status = { ...S.status, ...st }; followHead(S.status, ui.pkgs[st.job]); }
+  } catch (e) { /* the full refresh reports problems */ } finally { statusBusy = false; }
+}, 250);

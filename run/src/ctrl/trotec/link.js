@@ -11,7 +11,11 @@ const { settings, units } = require('./compile');
 
 const POLL = Buffer.from([IM.GETSTATUS, IM.GETXYPOSITION, IM.GET_PROGRESS_MARKER]);
 const NOP = Buffer.from([0x00]); // TTCMD_NOP: the data section of a packet that only asks
-const MAX_DATA = 1024;
+// Data per packet. Once the laser's buffer is full it holds each reply back until it has used up
+// as much data as the packet carried, and the reply is the only head position there is while a job
+// streams: 1024 bytes of cutting held it 1–2 s at a time (the head on screen stalled, then jumped).
+// Ruby's cut packets are under 230 bytes (TROTEC_PROTOCOL.md, Flow control).
+const MAX_DATA = 256;
 const REPLY_MS = 1500;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -221,12 +225,24 @@ class TrotecLink {
             this.fault = { at: Date.now(), text: why };
           }
         }
+        r.at = Date.now();
         if (r.status) this.lastReply = r;
         return r;
       }
       // buffer full is normal while a long job runs: the job stream is far ahead of the
       // machine. Keep offering the packet until there is room, unless we're stopping.
       if (got.kind === 'bufferFull') {
+        // the refusal may still answer the immediate section (status, position, marker): a
+        // position as fresh as any, without waiting for room
+        const fresh = parseReply(got);
+        if (fresh.status && fresh.xy) {
+          fresh.at = Date.now();
+          this.lastReply = fresh;
+          if (opts.poll) return fresh;
+          if (this.onPoll && !opts.urgent) this.onPoll(this.view(fresh));
+        }
+        // otherwise a status check gets the last answer, with its own time: not news (stamped
+        // as now, the screen held the head on an old position, then it jumped)
         if (opts.poll && this.lastReply) return this.lastReply;
         if (this.aborting && !opts.urgent) throw new Error('aborted');
         await sleep(200);
@@ -237,7 +253,7 @@ class TrotecLink {
           return this.exchangeNow(imm, data, opts);
         }
         // while waiting, keep the head position on screen up to date
-        if (this.onPoll && !opts.poll && !opts.urgent && Date.now() - (this.lastPollAt || 0) > 700) {
+        if (this.onPoll && !opts.poll && !opts.urgent && Date.now() - (this.lastReply ? this.lastReply.at || 0 : 0) > 700 && Date.now() - (this.lastPollAt || 0) > 700) {
           this.lastPollAt = Date.now();
           this.onPoll(this.view(await this.exchangeNow(POLL, null, { poll: true })));
           return this.exchangeNow(imm, data, opts);
@@ -260,7 +276,7 @@ class TrotecLink {
     const s = r.status || {};
     const pos = r.xy ? this.U.toMm(r.xy[0], r.xy[1]) : [NaN, NaN];
     const state = s.name === 'busy' ? 'busy' : s.name === 'pause' || s.name === 'hardwarePause' ? 'paused' : s.name === 'service' ? 'alarm' : 'idle';
-    return { state, pos: { x: +pos[0].toFixed(3), y: +pos[1].toFixed(3), z: 0 }, interlock: !!s.interlock, marker: r.marker, raw: s.raw };
+    return { state, pos: { x: +pos[0].toFixed(3), y: +pos[1].toFixed(3), z: 0 }, interlock: !!s.interlock, marker: r.marker, raw: s.raw, at: r.at };
   }
 
   async poll() { return this.view(await this.exchange(POLL, null, { poll: true })); }

@@ -20,6 +20,8 @@ class Store {
     this.history = this.read('history.json', []);
     // a job that was running when the app stopped didn't finish
     for (const j of this.jobs) if (j.status === 'running') j.status = 'stopped';
+    // jobs that have run keep no anchor (it was for that run: run again, as Pathline placed them)
+    for (const j of this.jobs) if (j.status !== 'queued') { j.anchor = null; j.anchorAtStart = false; }
     this.seq = this.jobs.concat(this.history).reduce((n, j) => Math.max(n, Number(String(j.id).replace(/\D/g, '')) || 0), 0);
   }
 
@@ -34,7 +36,8 @@ class Store {
 
   jobDir(id) { return path.join(this.jobsDir, id); }
 
-  add(pkg, warnings, source) {
+  // seconds: the controller's own estimate when it makes one (the Trotec), else Pathline's
+  add(pkg, warnings, source, seconds) {
     const id = 'J' + String(++this.seq).padStart(4, '0');
     const files = pkg.files || {};
     const clean = { ...pkg };
@@ -48,7 +51,7 @@ class Store {
     if (files.cjob) fs.writeFileSync(path.join(dir, 'job.cjob'), JSON.stringify(files.cjob));
     const job = {
       id, name: (pkg.job && pkg.job.name) || id, status: 'queued', progress: 0,
-      seconds: (pkg.estimate && pkg.estimate.totalSeconds) || 0,
+      seconds: Number.isFinite(seconds) ? seconds : (pkg.estimate && pkg.estimate.totalSeconds) || 0,
       material: pkg.material ? pkg.material.name + (pkg.material.thickness ? ' ' + pkg.material.thickness + ' mm' : '') : '',
       receivedAt: new Date().toISOString(), finishedAt: null, warnings: warnings || [], source: source || 'pathline', runs: 0
     };
@@ -68,10 +71,14 @@ class Store {
     return anchor.apply(this.pkg(id), j && j.anchor);
   }
 
-  setAnchor(id, at) {
+  // at: where the job's top-left corner goes (taken when the job starts); atStart: the operator
+  // switched Anchor to toolhead on (the position is taken at Start). Both last one run: finish()
+  // clears them, so a job run again, from the queue or from History, runs where Pathline placed it
+  setAnchor(id, at, atStart) {
     const j = this.get(id);
     if (!j) return null;
     j.anchor = at || null;
+    if (atStart !== undefined) j.anchorAtStart = !!atStart;
     this.flush();
     return j;
   }
@@ -106,16 +113,33 @@ class Store {
       seconds: Math.round((Date.parse(job.finishedAt) - Date.parse(startedAt)) / 1000), result
     });
     if (removeDone && result === 'Completed') job.hidden = true;
+    // anchored for that run only: run again, it goes where Pathline placed it
+    job.anchor = null; job.anchorAtStart = false;
     this.prune();
     this.flush();
   }
 
+  // what the controller reported through a run (positions, markers), for working out how it really
+  // moves: <data>/runs/<id>-<time>.json, the last 30 kept
+  saveRun(job, rec) {
+    try {
+      const dir = path.join(this.dir, 'runs');
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, job.id + '-' + rec.startedAt.replace(/[:.]/g, '-') + '.json'), JSON.stringify({ id: job.id, name: job.name, ...rec }));
+      const all = fs.readdirSync(dir).filter((f) => f.endsWith('.json')).sort();
+      for (const f of all.slice(0, Math.max(0, all.length - 30))) fs.rmSync(path.join(dir, f), { force: true });
+    } catch (e) { /* only a record */ }
+  }
+
   // put a job (from the queue or history) back in the queue
-  requeue(id) {
+  requeue(id, keepAnchor) {
     const j = this.get(id);
     if (j) {
       if (j.status === 'running') return j;
       j.status = 'queued'; j.progress = 0; j.hidden = false; j.finishedAt = null;
+      // from History: as Pathline placed it. Start on a completed job kept in the queue keeps an
+      // anchor switched on for it since it finished (keepAnchor)
+      if (!keepAnchor) { j.anchor = null; j.anchorAtStart = false; }
       this.jobs.splice(this.jobs.indexOf(j), 1);
       this.jobs.push(j);
       this.flush();
