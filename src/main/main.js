@@ -661,6 +661,11 @@ function createWindow() {
       win.close();
     }
   });
+  // a Setup page with unsaved changes holds the window (beforeunload); ask before discarding them
+  win.webContents.on('will-prevent-unload', (e) => {
+    const r = dialog.showMessageBoxSync(win, { type: 'question', buttons: ['Discard changes', 'Cancel'], defaultId: 1, cancelId: 1, message: 'Discard unsaved changes?', detail: 'Machine or material changes on this page have not been saved.' });
+    if (r === 0) e.preventDefault(); // let the page go
+  });
   // closing the window closes the app
   win.on('closed', () => { win = null; app.quit(); });
   // a crashed page is reported and reloaded

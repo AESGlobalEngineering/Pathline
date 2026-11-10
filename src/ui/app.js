@@ -8,6 +8,19 @@
   const CC = window.CC;
   const h = (...a) => window.React.createElement(...a);
 
+  // Motion only once the page has settled and while the window is on screen. Before that the
+  // page styles arrive after the first paint (transitions would fade every border in), and a
+  // hidden window pauses animations, leaving things mid-fade. Screenshot checks add ?still.
+  // (A data attribute: the page runtime resets the html class list after load.)
+  let settled = false;
+  const motion = () => {
+    const on = settled && !/[?&]still/.test(location.search) && document.visibilityState === 'visible';
+    document.documentElement.dataset.motion = on ? 'on' : 'off';
+  };
+  motion();
+  window.addEventListener('load', () => setTimeout(() => { settled = true; motion(); }, 300));
+  document.addEventListener('visibilitychange', motion);
+
   // ------------------------------------------------------------ toasts
   let toastBox = null;
   function toast(msg, opts) {
@@ -26,12 +39,14 @@
     if (opts.action) {
       const b = document.createElement('button');
       b.textContent = opts.action;
-      b.onclick = () => { el.remove(); opts.onAction && opts.onAction(); };
+      b.onclick = () => { leave(el); opts.onAction && opts.onAction(); };
       el.appendChild(b);
     }
     toastBox.appendChild(el);
-    setTimeout(() => el.remove(), opts.ms || (opts.kind === 'err' ? 7000 : 3500));
+    setTimeout(() => leave(el), opts.ms || (opts.kind === 'err' ? 7000 : 3500));
   }
+  // let a dialog, toast or backdrop play its exit (fonts.css .out) before it goes
+  function leave(el, ms) { if (!el || !el.isConnected) return; el.classList.add('out'); setTimeout(() => el.remove(), ms || 130); }
   const fail = (err) => toast(err && err.message ? err.message : String(err), { kind: 'err' });
 
   // numbers and units are set in mono, words in sans
@@ -262,7 +277,7 @@
       const btns = add('div', 'btns');
       const buttons = spec.buttons || [{ label: 'Cancel', value: null }, { label: 'OK', value: 'ok', primary: true }];
       const close = (val) => {
-        scrim.remove();
+        leave(scrim);
         document.removeEventListener('keydown', onKey, true);
         if (val === null || val === undefined) return resolve(null);
         const out = {};
@@ -341,7 +356,7 @@
       btns.appendChild(go);
       box.appendChild(btns);
 
-      let busy = false, online = null, checkErr = '', sent = null, sendErr = '', checking = false;
+      let busy = false, online = null, checkErr = '', sent = null, sendErr = '', checking = false, overDone = false;
       const note = (cls, text, action) => {
         const n = el('div', 'note ' + cls, text);
         if (action) { const a = el('button', '', action.l); a.type = 'button'; a.onclick = action.run; n.appendChild(a); }
@@ -357,6 +372,8 @@
           else if (via === 'Ethernet' && online === false) note('err', 'Connection failed — ' + checkErr, { l: 'Try again', run: () => runCheck() });
           if (via === 'Ethernet' && checking) note('muted', 'Checking connection…');
           (opts.warnings || []).forEach((m) => note('warn', m));
+          // job settings that differ from the material presets: say so here, with a way back, instead of a dialog first
+          if (opts.overrides && !overDone) note('warn', opts.overrides.text, { l: opts.overrides.label || 'Revert', run: async () => { if (busy) return; await opts.overrides.revert(); overDone = true; refresh(); } });
         }
         go.textContent = sent ? 'Done' : busy ? (via === 'Ethernet' ? 'Sending…' : 'Saving…') : via === 'Ethernet' ? opts.sendLabel || 'Send' : 'Save…';
         go.disabled = !sent && (busy || (opts.blocked || []).length > 0 || (via === 'Ethernet' && online !== true));
@@ -369,8 +386,12 @@
         checking = false;
         refresh();
       }
-      const close = (val) => { scrim.remove(); document.removeEventListener('keydown', onKey, true); resolve(val); };
-      const onKey = (e) => { if (e.key === 'Escape' && !busy) { e.stopPropagation(); close(sent); } };
+      const close = (val) => { leave(scrim); document.removeEventListener('keydown', onKey, true); resolve(val); };
+      const onKey = (e) => {
+        if (e.key === 'Escape' && !busy) { e.stopPropagation(); close(sent); }
+        // Enter sends (or closes once sent), like the main button, unless a button has focus
+        if (e.key === 'Enter' && e.target.tagName !== 'BUTTON' && !go.disabled) { e.stopPropagation(); e.preventDefault(); go.click(); }
+      };
       cancel.onclick = () => close(null);
       go.onclick = async () => {
         if (sent) return close(sent);
@@ -512,6 +533,7 @@
 
   // Ask before leaving a page with unsaved edits (links between pages).
   function guardNav(isDirty, save) {
+    let leaving = false;
     const onClick = async (e) => {
       const a = e.target.closest && e.target.closest('a[href]');
       if (!a || !isDirty() || a.getAttribute('href').startsWith('#')) return;
@@ -522,10 +544,14 @@
       if (r.button === 'save') {
         try { await save(); } catch (err) { return fail(err); }
       }
+      leaving = true;
       location.href = a.href;
     };
+    // closing the window (or reloading) with unsaved changes: main asks before it lets go
+    const onBefore = (e) => { if (!leaving && isDirty()) { e.preventDefault(); e.returnValue = ''; } };
     document.addEventListener('click', onClick, true);
-    return () => document.removeEventListener('click', onClick, true);
+    window.addEventListener('beforeunload', onBefore);
+    return () => { document.removeEventListener('click', onClick, true); window.removeEventListener('beforeunload', onBefore); };
   }
 
   // clipboard shared between pages for the session
@@ -1361,8 +1387,9 @@
       p.onCommit({ ...p.job, entities: p.job.entities.concat(ent) }, { record: true }, [ent.id]);
     }
 
-    // selection/origin colour on the bed: a real colour (the page may pass a CSS var)
-    accent() { const a = this.props.accent; return !a || /^var\(/.test(a) ? '#D62828' : a; }
+    // selection/origin colour on the bed: ink (black on a light bed, white on a dark one), never
+    // red, which is ACI 1. It's a CSS var, so it goes in style, not an SVG presentation attribute.
+    accent() { return 'var(--ink)'; }
     renderBed(k) {
       const [bw, bh] = this.bed();
       const x = this.bedX(k);
@@ -1381,7 +1408,7 @@
         // drawn on the viewport, outside the bed, so it follows the theme
         kids.push(h('text', { key: 'l', x, y: -8 / v.s, fontSize: 13 / v.s, fontWeight: 600, style: { fill: now ? 'var(--accent-fg)' : 'var(--text)' }, fontFamily: 'IBM Plex Sans, sans-serif' }, 'Bed ' + (k + 1) + (now ? ' · on the table now' : ' · after feed ' + k)));
       }
-      kids.push(h('circle', { key: 'o', cx: x, cy: 0, r: 5 / v.s, stroke: this.accent(), strokeWidth: 2, vectorEffect: 'non-scaling-stroke', style: { fill: 'var(--bed)' } }));
+      kids.push(h('circle', { key: 'o', cx: x, cy: 0, r: 5 / v.s, strokeWidth: 2, vectorEffect: 'non-scaling-stroke', style: { fill: 'var(--bed)', stroke: this.accent() } }));
       return h('g', { key: 'bed' + k }, kids);
     }
     // Screen-space rulers along the top and left, labelled in bed millimetres.
@@ -1462,16 +1489,16 @@
         const ms = this.state.measure;
         if (ms && p.tool === 'measure') {
           const len = Math.hypot(ms.x1 - ms.x0, ms.y1 - ms.y0);
-          kids.push(h('line', { key: 'ms', x1: ms.x0, y1: ms.y0, x2: ms.x1, y2: ms.y1, stroke: '#E5484D', strokeWidth: 1.5, strokeDasharray: '5 3', vectorEffect: 'non-scaling-stroke' }));
-          [[ms.x0, ms.y0], [ms.x1, ms.y1]].forEach(([x, y], i) => kids.push(h('circle', { key: 'mse' + i, cx: x, cy: y, r: 3.5 / v.s, fill: '#FFFFFF', stroke: '#E5484D', strokeWidth: 1.5, vectorEffect: 'non-scaling-stroke' })));
+          kids.push(h('line', { key: 'ms', x1: ms.x0, y1: ms.y0, x2: ms.x1, y2: ms.y1, strokeWidth: 1.5, strokeDasharray: '5 3', vectorEffect: 'non-scaling-stroke', style: { stroke: 'var(--ink)' } }));
+          [[ms.x0, ms.y0], [ms.x1, ms.y1]].forEach(([x, y], i) => kids.push(h('circle', { key: 'mse' + i, cx: x, cy: y, r: 3.5 / v.s, strokeWidth: 1.5, vectorEffect: 'non-scaling-stroke', style: { fill: 'var(--ink-halo)', stroke: 'var(--ink)' } })));
           kids.push(h('text', { key: 'msl', x: (ms.x0 + ms.x1) / 2 + 8 / v.s, y: (ms.y0 + ms.y1) / 2 - 8 / v.s, fontSize: 12 / v.s, fontWeight: 600, fill: '#B42318', fontFamily: 'IBM Plex Mono, monospace', stroke: '#FFFFFF', strokeWidth: 3 / v.s, paintOrder: 'stroke' }, len.toFixed(2) + ' mm'));
         }
         const hv = this.state.hover;
         if (hv && (p.tool === 'measure' || p.tool === 'line')) {
           const r = 5 / v.s;
           kids.push(hv.kind === 'vertex'
-            ? h('rect', { key: 'hv', x: hv.x - r, y: hv.y - r, width: 2 * r, height: 2 * r, fill: 'none', stroke: '#E5484D', strokeWidth: 1.6, vectorEffect: 'non-scaling-stroke' })
-            : h('circle', { key: 'hv', cx: hv.x, cy: hv.y, r, fill: 'none', stroke: '#E5484D', strokeWidth: 1.6, vectorEffect: 'non-scaling-stroke' }));
+            ? h('rect', { key: 'hv', x: hv.x - r, y: hv.y - r, width: 2 * r, height: 2 * r, fill: 'none', strokeWidth: 1.6, vectorEffect: 'non-scaling-stroke', style: { stroke: 'var(--ink)' } })
+            : h('circle', { key: 'hv', cx: hv.x, cy: hv.y, r, fill: 'none', strokeWidth: 1.6, vectorEffect: 'non-scaling-stroke', style: { stroke: 'var(--ink)' } }));
         }
         // selection frame + handles
         const b = this.selBoxWorld();
@@ -1479,23 +1506,23 @@
           const dx = moving ? drag.dx : 0, dy = moving ? drag.dy : 0;
           const pad = 8 / v.s;
           const x0 = b.x0 + dx - pad, y0 = b.y0 + dy - pad, x1 = b.x1 + dx + pad, y1 = b.y1 + dy + pad;
-          kids.push(h('rect', { key: 'sb', x: x0, y: y0, width: x1 - x0, height: y1 - y0, fill: 'none', stroke: this.accent(), strokeWidth: 1.2, strokeDasharray: '4 3', vectorEffect: 'non-scaling-stroke' }));
+          kids.push(h('rect', { key: 'sb', x: x0, y: y0, width: x1 - x0, height: y1 - y0, fill: 'none', strokeWidth: 1.2, strokeDasharray: '4 3', vectorEffect: 'non-scaling-stroke', style: { stroke: this.accent() } }));
           const hs = 4 / v.s;
-          [[x0, y0], [x1, y0], [x0, y1], [x1, y1]].forEach(([x, y], i) => kids.push(h('rect', { key: 'h' + i, x: x - hs, y: y - hs, width: 2 * hs, height: 2 * hs, fill: '#FFFFFF', stroke: this.accent(), strokeWidth: 1.4, vectorEffect: 'non-scaling-stroke' })));
+          [[x0, y0], [x1, y0], [x0, y1], [x1, y1]].forEach(([x, y], i) => kids.push(h('rect', { key: 'h' + i, x: x - hs, y: y - hs, width: 2 * hs, height: 2 * hs, strokeWidth: 1.4, vectorEffect: 'non-scaling-stroke', style: { fill: 'var(--ink-halo)', stroke: this.accent() } })));
           if (!moving) {
             const label = (b.x1 - b.x0).toFixed(1) + ' × ' + (b.y1 - b.y0).toFixed(1) + ' mm';
-            kids.push(h('text', { key: 'sl', x: x0, y: y1 + 16 / v.s, fontSize: 11 / v.s, fill: this.accent(), fontFamily: 'IBM Plex Mono, monospace' }, label));
+            kids.push(h('text', { key: 'sl', x: x0, y: y1 + 16 / v.s, fontSize: 11 / v.s, style: { fill: this.accent() }, fontFamily: 'IBM Plex Mono, monospace' }, label));
           }
         }
         if (moving && (drag.gx !== null || drag.gy !== null)) {
           const W = this.world();
-          if (drag.gx !== null) kids.push(h('line', { key: 'gx', x1: drag.gx, y1: -20, x2: drag.gx, y2: W.h + 20, stroke: '#E5484D', strokeWidth: 1, strokeDasharray: '3 3', vectorEffect: 'non-scaling-stroke' }));
-          if (drag.gy !== null) kids.push(h('line', { key: 'gy', x1: -20, y1: drag.gy, x2: W.w + 20, y2: drag.gy, stroke: '#E5484D', strokeWidth: 1, strokeDasharray: '3 3', vectorEffect: 'non-scaling-stroke' }));
+          if (drag.gx !== null) kids.push(h('line', { key: 'gx', x1: drag.gx, y1: -20, x2: drag.gx, y2: W.h + 20, strokeWidth: 1, strokeDasharray: '3 3', vectorEffect: 'non-scaling-stroke', style: { stroke: 'var(--ink)' } }));
+          if (drag.gy !== null) kids.push(h('line', { key: 'gy', x1: -20, y1: drag.gy, x2: W.w + 20, y2: drag.gy, strokeWidth: 1, strokeDasharray: '3 3', vectorEffect: 'non-scaling-stroke', style: { stroke: 'var(--ink)' } }));
         }
         if (drag && (drag.kind === 'band' || drag.kind === 'draw')) {
           const x0 = Math.min(drag.x0, drag.x1), y0 = Math.min(drag.y0, drag.y1), w = Math.abs(drag.x1 - drag.x0), hh = Math.abs(drag.y1 - drag.y0);
           const st = { fill: 'none', strokeWidth: 1.3, vectorEffect: 'non-scaling-stroke', style: { stroke: drag.kind === 'band' ? this.accent() : aci.stroke(p.drawAci || 7) } };
-          if (drag.kind === 'band') kids.push(h('rect', { key: 'band', x: x0, y: y0, width: w, height: hh, ...st, fill: 'rgba(214,40,40,0.06)', strokeDasharray: '4 3' }));
+          if (drag.kind === 'band') kids.push(h('rect', { key: 'band', x: x0, y: y0, width: w, height: hh, ...st, style: { ...st.style, fill: 'var(--accent-soft)', fillOpacity: 0.5 }, strokeDasharray: '4 3' }));
           else if (drag.tool === 'line' || drag.tool === 'measure') kids.push(h('line', { key: 'pv', x1: drag.x0, y1: drag.y0, x2: drag.x1, y2: drag.y1, ...st, strokeDasharray: drag.tool === 'measure' ? '5 3' : undefined }));
           else if (drag.tool === 'rect') kids.push(h('rect', { key: 'pv', x: x0, y: y0, width: w, height: drag.shift ? w : hh, ...st }));
           else if (drag.tool === 'ellipse') kids.push(h('ellipse', { key: 'pv', cx: x0 + w / 2, cy: y0 + (drag.shift ? w : hh) / 2, rx: w / 2, ry: (drag.shift ? w : hh) / 2, ...st }));
@@ -1527,7 +1554,7 @@
     async reportBug() {
       const r = await dialog({
         title: 'Report a bug',
-        message: 'Saves the report as a file wherever you choose (with the app version, recent errors, a screenshot and, if you like, the current job), then you can send it to the Pathline Prepare developers as a GitHub issue.',
+        message: 'Saves a report file (app version, recent errors, a screenshot) to attach to a GitHub issue.',
         fields: [
           { key: 'title', label: 'What went wrong (one line)', value: '', full: true },
           { key: 'description', label: 'What happened, and what you expected', type: 'textarea', value: '', full: true, rows: 4 },
@@ -1581,7 +1608,7 @@
       const row = add(box, 'div', 'btns');
       const ok = add(row, 'button', 'primary', 'Got it');
       ok.type = 'button';
-      const close = () => { scrim.remove(); document.removeEventListener('keydown', onKey, true); };
+      const close = () => { leave(scrim); document.removeEventListener('keydown', onKey, true); };
       const onKey = (e) => { if (e.key === 'Escape' || e.key === 'Enter') { e.stopPropagation(); close(); } };
       ok.onclick = close;
       document.addEventListener('keydown', onKey, true);
@@ -1623,7 +1650,7 @@
       box.setAttribute('aria-label', 'Pathline Prepare update');
       scrim.appendChild(box);
       document.body.appendChild(scrim);
-      upd = { box, close: () => { scrim.remove(); upd = null; } };
+      upd = { box, close: () => { leave(scrim); upd = null; } };
     }
     const { box } = upd;
     const add = (parent, tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; parent.appendChild(e); return e; };

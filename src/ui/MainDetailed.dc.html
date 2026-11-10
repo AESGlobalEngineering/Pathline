@@ -48,9 +48,10 @@
 .mat-sw{flex:none;border-radius:8px;box-shadow:var(--chip-ring)}
 /* process rows */
 .proc{display:flex;flex-direction:column;border-radius:8px}
-.proc-head{flex:1;min-width:0;display:flex;align-items:center;gap:10px;padding:9px 4px 9px 10px;border:0;background:transparent;cursor:pointer;text-align:left;color:var(--text)}
+.proc-head{flex:1;min-width:0;display:flex;align-items:center;gap:8px;padding:9px 2px 9px 6px;border:0;background:transparent;cursor:pointer;text-align:left;color:var(--text)}
 .proc-title{display:flex;align-items:center;gap:6px;min-width:0}
 .proc-title > .nm{font-weight:500;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.proc-sum{margin-left:auto;flex:none;padding-left:6px;font-size:11.5px;color:var(--text-2);white-space:nowrap}
 .proc-set{margin:0 6px 6px;padding:12px;border-radius:6px;background:var(--surface);box-shadow:inset 0 0 0 1px var(--line);display:flex;flex-direction:column;gap:14px}
 .proc-name{flex:1;min-width:0;font:600 14px var(--font);border:0;border-bottom:1px dashed transparent;outline:0;padding:2px 0;color:var(--text);background:transparent;text-overflow:ellipsis}
 .proc-name:hover,.proc-name:focus{border-bottom-color:var(--line-hover)}
@@ -59,8 +60,16 @@
 .chip-none{box-sizing:border-box;border-radius:4px;border:1.5px dashed var(--line-hover);display:inline-flex;align-items:center;color:var(--text-3);font-size:12px}
 /* fill / sheet popovers */
 .popover{position:absolute;top:44px;z-index:40;padding:14px;display:flex;flex-direction:column;gap:12px;border-radius:12px}
-/* snap toggles */
-.snap[aria-pressed="true"]{border-color:var(--accent)}
+/* snap toggles: independent on/off chips in one sunken group; on = ink text with a tick */
+.snap-grp{display:inline-flex;gap:2px;padding:3px;border-radius:var(--ctl-r);background:var(--sunken)}
+.snap{display:inline-flex;align-items:center;gap:5px;height:30px;padding:0 10px;border:0;border-radius:6px;cursor:pointer;font-weight:500;white-space:nowrap}
+.snap:hover{color:var(--text) !important}
+.snap[aria-pressed="true"]{box-shadow:var(--shadow-1)}
+.snap[aria-pressed="true"]::before{content:'';width:12px;height:12px;flex:none;background:currentColor;
+  -webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12.5l4.5 4.5L19 7.5'/%3E%3C/svg%3E") center/contain no-repeat;
+  mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12.5l4.5 4.5L19 7.5'/%3E%3C/svg%3E") center/contain no-repeat}
+/* machine-specific tools at the right of the toolbar, headed by the controller name */
+.mach-tools-lbl{display:inline-flex;align-items:center;height:24px;padding-left:12px;margin-left:4px;border-left:1px solid var(--line)}
 </style>
 </helmet>
 <div style="height: 100vh; display: flex; flex-direction: column; background: var(--bg); color: var(--text); font-family: var(--font); font-size: 13px; overflow: hidden">
@@ -136,6 +145,11 @@
       </sc-if>
     </div>
   </header>
+
+  <!-- ===== Loading (while the page reads its data): the page's own panels with the content greyed ===== -->
+  <sc-if value="{{loading}}" hint-placeholder-val="{{false}}">
+    <div class="loading-screen" role="status" aria-live="polite" style="flex-direction: column"><span class="sr-only">Loading…</span><div class="ld-bar" style="height: 50px; border-bottom: 1px solid var(--line)"><span class="skel ctl" style="width: 86px"></span><span class="skel ctl" style="width: 104px"></span><span class="skel ctl" style="width: 86px"></span><span class="ld-sep"></span><span class="skel" style="width: 20px; height: 20px"></span><span class="skel" style="width: 20px; height: 20px"></span><span class="ld-sep"></span><span class="skel" style="width: 20px; height: 20px"></span><span class="skel" style="width: 20px; height: 20px"></span><span class="skel" style="width: 20px; height: 20px"></span><span class="skel" style="width: 20px; height: 20px"></span><span style="flex: 1"></span><span class="skel ctl" style="width: 300px"></span></div><div style="flex: 1; display: flex; min-height: 0"><div class="ld-col l" style="width: 52px; align-items: center; gap: 4px; padding: 8px 0"><span style="width: 40px; height: 40px; display: flex; align-items: center; justify-content: center"><span class="skel" style="width: 20px; height: 20px"></span></span><span style="width: 40px; height: 40px; display: flex; align-items: center; justify-content: center"><span class="skel" style="width: 20px; height: 20px"></span></span><span style="width: 40px; height: 40px; display: flex; align-items: center; justify-content: center"><span class="skel" style="width: 20px; height: 20px"></span></span><span style="width: 40px; height: 40px; display: flex; align-items: center; justify-content: center"><span class="skel" style="width: 20px; height: 20px"></span></span><span style="width: 40px; height: 40px; display: flex; align-items: center; justify-content: center"><span class="skel" style="width: 20px; height: 20px"></span></span><span style="width: 40px; height: 40px; display: flex; align-items: center; justify-content: center"><span class="skel" style="width: 20px; height: 20px"></span></span><span style="width: 40px; height: 40px; display: flex; align-items: center; justify-content: center"><span class="skel" style="width: 20px; height: 20px"></span></span><span style="width: 40px; height: 40px; display: flex; align-items: center; justify-content: center"><span class="skel" style="width: 20px; height: 20px"></span></span><span style="width: 40px; height: 40px; display: flex; align-items: center; justify-content: center"><span class="skel" style="width: 20px; height: 20px"></span></span></div><div style="flex: 1; min-width: 0; display: flex; flex-direction: column"><div class="viewport" style="flex: 1"></div><div class="ld-bar" style="height: 50px; border-top: 1px solid var(--line)"><span class="skel ctl" style="width: 118px"></span><span class="skel ctl" style="width: 44px"></span><span style="flex: 1"></span><span class="skel" style="width: 48px"></span><span class="skel ctl" style="width: 206px"></span></div></div><div class="ld-col r" style="width: 360px; padding: 0; gap: 0"><div class="ld-row" style="gap: 22px; height: 46px; padding: 0 22px; border-bottom: 1px solid var(--line)"><span class="skel" style="width: 64px"></span><span class="skel" style="width: 64px"></span><span class="skel" style="width: 40px"></span><span class="skel" style="width: 44px"></span></div><div style="display: flex; flex-direction: column; gap: 6px; padding: 14px"><span class="skel ctl" style="width: 100%; height: 60px"></span><div class="ld-row" style="justify-content: space-between; margin: 16px 0 6px"><span class="skel" style="width: 76px; height: 13px"></span><span class="skel" style="width: 64px; height: 10px"></span></div><div class="ld-row" style="height: 50px; padding: 0 8px; border-radius: 8px; box-shadow: inset 0 0 0 1px var(--line)"><span class="skel" style="width: 36px; height: 18px"></span><span style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px"><span class="skel" style="width: 62%"></span><span class="skel" style="width: 40%; height: 9px"></span></span><span class="skel" style="width: 76px; height: 10px"></span></div><div class="ld-row" style="height: 50px; padding: 0 8px; border-radius: 8px; box-shadow: inset 0 0 0 1px var(--line)"><span class="skel" style="width: 36px; height: 18px"></span><span style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px"><span class="skel" style="width: 48%"></span><span class="skel" style="width: 40%; height: 9px"></span></span><span class="skel" style="width: 76px; height: 10px"></span></div><div class="ld-row" style="height: 50px; padding: 0 8px; border-radius: 8px; box-shadow: inset 0 0 0 1px var(--line)"><span class="skel" style="width: 36px; height: 18px"></span><span style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px"><span class="skel" style="width: 70%"></span><span class="skel" style="width: 40%; height: 9px"></span></span><span class="skel" style="width: 76px; height: 10px"></span></div><div class="ld-row" style="height: 50px; padding: 0 8px; border-radius: 8px; box-shadow: inset 0 0 0 1px var(--line)"><span class="skel" style="width: 36px; height: 18px"></span><span style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px"><span class="skel" style="width: 55%"></span><span class="skel" style="width: 40%; height: 9px"></span></span><span class="skel" style="width: 76px; height: 10px"></span></div><div class="ld-row" style="height: 50px; padding: 0 8px; border-radius: 8px; box-shadow: inset 0 0 0 1px var(--line)"><span class="skel" style="width: 36px; height: 18px"></span><span style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px"><span class="skel" style="width: 66%"></span><span class="skel" style="width: 40%; height: 9px"></span></span><span class="skel" style="width: 76px; height: 10px"></span></div><div class="ld-row" style="height: 50px; padding: 0 8px; border-radius: 8px; box-shadow: inset 0 0 0 1px var(--line)"><span class="skel" style="width: 36px; height: 18px"></span><span style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px"><span class="skel" style="width: 44%"></span><span class="skel" style="width: 40%; height: 9px"></span></span><span class="skel" style="width: 76px; height: 10px"></span></div></div></div></div><div class="ld-bar" style="height: 64px; gap: 14px; padding: 0 14px; border-top: 1px solid var(--line)"><span style="display: flex; flex-direction: column; gap: 7px"><span class="skel" style="width: 110px; height: 14px"></span><span class="skel" style="width: 220px; height: 9px"></span></span><span class="skel pill" style="width: 120px; height: 24px"></span><span class="skel pill" style="width: 150px; height: 24px"></span><span class="skel pill" style="width: 200px; height: 24px"></span><span style="flex: 1"></span><span class="skel ctl" style="width: 178px; height: 44px"></span></div></div>
+  </sc-if>
 
   <!-- ===== Toolbar ===== -->
   <div role="toolbar" aria-label="Tools" class="subbar">
@@ -256,7 +270,7 @@
       </div>
     </sc-for>
     <span style="flex: 1"></span>
-    <span class="lbl" style="margin-right: 2px">{{mach.toolsLabel}}</span>
+    <span class="lbl mach-tools-lbl" style="margin-right: 2px">{{mach.toolsLabel}}</span>
     <sc-if value="{{regAvail}}" hint-placeholder-val="{{true}}">
       <div style="position: relative">
         <button class="tb v-bd" onClick="{{toggleReg}}" aria-haspopup="menu" aria-expanded="{{regOpen}}" style="--v-bd: {{regBd}}; box-shadow: {{regSh}}">
@@ -301,13 +315,6 @@
         <!-- viewport -->
         <div class="viewport" style="flex: 1; min-width: 0; min-height: 0; position: relative; overflow: hidden">
           {{canvasEl}}
-          <sc-if value="{{empty}}" hint-placeholder-val="{{false}}">
-            <div class="card empty" style="position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); padding: 24px 28px; border-style: dashed; border-color: var(--line-hover); box-shadow: var(--shadow-pop); pointer-events: none">
-              <span class="em-icon"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.import}}"></path></svg></span>
-              <span class="em-title">Drop a DXF, PDF, SVG or PLT file here</span>
-              <span class="em-text">or use Import (Ctrl+I) · draw with the tools on the left</span>
-            </div>
-          </sc-if>
         </div>
 
         <!-- canvas footer -->
@@ -325,10 +332,12 @@
           <span class="mono lbl" id="lrc-cursor"></span>
           <span style="flex: 1"></span>
           <span class="lbl">{{selInfo}}</span>
-          <span class="lbl">Snap</span>
-          <sc-for list="{{snaps}}" as="s" hint-placeholder-count="3">
-            <button class="tb snap v-bd" aria-pressed="{{s.on}}" onClick="{{s.toggle}}" style="--v-bd: {{s.bd}}; background: {{s.bg}}; color: {{s.fg}}">{{s.l}}</button>
-          </sc-for>
+          <span class="lbl" id="snap-label">Snap to</span>
+          <div role="group" aria-labelledby="snap-label" class="snap-grp">
+            <sc-for list="{{snaps}}" as="s" hint-placeholder-count="3">
+              <button class="snap" aria-pressed="{{s.on}}" onClick="{{s.toggle}}" style="--v-bd: {{s.bd}}; background: {{s.bg}}; color: {{s.fg}}">{{s.l}}</button>
+            </sc-for>
+          </div>
         </div>
       </div>
     </main>
@@ -380,7 +389,7 @@
             <span class="lbl">{{coloursUsed}}</span>
           </div>
           <sc-if value="{{orphanNote}}" hint-placeholder-val="{{false}}">
-            <div class="note warn">{{orphanNote}}</div>
+            <div class="note warn" style="display: flex; align-items: center; gap: 10px"><span style="flex: 1">{{orphanNote}}</span><button class="tb sm" onClick="{{addOrphan}}" style="flex: none">Add process</button></div>
           </sc-if>
           <div style="display: flex; flex-direction: column; gap: 4px">
             <sc-for list="{{colours}}" as="c" hint-placeholder-count="4">
@@ -395,19 +404,19 @@
                   <span style="flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.3">
                     <span class="proc-title"><span class="nm">{{c.name}}</span><sc-if value="{{c.badge}}" hint-placeholder-val="{{false}}"><span class="tag" style="background: {{c.badgeBg}}; color: {{c.badgeFg}}">{{c.badge}}</span></sc-if></span>
                     <span style="display: flex; align-items: center; gap: 6px; min-width: 0">
-                      <span class="lbl" style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{c.proc}}</span>
+                      <span class="lbl" title="{{c.proc}}" style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{c.proc}}</span>
                       <sc-if value="{{c.dashOn}}" hint-placeholder-val="{{false}}">
                         <svg width="22" height="8" role="img" aria-label="Dashed" style="flex: none"><line x1="0" y1="4" x2="22" y2="4" stroke-width="2" stroke-dasharray="5 3" style="stroke: var(--text-2)"></line></svg>
                       </sc-if>
+                      <span class="mono proc-sum">{{c.summary}}</span>
                     </span>
                   </span>
-                  <span class="mono" style="font-size: 12px; color: var(--text-2); white-space: nowrap">{{c.summary}}</span>
                   <svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width: 16px; height: 16px; color: var(--text-3); transform: rotate({{c.chevRot}}); transition: transform 0.15s"><path d="{{icons.chev}}"></path></svg>
                 </button>
-                <button class="ib" onClick="{{c.toggleOut}}" aria-label="{{c.outLabel}}" title="{{c.outLabel}}" style="color: var(--text-3)"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{c.outIcon}}"></path></svg></button>
+                <button class="ib" onClick="{{c.toggleOut}}" aria-label="{{c.outLabel}}" title="{{c.outLabel}}" style="color: var(--text-3); width: 30px"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{c.outIcon}}"></path></svg></button>
                 </div>
                 <sc-if value="{{c.open}}" hint-placeholder-val="{{false}}">
-                <section aria-label="{{c.name}} settings" class="proc-set">
+                <section aria-label="{{c.name}} settings" class="proc-set reveal">
                   <div style="display: flex; align-items: center; gap: 10px">
                     <input type="text" class="proc-name" value="{{sel.name}}" onChange="{{sel.setName}}" aria-label="Process name">
                     <span class="tag" style="background: {{sel.statusBg}}; color: {{sel.statusFg}}">{{sel.status}}</span>
@@ -734,6 +743,12 @@
 </div>
 </x-dc>
 <script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+// the last status heard from each machine this session ('ok' / 'err'), so a page that has just
+// opened can show it while it checks again; lastDev(id) reads, lastDev(id, v) writes
+const lastDev = (id, v) => {
+  try { if (v === undefined) return sessionStorage.getItem('lrc-dev-' + id); sessionStorage.setItem('lrc-dev-' + id, v); } catch (e) { /* storage unavailable */ }
+  return null;
+};
 class Component extends DCLogic {
   state = {
     ready: false, job: null, machines: [], materials: [], recent: [], hist: { undo: 0, redo: 0 },
@@ -827,8 +842,8 @@ class Component extends DCLogic {
     this.tick = (this.tick || 0) + 1;
     const withJobs = this.tick % 2 === 0 || this.state.devJobs === null;
     Promise.all([window.api.device.status(m.id), withJobs ? window.api.device.jobs(m.id) : null])
-      .then(([dev, jobs]) => this.setState((s) => ({ dev: { ...dev, mid: m.id }, devErr: null, devJobs: jobs ? { mid: m.id, list: jobs } : s.devJobs })))
-      .catch((err) => this.setState({ dev: null, devErr: { mid: m.id, msg: err.message } }))
+      .then(([dev, jobs]) => { lastDev(m.id, 'ok'); this.setState((s) => ({ dev: { ...dev, mid: m.id }, devErr: null, devJobs: jobs ? { mid: m.id, list: jobs } : s.devJobs })); })
+      .catch((err) => { lastDev(m.id, 'err'); this.setState({ dev: null, devErr: { mid: m.id, msg: err.message } }); })
       .finally(() => { this.polling = false; });
   }
   // Apply a job change; record:true adds an undo step.
@@ -1019,7 +1034,7 @@ class Component extends DCLogic {
   }
   async offsetDlg() {
     if (!this.needSel()) return;
-    const r = await LRC.dialog({ title: 'Offset path', message: 'Adds an outline around the selection. Use a negative distance to go inwards.', fields: [{ key: 'd', label: 'Distance', value: '2', unit: 'mm', type: 'number' }], buttons: [{ label: 'Cancel', value: null }, { label: 'Offset', value: 'ok', primary: true }] });
+    const r = await LRC.dialog({ title: 'Offset path', message: 'A negative distance goes inwards.', fields: [{ key: 'd', label: 'Distance', value: '2', unit: 'mm', type: 'number' }], buttons: [{ label: 'Cancel', value: null }, { label: 'Offset', value: 'ok', primary: true }] });
     if (r && Number.isFinite(r.values.d) && r.values.d) this.op((j, s) => LRC.ops.offset(j, s, r.values.d));
   }
   // Array: on any part of an existing array it opens with that array's
@@ -1218,9 +1233,20 @@ class Component extends DCLogic {
     return presets.find((x) => x.name === cur.name) || presets[i] || null;
   }
   // Before a job leaves the app: offer to undo job overrides.
+  // processes whose settings were changed for this job (not the material presets)
+  overridden() { return this.state.job.processes.filter((p) => p.src === 'job' && !CC.isRegProc(p) && p.out !== false); }
+  async revertOverrides() {
+    const job = this.state.job;
+    const processes = job.processes.map((p, i) => {
+      if (p.src !== 'job' || CC.isRegProc(p)) return p;
+      const pre = this.presetFor(i);
+      return pre ? { ...JSON.parse(JSON.stringify(pre)), aci: p.aci, src: 'preset' } : p;
+    });
+    await this.commit({ ...job, processes }, { record: true });
+  }
   async checkOverrides(what) {
     const job = this.state.job;
-    const over = job.processes.filter((p) => p.src === 'job' && !CC.isRegProc(p) && p.out !== false);
+    const over = this.overridden();
     if (!over.length) return true;
     const r = await LRC.dialog({
       title: 'Job overrides',
@@ -1229,12 +1255,7 @@ class Component extends DCLogic {
     });
     if (!r) return false;
     if (r.button === 'revert') {
-      const processes = job.processes.map((p, i) => {
-        if (p.src !== 'job' || CC.isRegProc(p)) return p;
-        const pre = this.presetFor(i);
-        return pre ? { ...JSON.parse(JSON.stringify(pre)), aci: p.aci, src: 'preset' } : p;
-      });
-      await this.commit({ ...job, processes }, { record: true });
+      await this.revertOverrides();
       LRC.toast('Reverted to the material presets before ' + what);
     }
     return true;
@@ -1272,14 +1293,15 @@ class Component extends DCLogic {
     this.clearEdit(i);
     this.commit({ ...this.state.job, processes }, { record: true });
   }
-  async newProcess() {
+  // aciFor: a colour in the drawing that has no process yet (from the warning's Add process)
+  async newProcess(aciFor) {
     const isLaser = this.machine().type === 'laser';
     const used = new Set(this.state.job.processes.flatMap((p) => p.aci || []));
-    const free = [1, 2, 3, 4, 5, 6, 7, 8, 9].find((n) => !used.has(n));
+    const free = aciFor || [1, 2, 3, 4, 5, 6, 7, 8, 9].find((n) => !used.has(n));
     const r = await LRC.dialog({
       title: 'New process',
       fields: [
-        { key: 'name', label: 'Name', value: isLaser ? 'New cut' : 'New tool pass', full: true },
+        { key: 'name', label: 'Name', value: aciFor ? 'ACI ' + aciFor : isLaser ? 'New cut' : 'New tool pass', full: true },
         isLaser ? { key: 'proc', label: 'Process', type: 'seg', value: 'Cut', options: ['Cut', 'Engrave'] } : { key: 'proc', label: 'Tool head', type: 'seg', value: 'T1 · Knife', options: ['T1 · Knife', 'T2 · V-cut 45°', 'T3 · Crease wheel', 'T4 · Pen'] },
         { key: 'aci', label: 'Colour (ACI)', type: 'number', value: free ? String(free) : '' }
       ],
@@ -1331,7 +1353,7 @@ class Component extends DCLogic {
     this.commit({ ...this.state.job, processes }, { record: true });
   }
   async aciOther() {
-    const r = await LRC.dialog({ title: 'Colour index', message: 'AutoCAD Color Index 1–255. A colour can only belong to one process.', fields: [{ key: 'n', label: 'ACI number', value: '', type: 'number' }], buttons: [{ label: 'Cancel', value: null }, { label: 'Toggle', value: 'ok', primary: true }] });
+    const r = await LRC.dialog({ title: 'Colour index', message: '1–255. Each colour belongs to one process.', fields: [{ key: 'n', label: 'ACI number', value: '', type: 'number' }], buttons: [{ label: 'Cancel', value: null }, { label: 'Toggle', value: 'ok', primary: true }] });
     const n = r && Math.round(r.values.n);
     if (n >= 1 && n <= 255) this.toggleAci(n);
   }
@@ -1351,8 +1373,8 @@ class Component extends DCLogic {
     this.dev('frame', { box: [b.x0, b.y0, b.x1, b.y1] }, 'Framing ' + CC.boxW(b).toFixed(0) + ' × ' + CC.boxH(b).toFixed(0) + ' mm');
   }
   async sendDialog(andStart) {
-    if (!(await this.checkOverrides('sending'))) return;
     const s = this.state;
+    const over = this.overridden();
     const m = this.machine();
     // the full estimate for what's about to be sent (not a stand-in)
     const est = this._est && this._est.job === s.job && this._est.m === m ? this._est.r : CC.estimate(s.job, m);
@@ -1365,11 +1387,12 @@ class Component extends DCLogic {
       via: m.conn === 'Ethernet' ? 'Ethernet' : 'Local', localOnly: !!m.sim,
       blocked: checks.filter((c) => c.block).map((c) => c.l),
       warnings: checks.filter((c) => !c.ok && !c.block).map((c) => c.l),
+      overrides: over.length ? { text: (over.length === 1 ? over[0].name + ' uses' : over.length + ' processes use') + ' job settings, not the material presets', label: 'Revert to presets', revert: () => this.revertOverrides() } : null,
       check: () => (m.ip
         ? window.api.device.status(m.id).catch((err) => { throw new Error(m.name + ' did not answer at ' + m.ip + ':' + (m.port || 8470) + ' (' + err.message + ')'); })
         : Promise.reject(new Error(m.name + ' has no IP address — set it on the Machines page'))),
       send: async (via) => {
-        const r = await window.api.device.send(job, via);
+        const r = await window.api.device.send(this.state.job, via); // the job as it is now (after a revert, too)
         if (r && andStart && via === 'Ethernet') await window.api.device.command(m.id, 'start', {});
         return r;
       },
@@ -1575,7 +1598,7 @@ class Component extends DCLogic {
     // ---- header: machine + device status
     const TYPE = { laser: { type: 'LASER', tbg: 'var(--badge-laser)' }, plotter: { type: 'PLOTTER', tbg: 'var(--badge-plotter)' } };
     const subOf = (x) => (x.sim ? 'Simulated' + (x.ctrl ? ' · ' + x.ctrl : '') + ' · jobs saved as files' : (x.ctrl ? x.ctrl + ' · ' : '') + (x.placeholder ? 'not set up' : x.conn === 'Ethernet' ? (x.ip || 'no IP') : 'save locally'));
-    const mach = { ...TYPE[m], name: machine.name, sub: (machine.kind || '') + (machine.kind ? ' · ' : '') + subOf(machine), toolsLabel: machine.ctrl };
+    const mach = { ...TYPE[m], name: machine.name, sub: machine.placeholder ? (machine.kind || '') : (machine.kind || '') + (machine.kind ? ' · ' : '') + subOf(machine), toolsLabel: machine.ctrl };
     const machines = S.machines.map((x) => ({ ...TYPE[x.type], name: x.name, sub: subOf(x), on: x.id === machine.id, bg: x.id === machine.id ? accentSoft : 'transparent', pick: R(() => this.pickMachine(x.id)) }));
     const online = S.dev && S.dev.mid === machine.id;
     let dev;
@@ -1590,7 +1613,11 @@ class Component extends DCLogic {
             // the HMI answers, but its link to the controller is down
             : S.dev.link && S.dev.link !== 'online' ? { label: 'Machine offline', dot: 'var(--warn-dot)', fg: 'var(--warn)', cls: 'warn' }
             : { label: 'Ready', dot: 'var(--ok-dot)', fg: 'var(--ok)', cls: 'ok' };
-    } else dev = S.devErr ? { label: 'Offline', dot: 'var(--err-dot)', fg: 'var(--err)', cls: 'err' } : { label: 'Checking…', dot: 'var(--idle-dot)', fg: 'var(--text-2)', cls: '' };
+    } else if (S.devErr) dev = { label: 'Offline', dot: 'var(--err-dot)', fg: 'var(--err)', cls: 'err' };
+    // not heard back yet (page just opened): show the last known state, breathing, rather than a blank Checking…
+    else dev = lastDev(machine.id) === 'ok' ? { label: 'Ready', dot: 'var(--ok-dot)', fg: 'var(--ok)', cls: 'ok busy' }
+      : lastDev(machine.id) === 'err' ? { label: 'Offline', dot: 'var(--err-dot)', fg: 'var(--err)', cls: 'err busy' }
+        : { label: 'Checking…', dot: 'var(--idle-dot)', fg: 'var(--text-2)', cls: 'busy' };
 
     // features the machine has: controls for the others are hidden, not greyed out
     const feat = (k) => !!(machine.info && machine.info.f && machine.info.f[k]);
@@ -1635,7 +1662,7 @@ class Component extends DCLogic {
       return {
         hidden: isReg && !regOnNow, pi: i,
         chips, none: chips.length === 0, name: p.name, badge,
-        badgeBg: badge === 'Edited' ? 'var(--warn-soft)' : accentSoft, badgeFg: badge === 'Edited' ? 'var(--warn)' : accentFg,
+        badgeBg: badge === 'Edited' ? 'var(--warn-soft)' : accent, badgeFg: badge === 'Edited' ? 'var(--warn)' : 'var(--on-accent)',
         proc: (isReg ? 'Camera marks, not cut' : isLaser ? p.proc : p.tool) + (nObj ? ' · ' + nObj + ' object' + (nObj > 1 ? 's' : '') : ''),
         summary: isReg ? nObj + ' / ' + (CC.REG_NEEDED[job.regMode] || 3) + ' marks' : isLaser ? p.power + '% · ' + p.speed + ' mm/s' : p.speed + ' mm/s',
         dashOn: !!p.dash, on: i === selIdx,
@@ -1682,8 +1709,8 @@ class Component extends DCLogic {
         cantGlobal: !(dirty || sc.src === 'job') || !material, globalOpacity: (dirty || sc.src === 'job') && material ? 1 : 0.45,
         globalTip: material ? (material.locked ? material.name + ' is locked' : 'Save these settings as the ' + material.name + ' preset for ' + machine.name) : 'No material on this job',
         status: dirty ? 'Unsaved' : sc.src === 'job' ? 'Job override' : 'Material preset',
-        statusBg: dirty ? 'var(--warn-soft)' : sc.src === 'job' ? accentSoft : 'var(--sunken)',
-        statusFg: dirty ? 'var(--warn)' : sc.src === 'job' ? accentFg : 'var(--text-2)',
+        statusBg: dirty ? 'var(--warn-soft)' : sc.src === 'job' ? accent : 'var(--sunken)',
+        statusFg: dirty ? 'var(--warn)' : sc.src === 'job' ? 'var(--on-accent)' : 'var(--text-2)',
         selectLabel: isLaser ? 'Process' : 'Tool head',
         selectValue: isLaser ? sc.proc : sc.tool,
         sliders: isLaser
@@ -2048,8 +2075,8 @@ class Component extends DCLogic {
     const mact = (l, fn) => ({ l, run: R(fn), off: !canJog, op: canJog ? 1 : 0.45 }); // disabled = 0.45
     const p0 = online ? S.dev.pos || {} : null;
     const moveNote = machine.conn !== 'Ethernet'
-      ? machine.name + ' is set up to save jobs locally. Jogging needs an Ethernet connection to its controller (Machines page).'
-      : !online ? 'Not connected to ' + machine.name + (machine.ip ? ' at ' + machine.ip : '') + (S.devErr ? ' — ' + S.devErr.msg : '') + '. Jog controls work once the controller answers.' : null;
+      ? 'Jogging needs an Ethernet connection to ' + machine.name + '.'
+      : !online ? 'Not connected to ' + machine.name + (S.devErr ? ' — ' + S.devErr.msg : '') + '.' : null;
 
     // ---- queue
     // the queue is the machine controller's own job list (polled with the status)
@@ -2077,9 +2104,9 @@ class Component extends DCLogic {
         remove: R(() => this.queueAction((mid) => window.api.device.removeJob(mid, q.id), 'Removed "' + q.name + '" from ' + machine.name))
       };
     });
-    const queueNote = machine.conn !== 'Ethernet' ? machine.name + ' saves jobs locally, so it has no queue to show. Set an Ethernet connection on the Machines page to see the machine’s queue.'
-      : !online ? 'Not connected to ' + machine.name + (machine.ip ? ' at ' + machine.ip : '') + ' — the queue shows once the controller answers.'
-        : !qList.length ? 'No jobs waiting on ' + machine.name + '. Jobs appear here when you send them.' : false;
+    const queueNote = machine.conn !== 'Ethernet' ? machine.name + ' saves jobs locally, so it has no queue.'
+      : !online ? 'Not connected to ' + machine.name + '.'
+        : !qList.length ? 'No jobs waiting.' : false;
 
     // ---- tools
     const tool = (l, d, id, key, msg) => {
@@ -2088,7 +2115,7 @@ class Component extends DCLogic {
     };
     const snap = (l, k) => {
       const on = !!S.snap[k];
-      return { l, on, bd: on ? accent : 'var(--line-strong)', bg: on ? accentSoft : 'var(--surface)', fg: on ? accentFg : 'var(--text-2)', toggle: () => this.setState((s) => ({ snap: { ...s.snap, [k]: !on } })) };
+      return { l, on, bd: 'transparent', bg: on ? 'var(--seg-on)' : 'transparent', fg: on ? 'var(--text)' : 'var(--text-3)', toggle: () => this.setState((s) => ({ snap: { ...s.snap, [k]: !on } })) };
     };
     const tb = (l, d, fn, off) => ({ l, d, run: R(fn), off: !!off });
 
@@ -2128,7 +2155,8 @@ class Component extends DCLogic {
     return {
       accent, accentSoft, icons, noop, isLaser, isPlotter: !isLaser, mach, machines, dev,
       menuOpen: S.menu,
-      toggleMenu: () => this.setState((s) => ({ menu: !s.menu, reg: false, fill: false, bar: null })),
+      // no machine yet: the box goes straight to adding one; no materials for it yet: the material box goes to adding one
+      toggleMenu: machine.placeholder ? () => this.flushJob().then(() => { location.href = 'MachineSetupDetailed.dc.html#add'; }) : () => this.setState((s) => ({ menu: !s.menu, reg: false, fill: false, bar: null })),
       regOpen: S.reg, regBd: regOn ? accent : 'var(--line-strong)', regSh: regOn ? 'inset 0 0 0 1px ' + accent : 'none', regIc: regOn ? accentFg : 'var(--text-3)',
       toggleReg: () => this.setState((s) => ({ reg: !s.reg, menu: false, fill: false })),
       regModes, regLabel, regAvail: isLaser && feat('camera'),
@@ -2193,7 +2221,7 @@ class Component extends DCLogic {
         tool('Ellipse', icons.ellipse, 'ellipse', 'E'), tool('Polygon', icons.polygon, 'polygon', 'P'), tool('Text', icons.text, 'text', 'T'),
         tool('Import image', icons.image, 'image', null, 'Raster images are not supported yet — import vector artwork (DXF, PDF, SVG or PLT)'), tool('Measure', icons.measure, 'measure', 'M')
       ],
-      canvasEl, empty: !job.entities.length,
+      canvasEl,
       zoom: S.zoom, zoomIn: () => this.canvas && this.canvas.zoomBy(1.25), zoomOut: () => this.canvas && this.canvas.zoomBy(0.8), zoomFit: () => this.canvas && this.canvas.fit(), zoomActual: () => this.canvas && this.canvas.zoomActual(),
       addBed: () => this.commit({ ...job, beds: (job.beds || 1) + 1 }, { record: true }),
       removeBed: () => {
@@ -2211,10 +2239,11 @@ class Component extends DCLogic {
       recolourSel: () => this.commit(LRC.ops.setAci(job, selIds, procs[selIdx].aci[0]), { record: true }),
       advOpen: S.adv, advRot: S.adv ? '180deg' : '0deg',
       toggleAdv: () => this.setState((s) => ({ adv: !s.adv })),
-      matOpen: S.matOpen, matBd: S.matOpen ? accent : 'var(--line-strong)', toggleMat: () => this.setState((s) => ({ matOpen: !s.matOpen })), matList,
-      mat: material ? { name: material.name + ' · ' + material.t + ' mm', sub: machine.name + ' presets' + (material.locked ? ' · locked' : ''), sw: material.sw } : { name: 'No material', sub: 'Pick a material for its presets', sw: 'var(--sunken)' },
+      matOpen: S.matOpen, matBd: S.matOpen ? accent : 'var(--line-strong)', toggleMat: matList.length ? () => this.setState((s) => ({ matOpen: !s.matOpen })) : () => this.flushJob().then(() => { location.href = 'MaterialsDetailed.dc.html#new'; }), matList,
+      mat: material ? { name: material.name + ' · ' + material.t + ' mm', sub: material.locked ? 'Locked' : '', sw: material.sw } : { name: 'No material', sub: '', sw: 'var(--sunken)' },
       coloursUsed: procs.length + ' process' + (procs.length === 1 ? '' : 'es'),
-      orphanNote: orphans.length ? 'No process for ' + orphans.map((a) => 'ACI ' + a + ' (' + counts[a] + ')').join(', ') + ' — these objects will not be output. Assign the colour with Edit below.' : false,
+      orphanNote: orphans.length ? orphans.map((a) => 'ACI ' + a).join(', ') + ' ' + (orphans.length > 1 ? 'have' : 'has') + ' no process and won’t be output' : false,
+      addOrphan: R(() => this.newProcess(orphans[0])),
       colours, hasSel, sel, newProcess: R(() => this.newProcess()), deleteProcess: R(() => this.deleteProcess()),
       toggleDash: () => this.setEdit('dash', !(sc && sc.dash)),      saveGlobal: R(() => this.saveToMaterial()), revertJob: R(() => this.revertToPreset()),
       est: est.total ? 'Est. ' + CC.fmtDuration(est.total, true) : 'Est. —',
@@ -2244,13 +2273,13 @@ class Component extends DCLogic {
   }
   async rotaryDlg() {
     const j = this.state.job;
-    const r = await LRC.dialog({ title: 'Rotary', message: 'Sent with the job so the controller switches to the rotary axis.', fields: [{ key: 'on', label: 'Use the rotary attachment for this job', type: 'check', value: !!j.rotary }, { key: 'd', label: 'Object diameter', value: String((j.rotary && j.rotary.d) || 80), unit: 'mm', type: 'number' }], buttons: [{ label: 'Cancel', value: null }, { label: 'Apply', value: 'ok', primary: true }] });
+    const r = await LRC.dialog({ title: 'Rotary', fields: [{ key: 'on', label: 'Use the rotary attachment for this job', type: 'check', value: !!j.rotary }, { key: 'd', label: 'Object diameter', value: String((j.rotary && j.rotary.d) || 80), unit: 'mm', type: 'number' }], buttons: [{ label: 'Cancel', value: null }, { label: 'Apply', value: 'ok', primary: true }] });
     if (r) this.commit({ ...j, rotary: r.values.on ? { d: r.values.d || 80 } : null }, { record: true });
   }
   headsDlg() {
     const heads = (this.machine().info && this.machine().info.heads) || [];
     const used = new Set(this.state.job.processes.filter((p) => p.out !== false).map((p) => CC.toolSlot(p.tool)));
-    LRC.dialog({ title: 'Tool heads · ' + this.machine().name, message: 'Read from the machine. Change heads on its HMI, then sync on the Machines page.', fields: [{ key: 't', type: 'table', rows: heads.map((x) => [x.slot + ' · ' + x.tool + (used.has(x.slot) ? ' · used by this job' : ''), x.loaded ? 'Loaded' : 'Empty']) }], buttons: [{ label: 'Close', value: 'ok', primary: true }] });
+    LRC.dialog({ title: 'Tool heads · ' + this.machine().name, message: 'Read from the machine.', fields: [{ key: 't', type: 'table', rows: heads.map((x) => [x.slot + ' · ' + x.tool + (used.has(x.slot) ? ' · used by this job' : ''), x.loaded ? 'Loaded' : 'Empty']) }], buttons: [{ label: 'Close', value: 'ok', primary: true }] });
   }
   async conveyorDlg() {
     const j = this.state.job;
