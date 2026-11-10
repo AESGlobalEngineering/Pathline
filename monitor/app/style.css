@@ -178,3 +178,20 @@ img{max-width:100%}
 .hint b{font-weight:600}
 .loading{display:flex;flex-direction:column;gap:10px}
 .skel{display:block;border-radius:14px;background:var(--sunken);height:150px}
+
+/* ---- getting the app onto a phone ---- */
+.install .set{border-bottom:0}
+.steps{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:10px}
+.steps li{display:flex;gap:10px;align-items:flex-start;font-size:14px;line-height:1.4}
+.steps .ord{width:24px;height:24px;border-radius:7px;background:var(--sunken);display:inline-flex;align-items:center;justify-content:center;font:500 12px var(--mono);color:var(--text-2);flex:none}
+.steps svg.i{vertical-align:-4px;color:var(--accent-fg)}
+/* a PC's view: the QR code to the right of the phone frame (the frame stays centred, as its tab bar is) */
+.desk{position:fixed;top:50%;left:calc(50% + 215px + 56px);transform:translateY(-50%);width:320px;display:flex;flex-direction:column;align-items:flex-start;gap:12px;color:var(--text)}
+.desk h2{margin:4px 0 0;font-size:22px;font-weight:600;line-height:1.25;text-wrap:balance}
+.desk p{margin:0;color:var(--text-2);line-height:1.5}
+.desk .qr{width:220px;height:220px;padding:10px;background:#FFFFFF;border-radius:14px;box-shadow:0 0 0 1px var(--line-strong)}
+.desk .qr svg{display:block;width:100%;height:100%}
+.desk .qr.empty{display:flex;align-items:center;justify-content:center;color:#5B6370;font-size:13px;text-align:center}
+.desk .url{font-size:15px;color:var(--text);user-select:all}
+.desk .small{font-size:13px;color:var(--text-3)}
+@media (max-width:1199px),(pointer:coarse){.desk{display:none}}

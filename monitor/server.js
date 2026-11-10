@@ -131,7 +131,26 @@ function findMachines() {
 setInterval(findMachines, 10 * 60 * 1000);
 
 // this computer's own addresses, for phones to open
-const addresses = () => Object.values(require('os').networkInterfaces()).flat().filter((a) => a && (a.family === 'IPv4' || a.family === 4) && !a.internal && !/^169\.254\./.test(a.address)).map((a) => a.address);
+// (virtual adapters last: Hyper-V, WSL, VirtualBox, VPNs, so the first is usually the Wi-Fi or Ethernet one)
+const addresses = () => {
+  const out = [];
+  for (const [name, list] of Object.entries(require('os').networkInterfaces())) {
+    for (const a of list || []) {
+      if (!(a.family === 'IPv4' || a.family === 4) || a.internal || /^169\.254\./.test(a.address)) continue;
+      out.push({ ip: a.address, virtual: /vethernet|virtual|vmware|vbox|hyper-v|wsl|docker|tailscale|zerotier|vpn|loopback/i.test(name) });
+    }
+  }
+  return out.sort((a, b) => a.virtual - b.virtual).map((a) => a.ip);
+};
+const phoneUrls = () => addresses().map((ip) => (tls ? 'https' : 'http') + '://' + ip + ':' + PORT + '/');
+// the address phones open, and the same as a QR code for a phone's camera
+const qrcode = require('qrcode-generator');
+function qrSvg(text) {
+  const qr = qrcode(0, 'M');
+  qr.addData(text);
+  qr.make();
+  return qr.createSvgTag({ cellSize: 4, margin: 2, scalable: true });
+}
 
 // ---------------------------------------------------------------- http
 const APP = path.join(__dirname, 'app');
@@ -160,6 +179,7 @@ async function handle(req, res) {
       return;
     }
     if (p === '/api/push-key') return send(res, 200, { key: vapid.publicKey });
+    if (p === '/api/phone') { const urls = phoneUrls(); return send(res, 200, { urls, qr: urls[0] ? qrSvg(urls[0]) : null }); }
     if (p === '/api/find' && req.method === 'POST') return send(res, 200, await findMachines());
     // a phone's settings, and its push subscription once notifications are turned on
     if (p === '/api/device' && req.method === 'POST') {
@@ -204,7 +224,9 @@ async function handle(req, res) {
 const server = tls ? https.createServer(tls, handle) : http.createServer(handle);
 server.listen(PORT, () => {
 log('Pathline Monitor ' + pkg.version + ' · ' + watcher.list.length + ' machines so far · data in ' + DATA);
-  for (const a of addresses()) log('  phones on this network open ' + (tls ? 'https' : 'http') + '://' + a + ':' + PORT);
+  const urls = phoneUrls();
+  if (urls.length) log('  phones on this network open ' + urls[0] + (urls.length > 1 ? ' (or ' + urls.slice(1).join(', ') + ')' : ''));
+  log('  on this PC, open ' + (tls ? 'https' : 'http') + '://localhost:' + PORT + ' for a QR code to scan with a phone');
   if (!tls) log('Plain http: alerts show while the app is open. For alerts with it closed, see README.md (local certificate).');
   watcher.start();
   findMachines();

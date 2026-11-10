@@ -1,7 +1,7 @@
 // Pathline Monitor's service worker: keeps the app's own files so it opens at once, and shows
 // the notifications the Monitor service pushes.
 'use strict';
-const CACHE = 'pathline-monitor-1';
+const CACHE = 'pathline-monitor-2';
 const SHELL = ['./', 'index.html', 'style.css', 'app.js', 'icon.svg', 'icon-192.png', 'badge-72.png', 'manifest.webmanifest'];
 
 self.addEventListener('install', (e) => { e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting())); });

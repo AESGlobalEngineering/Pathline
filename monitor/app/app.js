@@ -95,7 +95,7 @@ function machinesView() {
   const empty = !M.length ? '<div class="list"><div class="hint">' + (S.finding ? '<b>Looking for Pathline Run machines on the network…</b>' : '<b>No machines found.</b> Check each machine\'s Pathline Run is open and on this network, then look again.') + '</div>' +
     (S.finding ? '' : '<div class="set"><span class="body">Machines are found the way Pathline Prepare finds them</span><button class="tb" data-a="find">Look again</button></div>') + '</div>' : '';
   return bar('<h1>Machines</h1><div class="sub">' + M.length + (M.length === 1 ? ' machine' : ' machines') + '</div>', liveTag()) +
-    '<main class="main">' + (M.length ? tiles : empty) +
+    '<main class="main">' + installCard() + (M.length ? tiles : empty) +
     (attn.length ? '<section class="sec"><div class="sec-h">Needs you <span class="n">' + attn.length + '</span></div>' + attn.map(card).join('') + '</section>' : '') +
     (rest.length ? '<section class="sec"><div class="sec-h">' + (attn.length ? 'Everything else' : 'All machines') + ' <span class="n">' + rest.length + '</span></div>' + rest.map(card).join('') + '</section>' : '') + '</main>';
 }
@@ -152,6 +152,42 @@ function alertsView() {
 // ---------------------------------------------------------------- settings
 const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 const standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+const isAndroid = /Android/i.test(navigator.userAgent);
+// opened on a PC (a mouse, a wide window): the app is for phones, so say how to get it on one
+const onDesk = () => matchMedia('(min-width: 1200px) and (pointer: fine)').matches;
+
+// ---------------------------------------------------------------- getting the app on a phone
+// Over the workshop network's plain http, "Add to Home Screen" is how a phone keeps the app
+// (Chrome's own Install prompt only comes with https; when it does, Install uses it).
+let installPrompt = null;
+window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installPrompt = e; render(); });
+window.addEventListener('appinstalled', () => { installPrompt = null; store.set('installHide', true); render(); });
+const SHARE = 'M12 3v12 M8 7l4-4 4 4 M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7';
+const DOTS = 'M12 5v.5 M12 12v.5 M12 19v.5';
+function installSteps() {
+  const step = (n, html) => '<li><span class="ord">' + n + '</span><span>' + html + '</span></li>';
+  if (isIOS) return '<ol class="steps">' + step(1, 'Tap <b>Share</b> ' + ic(SHARE, 18) + ' in Safari\'s toolbar') + step(2, 'Scroll down and tap <b>Add to Home Screen</b>') + step(3, 'Tap <b>Add</b>. Pathline Monitor is on the Home Screen, with its white tile') + '</ol>';
+  if (isAndroid) return '<ol class="steps">' + step(1, 'Tap the menu ' + ic(DOTS, 18) + ' in Chrome\'s corner') + step(2, 'Tap <b>Add to Home screen</b> (or <b>Install app</b>)') + step(3, 'Tap <b>Add</b>. Pathline Monitor is on the Home screen') + '</ol>';
+  return '<ol class="steps">' + step(1, 'Open this page on the phone, on the workshop Wi-Fi') + step(2, 'Use the browser\'s <b>Add to Home Screen</b>') + '</ol>';
+}
+function installCard() {
+  if (standalone || onDesk() || store.get('installHide', false)) return '';
+  return '<div class="list install"><div class="set"><img class="mark" src="icon.svg" alt="" style="width:36px;height:36px"><span class="body">Keep Pathline Monitor on your Home Screen<span class="s">It opens full screen, like an app, one tap away</span></span>' +
+    (installPrompt ? '<button class="btn-primary" data-a="install">Install</button>' : '<button class="tb" data-a="howInstall">How</button>') + '</div>' +
+    (ui.howInstall ? '<div class="hint">' + installSteps() + '<button class="tb" data-a="installHide" style="margin-top:8px">Done, hide this</button></div>' : '') + '</div>';
+}
+// the PC's view: a QR code beside the app, for a phone's camera
+let phone = null;
+function deskCard() {
+  if (!onDesk()) return '';
+  if (!phone) { phone = {}; fetch('api/phone').then((r) => r.json()).then((v) => { phone = v; render(); }).catch(() => {}); }
+  const url = phone.urls && phone.urls[0];
+  return '<aside class="desk" aria-label="Get Pathline Monitor on a phone"><img src="icon.svg" alt="" width="48" height="48"><h2>Pathline Monitor is for your phone</h2>' +
+    '<p>Scan this with the phone\'s camera, on the workshop Wi-Fi, then add it to the Home Screen.</p>' +
+    (phone.qr ? '<div class="qr">' + phone.qr + '</div>' : '<div class="qr empty">' + (phone.urls ? 'This PC has no network address' : '') + '</div>') +
+    (url ? '<p class="url mono">' + esc(url.replace(/\/$/, '')) + '</p>' : '') +
+    '<p class="small"><b>iPhone</b>: Share, then Add to Home Screen.<br><b>Android</b>: menu, then Add to Home screen.</p></aside>';
+}
 const canPush = window.isSecureContext && 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
 
 function phoneCard() {
@@ -173,7 +209,8 @@ function prefsView() {
   const sw = (k, t, s) => '<div class="set"><span class="body">' + t + '<span class="s">' + s + '</span></span><button role="switch" class="sw" aria-checked="' + !!p[k] + '" aria-label="' + t + '" data-a="pref" data-v="' + k + '"></button></div>';
   const M = S ? S.machines : [];
   return bar('<h1>Settings</h1><div class="sub">Alerts on this phone</div>', '') +
-    '<main class="main"><section class="sec"><div class="sec-h">This phone</div><div class="list">' + phoneCard() + '</div></section>' +
+    '<main class="main"><section class="sec"><div class="sec-h">This phone</div><div class="list">' + phoneCard() + '</div>' +
+    (!standalone && !onDesk() ? '<div class="list"><div class="set"><span class="body">Add to Home Screen<span class="s">Opens full screen, like an app</span></span>' + (installPrompt ? '<button class="btn-primary" data-a="install">Install</button>' : '<button class="tb" data-a="howInstall">How</button>') + '</div>' + (ui.howInstall ? '<div class="hint">' + installSteps() + '</div>' : '') + '</div>' : '') + '</section>' +
     '<section class="sec"><div class="sec-h">Notify me when</div><div class="list">' +
     sw('done', 'A job finishes', 'With how long it took and what\'s queued next') +
     sw('queue', 'A queue runs out', 'The machine has nothing left to do') +
@@ -201,6 +238,9 @@ function render() {
   const y = window.scrollY;
   const focus = document.activeElement && document.activeElement.dataset ? [document.activeElement.dataset.a, document.activeElement.dataset.v] : null;
   $app.innerHTML = v + tabs();
+  const desk = deskCard();
+  let $desk = document.getElementById('desk');
+  if (!desk) { if ($desk) $desk.remove(); } else { if (!$desk) { $desk = document.createElement('div'); $desk.id = 'desk'; document.body.appendChild($desk); } if ($desk.innerHTML !== desk) $desk.innerHTML = desk; }
   window.scrollTo(0, y);
   // keep keyboard focus on the same control across the once-a-second redraw
   if (focus && focus[0]) { const el = $app.querySelector('[data-a="' + focus[0] + '"]' + (focus[1] ? '[data-v="' + CSS.escape(focus[1]) + '"]' : '')); if (el) el.focus(); }
@@ -317,6 +357,7 @@ function fromHash() {
   render();
 }
 window.addEventListener('popstate', fromHash);
+window.addEventListener('resize', () => render());
 
 const H = {
   go: (v) => { if (ui.view === 'alerts' && v !== 'alerts') markSeen(true); ui.view = v; ui.machine = null; route(); },
@@ -328,6 +369,9 @@ const H = {
   mute: (v) => { ui.prefs.mute = { ...(ui.prefs.mute || {}), [v]: !(ui.prefs.mute || {})[v] }; render(); saveDevice().catch(() => {}); },
   pushOn, pushOff, testPush,
   testLocal: () => banner({ kind: 'done', machine: null, title: 'Laser A finished Coasters', body: 'This is how an alert looks and sounds' }, 0),
+  howInstall: () => { ui.howInstall = !ui.howInstall; render(); },
+  installHide: () => { store.set('installHide', true); ui.howInstall = false; render(); },
+  install: async () => { if (!installPrompt) return; installPrompt.prompt(); const c = await installPrompt.userChoice.catch(() => null); installPrompt = null; if (c && c.outcome === 'accepted') store.set('installHide', true); render(); },
   find: async () => { try { await fetch('api/find', { method: 'POST' }); } catch (e) { /* the stream shows the result */ } },
 };
 $app.addEventListener('click', (e) => {

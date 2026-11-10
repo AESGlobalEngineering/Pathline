@@ -1,10 +1,12 @@
 # Pathline Monitor
 
-An internal phone app, for the workshop network only. It shows every Pathline Run machine: what each one is doing, how long the job has left, what's queued, and what finished today. When a job finishes, or a machine is stuck waiting for someone, the phone shows an alert with a tone.
+A phone app for the workshop network only. It shows every Pathline Run machine: what each one is doing, how long the job has left, what's queued, and what finished today. When a job finishes, or a machine is stuck waiting for someone, the phone shows an alert with a tone.
+
+The phones get the app, and the machines' news, from the **Monitor hub**: one always-on PC or Pi on the same network, set up once.
 
 ```
-Pathline Run (each machine) ◀──HTTP 8470──  Pathline Monitor service  ──HTTP 8480──▶  phones on the
-                                             (one workshop PC or Pi)                  workshop Wi-Fi
+Pathline Run (each machine) ◀──HTTP 8470──  Monitor hub              ──HTTP 8480──▶  the app, on phones
+                                             (one workshop PC or Pi)                  on the workshop Wi-Fi
 ```
 
 It only watches. Nothing on the phone starts, pauses or moves a machine on: a laser is started by someone standing at it. Nothing leaves the workshop network.
@@ -22,7 +24,17 @@ It only watches. Nothing on the phone starts, pauses or moves a machine on: a la
 
 Each phone chooses which of these it gets (Settings), can mute single machines, and can set quiet hours (18:00 to 07:00, no tone).
 
-## Set up
+## Get it on a phone
+
+1. On the hub PC, open `http://localhost:8480`. It shows a QR code for the phones (the hub's window also prints the address, for example `http://192.168.1.20:8480`).
+2. On the phone, on the workshop Wi-Fi, scan the QR code with the camera, or type the address.
+3. Add it to the Home Screen, so it opens full screen like an app, one tap away:
+   - **iPhone**: in Safari, tap **Share**, then **Add to Home Screen**.
+   - **Android**: in Chrome, tap the menu, then **Add to Home screen** (**Install app** where Chrome offers it).
+
+The app shows the same steps until it's on the Home Screen (**How**, at the top of Machines, and in Settings).
+
+## Set up the hub (once)
 
 On a PC or Raspberry Pi that's always on, on the same network as the machines:
 
@@ -31,7 +43,7 @@ On a PC or Raspberry Pi that's always on, on the same network as the machines:
 | **Windows PC** | **[⬇ Pathline-Monitor-Windows.zip](https://github.com/AESGlobalEngineering/Pathline/releases/download/pathlinemonitor/Pathline-Monitor-Windows.zip)** | Unzip it, then double-click **Start Pathline Monitor.cmd** and leave its window open. Node.js is inside: nothing else to install |
 | **Raspberry Pi**, Linux or Mac | [Pathline-Monitor.zip](https://github.com/AESGlobalEngineering/Pathline/releases/download/pathlinemonitor/Pathline-Monitor.zip) | Unzip it, then `sh start.sh` (needs Node.js 18 or newer: `sudo apt install nodejs`) |
 
-It prints the address for phones, for example `http://192.168.1.20:8480`. To update, unzip a newer download over the old folder: `monitor/data` (the machines it found, phones' choices, alerts) and `monitor/config.json` are kept.
+To update the hub, unzip a newer download over the old folder: `monitor/data` (the machines it found, phones' choices, alerts) and `monitor/config.json` are kept. Phones get the new app the next time they open it.
 
 From a copy of this repository instead (Node.js 18 or newer; Monitor uses Pathline Prepare's machine finder, `src/main/discover.js`, so keep the whole folder):
 
@@ -59,12 +71,7 @@ Machines it finds are kept in `data/found.json`, so a machine that's switched of
 
 `"find": false` turns the network search off.
 
-### On each phone
-
-Open the address it printed, in Safari (iPhone) or Chrome (Android), on the workshop Wi-Fi. To keep it one tap away:
-
-- **iPhone**: Share → **Add to Home Screen**.
-- **Android**: menu → **Add to Home screen**.
+### Alerts on the phone
 
 Alerts show while Pathline Monitor is open on the phone: a banner, a short tone and a buzz. Phones only play sound after a tap, so tap the app once after opening it. **Try it** in Settings shows how an alert looks and sounds.
 
