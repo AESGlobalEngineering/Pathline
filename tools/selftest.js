@@ -152,6 +152,41 @@ async function main() {
       const seq = ops.map((o) => o.ent + o.round).join(' ');
       ok(seq === 'a1 b1 l1 a2 b2 a3 b3', 'repeat runs the whole job, then again; once-only processes once (' + seq + ')');
     }
+    // print and cut: registration marks must be where the head camera (beside the beam) can reach them
+    {
+      const dot = (id, x, y) => ({ id, aci: 5, paths: [{ p: CC.shapes.ellipse(x, y, 2.5, 2.5), c: true }] });
+      const art = { id: 'art', aci: 1, paths: [{ p: CC.shapes.rect(60, 60, 300, 200, 0), c: true }] };
+      const procs = [{ name: 'Cut', proc: 'Cut', power: 80, speed: 20, f: 5000, passes: 1, out: true, aci: [1] }, { ...CC.regProcess(), aci: [5] }];
+      const pc = (marks) => ({ ...pj, regMode: 'nonlinear', entities: [art].concat(marks), processes: procs });
+      const cam = (camX, camY, extra) => ({ id: 'q', type: 'laser', info: { bed: [1300, 900], camX: String(camX), camY: String(camY), f: { camera: true }, ...(extra || {}) } });
+      const q500 = cam(-41.74, -12.99);
+      // the owner's Q500: camera left of and behind the beam, so marks need x ≥ 41.74 + 2, y ≥ 12.99 + 2
+      const R = CC.camReach(q500);
+      ok(Math.abs(R.keep.x0 - 43.74) < 1e-9 && Math.abs(R.keep.y0 - 14.99) < 1e-9 && R.keep.x1 === 1298 && R.keep.y1 === 898, 'Q500 camera reach: marks in x 43.74–1298, y 14.99–898');
+      const x28 = pc([dot('m1', 28, 28), dot('m2', 1269.57, 28), dot('m3', 28, 844.35)]);
+      const far = CC.marksOutOfReach(x28, q500);
+      ok(far.length === 2 && far.every((f) => f.edge === 'left' && f.from === 28 && f.see === 41.7), 'the X28 job: marks 1 and 3 are 28 mm from the left edge, the camera sees from 41.7 mm');
+      const chk = CC.checkJob(x28, q500).find((c) => c.reach);
+      ok(chk && chk.block && /Mark 1 is 28 mm from the left edge/.test(chk.l), 'out-of-reach marks block Send and say which mark and edge (' + (chk && chk.l) + ')');
+      const sh = CC.reachShift(x28, q500);
+      const moved = { ...x28, entities: x28.entities.map((e) => CC.translate(e, sh.dx, sh.dy)) };
+      ok(sh.dx > 15 && sh.dx < 16.5 && sh.dy === 0 && !CC.marksOutOfReach(moved, q500).length && !CC.checkJob(moved, q500).some((c) => c.block), 'moving the whole job ' + sh.dx + ' mm right brings every mark into reach');
+      // camera on the other side (positive offsets): the limits are at the right and front edges instead
+      const other = cam(35, 20);
+      const RO = CC.camReach(other);
+      ok(RO.keep.x0 === 2 && RO.keep.x1 === 1300 - 35 - 2 && RO.keep.y1 === 900 - 20 - 2, 'positive offsets: marks kept 37 mm from the right and 22 mm from the front');
+      const edges = CC.marksOutOfReach(pc([dot('a', 1290, 400), dot('b', 600, 890), dot('c', 600, 400)]), other).map((f) => f.edge).sort().join(',');
+      ok(edges === 'front,right', 'positive offsets: marks near the right and front edges are flagged (' + edges + ')');
+      const sh2 = CC.reachShift(pc([dot('a', 1290, 400), dot('b', 600, 890), dot('c', 600, 400)]), other);
+      ok(sh2.dx < 0 && sh2.dy < 0, 'positive offsets: the job moves left and back (' + sh2.dx + ', ' + sh2.dy + ')');
+      // marks further apart than the camera can reach: no move can work
+      const wide = pc([dot('m1', 5, 100), dot('m2', 1295, 100), dot('m3', 5, 500)]);
+      const ws = CC.reachShift(wide, q500), wc = CC.checkJob(wide, q500).find((c) => c.block && /too wide/.test(c.l));
+      ok(ws.tooWide === 'x' && wc, 'marks 1290 mm apart: too wide for print and cut with this camera (' + (wc && wc.l) + ')');
+      // nothing changes without a camera offset (camera off, older Run) or on a plotter
+      ok(!CC.camReach(cam(-41.74, -12.99, { f: { camera: false } })) && !CC.camReach({ type: 'laser', info: { bed: [1300, 900] } }) && !CC.camReach({ type: 'plotter', info: { camX: '-40', camY: '-10' } }), 'no camera offset, camera off or a plotter: marks are not checked');
+      ok(!CC.marksOutOfReach({ ...x28, regMode: 'off' }, q500).length, 'registration marks off: nothing is checked');
+    }
     // same-size parts touching side by side are never "inside" each other (a first point on the shared
     // edge, and rounding in the areas, made a part count as a hole of its neighbour and get cut early)
     {

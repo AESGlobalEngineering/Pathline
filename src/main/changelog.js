@@ -5,6 +5,13 @@
 
 module.exports = [
   {
+    version: '1.6.7', date: '10 Nov 2026',
+    added: [
+      'Print and cut: registration marks are checked against where the laser\'s head camera can reach (from the camera offset the machine reports). A mark out of reach is named with its edge and blocks Send; click the warning to move the whole job, marks and artwork together, just far enough. Marks further apart than the camera can reach are reported as too wide. While registration marks are on, the band the camera can\'t reach is shown on the bed.'
+    ],
+    fixed: []
+  },
+  {
     version: '1.6.6', date: '10 Nov 2026',
     added: [],
     fixed: [

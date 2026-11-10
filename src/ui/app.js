@@ -1403,6 +1403,16 @@
         const dsh = this.state.drag && this.state.drag.kind === 'sheet' ? this.state.drag : null;
         kids.push(h('rect', { key: 's', x: x + (dsh ? dsh.x : sh.x), y: dsh ? dsh.y : sh.y, width: sh.w, height: sh.h, strokeWidth: 1.2, vectorEffect: 'non-scaling-stroke', style: { fill: 'var(--sheet)', stroke: 'var(--sheet-line)', filter: 'drop-shadow(0 2px 4px rgba(21,24,30,0.10))' } }));
       }
+      // print and cut: where the head camera can't reach a registration mark
+      // (props.reach from CC.camReach), tinted, with a dashed edge
+      const R = this.props.reach;
+      if (R) {
+        const K = R.keep;
+        const bands = [[0, 0, K.x0, bh], [K.x1, 0, bw - K.x1, bh], [K.x0, 0, K.x1 - K.x0, K.y0], [K.x0, K.y1, K.x1 - K.x0, bh - K.y1]].filter((b) => b[2] > 0.01 && b[3] > 0.01);
+        bands.forEach(([bx, by, w, hh], i) => kids.push(h('rect', { key: 'rb' + i, x: x + bx, y: by, width: w, height: hh, style: { fill: 'var(--warn-soft)', opacity: 0.75, pointerEvents: 'none' } })));
+        kids.push(h('rect', { key: 'rk', x: x + K.x0, y: K.y0, width: K.x1 - K.x0, height: K.y1 - K.y0, fill: 'none', strokeWidth: 1, strokeDasharray: '5 4', vectorEffect: 'non-scaling-stroke', style: { stroke: 'var(--warn)', pointerEvents: 'none' } },
+          h('title', null, 'Registration marks must be inside this line: the camera beside the beam can\'t reach outside it')));
+      }
       if (this.isPlot()) {
         const now = k === 0;
         // drawn on the viewport, outside the bed, so it follows the theme

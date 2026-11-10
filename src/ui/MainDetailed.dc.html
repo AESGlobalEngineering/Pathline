@@ -1320,6 +1320,20 @@ class Component extends DCLogic {
     this.commit({ ...this.state.job, processes }, { record: true });
     this.setState({ procSel: processes.length - 1, edit: {} });
   }
+  // Print and cut: move the whole job, marks and artwork together (so the print
+  // still lines up), just far enough for the head camera to reach every mark.
+  // The printed sheet then goes that much further over on the bed too.
+  moveIntoReach() {
+    const job = this.state.job, m = this.machine();
+    const sh = CC.reachShift(job, m);
+    if (sh.tooWide) return LRC.fail(new Error('The registration marks are ' + sh.span + ' mm apart; this laser\'s camera can only reach ' + sh.reach + ' mm, so this job is too wide for print and cut on it'));
+    if (!sh.dx && !sh.dy) return;
+    const entities = job.entities.map((e) => CC.translate(e, sh.dx, sh.dy));
+    const sheet = job.sheet && job.sheet.on ? { ...job.sheet, x: job.sheet.x + sh.dx, y: job.sheet.y + sh.dy } : job.sheet;
+    this.commit({ ...job, entities, sheet }, { record: true });
+    const dir = [sh.dx ? Math.abs(sh.dx) + ' mm ' + (sh.dx > 0 ? 'right' : 'left') : '', sh.dy ? Math.abs(sh.dy) + ' mm ' + (sh.dy > 0 ? 'forward' : 'back') : ''].filter(Boolean).join(' and ');
+    LRC.toast('Moved the job ' + dir + ' so the camera can reach every mark. Place the printed sheet there too.', { kind: 'ok', ms: 7000 });
+  }
   // Move a process in the list (the run order with By process); edits in
   // progress and the open process move with it
   moveProcess(from, to) {
@@ -2125,7 +2139,8 @@ class Component extends DCLogic {
       cls: c.ok ? 'ok' : c.warn ? 'warn' : 'err',
       bg: c.ok ? 'var(--ok-soft)' : c.warn ? 'var(--warn-soft)' : 'var(--err-soft)', fg: c.ok ? 'var(--ok)' : c.warn ? 'var(--warn)' : 'var(--err)',
       // the repeat warning opens Job settings, where it's changed
-      click: c.repeat ? R(() => this.jobSettings()) : noop, cur: c.repeat ? 'pointer' : '', tip: c.repeat ? 'Open Job settings' : ''
+      // the repeat warning opens Job settings; marks out of the camera's reach move the job into reach
+      click: c.repeat ? R(() => this.jobSettings()) : c.reach ? R(() => this.moveIntoReach()) : noop, cur: c.repeat || c.reach ? 'pointer' : '', tip: c.repeat ? 'Open Job settings' : c.reach ? 'Move the whole job (marks and artwork together) where the camera can reach every mark' : ''
     }));
     const outProcs = procs.filter((p) => p.out !== false && (p.aci || []).some((a) => usedAci.has(a))).length;
     const nObj = job.entities.filter((e) => !e.hidden).length;
@@ -2134,6 +2149,8 @@ class Component extends DCLogic {
     // ---- canvas
     const canvasEl = React.createElement(LRC.JobCanvas, {
       job, machine, sel: selIds, tool: S.tool, accent, snap: S.snap, drawAci: this.drawAci(),
+      // print and cut: where the head camera can reach the registration marks
+      reach: isLaser && job.regMode && job.regMode !== 'off' ? CC.camReach(machine) : null,
       canvasRef: (c) => { this.canvas = c; },
       onSelect: (sel) => this.setState({ sel }),
       onCommit: (j, opts, sel) => { this.commit(j, opts, sel); if (S.tool !== 'select' && S.tool !== 'measure') this.setState({ tool: 'select' }); },

@@ -15,6 +15,15 @@ Latest round (28 Oct, final):
 - **Dark mode bed is grey** (`--bed`, `--sheet`, `--bed-grid*` in theme.css). **ACI 7 shows as white in dark mode** (black in light), as in CAD, and so do the marks drawn on the bed (registration marks, engrave hatching, arrows, start points): see the `--aci7*` and `--ink` tokens, and `LRC.aci.hex/fg/stroke` in app.js. Exports (DXF/SVG/PDF) still use real black.
 - **Sample machines and materials from earlier builds are removed on first start** (main.js, tracked by `settings.samplesRemoved`). This is by exact id (trotec, flatbed, laser2, acr-print-3 … brass-1); anything the operator created stays.
 
+Version 1.6.7 (10 Nov):
+- **Registration marks within the head camera's reach** (brief from the Pathline Run session; the X28 job had marks at 28 mm from the left on a Q500 whose camera sits 41.74 mm from the beam). In core.js:
+  - `camReach(machine)` returns `{ see, keep, W, H, camX, camY }` from `info.camX`/`camY` (strings) and `bed`; `keep` is `see` with `REACH_MARGIN` (2 mm). It is null for plotters, `f.camera === false`, or a missing offset.
+  - `marksOutOfReach(job, machine)` lists `{ n, id, edge, from, see, keep }`.
+  - `reachShift(job, machine)` gives the smallest whole-job move `{ dx, dy }`, keeping the job on the bed where possible, or `{ tooWide, span, reach }`.
+  - `checkJob` adds a blocking check (`reach: true`), or a blocking "too wide" check.
+- On the Job page, the check pill runs `moveIntoReach()`: it translates every entity, and the sheet when on, and says to place the printed sheet there too. `JobCanvas` draws the unreachable band from `props.reach`, passed only while registration marks are on.
+- Prepare never places marks itself; they are objects in the drawing given the Registration marks colour, which is why the fix moves the job rather than the marks. HMI-BRIEF §4.6 documents the rule.
+
 Version 1.6.6 (10 Nov):
 - **Inside test for nesting** (`insideOf(inner, innerBox, innerArea, outer, outerBox, outerArea)`), used by `nestDepth` and by `isHole` in `estimate()`. A shape is inside another only when:
   - its box fits within the other's;

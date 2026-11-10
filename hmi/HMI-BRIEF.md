@@ -189,6 +189,7 @@ The operator prints artwork with marks, puts the sheet on the bed, and the camer
 - `mode: "nonlinear"` (3 marks): **non-linear**. The intent is to correct uneven distortion as well. The method is the HMI's choice (§11).
 - Apply the transform to every coordinate of every later step (paths, boxes, gaps). Pathline never sends more marks than the mode uses (such jobs are blocked). If there are fewer marks than the mode needs, Pathline only warns, so handle it: refuse to start, or fall back.
 - Machine settings that matter: `markType` (Dot), `markD`, `camX`/`camY` (camera offset from the beam), `calibrated` (date text), and `markTime` (seconds to read one mark, used by Pathline's estimate, default 1.5).
+- **Camera reach (from Pathline Prepare 1.6.7):** Prepare uses `camX`/`camY` and `bed` to keep marks where the camera can read them. A mark at (x, y) is read with the laser at (x + camX, y + camY), so marks must lie in x max(0, −camX)…min(W, W − camX) and y max(0, −camY)…min(H, H − camY). Prepare keeps them a further 2 mm inside. If a mark is outside, Send is blocked with the mark and edge named, and one click moves the whole job (marks and artwork together) into reach. The unreachable band is drawn on the bed while registration marks are on. Without `camX`/`camY` (or with `f.camera` false) nothing is checked.
 
 ## 5. Machine settings (`GET /machine`)
 

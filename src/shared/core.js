@@ -1902,6 +1902,72 @@
       return { id: e.id, x: (b.x0 + b.x1) / 2, y: (b.y0 + b.y1) / 2, d: Math.max(b.x1 - b.x0, b.y1 - b.y0) };
     });
   }
+  // Where the head camera can read a mark. Pathline Run reads a mark at (x, y)
+  // with the laser at (x + camX, y + camY), and the laser has to stay on the
+  // bed, so a mark must lie in x max(0, −camX)…min(W, W − camX) and
+  // y max(0, −camY)…min(H, H − camY), kept REACH_MARGIN in from those limits
+  // (Run re-centres on each mark and looks for later ones where the first
+  // predict them). null for a plotter, a camera switched off, or a machine
+  // that doesn't report the offset (older Run): nothing is checked then.
+  const REACH_MARGIN = 2;
+  function camReach(machine) {
+    if (!machine || machine.type === 'plotter') return null;
+    const info = machine.info || {};
+    if (info.f && info.f.camera === false) return null;
+    const cx = parseFloat(info.camX), cy = parseFloat(info.camY);
+    if (!Number.isFinite(cx) || !Number.isFinite(cy)) return null;
+    const [W, H] = bedOf(machine);
+    // what the camera can see, and the area marks are kept in
+    const see = { x0: Math.max(0, -cx), x1: Math.min(W, W - cx), y0: Math.max(0, -cy), y1: Math.min(H, H - cy) };
+    const keep = { x0: see.x0 + REACH_MARGIN, x1: see.x1 - REACH_MARGIN, y0: see.y0 + REACH_MARGIN, y1: see.y1 - REACH_MARGIN };
+    return { see, keep, W, H, camX: cx, camY: cy };
+  }
+  const round1 = (v) => Math.round(v * 10) / 10;
+  // a move rounded away from zero to 0.1 mm, so it never falls just short
+  const roundOut = (v) => Math.sign(v) * Math.ceil(Math.abs(v) * 10 - 1e-9) / 10;
+  // The registration marks the camera can't reach, numbered as in the job:
+  // [{ n, id, x, y, edge, from, see, keep }] — `from` is how far the mark is
+  // from that edge of the bed, `see` how far in the camera can first see,
+  // `keep` where marks should be (the margin added).
+  function marksOutOfReach(job, machine) {
+    const R = camReach(machine);
+    if (!R || !job.regMode || job.regMode === 'off') return [];
+    const out = [];
+    regMarks(job, machine).forEach((m, i) => {
+      const n = i + 1;
+      if (m.x < R.keep.x0) out.push({ n, id: m.id, x: m.x, y: m.y, edge: 'left', from: round1(m.x), see: round1(R.see.x0), keep: round1(R.keep.x0) });
+      if (m.x > R.keep.x1) out.push({ n, id: m.id, x: m.x, y: m.y, edge: 'right', from: round1(R.W - m.x), see: round1(R.W - R.see.x1), keep: round1(R.W - R.keep.x1) });
+      if (m.y < R.keep.y0) out.push({ n, id: m.id, x: m.x, y: m.y, edge: 'back', from: round1(m.y), see: round1(R.see.y0), keep: round1(R.keep.y0) });
+      if (m.y > R.keep.y1) out.push({ n, id: m.id, x: m.x, y: m.y, edge: 'front', from: round1(R.H - m.y), see: round1(R.H - R.see.y1), keep: round1(R.H - R.keep.y1) });
+    });
+    return out;
+  }
+  // How far to move the whole job (marks and artwork together, so the print
+  // still lines up) to bring every mark into the camera's reach, as little as
+  // possible and keeping the job on the bed where it can.
+  // { dx, dy } (0, 0 when nothing needs to move), or { tooWide: 'x' | 'y',
+  // span, reach } when the marks are further apart than the camera can reach.
+  function reachShift(job, machine) {
+    const R = camReach(machine);
+    const marks = R && job.regMode && job.regMode !== 'off' ? regMarks(job, machine) : [];
+    if (!marks.length) return { dx: 0, dy: 0 };
+    const mb = { x0: Math.min(...marks.map((m) => m.x)), x1: Math.max(...marks.map((m) => m.x)), y0: Math.min(...marks.map((m) => m.y)), y1: Math.max(...marks.map((m) => m.y)) };
+    const eb = boxOf((job.entities || []).filter((e) => !e.hidden));
+    const axis = (k, lo, hi, m0, m1, e0, e1, size) => {
+      // marks: lo − m0 ≤ d ≤ hi − m1; the job on the bed: −e0 ≤ d ≤ size − e1
+      const a = lo - m0, b = hi - m1;
+      if (a > b + 1e-9) return { tooWide: k, span: round1(m1 - m0), reach: round1(hi - lo) };
+      const a2 = Math.max(a, -e0), b2 = Math.min(b, size - e1);
+      const [p, q] = a2 <= b2 + 1e-9 ? [a2, b2] : [a, b];
+      return { d: Math.min(Math.max(0, p), q) };
+    };
+    const x = axis('x', R.keep.x0, R.keep.x1, mb.x0, mb.x1, eb.x0, eb.x1, R.W);
+    if (x.tooWide) return x;
+    const y = axis('y', R.keep.y0, R.keep.y1, mb.y0, mb.y1, eb.y0, eb.y1, R.H);
+    if (y.tooWide) return y;
+    return { dx: roundOut(x.d), dy: roundOut(y.d) };
+  }
+
   // A new reg-mark process (added when reg marks are switched on).
   const regProcess = () => ({ name: 'Registration marks', proc: REG_PROC, power: 0, speed: 0, f: 0, passes: 1, dash: false, dl: 5, gl: 2, out: true, aci: [], adv: {}, src: 'job' });
   // A job's processes after taking a material's presets: the job's own
@@ -1967,6 +2033,17 @@
         if (have > need) out.push({ ok: false, block: true, l: 'Registration marks · ' + have + ' found, ' + name + ' uses ' + need + ' — remove ' + (have - need) });
         else out.push(have === need ? { ok: true, l: 'Registration marks · ' + have + ' · ' + name }
           : { ok: false, warn: true, l: 'Registration marks · ' + have + ' of ' + need + ' — give the marks a Registration marks colour' });
+        // the head camera has to reach every mark (it sits beside the beam):
+        // the job can't be sent until they're in reach; Move into reach fixes it
+        const far = marksOutOfReach(job, machine);
+        if (far.length) {
+          const sh = reachShift(job, machine);
+          const f = far[0];
+          const more = far.length > 1 ? ' (and ' + (far.length - 1) + ' more)' : '';
+          out.push(sh.tooWide
+            ? { ok: false, block: true, l: 'Registration marks are ' + sh.span + ' mm apart ' + (sh.tooWide === 'x' ? 'across' : 'front to back') + '; this laser\'s camera can only reach ' + sh.reach + ' mm — too wide for print and cut on this laser' }
+            : { ok: false, block: true, reach: true, l: 'Mark ' + f.n + ' is ' + f.from + ' mm from the ' + f.edge + ' edge; this laser\'s camera can only see from ' + f.see + ' mm' + more + ' — click to move the job into reach' });
+        }
       }
     }
     return out;
@@ -1977,7 +2054,7 @@
     uid, EMPTY_BOX, growBox, entityBox, boxOf, boxValid, boxW, boxH,
     mapEntity, translate, scaleAbout, rotateAbout, polyLen, polyArea, pointInPoly, distToEntity, isClosedPts, cleanPath, shapes,
     processOrder, processOfAci, toolSlot, toolRank, polyTime, travelTime, rasterSpans, orderPaths,
-    estimate, headAt, fmtDuration, fmtLen, fmtArea, checkJob, regMarks, regMarkAci, regProcess, withPresets, ensureRegProcess, isRegProc, REG_PROC, REG_NEEDED,
+    estimate, headAt, fmtDuration, fmtLen, fmtArea, checkJob, regMarks, regMarkAci, camReach, marksOutOfReach, reachShift, regProcess, withPresets, ensureRegProcess, isRegProc, REG_PROC, REG_NEEDED,
     cutOrderOf, CUT_ORDER_DEFAULT, commonLines, bedOf, bedCount, defaultPresets, DEFAULTS,
     rasterIslands, engraveScan, ENGRAVE_DIRS, DPI_STEPS, starterPresets, nestRects, THERMAL, thermalKey, thermalOf, colourOf, absorptionOf, thermalSim, metalPresets, presetsFor
   };
