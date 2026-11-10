@@ -5,6 +5,8 @@
  *
  * Rules of use
  * - Colours: always a token (var(--…)), never a hex, except ACI colours, which are data.
+ * - Red (--action) only acts: Send to machine, Save, a dialog's main button. Selection and
+ *   on/off state use the ink accent (--accent), because red is ACI 1 and the error colour.
  * - Controls are 36 px tall (--ctl-h); dense table cells too. Disabled = opacity 0.45.
  * - Text: sans for words, mono (.mono / .num) for numbers and units only.
  * - Page switches (Job | Simulation, Machines | Materials) and value choices use .seg.
@@ -45,12 +47,20 @@
   --text-3: #5B6370;
   --text-4: #8A919C;
 
-  /* accent = Path red. --accent fills carry white text; --accent-fg is red text/icons on surfaces */
-  --accent: #D62828;
-  --accent-hover: #BC1F1F;
-  --accent-fg: #C21F1F;
-  --accent-soft: #FCECEB;
-  --accent-ring: rgba(214, 40, 40, 0.22);
+  /* action = Path red: the brand mark and the few controls that act on the machine or the job
+     (Send to machine, Save, a dialog's main button, send progress). Red is also ACI 1 (the usual
+     cut colour) and the error colour, so it is never used for selection or state. */
+  --action: #D62828;
+  --action-hover: #BC1F1F;
+  --on-action: #FFFFFF;
+
+  /* accent = ink: selection, on/off state, focus, current tab, links, sliders and checkboxes.
+     --accent fills carry --on-accent text; --accent-fg is ink text/icons on surfaces */
+  --accent: #111214;
+  --accent-hover: #2C2F36;
+  --accent-fg: #111214;
+  --accent-soft: #E9EBEF;
+  --accent-ring: rgba(17, 18, 20, 0.16);
   --on-accent: #FFFFFF;
 
   /* status */
@@ -123,12 +133,16 @@
   --text-3: #9AA1AC;
   --text-4: #727985;
 
-  --accent: #D62828;
-  --accent-hover: #E5332D;
-  --accent-fg: #FF6159;
-  --accent-soft: rgba(239, 59, 51, 0.16);
-  --accent-ring: rgba(239, 59, 51, 0.35);
-  --on-accent: #FFFFFF;
+  --action: #D62828;
+  --action-hover: #E5332D;
+  --on-action: #FFFFFF;
+
+  --accent: #E6E8EB;
+  --accent-hover: #FFFFFF;
+  --accent-fg: #F2F3F5;
+  --accent-soft: #2A2D33;
+  --accent-ring: rgba(230, 232, 235, 0.24);
+  --on-accent: #111214;
 
   --ok: #5CCB95;
   --ok-soft: rgba(48, 164, 108, 0.16);
@@ -207,8 +221,10 @@ svg.i { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-widt
 .tb.block { width: 100%; }
 .tb.dashed { border-style: dashed; color: var(--text-2); }
 
-.btn-primary { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: var(--ctl-h); padding: 0 16px; border: 0; border-radius: var(--ctl-r); background: var(--accent); color: var(--on-accent); font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; text-decoration: none; box-sizing: border-box; }
-.btn-primary:hover { background: var(--accent-hover); color: var(--on-accent); }
+.btn-primary { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: var(--ctl-h); padding: 0 16px; border: 0; border-radius: var(--ctl-r); background: var(--action); color: var(--on-action); font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; text-decoration: none; box-sizing: border-box; }
+.btn-primary:hover { background: var(--action-hover); color: var(--on-action); }
+/* nothing to act on yet: neutral, not a faded red (which reads as an error) */
+.btn-primary:disabled, .btn-primary:disabled:hover { background: var(--sunken); color: var(--text-4); opacity: 1; }
 .btn-primary.lg { height: 44px; padding: 0 22px; font-size: 14px; }
 .btn-danger { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: var(--ctl-h); padding: 0 16px; border: 0; border-radius: var(--ctl-r); background: var(--err-dot); color: #FFFFFF; font-weight: 600; cursor: pointer; }
 .btn-link { display: inline-flex; align-items: center; gap: 4px; height: 30px; padding: 0; border: 0; background: transparent; color: var(--accent-fg); font-weight: 500; cursor: pointer; }
@@ -288,6 +304,7 @@ select.dd option { background: var(--surface); color: var(--text); }
 .sw { width: 40px; height: 24px; flex: none; border: 0; border-radius: 12px; padding: 3px; box-sizing: border-box; background: var(--track); display: inline-flex; justify-content: flex-start; cursor: pointer; transition: background 0.12s; }
 .sw::after { content: ''; width: 18px; height: 18px; border-radius: 50%; background: var(--knob); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3); }
 .sw[aria-checked="true"], .sw.on { background: var(--accent); justify-content: flex-end; }
+.sw[aria-checked="true"]::after, .sw.on::after { background: var(--on-accent); }
 
 /* ------------------------------------------------------------ containers */
 .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--card-r); }
@@ -313,7 +330,7 @@ select.dd option { background: var(--surface); color: var(--text); }
 .pill.check::before { display: none; }
 
 .tag { display: inline-flex; align-items: center; height: 20px; padding: 0 6px; border-radius: 4px; font-size: 11px; font-weight: 600; white-space: nowrap; flex: none; background: var(--sunken); color: var(--text-2); }
-.tag.accent { background: var(--accent-soft); color: var(--accent-fg); }
+.tag.accent { background: var(--accent); color: var(--on-accent); }
 .tag.warn { background: var(--warn-soft); color: var(--warn); }
 
 /* machine-type badge (LASER / PLOTTER) */
@@ -333,3 +350,66 @@ select.dd option { background: var(--surface); color: var(--text); }
 
 /* the canvas/scene viewport behind the bed */
 .viewport { background-color: var(--canvas); background-image: radial-gradient(var(--canvas-dot) 1px, transparent 1px); background-size: 16px 16px; }
+
+/* ------------------------------------------------------------ loading screen
+   Shown while a page reads its data. Fades in only after 120 ms, so a fast load
+   never flashes; a skeleton in the page's own layout, with a slow shimmer. */
+.loading-screen { position: fixed; inset: 56px 0 0 0; z-index: 25; display: flex; background: var(--bg); animation: ld-in 0.24s cubic-bezier(0.23, 1, 0.32, 1) 0.12s both; }
+.loading-screen .ld-col { flex: none; display: flex; flex-direction: column; gap: 12px; padding: 16px; background: var(--surface); box-sizing: border-box; }
+.loading-screen .ld-col.l { border-right: 1px solid var(--line); }
+.loading-screen .ld-col.r { border-left: 1px solid var(--line); }
+.loading-screen .ld-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 16px; padding: 20px; box-sizing: border-box; }
+.loading-screen .ld-card { display: flex; flex-direction: column; gap: 12px; padding: 16px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--card-r); }
+.loading-screen .ld-row { display: flex; align-items: center; gap: 10px; }
+/* one shimmer for the whole screen: every block shows a slice of the same sweep (background
+   fixed to the viewport), so wide and narrow blocks move together instead of each on its own clock */
+.skel { display: block; flex: none; height: 12px; border-radius: 6px; background-color: var(--skel);
+  background-image: linear-gradient(100deg, transparent 40%, var(--shimmer) 50%, transparent 60%); background-size: 200vw 100%; background-attachment: fixed; background-repeat: no-repeat;
+  animation: skel-sweep 1.8s linear infinite; }
+.skel.ctl { height: var(--ctl-h); border-radius: var(--ctl-r); }
+.skel.pill { border-radius: 999px; }
+.loading-screen .ld-bar { display: flex; align-items: center; gap: 8px; flex: none; padding: 0 10px; background: var(--surface); box-sizing: border-box; }
+.loading-screen .ld-sep { width: 1px; height: 24px; margin: 0 4px; background: var(--line); flex: none; }
+.loading-screen .ld-hr { height: 1px; background: var(--line); flex: none; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+@keyframes ld-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes skel-sweep { from { background-position: 100vw 0; } to { background-position: -100vw 0; } }
+:root { --skel: #E6E8EC; --shimmer: rgba(255, 255, 255, 0.7); }
+:root[data-theme="dark"] { --skel: #22252A; --shimmer: rgba(255, 255, 255, 0.05); }
+
+/* ------------------------------------------------------------ motion
+   Quick and quiet: this is a tool used all day. State changes ease (120 ms), things
+   that appear ease in from where they come from (140-200 ms, ease-out), nothing
+   bounces, and everything stops under prefers-reduced-motion. */
+:root { --ease-out: cubic-bezier(0.23, 1, 0.32, 1); }
+.tb, .ib, .dd, .btn-primary, .btn-danger, .btn-link, .list-item, .fld, .cell, .pop .opt, .menu-item, .seg > *, .tabs > *, .grip, .tag, .pill {
+  transition: background-color 0.12s ease-out, border-color 0.12s ease-out, color 0.12s ease-out, box-shadow 0.12s ease-out, opacity 0.12s ease-out, transform 0.1s ease-out;
+}
+/* press: a small give under the pointer */
+.tb:active:not(:disabled), .btn-primary:active:not(:disabled), .btn-danger:active:not(:disabled), .ib:active:not(:disabled) { transform: scale(0.97); }
+/* switch: the knob slides (pages also set justify-content inline; the knob moves by transform instead) */
+.sw { justify-content: flex-start !important; transition: background-color 0.16s ease-out; }
+.sw::after { transition: transform 0.18s var(--ease-out), background-color 0.16s ease-out; }
+.sw[aria-checked="true"]::after, .sw.on::after { transform: translateX(16px); }
+/* menus, dropdown lists and popovers drop in from their trigger */
+.pop { animation: pop-in 0.14s var(--ease-out); transform-origin: top center; }
+@keyframes pop-in { from { opacity: 0; transform: translateY(-4px) scale(0.98); } to { opacity: 1; transform: none; } }
+/* a panel that opens in place (process settings, advanced rows, colour pickers) */
+.reveal { animation: reveal-in 0.2s var(--ease-out); }
+@keyframes reveal-in { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+/* empty states settle in once */
+.empty { animation: reveal-in 0.28s var(--ease-out); }
+/* chevrons that flip when their section opens */
+[aria-expanded] > svg.i, .adv-btn svg.i { transition: transform 0.18s var(--ease-out); }
+/* a status that is still being checked breathes */
+.pill.busy .dot, .pill.busy .ms-dot { animation: busy-dot 1.2s ease-in-out infinite; }
+@keyframes busy-dot { 50% { opacity: 0.25; } }
+
+/* motion off (page still settling, hidden window, or a screenshot check): nothing is caught mid-fade */
+:root[data-motion="off"] *:not(.loading-screen), :root[data-motion="off"] *::before, :root[data-motion="off"] *::after { animation: none !important; transition: none !important; }
+/* (the loading screen keeps its delayed fade even then, so a fast load never flashes it) */
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
+  .skel { background-image: none; }
+}

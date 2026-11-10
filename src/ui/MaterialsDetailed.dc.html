@@ -22,6 +22,8 @@
 .aci-opt{display:inline-flex;align-items:center;gap:6px;height:var(--ctl-h);padding:0 10px 0 7px;border:0;border-radius:var(--ctl-r);cursor:pointer;color:var(--text)}
 .tg-cell{flex:1;height:var(--ctl-h);border:0;border-radius:6px;cursor:pointer}
 .tg-range{display:grid;grid-template-columns:64px repeat(3,minmax(0,1fr));gap:6px 10px;align-items:center;max-width:520px}
+/* advanced settings toggle at the end of each process row: open = ink tint */
+.adv-btn[aria-expanded="true"]{background:var(--accent-soft);color:var(--text)}
 .fld-col{display:flex;flex-direction:column;gap:6px;min-width:0}
 /* theme.css .dd:disabled / .cell:disabled use the background shorthand, which drops the
    native-select chevron in light and tiles it in dark; restore it for disabled selects */
@@ -46,7 +48,6 @@ select.dd:disabled{background-color:var(--sunken);background-repeat:no-repeat;ba
       </div>
       <div style="display: flex; flex-direction: column; line-height: 1.25">
         <h1 class="h-page">Material library</h1>
-        <span class="lbl">{{libCount}}</span>
       </div>
     </div>
     <span class="spacer"></span>
@@ -58,6 +59,11 @@ select.dd:disabled{background-color:var(--sunken);background-repeat:no-repeat;ba
     <button class="tb" onClick="{{exportLib}}" title="Save the whole library to a file"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.export}}"></path></svg>Export</button>
     <button class="btn-primary" onClick="{{save}}" disabled="{{clean}}" style="padding: 0 20px">Save</button>
   </header>
+
+  <!-- ===== Loading (while the page reads its data): the page's own panels with the content greyed ===== -->
+  <sc-if value="{{loading}}" hint-placeholder-val="{{false}}">
+    <div class="loading-screen" role="status" aria-live="polite"><span class="sr-only">Loading…</span><div class="ld-col l" style="width: 300px; gap: 8px; padding: 14px"><span class="skel ctl" style="width: 100%"></span><span class="skel ctl" style="width: 100%"></span><span style="height: 8px"></span><div class="ld-row" style="justify-content: space-between; padding: 6px 10px 0"><span class="skel" style="width: 56px; height: 10px"></span><span class="skel" style="width: 10px; height: 10px"></span></div><div class="ld-row" style="padding: 7px 10px"><span class="skel" style="width: 26px; height: 26px"></span><span style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px"><span class="skel" style="width: 58%"></span><span class="skel" style="width: 40%; height: 9px"></span></span></div><div class="ld-row" style="padding: 7px 10px"><span class="skel" style="width: 26px; height: 26px"></span><span style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px"><span class="skel" style="width: 50%"></span><span class="skel" style="width: 40%; height: 9px"></span></span></div><div class="ld-row" style="justify-content: space-between; padding: 6px 10px 0"><span class="skel" style="width: 56px; height: 10px"></span><span class="skel" style="width: 10px; height: 10px"></span></div><div class="ld-row" style="padding: 7px 10px"><span class="skel" style="width: 26px; height: 26px"></span><span style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px"><span class="skel" style="width: 50%"></span><span class="skel" style="width: 40%; height: 9px"></span></span></div><div class="ld-row" style="justify-content: space-between; padding: 6px 10px 0"><span class="skel" style="width: 56px; height: 10px"></span><span class="skel" style="width: 10px; height: 10px"></span></div><div class="ld-row" style="padding: 7px 10px"><span class="skel" style="width: 26px; height: 26px"></span><span style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px"><span class="skel" style="width: 62%"></span><span class="skel" style="width: 40%; height: 9px"></span></span></div><div class="ld-row" style="padding: 7px 10px"><span class="skel" style="width: 26px; height: 26px"></span><span style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px"><span class="skel" style="width: 46%"></span><span class="skel" style="width: 40%; height: 9px"></span></span></div><span style="flex: 1"></span><span class="skel ctl" style="width: 100%"></span></div><div class="ld-main"><div class="ld-card ld-row" style="flex-direction: row; align-items: flex-start; gap: 16px"><span class="skel" style="width: 64px; height: 64px"></span><span style="flex: 1; display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 12px"><span class="skel" style="width: 40px; height: 10px"></span><span class="skel" style="width: 60px; height: 10px"></span><span class="skel" style="width: 44px; height: 10px"></span><span class="skel ctl" style="width: 100%"></span><span class="skel ctl" style="width: 100%"></span><span class="skel ctl" style="width: 100%"></span></span></div><div class="ld-card" style="padding: 0; gap: 0"><div class="ld-row" style="gap: 20px; height: 50px; padding: 0 16px; border-bottom: 1px solid var(--line)"><span class="skel" style="width: 110px; height: 22px"></span><span class="skel" style="width: 100px; height: 22px"></span><span class="skel ctl" style="width: 86px"></span></div><div class="ld-row" style="height: 36px; padding: 0 16px; border-bottom: 1px solid var(--line)"><span class="skel" style="width: 32%; height: 9px"></span></div><div class="ld-row" style="height: 53px; padding: 0 16px; border-bottom: 1px solid var(--line-soft)"><span class="skel" style="width: 16px; height: 16px"></span><span class="skel" style="width: 18px; height: 18px"></span><span class="skel ctl" style="width: 220px"></span><span class="skel ctl" style="width: 112px"></span><span class="skel ctl" style="width: 60px"></span><span class="skel ctl" style="width: 80px"></span><span class="skel ctl" style="width: 92px"></span><span class="skel ctl" style="width: 112px"></span><span class="skel ctl" style="width: 92px"></span></div><div class="ld-row" style="height: 53px; padding: 0 16px; border-bottom: 1px solid var(--line-soft)"><span class="skel" style="width: 16px; height: 16px"></span><span class="skel" style="width: 18px; height: 18px"></span><span class="skel ctl" style="width: 220px"></span><span class="skel ctl" style="width: 112px"></span><span class="skel ctl" style="width: 60px"></span><span class="skel ctl" style="width: 80px"></span><span class="skel ctl" style="width: 92px"></span><span class="skel ctl" style="width: 112px"></span><span class="skel ctl" style="width: 92px"></span></div><div class="ld-row" style="height: 53px; padding: 0 16px; border-bottom: 1px solid var(--line-soft)"><span class="skel" style="width: 16px; height: 16px"></span><span class="skel" style="width: 18px; height: 18px"></span><span class="skel ctl" style="width: 220px"></span><span class="skel ctl" style="width: 112px"></span><span class="skel ctl" style="width: 60px"></span><span class="skel ctl" style="width: 80px"></span><span class="skel ctl" style="width: 92px"></span><span class="skel ctl" style="width: 112px"></span><span class="skel ctl" style="width: 92px"></span></div><div class="ld-row" style="height: 53px; padding: 0 16px; border-bottom: 1px solid var(--line-soft)"><span class="skel" style="width: 16px; height: 16px"></span><span class="skel" style="width: 18px; height: 18px"></span><span class="skel ctl" style="width: 220px"></span><span class="skel ctl" style="width: 112px"></span><span class="skel ctl" style="width: 60px"></span><span class="skel ctl" style="width: 80px"></span><span class="skel ctl" style="width: 92px"></span><span class="skel ctl" style="width: 112px"></span><span class="skel ctl" style="width: 92px"></span></div><div class="ld-row" style="height: 53px; padding: 0 16px; border-bottom: 1px solid var(--line-soft)"><span class="skel" style="width: 16px; height: 16px"></span><span class="skel" style="width: 18px; height: 18px"></span><span class="skel ctl" style="width: 220px"></span><span class="skel ctl" style="width: 112px"></span><span class="skel ctl" style="width: 60px"></span><span class="skel ctl" style="width: 80px"></span><span class="skel ctl" style="width: 92px"></span><span class="skel ctl" style="width: 112px"></span><span class="skel ctl" style="width: 92px"></span></div><div class="ld-row" style="height: 66px; padding: 0 16px"><span class="skel ctl" style="width: 120px"></span></div></div></div></div>
+  </sc-if>
 
   <div style="flex: 1; display: flex; min-height: 0">
 
@@ -104,7 +110,7 @@ select.dd:disabled{background-color:var(--sunken);background-repeat:no-repeat;ba
         <section aria-label="No materials" class="card empty" style="margin: auto; max-width: 460px">
           <span class="em-icon" aria-hidden="true"><svg class="i" viewBox="0 0 24 24"><path d="{{icons.layers}}"></path></svg></span>
           <h2 class="em-title" style="margin: 0">No materials yet</h2>
-          <span class="em-text">Add the materials you cut, with their power and speed settings for each machine, or import a library exported from another computer.</span>
+          <span class="em-text">Add a material, or import a library.</span>
           <div class="em-actions">
             <button class="tb" onClick="{{importLib}}">Import library</button>
             <button class="btn-primary" onClick="{{newMaterial}}">New material</button>
@@ -166,7 +172,7 @@ select.dd:disabled{background-color:var(--sunken);background-repeat:no-repeat;ba
         <sc-if value="{{isLaser}}" hint-placeholder-val="{{true}}">
           <div style="overflow-x: auto">
             <div role="table" aria-label="Laser processes" style="min-width: 1070px">
-              <div role="row" style="display: grid; grid-template-columns: 46px minmax(150px, 1.2fr) 112px 112px 80px 92px 112px 118px 108px 36px; gap: 10px; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--line)">
+              <div role="row" style="display: grid; grid-template-columns: 46px minmax(150px, 1.2fr) 112px 112px 80px 92px 112px 118px 36px 36px; gap: 10px; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--line)">
                 <span role="columnheader" class="th" title="Output">Out</span>
                 <span role="columnheader" class="th">Name</span>
                 <span role="columnheader" class="th">Process</span>
@@ -175,16 +181,16 @@ select.dd:disabled{background-color:var(--sunken);background-repeat:no-repeat;ba
                 <span role="columnheader" class="th">Speed mm/s</span>
                 <span role="columnheader" class="th">Source</span>
                 <span role="columnheader" class="th">Freq / DPI</span>
-                <span></span>
+                <span role="columnheader" class="th" aria-label="Advanced settings"></span>
                 <span></span>
               </div>
               <sc-for list="{{laserRows}}" as="r" hint-placeholder-count="6">
                 <div data-prow="1" style="border-bottom: 1px solid var(--line-soft); background: {{r.bg}}; transform: {{r.dragT}}; position: relative; z-index: {{r.dragZ}}; box-shadow: {{r.dragSh}}">
-                  <div role="row" style="display: grid; grid-template-columns: 46px minmax(150px, 1.2fr) 112px 112px 80px 92px 112px 118px 108px 36px; gap: 10px; align-items: center; padding: 8px 16px">
+                  <div role="row" style="display: grid; grid-template-columns: 46px minmax(150px, 1.2fr) 112px 112px 80px 92px 112px 118px 36px 36px; gap: 10px; align-items: center; padding: 8px 16px">
                     <span role="cell" style="display: flex; align-items: center; gap: 4px"><button class="grip" onPointerDown="{{r.grip}}" disabled="{{locked}}" aria-label="Drag {{r.name}} up or down" title="Drag to reorder"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="stroke-width: 2.6"><path d="{{icons.grip}}"></path></svg></button><input type="checkbox" checked="{{r.out}}" onChange="{{r.toggleOut}}" disabled="{{locked}}" aria-label="{{r.name}} output" style="width: 18px; height: 18px; margin: 0"></span>
                     <span role="cell" style="display: flex; align-items: center; gap: 6px; min-width: 0">
                       <input class="cell sans" value="{{r.name}}" onChange="{{r.setName}}" disabled="{{locked}}" aria-label="Process name" style="font-weight: 500">
-                      <sc-if value="{{r.edited}}" hint-placeholder-val="{{false}}"><span role="img" aria-label="Edited" style="width: 7px; height: 7px; flex: none; border-radius: 50%; background: {{accent}}"></span></sc-if>
+                      <sc-if value="{{r.edited}}" hint-placeholder-val="{{false}}"><span role="img" aria-label="Edited" title="Changed from the saved preset" style="width: 7px; height: 7px; flex: none; border-radius: 50%; background: var(--warn-dot)"></span></sc-if>
                     </span>
                     <span role="cell">
                       <select class="cell dd" value="{{r.proc}}" onChange="{{r.setProc}}" disabled="{{locked}}" aria-label="{{r.name}} process">
@@ -216,15 +222,14 @@ select.dd:disabled{background-color:var(--sunken);background-repeat:no-repeat;ba
                       <sc-if value="{{r.isEng}}" hint-placeholder-val="{{false}}">{{r.dpiEl}}</sc-if>
                     </span>
                     <span role="cell">
-                      <button class="btn-link" onClick="{{r.toggleAdv}}" aria-expanded="{{r.advOpen}}" style="height: var(--ctl-h); padding: 0 6px">
-                        <svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="transform: rotate({{r.advRot}})"><path d="{{icons.chev}}"></path></svg>Advanced
+                      <button class="ib adv-btn" onClick="{{r.toggleAdv}}" aria-expanded="{{r.advOpen}}" aria-label="Advanced settings for {{r.name}}" title="Advanced settings">
+                        <svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="transform: rotate({{r.advRot}})"><path d="{{icons.chev}}"></path></svg>
                       </button>
                     </span>
                     <span role="cell"><button class="ib" onClick="{{r.more}}" onPointerDown="{{r.hold}}" aria-label="{{r.name}} more actions" title="Hold and drag to reorder; click to move, duplicate or delete" style="cursor: {{r.grab}}; touch-action: none"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="stroke-width: 2.6"><path d="{{icons.more}}"></path></svg></button></span>
                   </div>
                   <sc-if value="{{r.picking}}" hint-placeholder-val="{{false}}">
-                    <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 16px 10px 50px; background: var(--surface-2); border-top: 1px solid var(--line-soft)">
-                      <span class="lbl" style="margin-right: 4px">Colours for {{r.name}}</span>
+                    <div class="reveal" style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 16px 10px 50px; background: var(--surface-2); border-top: 1px solid var(--line-soft)">
                       <sc-for list="{{r.aci}}" as="a" hint-placeholder-count="9">
                         <button class="aci-opt" aria-pressed="{{a.on}}" onClick="{{a.toggle}}" title="{{a.title}}" aria-label="{{a.title}}" disabled="{{a.dis}}" style="background: {{a.bg}}; box-shadow: {{a.ring}}; opacity: {{a.op}}">
                           <span class="chip" aria-hidden="true" style="width: 20px; height: 20px; background: {{a.hex}}"></span>
@@ -238,7 +243,7 @@ select.dd:disabled{background-color:var(--sunken);background-repeat:no-repeat;ba
                     </div>
                   </sc-if>
                   <sc-if value="{{r.advOpen}}" hint-placeholder-val="{{false}}">
-                    <div style="padding: 6px 16px 18px 50px; display: flex; flex-direction: column; gap: 16px">
+                    <div class="reveal" style="padding: 6px 16px 18px 50px; display: flex; flex-direction: column; gap: 16px">
                       <div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px 24px">
                         <sc-for list="{{r.adv}}" as="f" hint-placeholder-count="5">
                           <sc-if value="{{f.isText}}" hint-placeholder-val="{{true}}">
@@ -326,7 +331,7 @@ select.dd:disabled{background-color:var(--sunken);background-repeat:no-repeat;ba
                       <sc-if value="{{r.none}}" hint-placeholder-val="{{false}}"><span class="lbl">None</span></sc-if>
                     </button>
                     <input class="cell sans" value="{{r.name}}" onChange="{{r.setName}}" disabled="{{locked}}" aria-label="Process name" style="font-weight: 500">
-                    <sc-if value="{{r.edited}}" hint-placeholder-val="{{false}}"><span role="img" aria-label="Edited" style="width: 7px; height: 7px; flex: none; border-radius: 50%; background: {{accent}}"></span></sc-if>
+                    <sc-if value="{{r.edited}}" hint-placeholder-val="{{false}}"><span role="img" aria-label="Edited" title="Changed from the saved preset" style="width: 7px; height: 7px; flex: none; border-radius: 50%; background: var(--warn-dot)"></span></sc-if>
                   </span>
                   <span role="cell">
                     <select class="cell dd" value="{{r.tool}}" onChange="{{r.setTool}}" disabled="{{locked}}" aria-label="{{r.name}} tool head">
@@ -348,7 +353,6 @@ select.dd:disabled{background-color:var(--sunken);background-repeat:no-repeat;ba
                 </div>
                 <sc-if value="{{r.picking}}" hint-placeholder-val="{{false}}">
                   <div role="row" style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 16px; background: var(--surface-2); border-bottom: 1px solid var(--line-soft)">
-                    <span class="lbl" style="margin-right: 4px">Colours for {{r.name}}</span>
                     <sc-for list="{{r.aci}}" as="a" hint-placeholder-count="9">
                       <button class="aci-opt" aria-pressed="{{a.on}}" onClick="{{a.toggle}}" title="{{a.title}}" aria-label="{{a.title}}" disabled="{{a.dis}}" style="background: {{a.bg}}; box-shadow: {{a.ring}}; opacity: {{a.op}}">
                         <span class="chip" aria-hidden="true" style="width: 20px; height: 20px; background: {{a.hex}}"></span>
@@ -381,7 +385,6 @@ select.dd:disabled{background-color:var(--sunken);background-repeat:no-repeat;ba
           <section aria-label="Test grid" class="card" style="flex: 2 1 480px; min-width: 0; padding: 16px; display: flex; flex-direction: column; gap: 12px">
             <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px">
               <h2 class="h-sec">Test grid</h2>
-              <span class="lbl">{{tg.blurb}}</span>
               <span style="flex: 1"></span>
               <label style="display: flex; align-items: center; gap: 8px">
                 <span class="lbl">Test</span>
@@ -493,6 +496,8 @@ class Component extends DCLogic {
       .then(([lib, machines, job]) => {
         const want = new URLSearchParams(location.search).get('m') || (job && job.materialId);
         this.setState({ ready: true, lib: JSON.parse(JSON.stringify(lib)), saved: lib, machines, matId: lib.some((m) => m.id === want) ? want : (lib[0] && lib[0].id), tab: job ? job.machineId : null });
+        // arrived from the Job page's empty material box: start a new material
+        if (location.hash === '#new') { history.replaceState(null, '', location.pathname + location.search); this.newMaterial(); }
       })
       .catch(LRC.fail);
     // newer settings from a machine: take them in, except for materials with
@@ -644,7 +649,7 @@ class Component extends DCLogic {
       layers: 'M12 3l9 5-9 5-9-5z M3 13l9 5 9-5'
     };
     const S = this.state;
-    if (!S.ready) return { accent, icons, noop, groups: [], filters: [], hasMat: false, libCount: '' };
+    if (!S.ready) return { loading: true, accent, icons, noop, groups: [], filters: [], hasMat: false, libCount: '' };
     const R = (fn) => this.run(fn);
     const dirty = this.dirty();
     const MACH = { laser: { name: 'Laser', type: 'LASER', tbg: 'var(--badge-laser)' }, plotter: { name: 'Plotter', type: 'PLOTTER', tbg: 'var(--badge-plotter)' } };
@@ -921,7 +926,7 @@ class Component extends DCLogic {
       machTabs, canAddType: !!otherType, addTypeLabel: otherType ? MACH[otherType].name : '',
       addType: () => { this.patchMat((m) => ({ ...m, m: m.m.concat(otherType), presets: { ...m.presets, [otherType]: CC.starterPresets(otherType, m.t) } })); const first = S.machines.find((x) => x.type === otherType); this.setState({ tab: first ? first.id : null }); },
       isLaser, isPlotter: !isLaser,
-      rowCount: rows.length + ' processes' + (machine && !Array.isArray(mat.presets[machine.id]) ? ' · starting values, saved for ' + machine.name + ' once changed' : ''),
+      rowCount: machine && !Array.isArray(mat.presets[machine.id]) ? 'Starting values' : '',
       laserRows, plotRows, tg, heads,
       addProcess: () => this.addProcess(),
       usage: [{ k: 'Jobs sent', v: String(mat.jobs || 0) }, { k: 'Presets', v: String(this.tabMachines(mat).reduce((s, x) => s + CC.presetsFor(mat, x).length, 0)) }, { k: 'Last used', v: mat.last || '—' }],
