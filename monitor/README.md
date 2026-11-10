@@ -24,15 +24,22 @@ Each phone chooses which of these it gets (Settings), can mute single machines, 
 
 ## Set up
 
-On a PC or Raspberry Pi that's always on, on the same network as the machines, with Node.js 18 or newer. Use the whole Pathline folder: Monitor finds machines with Pathline Prepare's own code (`src/main/discover.js`).
+On a PC or Raspberry Pi that's always on, on the same network as the machines:
+
+| For | Download | Then |
+|---|---|---|
+| **Windows PC** | **[⬇ Pathline-Monitor-Windows.zip](https://github.com/AESGlobalEngineering/Pathline/releases/download/pathlinemonitor/Pathline-Monitor-Windows.zip)** | Unzip it, then double-click **Start Pathline Monitor.cmd** and leave its window open. Node.js is inside: nothing else to install |
+| **Raspberry Pi**, Linux or Mac | [Pathline-Monitor.zip](https://github.com/AESGlobalEngineering/Pathline/releases/download/pathlinemonitor/Pathline-Monitor.zip) | Unzip it, then `sh start.sh` (needs Node.js 18 or newer: `sudo apt install nodejs`) |
+
+It prints the address for phones, for example `http://192.168.1.20:8480`. To update, unzip a newer download over the old folder: `monitor/data` (the machines it found, phones' choices, alerts) and `monitor/config.json` are kept.
+
+From a copy of this repository instead (Node.js 18 or newer; Monitor uses Pathline Prepare's machine finder, `src/main/discover.js`, so keep the whole folder):
 
 ```bash
 cd monitor
 npm install
 node server.js
 ```
-
-It prints the address for phones, for example `http://192.168.1.20:8480`.
 
 ### Finding the machines
 
@@ -73,8 +80,8 @@ Phones only deliver alerts to a closed app from an `https://` address they trust
 
 ### Keep it running
 
-- **Windows**: Task Scheduler → Create Task → "Run whether user is logged on or not", trigger **At startup**, action `node` with argument `server.js`, "Start in" the `monitor` folder. Allow Node.js through Windows Firewall on private networks, for port 8480 and for the search (mDNS answers come back to it).
-- **Raspberry Pi**: a systemd service with `WorkingDirectory=/home/pi/Pathline/monitor` and `ExecStart=/usr/bin/node server.js`, `Restart=always`.
+- **Windows**: Task Scheduler → Create Task → "Run whether user is logged on or not", trigger **At startup**, action **Start Pathline Monitor.cmd** from the unzipped folder. The first time it runs, Windows Firewall asks about Node.js: allow private networks, so phones can connect and the search hears Pathline Run's answers.
+- **Raspberry Pi**: a systemd service with `WorkingDirectory=/home/pi/Pathline-Monitor/monitor` and `ExecStart=/usr/bin/node server.js`, `Restart=always`.
 
 ## What it keeps
 
@@ -90,5 +97,6 @@ In `monitor/data/` (left out of git):
 - `lib/watch.js` asks each machine's Pathline Run every 2 s (`GET /api/local/state`, the same data Run's own screen uses, and `GET /api/v1/info` once a minute). It turns the answers into one view per machine, and compares each look with the last to make the alerts in the table above.
 - `server.js` finds machines (`../src/main/discover.js`) and keeps the alerts. It streams the machines and alerts to the app (`GET /api/events`) and serves the app. With https it also sends Web Push.
 - `app/` is the phone app: `app.js` (screens, and the banner and tone for new alerts), `sw.js` (service worker, used with https), `manifest.webmanifest` and the icons. `tools/make-icons.js` redraws the icons from the Pathline mark (run it with Electron).
+- `tools/package.js` lays out the download (`dist/Pathline-Monitor/`: the starters, `monitor/`, the machine finder, and with `--node <node.exe>` Node.js itself). The release workflow ([../.github/workflows/release-monitor.yml](../.github/workflows/release-monitor.yml)) zips it whenever `package.json` has a new version.
 
 `npm test` puts a stand-in Pathline Run through each case and checks which alerts come out.
