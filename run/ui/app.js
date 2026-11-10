@@ -240,14 +240,44 @@ function thumbImg(pkg) {
   }
   return '<img class="bedsvg" src="' + url + '" alt="" draggable="false" style="aspect-ratio:' + W + '/' + H + '">';
 }
+// Under the bed: the head Z axis's state and the height map's key
+function zLine() {
+  const z = S.zaxis;
+  if (!z || !z.enabled) return '';
+  const m = z.mesh;
+  const what = z.following === 'following' ? 'following the sheet' : z.following === 'holding' ? 'holding high (not sure where the head is)' : z.following === 'up' ? 'up' : z.state === 'ready' ? 'ready' : z.state + (z.fault ? ': ' + z.fault : '');
+  const key = m ? '<span style="display:inline-flex;align-items:center;gap:6px"><span style="width:28px;height:8px;border-radius:2px;background:linear-gradient(90deg,hsl(212 70% 50%),hsl(0 0% 92%),hsl(8 75% 50%))"></span>sheet ' + m.min.toFixed(1) + ' to +' + m.max.toFixed(1) + ' mm, steepest ' + (m.slope * 100).toFixed(1) + ' %</span>' : '<span>no height map: Scan height</span>';
+  return '<span class="lbl" style="display:flex;flex-wrap:wrap;align-items:center;gap:12px"><span>Z axis ' + esc(what) + '</span>' + key + '</span>';
+}
+
+// The sheet's height map (Z axis → Scan): a cell per scanned point, blue where the sheet is low,
+// red where it's high (against where focus was set), see-through. Cached by the map's time.
+function meshSvg() {
+  const m = S.zaxis && S.zaxis.mesh;
+  if (!m || !m.h) return '';
+  if (ui.meshSvg && ui.meshSvg.at === m.at) return ui.meshSvg.svg;
+  const span = Math.max(0.2, Math.abs(m.min), Math.abs(m.max));
+  let s = '<g aria-hidden="true" opacity="0.45">';
+  for (let j = 0; j < m.ny; j++) for (let i = 0; i < m.nx; i++) {
+    const v = m.h[j * m.nx + i] / span; // −1 … 1
+    const col = v >= 0 ? 'hsl(8 75% ' + (92 - 42 * v).toFixed(0) + '%)' : 'hsl(212 70% ' + (92 + 42 * v).toFixed(0) + '%)';
+    s += '<rect x="' + (m.x0 + (i - 0.5) * m.dx).toFixed(1) + '" y="' + (m.y0 + (j - 0.5) * m.dy).toFixed(1) + '" width="' + m.dx.toFixed(1) + '" height="' + m.dy.toFixed(1) + '" fill="' + col + '"/>';
+  }
+  s += '</g>';
+  ui.meshSvg = { at: m.at, svg: s };
+  return s;
+}
+
 function bedSvg(pkg, opts = {}) {
   const [W, H] = cfg().bed;
   if (!opts.head && pkg && pkg !== 'loading') return thumbImg(pkg);
   let body = '';
   if (pkg && pkg !== 'loading') {
     if (pkg.sheet) body += '<rect x="' + pkg.sheet.x + '" y="' + pkg.sheet.y + '" width="' + pkg.sheet.w + '" height="' + pkg.sheet.h + '" fill="var(--sheet)" stroke="var(--bed-line)" stroke-width="' + W / 600 + '"/>';
-    body += artSlot(pkg, !!opts.big);
   }
+  // the head Z axis's height map of the sheet, under the artwork
+  if (opts.big) body += meshSvg();
+  if (pkg && pkg !== 'loading') body += artSlot(pkg, !!opts.big);
   // zoomed in, the head ring and markers keep their size on screen
   const r = Math.max(W, H) / 70 / (opts.head ? ui.zoom.k : 1);
   // where an anchored job's top-left corner was pinned (green, as in the design)
@@ -601,12 +631,15 @@ function queueView() {
     '<div style="position:absolute;inset:50px 8px 8px">' + bedSvg(shownPkg, { big: true, head: true }) + '</div>' +
     headReadout(st, isRun) + bedTools() + '</div>' +
     (shown && shownPkg && shownPkg !== 'loading' && shownPkg.anchor ? '<span class="lbl" style="display:flex;align-items:center;gap:8px"><span style="width:10px;height:10px;border-radius:50%;border:2px solid var(--ok-dot);background:var(--bed);flex:none"></span>Anchored at X ' + shownPkg.anchor.x.toFixed(1) + ', Y ' + shownPkg.anchor.y.toFixed(1) + ' mm</span>' : '') +
+    zLine() +
     '</div></div>' +
 
     '<div class="qrun">' +
     '<button class="run-btn" data-a="startPause" aria-label="' + (st.state === 'running' ? 'Pause' : st.state === 'paused' ? 'Resume' : 'Start') + '"' + (!isRun && cantStart ? ' disabled' : '') + ' style="background:' + (st.state === 'running' ? 'var(--pause)' : 'var(--go)') + ';cursor:pointer">' + ic(st.state === 'running' ? ICON.pause : ICON.play, 28) + '</button>' +
     '<button class="run-btn stop" data-a="stop" aria-label="Stop" style="color:var(--err)">' + ic(ICON.stop, 24) + '</button>' +
     '<button class="tb" data-a="frame" style="height:64px;padding:0 18px"' + (!shown || isRun ? ' disabled' : '') + '>' + ic(ICON.frame) + 'Frame</button>' +
+    // the head Z axis: scan the sheet's height under the chosen job
+    (S.zaxis && S.zaxis.enabled ? '<button class="tb" data-a="zScan" style="height:64px;padding:0 18px"' + (!shown || isRun || S.zaxis.state !== 'ready' ? ' disabled' : '') + ' title="The ultrasonic sensor measures the sheet under this job, so the nozzle follows it">' + ic('M4 17c3-4 5-4 8 0s5 4 8 0 M4 11c3-4 5-4 8 0s5 4 8 0') + 'Scan height</button>' : '') +
     '<div style="flex:1 1 280px;min-width:0;display:flex;flex-direction:column;gap:8px">' +
     // the bar, with the percentage complete at its end
     '<div style="display:flex;align-items:center;gap:12px"><div role="progressbar" aria-label="Job progress" aria-valuenow="' + Math.round(frac * 100) + '" aria-valuemin="0" aria-valuemax="100" style="flex:1;height:14px;border-radius:7px;background:var(--sunken);box-shadow:inset 0 0 0 1px var(--line);overflow:hidden"><div style="height:100%;width:' + (frac * 100).toFixed(1) + '%;background:var(--accent)"></div></div>' +
@@ -761,9 +794,11 @@ async function loadNetwork() {
 }
 
 function setupView() {
-  if (!ui.draft) ui.draft = JSON.parse(JSON.stringify(cfg()));
+  // the setup as saved, with the Z axis's defaults filled in (so they show, and aren't "changes")
+  const savedCfg = () => { const c = JSON.parse(JSON.stringify(cfg())); if (S.zaxis && S.zaxis.settings) c.zaxis = { ...S.zaxis.settings, ...(c.zaxis || {}) }; return c; };
+  if (!ui.draft) ui.draft = savedCfg();
   const d = ui.draft;
-  const dirty = JSON.stringify(d) !== JSON.stringify(cfg());
+  const dirty = JSON.stringify(d) !== JSON.stringify(savedCfg());
   const text = (l, path, unit, hint) => '<label class="row"><span>' + l + (hint ? '<span class="hint">' + hint + '</span>' : '') + '</span><span class="fld"><input class="mono" data-f="' + path + '" value="' + esc(get(d, path)) + '"><span class="lbl mono">' + (unit || '') + '</span></span></label>';
   const num = (l, path, unit, hint) => text(l, path, unit, hint).replace('data-f=', 'data-num="1" data-f=');
   // a setting the controller reports: shows its value, and Reset puts it back after typing over it
@@ -885,6 +920,43 @@ function setupView() {
       (busy ? '<div class="warnbox">' + esc(S.status.message || busy) + '</div>' : '') +
       (b && b.points ? boardResult(b) : ''),
     'Lay the checkerboard on the bed at any angle and jog the laser head over its top-left inner corner. Check measures with the bed map on; Calibrate saves a new map. Use Every corner only with a board that is perfectly flat.'));
+  }
+
+  // the head Z axis (an ESP32 moving the whole nozzle, an ultrasonic sensor beside it)
+  if (!isPlotter && cfg().configured) {
+    tabs['Z axis'] = [];
+    const z = d.zaxis || {};
+    const savedOn = !dirty && !!(cfg().zaxis || {}).enabled;
+    const zs = ui.zst || {};
+    const ready = savedOn && S.zaxis && S.zaxis.state === 'ready';
+    const needZ = !ready ? ' disabled title="Switch the Z axis on, save, and wait for it to be ready"' : running() ? ' disabled title="A job is running"' : '';
+    const ro = (l, val) => '<div class="row"><span>' + l + '</span><span class="mono">' + val + '</span></div>';
+    const zPorts = [['', 'Choose…']].concat(ui.ports.filter((p) => !p.trotec).map((p) => [p.path, p.path + (p.label ? ' · ' + p.label : '')]));
+    if (z.port && !zPorts.some(([v]) => v === z.port)) zPorts.push([z.port, z.port + ' · not found now']);
+    tabs['Z axis'].push(card('Z axis', tog('Z axis on', 'zaxis.enabled') + tog('Simulated', 'zaxis.sim') +
+      (z.sim ? '' : '<label class="row"><span>USB port<span class="hint">The ESP32</span></span><select class="cell" data-f="zaxis.port">' + zPorts.map(([v, l]) => '<option value="' + esc(v) + '"' + (v === (z.port || '') ? ' selected' : '') + '>' + esc(l) + '</option>').join('') + '</select></label>') +
+      tog('Dry run (work it out and log it, the nozzle doesn\'t move)', 'zaxis.dry') +
+      ro('State', esc((S.zaxis && S.zaxis.state) || 'off') + (S.zaxis && S.zaxis.fault ? ' · ' + esc(S.zaxis.fault) : '') + (zs.info ? ' · ' + esc(zs.info) : '')) +
+      ro('Nozzle', Number.isFinite(zs.pos) ? zs.pos.toFixed(2) + ' mm down from the top' + (Number.isFinite(z.ref) ? ' (focus at ' + Number(z.ref).toFixed(2) + ')' : '') : '—') +
+      '<div style="display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end">' +
+      '<button class="tb" data-a="z" data-v="jog:-1"' + needZ + ' title="Up 1 mm">▲ 1</button><button class="tb" data-a="z" data-v="jog:-0.1"' + needZ + ' title="Up 0.1 mm">▲ 0.1</button>' +
+      '<button class="tb" data-a="z" data-v="jog:0.1"' + needZ + ' title="Down 0.1 mm">▼ 0.1</button><button class="tb" data-a="z" data-v="jog:1"' + needZ + ' title="Down 1 mm">▼ 1</button>' +
+      '<button class="tb" data-a="z" data-v="up"' + needZ + '>Up</button><button class="tb" data-a="z" data-v="home"' + (savedOn ? '' : ' disabled') + '>Home</button><button class="tb" data-a="z" data-v="read"' + needZ + '>Read height</button></div>',
+    'Moves the whole nozzle. It homes upwards to its end stop when it connects, and goes up whenever a job pauses, stops or Pathline Run isn\'t sure where the head is.'));
+    tabs['Z axis'].push(card('Focus', ro('Focus', Number.isFinite(z.ref) && Number.isFinite(z.dRef) ? 'nozzle at ' + Number(z.ref).toFixed(2) + ' mm, sensor read ' + Number(z.dRef).toFixed(2) + ' mm' : 'not set') +
+      num('Nozzle gap at focus', 'zaxis.gap', 'mm', 'Nozzle tip to sheet') + num('Smallest gap allowed', 'zaxis.gapMin', 'mm') + num('Deepest the nozzle may go', 'zaxis.bottom', 'mm', 'Down from the top') +
+      '<div style="display:flex;justify-content:flex-end"><button class="btn-primary" data-a="z" data-v="focus"' + needZ + '>Set focus here</button></div>',
+    'Jog the laser over the sheet (middle, away from edges), focus the nozzle with the focus gauge using ▲ ▼, then Set focus here. The sensor is brought over the same point to read the height there. A new focus clears the height map.'));
+    const m = S.zaxis && S.zaxis.mesh;
+    tabs['Z axis'].push(card('Height map', ro('Map', m ? m.nx + ' × ' + m.ny + ' points · ' + m.min.toFixed(2) + ' to ' + m.max.toFixed(2) + ' mm · steepest ' + (m.slope * 100).toFixed(1) + ' %' + (m.dropped ? ' · ' + m.dropped + ' dropped' : '') + ' · ' + new Date(m.at).toLocaleString() : 'none: Queue → Scan height') +
+      num('Scan every', 'zaxis.grid', 'mm') + num('Scan past the job by', 'zaxis.margin', 'mm') + num('Drop a reading off from its neighbours by', 'zaxis.tol', 'mm', 'Edges, holes, parts cut') +
+      '<div style="display:flex;justify-content:flex-end"><button class="tb" data-a="z" data-v="clear"' + (m ? '' : ' disabled') + '>Clear map</button></div>',
+    'Queue → Scan height measures the sheet under the chosen job, with the nozzle up. Scan again for each new sheet.'));
+    tabs['Z axis'].push(card('Sensor and axis', num('Sensor offset X', 'zaxis.sensorOffset.0', 'mm', 'Sensor − laser') + num('Sensor offset Y', 'zaxis.sensorOffset.1', 'mm') + tog('Sensor moves with the nozzle', 'zaxis.sensorOnZ') +
+      num('Lift between cuts', 'zaxis.lift', 'mm', 'On longer moves') + num('Axis speed', 'zaxis.vmax', 'mm/s') + num('Axis acceleration', 'zaxis.amax', 'mm/s²') + num('Planned speed', 'zaxis.planVmax', 'mm/s', 'Below the axis speed, so it can catch up'),
+    'PONO 18GM40-150 (40–150 mm) through 4–20 mA into an ADS1115; NEMA 11 lead screw on a TMC2209.'));
+    // the axis's own state while the tab is open
+    if (ui.setTab === 'Z axis' && savedOn && !ui.zPoll) ui.zPoll = setInterval(() => { if (ui.view !== 'setup' || ui.setTab !== 'Z axis') { clearInterval(ui.zPoll); ui.zPoll = null; return; } call('GET', LOCAL('/zaxis')).then((s) => { ui.zst = s; render(); }).catch(() => {}); }, 1000);
   }
 
   // the material settings Pathline Prepare keeps on this machine (GET /materials), read only:
@@ -1187,6 +1259,22 @@ const H = {
   camGoto: act(async (v) => call('POST', LOCAL('/camera/goto'), { to: v })),
   // print and cut: the waiting mark is under the crosshair; back to the queue to watch the job
   markAccept: act(async () => { await call('POST', API('/marks/accept'), {}); ui.view = 'queue'; }),
+  // the head Z axis: Setup → Z axis buttons (v: jog:±mm, up, home, read, focus, clear)
+  z: act(async (v) => {
+    const [what, arg] = String(v).split(':');
+    if (what === 'jog') ui.zst = await call('POST', LOCAL('/zaxis/jog'), { delta: Number(arg) });
+    else if (what === 'up' || what === 'home') ui.zst = await call('POST', LOCAL('/zaxis/' + what), {});
+    else if (what === 'read') { const r = await call('POST', LOCAL('/zaxis/read'), {}); toast('Sensor: ' + r.mm.toFixed(2) + ' mm (' + r.n + ' readings, spread ' + r.spread.toFixed(2) + ' mm)'); }
+    else if (what === 'focus') { const r = await call('POST', LOCAL('/zaxis/focus'), {}); toast('Focus set: nozzle at ' + r.ref.toFixed(2) + ' mm, sensor ' + r.dRef.toFixed(2) + ' mm. Scan the sheet next (Queue → Scan height).', { ms: 8000 }); ui.draft = null; }
+    else if (what === 'clear') { await call('DELETE', LOCAL('/zaxis/mesh')); toast('Height map cleared'); }
+  }),
+  zScan: act(async () => {
+    const id = ui.sel;
+    if (!id) throw new Error('Choose a job to scan under');
+    toast('Scanning the sheet\'s height under the job: the head moves over it with the nozzle up…', { ms: 6000 });
+    const m = await call('POST', LOCAL('/zaxis/scan'), { id });
+    toast('Sheet scanned: ' + m.nx + ' × ' + m.ny + ' points, ' + m.min.toFixed(1) + ' to +' + m.max.toFixed(1) + ' mm, steepest ' + (m.slope * 100).toFixed(1) + ' %' + (m.dropped ? ' (' + m.dropped + ' readings dropped)' : ''), { ms: 8000 });
+  }),
   camCalibrate: act(async () => {
     const r = await call('POST', LOCAL('/camera/calibrate'), {});
     toast('Camera calibrated on ' + r.corners + ' corners: pixel size ' + (r.pixel * 1000).toFixed(2) + ' µm, picture turned ' + r.rotation.toFixed(2) + '°' + (r.mirrored ? ' (mirrored)' : '') + ': saved', { ms: 8000 });

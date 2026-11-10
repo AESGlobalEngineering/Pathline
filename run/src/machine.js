@@ -450,6 +450,8 @@ class Machine {
       this.batch = [];
     }
     if (!job) return { state: this.st.state, message: 'Nothing queued' };
+    // the head Z axis: focus set, the sheet scanned, the axis ready (before anything moves)
+    if (this.zaxis) { try { this.zaxis.check(); } catch (e) { throw busyErr('"' + job.name + '": ' + e.message); } }
     // where the head is as Start is pressed: the anchor (if on), and where it goes back to after
     if (this.st.link === 'online') { try { this.apply(await this.link.poll()); } catch (e) { /* the last position */ } }
     const p0 = this.st.pos;
@@ -523,21 +525,26 @@ class Machine {
           }
           this.run.placed = shown;
           this.st.placed = job.id + ':' + Date.now();
+          // the head Z axis: the nozzle's height along the job as it now lies
+          if (this.zaxis) this.run.z = this.zaxis.prepare(placed);
         }
         try { return this.compile(placed, opts); } catch (e) { throw new Error('Couldn\'t convert "' + job.name + '" after reading its marks: ' + e.message); }
       }, back);
       return { state: 'running', job: job.id };
     }
-    this.execute(job, program, null, back);
+    // the head Z axis: the nozzle's height along the job (or why it can't be followed)
+    let z = null;
+    if (this.zaxis) { try { z = this.zaxis.prepare(pkg); } catch (e) { throw busyErr('"' + job.name + '": ' + e.message); } }
+    this.execute(job, program, null, back, z);
     return { state: 'running', job: job.id };
   }
 
   // prepare(ctl, status): work done before the job is sent (reading registration marks), giving
   // the program to send; back: where the head was at Start (it goes back there once the job is done)
-  execute(job, program, prepare, back) {
+  execute(job, program, prepare, back, z) {
     const ctl = { aborted: false, paused: false };
     const startedAt = new Date().toISOString();
-    this.run = { job, program, ctl };
+    this.run = { job, program, ctl, z: z || null };
     job.status = 'running';
     job.progress = 0;
     this.store.flush();
@@ -555,7 +562,7 @@ class Machine {
     const record = (p, how) => {
       if (timeline.length < 20000) timeline.push([(p.at || Date.now()) - since, p.pos ? p.pos.x : null, p.pos ? p.pos.y : null, p.marker === undefined ? null : p.marker, p.state, how, rel(p.sent), p.kind || null, Number.isFinite(p.len) ? p.len : null, rel(p.rx)]);
     };
-    this.onPos = (p) => record(p, 'p');
+    this.onPos = (p) => { record(p, 'p'); if (this.zaxis) this.zaxis.position(p, this.st.progress); };
     const setProgress = (sec) => {
       this.st.progress = Math.max(this.st.progress, Math.min(0.999, sec / total));
       job.progress = this.st.progress;
@@ -574,6 +581,8 @@ class Machine {
         // the controller's own estimate (as converted, after any registration marks) is the one shown
         if (program.estimated) job.seconds = Math.round(program.seconds);
         since = Date.now();
+        // the head Z axis follows the job from here
+        if (this.zaxis && this.run.z) this.zaxis.begin(this.run.z, job, since);
         // the laser threw the job away itself (Trotec: an FPGA error, then its buffers cleared):
         // that's not a finished job, whatever state it's left in
         const thrownAway = () => {
@@ -614,7 +623,9 @@ class Machine {
               if (!mark || mark.m !== p.marker) mark = { m: p.marker, at: active };
             }
             const est = mark ? markerSec(mark.m) + Math.min(active - mark.at, stepSec(mark.m + 1)) : Math.min(active, seg.steps.length ? seg.steps[0].seconds : seg.seconds);
-            setProgress(doneSec + Math.min(est, seg.seconds));            record(p, '');
+            setProgress(doneSec + Math.min(est, seg.seconds));
+            record(p, '');
+            if (this.zaxis) this.zaxis.position(p, this.st.progress);
             if (p.state === 'paused' && !ctl.paused) this.st.message = p.interlock ? 'Paused: lid open' : 'Paused on the machine';
           };
           await this.link.send(seg, { ...ctl, get aborted() { return ctl.aborted; }, onReply: follow });
@@ -653,6 +664,8 @@ class Machine {
           this.st.message = e.message;
         }
       }
+      // the head Z axis: the nozzle up before the head goes anywhere else
+      const zRun = this.zaxis ? this.zaxis.end() : null;
       // RDD6584: after a job the head parks at home, so measure from there
       if (result === 'Completed' && program && program.knife && this.link.learnHome) await this.link.learnHome().catch(() => {});
       // Setup → Jobs → Return head to start: done, the head goes back to where it was at Start
@@ -667,7 +680,7 @@ class Machine {
         } catch (e) { this.log('return to start: ' + e.message); }
       }
       this.store.finish(job, result, startedAt, this.cfg.removeDone);
-      if (timeline.length && this.store.saveRun) this.store.saveRun(job, { startedAt, result, estimate: program ? program.seconds : null, steps: program ? program.segments.filter((s) => s.kind === 'stream').flatMap((s) => s.steps) : [], timeline });
+      if (timeline.length && this.store.saveRun) this.store.saveRun(job, { startedAt, result, estimate: program ? program.seconds : null, steps: program ? program.segments.filter((s) => s.kind === 'stream').flatMap((s) => s.steps) : [], timeline, ...(zRun ? { z: { dry: zRun.dry, log: zRun.log.map((e) => [e[0] - since, e[1], e[2], e[3]]) } } : {}) });
       // a run saved: the server fits the screen's head drawing to it (follow-fit.js)
       if (timeline.length && this.onRunSaved) { try { this.onRunSaved(job, result); } catch (e) { /* never stops the run ending */ } }
       this.run = null;
@@ -756,6 +769,8 @@ class Machine {
     this.batch = []; // Stop also ends a run of chosen jobs
     if (this.camCtl) this.camCtl.aborted = true; // and camera work
     if (this.run) this.run.ctl.aborted = true;
+    // the head Z axis: the nozzle up at once
+    if (this.zaxis && this.zaxis.link) this.zaxis.link.up().catch(() => {});
     try { if (this.link) await this.link.abort(); } catch (e) { this.log('stop: ' + e.message); }
     if (!this.run && this.st.state !== 'alarm') { this.st.state = 'idle'; this.st.message = 'Stopped'; }
     return { state: this.run ? 'stopping' : this.st.state };

@@ -48,6 +48,7 @@ const BASE = {
   manual: [],                    // settings typed in Setup over the controller's own ('bed.0', 'speed' …)
   knifeHome: null,               // RDD6584: where the head homes and parks, controller mm (learnt)
   vision: { enabled: false },    // the Trotec's head camera (vision/vision.js DEFAULTS for the rest)
+  zaxis: { enabled: false },     // the head Z axis and height sensor (zaxis/index.js DEFAULTS for the rest)
   trotec: { unit: 0.010125, offset: [14.833125, 9.527625], laserSource: 5, travelSpeed: 700, maxSpeed: 2000, travel: 'standard', airOutput: 4, overscan: 10, cutPowerCorrection: 15, engravePowerCorrection: 20 },
   type: 'laser',                 // 'laser' or 'plotter' (Trotec: always laser; Ruida: from the model)
   ruida: { model: 'RDC6442G', magic: 0x88, origin: 'tr' },

@@ -144,6 +144,28 @@ function start(opts = {}) {
   }
   machine.onRunSaved = (job) => { setTimeout(() => fitFollow('after ' + job.name), 5000); };
 
+  // The head Z axis (zaxis/): the nozzle kept focused on the sheet as it lies, from a height map
+  // the ultrasonic sensor scans. Followed along the route the screen draws (motion as fitted).
+  const { ZAxis, DEFAULTS: ZDefaults } = require('./zaxis');
+  const followMotionNow = () => (cfg.controller === 'trotec' ? { ...trotecMotion(), follow: machine.learnt && machine.learnt.travel ? { travel: machine.learnt.travel, cut: machine.learnt.cut } : undefined } : null);
+  machine.zaxis = new ZAxis(machine, { dataDir: DATA, log, sim: !!opts.sim, motion: followMotionNow });
+  const zKey = (c) => JSON.stringify([c.zaxis && c.zaxis.enabled, c.zaxis && c.zaxis.sim, c.zaxis && c.zaxis.port, c.zaxis && c.zaxis.bottom, c.zaxis && c.zaxis.vmax, c.zaxis && c.zaxis.amax]);
+  // the box a job covers on the bed (its cuts and engraving), for the scan
+  const jobBox = (id) => {
+    const job = store.jobs.find((j) => j.id === id);
+    if (!job) throw err(404, 'No such job');
+    // anchored at the head when Start is pressed: where it will be from where the head is now
+    const pos = machine.st.pos;
+    const p = job.anchorAtStart && pos && Number.isFinite(pos.x) ? require('./job/anchor').apply(store.pkg(id), { x: pos.x, y: pos.y }) : store.runPkg(id);
+    let b = [Infinity, Infinity, -Infinity, -Infinity];
+    for (const s of p.toolpath || []) {
+      const pts = Array.isArray(s.p) ? s.p : Array.isArray(s.box) ? [[s.box[0], s.box[1]], [s.box[2], s.box[3]]] : [];
+      for (const q of pts) { b = [Math.min(b[0], q[0]), Math.min(b[1], q[1]), Math.max(b[2], q[0]), Math.max(b[3], q[1])]; }
+    }
+    if (!Number.isFinite(b[0])) throw err(409, 'That job has nothing to cut');
+    return b;
+  };
+
   // settings the machine finds out for itself: saved like Setup's, without a restart
   async function learnt(patch, why) {
     const next = config.merge(cfg, patch);
@@ -301,6 +323,8 @@ function start(opts = {}) {
     'GET /state': (b, req) => ({
       app: pkgJson.version, update: updates.status(), here: isLocalReq(req), config: cfg, status: machine.status(), info: machine.info, ruidaModels: ruidaModels.MODELS,
       fromController: machine.ctrl || null,
+      // the head Z axis: on, its state, and the sheet's height map (drawn on the bed)
+      zaxis: { enabled: machine.zaxis.enabled(), state: machine.zaxis.state, fault: machine.zaxis.fault || null, following: machine.zaxis.run ? machine.zaxis.run.zf.state : null, mesh: machine.zaxis.meshView(), settings: { ...ZDefaults, ...(cfg.zaxis || {}) } },
       camera: { open: !!machine.vision.camera, info: machine.vision.camera ? machine.vision.camera.info || null : null, busy: machine.camBusy || null, exposure: machine.vision.exposureNow(), defaults: VisionDefaults },
       jobs: store.jobs.filter((j) => !j.hidden), history: store.history.slice(0, 100), controllers: Object.keys(CONTROLLERS),
       // how the Trotec travels between cuts (the screen times the running job's route with it)
@@ -308,6 +332,22 @@ function start(opts = {}) {
       // the route's timing for drawing the head, as fitted to the jobs run (follow-fit.js)
       motion: cfg.controller === 'trotec' ? { ...trotecMotion(), follow: machine.learnt && machine.learnt.travel ? { travel: machine.learnt.travel, cut: machine.learnt.cut } : undefined } : null
     }),
+    // ---- the head Z axis (zaxis/): the screen's Z axis card, Jog's Z buttons, Queue → Scan
+    'GET /zaxis': async () => ({ ...(await machine.zaxis.status()), settings: { ...ZDefaults, ...(cfg.zaxis || {}) }, mesh: machine.zaxis.meshView() }),
+    'POST /zaxis/connect': async () => { await machine.zaxis.connect(); return machine.zaxis.status(); },
+    'POST /zaxis/home': () => machine.zaxis.home(),
+    'POST /zaxis/up': () => machine.zaxis.up(),
+    'POST /zaxis/jog': (b) => machine.zaxis.jog(b || {}),
+    'POST /zaxis/read': () => machine.zaxis.read(16),
+    // focus set by hand at the head: ref and dRef kept in Setup
+    'POST /zaxis/focus': async () => {
+      const f = await machine.zaxis.setFocus();
+      await learnt({ zaxis: { ...(cfg.zaxis || {}), ...f } }, 'z axis: focus kept (pos ' + f.ref + ' mm, sensor ' + f.dRef + ' mm)');
+      return { ...f, mesh: null };
+    },
+    // the sheet's height under a job (b.id) or a box (b.box: [x0, y0, x1, y1])
+    'POST /zaxis/scan': async (b) => machine.zaxis.scan(b && Array.isArray(b.box) ? b.box : jobBox(b && b.id)),
+    'DELETE /zaxis/mesh': () => { machine.zaxis.clearMesh(); return { mesh: null }; },
     // how the head drawing is fitted: what's in use, and the latest fit
     'GET /follow': () => ({ ...followState, fitting: !!fitting }),
     'POST /follow/fit': async (b, req) => {
@@ -323,6 +363,7 @@ function start(opts = {}) {
       } catch (e) { return []; }
     },
     'PUT /config': async (b) => {
+      const zBefore = zKey(cfg);
       const next = config.merge(cfg, b);
       if (!CONTROLLERS[next.controller]) throw err(400, 'Unknown controller');
       // the model decides laser or plotter (a Trotec is always a laser)
@@ -346,6 +387,8 @@ function start(opts = {}) {
       log('setup saved (' + cfg.controller + ', ' + cfg.connection.mode + ')');
       // a new name (or a machine just added): told to the network straight away
       if (discovery) discovery.update();
+      // the Z axis switched on or off, or its port or limits changed: connected again
+      if (zKey(cfg) !== zBefore) machine.zaxis.connect().catch(() => {});
       return { config: cfg };
     },
     'GET /presets': () => ({ trotec: config.defaults('trotec'), ruida: config.defaults('ruida'), ruidaModels: ruidaModels.MODELS }),
@@ -553,6 +596,8 @@ function start(opts = {}) {
     server.listen(PORT, () => {
       log('Pathline Run ' + pkgJson.version + ' on http://localhost:' + PORT + ' · ' + CONTROLLERS[cfg.controller].label + ' · ' + cfg.connection.mode + ' · data in ' + DATA);
       machine.connect().then(() => machine.startPolling());
+      // the head Z axis, when it's switched on (homes on connecting: upwards only)
+      if (cfg.zaxis && cfg.zaxis.enabled) machine.zaxis.connect().catch(() => {});
       // simulated machines stay quiet unless asked (--announce), so a test run isn't found by Prepare
       if (opts.announce !== undefined ? opts.announce : !opts.sim) {
         try {
@@ -568,6 +613,7 @@ function start(opts = {}) {
         // stops the machine safely, then closes the server
         close: async () => {
           try { if (discovery) await discovery.close(); } catch (e) { /* closing anyway */ }
+          try { await machine.zaxis.close(); } catch (e) { /* closing anyway */ }
           try { await machine.stop(); } catch (e) { /* closing anyway */ }
           try { if (machine.link) await machine.link.close(); } catch (e) { /* closing anyway */ }
           server.close();

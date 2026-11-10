@@ -1271,7 +1271,77 @@ async function followFitTests() {
   ok(Math.abs(rr.rx - rr.sent - 100) < 20 && Math.abs(rr.at - (rr.sent + 0.5 * (rr.rx - rr.sent))) < 1.01, 'the link times each position as fitted (half way from asking to the reply)', JSON.stringify(rr));
 }
 
-jogTests().then(linkTests).then(serverTests).then(discoveryTests).then(followFitTests).then(materialsTests).then(visionTests).then(() => {
+// ---------------------------------------------------------------- the head Z axis
+async function zaxisTests() {
+  console.log('Head Z axis (simulated)');
+  const F = require('../ui/follow');
+  const Z = { mesh: require('../src/zaxis/mesh'), P: require('../src/zaxis/planner'), ...require('../src/zaxis/follow'), ...require('../src/zaxis/device-sim'), Link: require('../src/zaxis/link') };
+  // a sheet bowed 2 mm with a ripple, scanned every 25 mm (one reading spoilt by an edge)
+  const surface = (x, y) => 2 * Math.sin((Math.PI * x) / 800) * Math.sin((Math.PI * y) / 500) + 0.3 * Math.sin(x / 40 + 1) * Math.sin(y / 30);
+  const grid = Z.mesh.gridFor([50, 50, 650, 400], 25, 15, [0, 0, 800, 500]);
+  const pts = Z.mesh.scanOrder(grid).map((g, k) => ({ x: g.x, y: g.y, d: 90 - surface(g.x, g.y) + (k === 40 ? 6 : 0) }));
+  const m = Z.mesh.build(pts, grid, { dRef: 90 });
+  const g40 = Z.mesh.scanOrder(grid)[40];
+  ok(m.dropped.length === 1 && Math.abs(Z.mesh.height(m, g40.x, g40.y) - surface(g40.x, g40.y)) < 0.3, 'height map: a reading off by 6 mm (an edge) is dropped and filled from its neighbours', JSON.stringify(m.dropped));
+  let worst = 0;
+  for (let x = 60; x < 640; x += 13) for (let y = 60; y < 390; y += 11) worst = Math.max(worst, Math.abs(Z.mesh.height(m, x, y) - surface(x, y)));
+  ok(worst < 0.15, 'height map: within ' + worst.toFixed(3) + ' mm of the sheet between the points');
+  // a job of strips over it
+  const strip = (x, y, w) => [[x, y], [x + w, y], [x + w, y + 12], [x, y + 12]];
+  const pkg = { processes: [{ index: 0, speed: 25 }], toolpath: Array.from({ length: 24 }, (_, k) => ({ type: 'cut', process: 0, closed: true, p: strip(70 + (k % 4) * 140, 70 + Math.floor(k / 4) * 50, 90 + (k * 7) % 30) })) };
+  const M = F.motionFor({ a: 500, j: 10000, v: 700, cut: { arc: 1000, corner: 20, acc: 2000 } }, {});
+  const route = F.routeOf(pkg, M);
+  const o = { ref: 4, gap: 2, gapMin: 0.8, lift: 1, vmax: 10, bottom: 8 };
+  const plan = Z.P.plan(route, m, o);
+  let minGap = Infinity, focus = 0;
+  for (let i = 0; i < plan.n; i++) {
+    const t = i * plan.dt, at = F.routeAt(route, t);
+    // the gap anywhere within ±0.5 s of route time (the head drawn that early or late)
+    for (const dt of [-0.5, 0, 0.5]) { const q = F.routeAt(route, Math.max(0, Math.min(route.end, t + dt))); minGap = Math.min(minGap, o.gap + (o.ref - plan.pos[i]) - Z.mesh.height(m, q.p[0], q.p[1])); }
+    if (plan.kind[i] === 1) focus = Math.max(focus, Math.abs(plan.pos[i] - (o.ref - Z.mesh.height(m, at.p[0], at.p[1]))));
+  }
+  ok(minGap >= o.gapMin && !Z.P.refusal(plan), 'plan: the nozzle never nearer the sheet than ' + o.gapMin + ' mm, even 0.5 s early or late (smallest ' + minGap.toFixed(2) + ' mm)');
+  // (next to a long travel the nozzle stays high enough for wherever the head may be in ±0.5 s:
+  // a little off focus there, by design)
+  ok(plan.focusOver02 < 0.03 && focus < 0.6, 'plan: focused while cutting (' + (plan.focusOver02 * 100).toFixed(1) + ' % of it over 0.2 mm off, beside long travel; worst ' + focus.toFixed(2) + ' mm)');
+  const high = Z.P.plan(route, m, { ...o, ref: 1 });
+  ok(/too high/.test(Z.P.refusal(high) || ''), 'plan: a sheet higher than the nozzle can rise above it is refused', Z.P.refusal(high));
+  // the link and the simulated axis: the protocol, and the watchdog
+  const L = new Z.Link({ sim: true }, { sim: { surface, headPos: () => ({ x: 300, y: 200 }), sensorOffset: [0, 0], dRef: 90, noise: 0.05 } });
+  await L.open();
+  await L.limits(8, 15, 1000);
+  await L.home();
+  await L.go(3, 5);
+  await new Promise((r) => setTimeout(r, 500));
+  const s1 = await L.status();
+  const rd = await L.read(16);
+  ok(Math.abs(s1.pos - 3) < 0.05 && Math.abs(rd.mm - (90 - surface(300, 200))) < 0.1, 'Z link: GO, status and the sensor read (' + s1.pos.toFixed(3) + ' mm, ' + rd.mm.toFixed(2) + ' mm)', JSON.stringify({ s1, rd }));
+  L.trajectory([[Date.now(), 3], [Date.now() + 300, 4]]);
+  await new Promise((r) => setTimeout(r, 1600));
+  const s2 = await L.status();
+  ok(L.fault && /watchdog/.test(L.fault.text) && s2.tgt === 0, 'Z axis: a trajectory with no line for 1 s goes up (watchdog)', JSON.stringify({ fault: L.fault, s2 }));
+  await L.close();
+  // following a synthetic run: reports every ~0.4 s from the route, the axis on a virtual clock
+  let clock = 0;
+  const dev = new Z.ZDeviceSim({ manual: true, clock: () => clock });
+  dev.handle('HOME'); dev.handle('LIM 8 15 1000');
+  const sink = { trajectory: (p) => dev.handle('P ' + p.map(([t, v]) => Math.round(t) + ' ' + v.toFixed(3)).join(' ')), up: () => dev.handle('UP') };
+  const zf = new Z.ZFollow({ sink, plan, pkg, M, job: 'J1', clock: () => clock, startAt: 0 });
+  const errs = [];
+  let next = 0, tick = 0;
+  for (clock = 0; clock < route.end * 1000; clock++) {
+    dev.step(1);
+    if (clock >= next) { const at = F.routeAt(route, clock / 1000); zf.position({ pos: { x: at.p[0], y: at.p[1] }, at: clock }, clock / 1000 / route.end); next += 380 + (clock % 7) * 20; }
+    if (clock >= tick) { zf.tick(true); tick += 50; }
+    if (clock % 100 === 0) { const at = F.routeAt(route, clock / 1000); if (route.segs[at.k].kind === 'cut') errs.push(Math.abs(dev.pos - (o.ref - Z.mesh.height(m, at.p[0], at.p[1])))); }
+  }
+  errs.sort((a, b) => a - b);
+  ok(errs[Math.floor(errs.length * 0.9)] < 0.15 && zf.log.filter((x) => x[3] === 'f').length > 0.9 * zf.log.length, 'following a job: the nozzle within ' + errs[Math.floor(errs.length * 0.9)].toFixed(3) + ' mm of focus 9 times in 10 while cutting');
+  zf.tick(false);
+  ok(zf.state === 'up', 'paused or stopped: the nozzle goes up');
+}
+
+jogTests().then(linkTests).then(serverTests).then(discoveryTests).then(followFitTests).then(zaxisTests).then(materialsTests).then(visionTests).then(() => {
   console.log(failed ? '\n' + failed + ' FAILED' : '\nAll passed');
   process.exit(failed ? 1 : 0);
 });
