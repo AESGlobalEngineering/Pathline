@@ -9,11 +9,11 @@ body{margin:0}
   --canvas:#E7E9EC;--canvas-dot:#CDD2D9;--seg-on:#FFFFFF;--knob:#FFFFFF;
   --line:#E1E4E8;--line-soft:#EEF0F3;--line-strong:#D5D9DF;--line-hover:#AEB5C0;--track:#C9CED6;
   --text:#111214;--text-2:#3A414C;--text-3:#5B6370;--text-4:#8A919C;
-  /* red acts (Save, Add machine, a dialog's main button); ink selects (tabs, switches, the
-     chosen job, the head on the bed). Red is also ACI 1 and the error colour.
+  /* red acts (Save, Add machine, a dialog's main button); muted teal selects (tabs, switches,
+     the chosen job, progress). Red is also ACI 1 and the error colour; the head on the bed is ink.
      Start / Pause / Stop keep the machine colours: green, amber, red outline. */
   --action:#D62828;--action-hover:#BC1F1F;--on-action:#FFFFFF;
-  --accent:#111214;--accent-hover:#2C2F36;--accent-fg:#111214;--accent-soft:#E9EBEF;--accent-ring:rgba(17,18,20,0.16);--on-accent:#FFFFFF;
+  --accent:#3D6C71;--accent-hover:#325A5E;--accent-fg:#386469;--accent-soft:#E9EFF0;--accent-ring:rgba(61,108,113,0.22);--on-accent:#FFFFFF;
   --ink:#15181E;--skel:#E6E8EC;--shimmer:rgba(255,255,255,0.7);
   --ok:#1B6B43;--ok-soft:#EDF7F1;--ok-dot:#30A46C;
   --warn:#8A4B00;--warn-soft:#FFF1DB;--warn-dot:#E5A000;
@@ -35,7 +35,7 @@ body{margin:0}
   --line:#2A2D33;--line-soft:#222429;--line-strong:#3A3E46;--line-hover:#555B66;--track:#4A4F59;
   --text:#ECEDEF;--text-2:#C3C7CE;--text-3:#9AA1AC;--text-4:#727985;
   --action:#D62828;--action-hover:#E5332D;--on-action:#FFFFFF;
-  --accent:#E6E8EB;--accent-hover:#FFFFFF;--accent-fg:#F2F3F5;--accent-soft:#2A2D33;--accent-ring:rgba(230,232,235,0.24);--on-accent:#111214;
+  --accent:#83B5B9;--accent-hover:#9DC5C8;--accent-fg:#9AC3C6;--accent-soft:rgba(131,181,185,0.16);--accent-ring:rgba(131,181,185,0.32);--on-accent:#0E0F11;
   --ink:#FFFFFF;--skel:#22252A;--shimmer:rgba(255,255,255,0.05);
   --ok:#5CCB95;--ok-soft:rgba(48,164,108,0.16);--ok-dot:#30A46C;
   --warn:#F2B65C;--warn-soft:rgba(229,160,0,0.16);--warn-dot:#E5A000;
@@ -82,7 +82,7 @@ body{margin:0}
 .hmi .btn-primary:disabled,.hmi .btn-primary:disabled:hover{background:var(--sunken);color:var(--text-4);opacity:1}
 .hmi .ib{display:inline-flex;align-items:center;justify-content:center;width:var(--ctl-h);height:var(--ctl-h);border:0;border-radius:var(--ctl-r);background:transparent;cursor:pointer;color:var(--text-2);padding:0;flex:none;box-sizing:border-box}
 .hmi .ib:hover{background:var(--hover);color:var(--text)}
-.hmi .run-btn{width:64px;height:64px;border:0;border-radius:12px;color:var(--on-accent);display:inline-flex;align-items:center;justify-content:center;flex:none}
+.hmi .run-btn{width:64px;height:64px;border:0;border-radius:12px;color:#FFFFFF;display:inline-flex;align-items:center;justify-content:center;flex:none}
 .hmi .run-btn.stop{border:1px solid var(--line-strong);background:var(--surface);cursor:pointer}
 
 /* fields */
@@ -127,7 +127,7 @@ body{margin:0}
 .hmi .sw{width:48px;height:28px;flex:none;border:0;border-radius:14px;padding:3px;box-sizing:border-box;background:var(--track);display:inline-flex;justify-content:flex-start;cursor:pointer;transition:background 0.12s}
 .hmi .sw::after{content:'';width:22px;height:22px;border-radius:50%;background:var(--knob);box-shadow:0 1px 2px rgba(0,0,0,0.3)}
 .hmi .sw[aria-checked="true"]{background:var(--accent);justify-content:flex-end}
-.hmi .sw[aria-checked="true"]::after{background:var(--on-accent)}
+.hmi .sw[aria-checked="true"]::after{background:var(--knob)}
 
 /* containers */
 .hmi .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--card-r)}
