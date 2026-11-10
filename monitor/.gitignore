@@ -1,0 +1,4 @@
+# this workshop's own setup and what the service keeps (push keys, phones, alerts)
+config.json
+data/
+*.pem

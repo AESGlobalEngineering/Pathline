@@ -1,0 +1,7 @@
+{
+  "port": 8480,
+  "find": true,
+  "machines": [
+    { "name": "Laser on another network", "host": "10.0.5.40", "port": 8470 }
+  ]
+}
