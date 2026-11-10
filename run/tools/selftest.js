@@ -188,6 +188,17 @@ console.log('Trotec job stream');
   // (Pathline's 4 s per square is ignored: on the X8 sheet its cutting time ran ~15 % long)
   const cutS = (50 * 12) / 22;
   ok(std.estimated && std.seconds > cutS + 50 * 0.3 && std.seconds < cutS + 50 * 0.6, 'estimate: each cut at its set speed plus each hop as the planner moves it', std.seconds.toFixed(1) + ' s');
+  {
+    // the cut's own time: the set speed on a long straight, far slower round a small circle at
+    // 400 mm/s (J0053's small shapes took 1.78 × length ÷ speed)
+    const prof = trotec.cutProfile(trotec.PLANNER.Standard);
+    const line = trotec.runTime([0, 0], [{ to: [500, 0] }], 30, prof);
+    const circ = trotec.runTime([5, 0], [{ c: [0, 0], r: 5, sweep: 2 * Math.PI, to: [5, 0] }], 400, prof);
+    const sqr = trotec.runTime([0, 0], [{ to: [10, 0] }, { to: [10, 10] }, { to: [0, 10] }, { to: [0, 0] }], 400, prof);
+    ok(Math.abs(line - 500 / 30) < 0.05, 'cut time: a 500 mm straight at 30 mm/s takes 500 ÷ 30 s', line.toFixed(3));
+    ok(circ > (2 * Math.PI * 5) / 400 * 2 && circ < 1, 'cut time: a 10 mm circle at 400 mm/s is held to the curve\'s speed', circ.toFixed(3) + ' s');
+    ok(sqr > 40 / 400 * 2 && sqr < 1, 'cut time: a 10 mm square at 400 mm/s slows at each corner', sqr.toFixed(3) + ' s');
+  }
   ok(jerks(std).every((j) => j === 5000), 'Standard travel: Ruby\'s planner values only (jerk 5000)', jerks(std).join(','));
   const fast = trotec.compile(plan.build(pkg), { ...cfg, trotec: { ...cfg.trotec, travel: 'fastest' } });
   const fj = jerks(fast);
@@ -1150,7 +1161,61 @@ async function visionTests() {
   srv.kill();
 }
 
-jogTests().then(linkTests).then(serverTests).then(materialsTests).then(visionTests).then(() => {
+// ---------------------------------------------------------------- found on the network
+// Run's mDNS answers, as Pathline Prepare asks for them (its own discover.js when it's in this
+// repo): a question from an ordinary port is answered straight back, with id, name, port, IP
+async function discoveryTests() {
+  console.log('Found on the network (mDNS)');
+  const disc = require('../src/discovery');
+  const { _packet: P } = disc;
+  const ifs = () => ({ eth: [{ family: 'IPv4', address: '192.168.5.20', netmask: '255.255.255.0' }], lab: [{ family: 'IPv4', address: '10.1.2.3', netmask: '255.255.0.0' }], lo: [{ family: 'IPv4', address: '127.0.0.1', netmask: '255.0.0.0', internal: true }] });
+  ok(disc.addresses(ifs()).map((a) => a.address).join() === '192.168.5.20,10.1.2.3', 'announced addresses leave out 127.x');
+  ok(P.ordered(disc.addresses(ifs()), '10.1.9.9')[0] === '10.1.2.3', 'the address on the asker\'s network comes first');
+  const rec = P.records({ id: 'run-0a1b2c3d', name: 'Q500 v2.1', type: 'laser', ctrl: 'Trotec', model: 'Q500', app: 'Pathline Run 0.7.12', port: 8470, hostname: 'SHOP PC_1', ips: ['10.1.2.3'] });
+  ok(rec.instance === 'Q500 v2 1._pathline._tcp.local' && rec.host === 'SHOP-PC-1.local', 'instance and host names are single labels', rec.instance + ' / ' + rec.host);
+  ok(!P.asksForUs({ name: '_printer._tcp.local', type: 12 }, rec) && P.asksForUs({ name: '_PATHLINE._tcp.local', type: 12 }, rec), 'answers _pathline._tcp.local only (any case)');
+
+  let prep = null;
+  try { prep = require('../../src/main/discover'); } catch (e) { /* Run on its own */ }
+  let info = { id: 'run-0a1b2c3d', name: 'Shop Q500', type: 'laser', ctrl: 'Trotec', model: 'Speedy Q500', app: 'Pathline Run 0.7.12', port: 8471 };
+  const r = disc.start(() => info, { port: 0, interfaces: () => ({ lo: [{ family: 'IPv4', address: '127.0.0.1', netmask: '255.0.0.0' }] }) });
+  await r.ready;
+  try {
+    if (prep) {
+      const found = await prep.browse({ to: { address: '127.0.0.1', port: r.port() }, timeout: 600 });
+      const m = found[0] || {};
+      ok(found.length === 1 && m.id === 'run-0a1b2c3d' && m.name === 'Shop Q500' && m.port === 8471 && m.type === 'laser' && m.ctrl === 'Trotec' && m.via.includes('announce'), 'Prepare\'s browse() finds the machine (id, name, port, type)', JSON.stringify(found));
+      info = { ...info, name: 'Shop Q500 renamed' };
+      const again = await prep.browse({ to: { address: '127.0.0.1', port: r.port() }, timeout: 600 });
+      ok(again[0] && again[0].name === 'Shop Q500 renamed' && again[0].id === 'run-0a1b2c3d', 'renamed: same id, new name');
+    } else {
+      // no Prepare here: ask by hand and read the answer back
+      const dgram = require('dgram');
+      const q = Buffer.concat([Buffer.from([0x12, 0x34, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0]), Buffer.from('\x09_pathline\x04_tcp\x05local\x00', 'binary'), Buffer.from([0, 12, 0x80, 1])]);
+      const ans = await new Promise((resolve) => { const s = dgram.createSocket('udp4'); s.on('message', (b) => { s.close(); resolve(b); }); s.bind(0, () => s.send(q, r.port(), '127.0.0.1')); setTimeout(() => { try { s.close(); } catch (e) { /* closed */ } resolve(null); }, 600); });
+      ok(ans && ans.readUInt16BE(0) === 0x1234 && ans.includes(Buffer.from('id=run-0a1b2c3d')), 'a question from an ordinary port is answered straight back');
+    }
+    info = null;
+    if (prep) ok((await prep.browse({ to: { address: '127.0.0.1', port: r.port() }, timeout: 400 })).length === 0, 'no machine set up: nothing is answered');
+  } finally { await r.close(); }
+
+  // the id in GET /info: made once, kept across restarts
+  const data = fs.mkdtempSync(path.join(os.tmpdir(), 'pathline-run-'));
+  fs.writeFileSync(path.join(data, 'config.json'), JSON.stringify({ controller: 'trotec', bed: [813, 508] }));
+  const ids = [];
+  for (let k = 0; k < 2; k++) {
+    const port = 18970 + Math.floor(Math.random() * 400);
+    const srv = spawn(process.execPath, [path.join(__dirname, '..', 'src', 'server.js'), '--sim', '--port', String(port), '--data', data], { stdio: ['ignore', 'pipe', 'pipe'] });
+    try {
+      let inf = null;
+      for (let i = 0; i < 60 && !inf; i++) { try { inf = await (await fetch('http://127.0.0.1:' + port + '/api/v1/info')).json(); } catch (e) { await new Promise((res) => setTimeout(res, 100)); } }
+      ids.push(inf && inf.id);
+    } finally { srv.kill(); await new Promise((res) => setTimeout(res, 300)); }
+  }
+  ok(/^run-[0-9a-f]{8}$/.test(ids[0] || '') && ids[0] === ids[1], 'GET /info has a stable id (' + ids[0] + ', the same after a restart)', JSON.stringify(ids));
+}
+
+jogTests().then(linkTests).then(serverTests).then(discoveryTests).then(materialsTests).then(visionTests).then(() => {
   console.log(failed ? '\n' + failed + ' FAILED' : '\nAll passed');
   process.exit(failed ? 1 : 0);
 });

@@ -53,12 +53,13 @@ class SimLink {
     // markers: steps finished so far
     let acc = 0;
     for (const s of r.seg.steps || []) { acc += s.seconds; if (acc <= r.t) r.marker = s.i + 1; }
-    if (r.t >= r.seg.seconds) this.run = null;
+    // done: the last marker stays reported while idle, as the Trotec's does
+    if (r.t >= r.seg.seconds) { this.lastMarker = r.marker; this.run = null; }
   }
 
   async poll() {
     const state = this.run ? (this.run.paused || this.lidOpen ? 'paused' : 'busy') : this.move ? 'busy' : 'idle';
-    return { state, pos: { ...this.pos }, interlock: this.lidOpen, marker: this.run ? this.run.marker : undefined };
+    return { state, pos: { ...this.pos }, interlock: this.lidOpen, marker: this.run ? this.run.marker : this.lastMarker };
   }
 
   async moveTo(x, y, opts = {}) {

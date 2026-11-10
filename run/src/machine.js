@@ -607,8 +607,7 @@ class Machine {
               if (!mark || mark.m !== p.marker) mark = { m: p.marker, at: active };
             }
             const est = mark ? markerSec(mark.m) + Math.min(active - mark.at, stepSec(mark.m + 1)) : Math.min(active, seg.steps.length ? seg.steps[0].seconds : seg.seconds);
-            setProgress(doneSec + Math.min(est, seg.seconds));
-            record(p, '');
+            setProgress(doneSec + Math.min(est, seg.seconds));            record(p, '');
             if (p.state === 'paused' && !ctl.paused) this.st.message = p.interlock ? 'Paused: lid open' : 'Paused on the machine';
           };
           await this.link.send(seg, { ...ctl, get aborted() { return ctl.aborted; }, onReply: follow });
@@ -625,6 +624,14 @@ class Machine {
             if (idle >= 2 && (sawBusy || Date.now() - sentAt > 3000)) break;
           }
           thrownAway();
+          // idle before the last part was reported done: the laser ended the job itself (J0055 went
+          // idle at part 14 of 188 after 15 s, and was kept as Completed). Every job that really
+          // finished was idle on its last marker
+          const lastMarker = seg.steps.length ? seg.steps[seg.steps.length - 1].marker : null;
+          if (!ctl.aborted && mark && lastMarker !== null && mark.m < lastMarker) {
+            const n = seg.steps.filter((s) => s.marker <= mark.m).length;
+            throw new Error('The laser stopped the job itself after part ' + n + ' of ' + seg.steps.length + ' (' + Math.round(this.st.progress * 100) + ' %). Check the laser, then start the job again.');
+          }
           doneSec += seg.seconds;
           setProgress(doneSec);
         }

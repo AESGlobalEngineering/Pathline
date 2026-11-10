@@ -136,9 +136,47 @@ function moveTime(d, v, a, j) {
   return 2 * ramp(lo).t;
 }
 
+// Seconds along each segment of a cut polyline at speed v, as the Trotec moves it (prof from the
+// server, as compile.js's estimate): slower round curves (a bend of up to 16° between segments
+// is part of a curve, of radius ≈ segment ÷ bend) and corners, accelerating at prof.acc, from a
+// stop and to a stop. Timing cuts as length ÷ speed put J0053 (400 mm/s, small shapes) 60 s
+// ahead of the head.
+function polyTimes(pts, v, prof) {
+  const n = pts.length, L = [], dir = [];
+  for (let k = 1; k < n; k++) { L.push(Math.hypot(pts[k][0] - pts[k - 1][0], pts[k][1] - pts[k - 1][1])); dir.push(Math.atan2(pts[k][1] - pts[k - 1][1], pts[k][0] - pts[k - 1][0])); }
+  const vj = new Array(n).fill(v);
+  vj[0] = 0; vj[n - 1] = 0;
+  for (let k = 1; k < n - 1; k++) {
+    let th = Math.abs(dir[k] - dir[k - 1]) % (2 * Math.PI);
+    if (th > Math.PI) th = 2 * Math.PI - th;
+    if (th < 1e-3) continue;
+    const sh = Math.sin(th / 2);
+    const lim = th <= (16 * Math.PI) / 180 ? Math.sqrt((prof.arc * Math.min(L[k], L[k - 1])) / th) : sh >= 0.9999 ? 0 : Math.sqrt((prof.corner * sh) / (1 - sh));
+    vj[k] = Math.min(v, lim);
+  }
+  const a = prof.acc;
+  for (let k = 0; k < n - 1; k++) vj[k + 1] = Math.min(vj[k + 1], Math.sqrt(vj[k] ** 2 + 2 * a * L[k]));
+  for (let k = n - 2; k >= 0; k--) vj[k] = Math.min(vj[k], Math.sqrt(vj[k + 1] ** 2 + 2 * a * L[k]));
+  return L.map((l, k) => {
+    const u0 = vj[k], u1 = vj[k + 1];
+    const pk = Math.max(1e-6, Math.min(v, Math.sqrt((2 * a * l + u0 * u0 + u1 * u1) / 2)));
+    const s1 = (pk * pk - u0 * u0) / (2 * a), s2 = (pk * pk - u1 * u1) / (2 * a);
+    return (pk - u0) / a + (pk - u1) / a + Math.max(0, l - s1 - s2) / pk;
+  });
+}
+
+// The Trotec's route timing for drawing the head, fitted to where the head really was: every
+// report of J0040–J0065 replayed through this code as the screen sees them (a refresh every
+// 0.7 s), with the head drawn between reports. Travel between cuts is quicker than the planner
+// limits say, and curves and corners slower than the estimate's model, which is fitted to whole
+// parts only (it gets each part's time right, not how it's split). With these the head drawn
+// is 2.1 mm from the real head (median; 7.7 mm for 9 in 10), was 2.7 and 10.6 mm. On runs left
+// out of the fit: 2.3 and 8.0 mm, was 3.2 and 11.2 mm.
+const FOLLOW_TROTEC = { travel: { a: 2000, j: 50000, v: 1000 }, cut: { arc: 500, corner: 5, acc: 300 } };
+
 function routeOf(pkg) {
-  // travel as the machine moves it (the server's motion limits; a plain speed if there are none)
-  const M = S.motion || { v: Number((cfg().trotec || {}).travelSpeed) || 500, a: 5000, j: 1e6 };
+  // travel as the machine moves it (a Trotec: as fitted above; a plain speed if there are no limits)
+  const M = S.motion ? (S.motion.cut ? { ...S.motion, ...FOLLOW_TROTEC.travel, cut: FOLLOW_TROTEC.cut } : S.motion) : { v: Number((cfg().trotec || {}).travelSpeed) || 500, a: 5000, j: 1e6 };
   const segs = [];
   let t = 0, cur = null;
   const add = (a, b, dt, kind, step) => { segs.push({ a, b, t0: t, dt: Math.max(dt, 1e-3), kind, step }); t += Math.max(dt, 1e-3); };
@@ -162,9 +200,16 @@ function routeOf(pkg) {
     const proc = (pkg.processes || []).find((p) => p.index === s.process) || {};
     let len = 0;
     for (let k = 1; k < pts.length; k++) len += Math.hypot(pts[k][0] - pts[k - 1][0], pts[k][1] - pts[k - 1][1]);
-    // a cut at its set speed (as the machine runs it; Pathline's own time ran ~15 % long), engraving
-    // at Pathline's time
-    const secs = kind === 'cut' && Number(proc.speed) > 0 ? len / Number(proc.speed) : s.seconds || len / (Number(proc.speed) || 20);
+    // a Trotec cut as it moves it (set speed on straights, slower round curves and corners); other
+    // cuts at their set speed (Pathline's own time ran ~15 % long), engraving at Pathline's time
+    const speed = Math.min(Number(proc.speed) || 0, Number((cfg().trotec || {}).maxSpeed) || Infinity);
+    if (kind === 'cut' && speed > 0 && M.cut) {
+      const dts = polyTimes(pts, speed, M.cut);
+      for (let k = 1; k < pts.length; k++) add(pts[k - 1], pts[k], dts[k - 1], kind, i);
+      cur = pts[pts.length - 1];
+      return;
+    }
+    const secs = kind === 'cut' && speed > 0 ? len / speed : s.seconds || len / (Number(proc.speed) || 20);
     for (let k = 1; k < pts.length; k++) {
       // engraving: the beam is on along a row, the step between rows is part of the scan
       const dl = Math.hypot(pts[k][0] - pts[k - 1][0], pts[k][1] - pts[k - 1][1]);
@@ -221,10 +266,10 @@ function followHead(st, pkg) {
     if (d < 4 && (!best || score < best.score - 0.01)) best = { k, t, d, score };
   }
   if (best) {
-    // the pace: route seconds per real second since the last fix, smoothed (and kept sensible)
-    const dt = (now - follow.at) / 1000;
-    if (follow.found && dt > 0.3 && best.t > follow.t) follow.rate = Math.max(0.5, Math.min(2.5, 0.8 * follow.rate + 0.2 * ((best.t - follow.t) / dt)));
-    Object.assign(follow, { k: best.k, t: best.t, at: now, miss: 0, found: true });
+    // the head moves on from here at the route's own pace (rate 1). A pace learnt from the fixes
+    // (smoothed, or from the last two in one part) drew it further off: with the route timed as
+    // the machine moves, the pace between fixes is mostly the fixes' own scatter
+    Object.assign(follow, { k: best.k, t: best.t, at: now, miss: 0, found: true, rate: 1 });
   } else follow.miss++;
 }
 

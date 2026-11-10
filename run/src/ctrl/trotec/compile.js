@@ -12,6 +12,55 @@ const { scanLines, trace } = require('../../job/plan');
 
 const COMMIT_EVERY = 200;
 
+// How the Trotec moves along a cut, fitted to every job run on the Q500 (J0040–J0065): it holds
+// the set speed on straight lines (measured 1.000–1.001 ×), but slows on curves to √(arc · r)
+// and at a corner of angle θ to √(corner · sin(θ/2) / (1 − sin(θ/2))) (corner is the planner's
+// vector setting, 20 in Standard), speeding up and slowing down at acc mm/s², and stops at each
+// run's ends. Length ÷ speed ran 2–5 % short at 33 mm/s and 78 % short at 400 mm/s (small shapes
+// never reach speed); this lands every job within −2.5 … +3.3 %.
+const CUT = { arc: 1000, acc: 2000 };
+const MARK_SEC = 4;
+const cutProfile = (P) => ({ arc: CUT.arc, corner: P ? P[2] : 20, acc: CUT.acc });
+
+// Seconds along one cut run at speed v: moves are fitArcs pieces ({ to } lines, { c, r, sweep,
+// to } arcs), from run[0]
+function runTime(start, moves, v, prof) {
+  const pc = [];
+  let at = start;
+  for (const m of moves) {
+    if (m.c) {
+      const L = Math.abs(m.sweep) * m.r;
+      const a0 = Math.atan2(at[1] - m.c[1], at[0] - m.c[0]), s = Math.sign(m.sweep);
+      if (L > 1e-6) pc.push({ L, cap: Math.min(v, Math.sqrt(prof.arc * m.r)), d0: a0 + (s * Math.PI) / 2, d1: a0 + m.sweep + (s * Math.PI) / 2 });
+    } else {
+      const L = Math.hypot(m.to[0] - at[0], m.to[1] - at[1]);
+      if (L > 1e-6) { const d = Math.atan2(m.to[1] - at[1], m.to[0] - at[0]); pc.push({ L, cap: v, d0: d, d1: d }); }
+    }
+    at = m.to;
+  }
+  if (!pc.length) return 0;
+  // the speed at each join: the slower piece's, and the corner's
+  const vj = new Array(pc.length + 1).fill(0);
+  for (let i = 1; i < pc.length; i++) {
+    let th = Math.abs(pc[i].d0 - pc[i - 1].d1) % (2 * Math.PI);
+    if (th > Math.PI) th = 2 * Math.PI - th;
+    const sh = Math.sin(th / 2);
+    const lim = th < 1e-3 ? Infinity : sh >= 0.9999 ? 0 : Math.sqrt((prof.corner * sh) / (1 - sh));
+    vj[i] = Math.min(pc[i].cap, pc[i - 1].cap, lim);
+  }
+  // as fast as it can get there, and still slow down in time
+  for (let i = 0; i < pc.length; i++) vj[i + 1] = Math.min(vj[i + 1], Math.sqrt(vj[i] * vj[i] + 2 * prof.acc * pc[i].L));
+  for (let i = pc.length - 1; i >= 0; i--) vj[i] = Math.min(vj[i], Math.sqrt(vj[i + 1] * vj[i + 1] + 2 * prof.acc * pc[i].L));
+  let t = 0;
+  for (let i = 0; i < pc.length; i++) {
+    const u0 = vj[i], u1 = vj[i + 1], L = pc[i].L, a = prof.acc;
+    const peak = Math.max(1e-6, Math.min(pc[i].cap, Math.sqrt((2 * a * L + u0 * u0 + u1 * u1) / 2)));
+    const s1 = (peak * peak - u0 * u0) / (2 * a), s2 = (peak * peak - u1 * u1) / (2 * a);
+    t += (peak - u0) / a + (peak - u1) / a + Math.max(0, L - s1 - s2) / peak;
+  }
+  return t;
+}
+
 // An arc from `from` (on its circle) as cubic Béziers of at most 45° (Ruby's piece size): each
 // [c1x, c1y, c2x, c2y, ex, ey] in mm. Control points at 4/3·tan(θ/4)·r along the tangents; the
 // curve then stays within 5·10⁻⁶·r of the circle (5 µm at a 1 m radius). The last piece ends
@@ -163,8 +212,8 @@ function compile(plan, cfg) {
     let travelSec = 0;
     let cutSec = 0;
     const speed = Math.min(p.speed, S.max);
+    const prof = cutProfile(P);
     for (const run of step.runs) {
-      for (let k = 1; k < run.length; k++) cutSec += Math.hypot(run[k][0] - run[k - 1][0], run[k][1] - run[k - 1][1]) / speed;
       // travel with the beam off
       out(TT.selectPowerLevel(0), TT.commit());
       out(TT.setParam64(KEY.MaxTangentialAcc, T.a), TT.commit());
@@ -186,6 +235,7 @@ function compile(plan, cfg) {
       // arcs.js). One COMMIT for the run, as Ruby commits once per cut item, but at least every
       // COMMIT_EVERY commands
       const moves = S.arcs ? fitArcs(run) : run.slice(1).map((q) => ({ to: q }));
+      cutSec += runTime(run[0], moves, speed, prof);
       let at = run[0], sent = 0;
       for (const m of moves) {
         const cmds = m.c ? bezierPieces(at, m).map((b) => TT.cubicBezier(U.fx(b[0]), U.fy(b[1]), U.fx(b[2]), U.fy(b[3]), U.fx(b[4]), U.fy(b[5])))
@@ -230,12 +280,14 @@ function compile(plan, cfg) {
   for (const step of plan.steps) {
     if (step.op === 'dwell' || step.op === 'inspect') {
       end();
-      segments.push({ ...step, kind: step.op });
+      // a registration mark: the camera moves to it, settles and looks, about 4 s a mark on the
+      // Q500 (3 marks took 11–17 s in J0040–J0065, the return to the start included)
+      segments.push({ ...step, kind: step.op, seconds: step.op === 'inspect' ? Math.max(Number(step.seconds) || 0, MARK_SEC) : step.seconds });
       continue;
     }
     begin();
-    // the step's time. A cut is timed here: the cutting at its set speed (the planner holds it,
-    // corners and curves included: on the X8 sheet Pathline's own cutting time ran ~15 % long) and
+    // the step's time. A cut is timed here: the cutting at its set speed on straights, slower round
+    // curves and corners (runTime: on the X8 sheet Pathline's own cutting time ran ~15 % long) and
     // the travel to each cut as the planner really moves (Pathline times that at 2000 mm/s with no
     // jerk limit). Engraving keeps Pathline's time
     let sec = step.seconds;
@@ -266,4 +318,4 @@ function exportFiles(plan, cfg) {
   return { bin, txt: txt.join('\n'), ext: '.sf' };
 }
 
-module.exports = { compile, exportFiles, settings, units, PLANNER };
+module.exports = { compile, exportFiles, settings, units, PLANNER, runTime, cutProfile };

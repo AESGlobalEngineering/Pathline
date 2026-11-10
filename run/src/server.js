@@ -124,14 +124,19 @@ function start(opts = {}) {
   const manualOf = (next) => (machine.ctrl ? Object.keys(machine.ctrl).filter((p) => Number(valueAt(next, p)) !== machine.ctrl[p]) : next.manual || []);
 
   // after an update: the changes since the version that last ran (shown once by the screen)
+  // and this machine's id for Pathline Prepare (GET /info, the network announcement): made once,
+  // at random, and never changed (not by a rename, a new IP address, an update or another
+  // controller). It's kept with the app's own state, so Setup and Remove machine can't lose it.
   let whatsNew = [];
+  let deviceId;
   {
     const f = path.join(DATA, 'app.json');
     let s = {};
     try { s = JSON.parse(fs.readFileSync(f, 'utf8')); } catch (e) { /* first run */ }
     const prev = s.lastRunVersion;
     if (prev && newer(pkgJson.version, prev)) whatsNew = changelog.filter((c) => newer(c.version, prev) && !newer(c.version, pkgJson.version));
-    if (prev !== pkgJson.version) fs.writeFileSync(f, JSON.stringify({ ...s, lastRunVersion: pkgJson.version }, null, 2));
+    deviceId = /^run-[0-9a-f]{8}$/.test(s.deviceId || '') ? s.deviceId : 'run-' + require('crypto').randomBytes(4).toString('hex');
+    if (prev !== pkgJson.version || deviceId !== s.deviceId) fs.writeFileSync(f, JSON.stringify({ ...s, lastRunVersion: pkgJson.version, deviceId }, null, 2));
   }
 
   // the request body as text (what: what's too large, for the message)
@@ -163,8 +168,16 @@ function start(opts = {}) {
     seconds: j.seconds, receivedAt: j.receivedAt, finishedAt: j.finishedAt
   }));
 
+  // who this machine is: GET /info and the network announcement say the same
+  const infoView = () => ({
+    name: cfg.name, type: config.machineType(cfg), ctrl: CONTROLLERS[cfg.controller].label, model: machine.info.model || cfg.name,
+    protocol: 1, app: 'Pathline Run ' + pkgJson.version
+  });
+  // announced on the network (once listening): Prepare finds the machine without an IP address
+  let discovery = null;
+
   // what Pathline is told while no machine has been added
-  const needMachine = () => { if (!cfg.configured) throw err(409, 'No machine is set up in Pathline Run yet. Add one on its screen: Setup → Add machine.'); };
+  const needMachine =() => { if (!cfg.configured) throw err(409, 'No machine is set up in Pathline Run yet. Add one on its screen: Setup → Add machine.'); };
 
   function queueJob(pkg, source) {
     needMachine();
@@ -181,10 +194,7 @@ function start(opts = {}) {
 
   // ---------------------------------------------------------------- Pathline protocol
   const api = {
-    'GET /info': () => (needMachine(), {
-      name: cfg.name, type: config.machineType(cfg), ctrl: CONTROLLERS[cfg.controller].label, model: machine.info.model || cfg.name,
-      firmware: machine.info.firmware || '', protocol: 1, bed: cfg.bed, app: 'Pathline Run ' + pkgJson.version
-    }),
+    'GET /info': () => (needMachine(), { id: deviceId, ...infoView(), firmware: machine.info.firmware || '', bed: cfg.bed }),
     'GET /machine': () => (needMachine(), config.machineView(cfg)),
     'GET /status': () => machine.status(),
     'GET /jobs': () => jobsView(),
@@ -251,7 +261,8 @@ function start(opts = {}) {
       camera: { open: !!machine.vision.camera, info: machine.vision.camera ? machine.vision.camera.info || null : null, busy: machine.camBusy || null, exposure: machine.vision.exposureNow(), defaults: VisionDefaults },
       jobs: store.jobs.filter((j) => !j.hidden), history: store.history.slice(0, 100), controllers: Object.keys(CONTROLLERS),
       // how the Trotec travels between cuts (the screen times the running job's route with it)
-      motion: cfg.controller === 'trotec' ? require('./ctrl/trotec/motion').travelLimits(cfg, require('./ctrl/trotec/compile').PLANNER.Standard, (cfg.trotec && cfg.trotec.travelSpeed) || 700) : null
+      // and along the cuts (slower round curves and corners), as its estimate times them
+      motion: cfg.controller === 'trotec' ? { ...require('./ctrl/trotec/motion').travelLimits(cfg, require('./ctrl/trotec/compile').PLANNER.Standard, (cfg.trotec && cfg.trotec.travelSpeed) || 700), cut: require('./ctrl/trotec/compile').cutProfile(require('./ctrl/trotec/compile').PLANNER.Standard) } : null
     }),
     'GET /log': () => logLines,
     'GET /ports': async () => {
@@ -282,6 +293,8 @@ function start(opts = {}) {
       cfg = next;
       config.save(DATA, cfg);
       log('setup saved (' + cfg.controller + ', ' + cfg.connection.mode + ')');
+      // a new name (or a machine just added): told to the network straight away
+      if (discovery) discovery.update();
       return { config: cfg };
     },
     'GET /presets': () => ({ trotec: config.defaults('trotec'), ruida: config.defaults('ruida'), ruidaModels: ruidaModels.MODELS }),
@@ -361,6 +374,7 @@ function start(opts = {}) {
       cfg = next;
       config.save(DATA, cfg);
       log('machine removed: ' + name);
+      if (discovery) discovery.update();
       return { config: cfg };
     },
     // this computer's network adapters and addresses (what Pathline connects to)
@@ -488,12 +502,21 @@ function start(opts = {}) {
     server.listen(PORT, () => {
       log('Pathline Run ' + pkgJson.version + ' on http://localhost:' + PORT + ' · ' + CONTROLLERS[cfg.controller].label + ' · ' + cfg.connection.mode + ' · data in ' + DATA);
       machine.connect().then(() => machine.startPolling());
+      // simulated machines stay quiet unless asked (--announce), so a test run isn't found by Prepare
+      if (opts.announce !== undefined ? opts.announce : !opts.sim) {
+        try {
+          discovery = require('./discovery').start(() => (cfg.configured ? { id: deviceId, ...infoView(), port: PORT } : null), { log, port: opts.mdnsPort });
+        } catch (e) { log('discovery: not started (' + e.message + ')'); }
+      }
       resolve({
         port: PORT,
         machine,
         log,
+        deviceId,
+        discovery,
         // stops the machine safely, then closes the server
         close: async () => {
+          try { if (discovery) await discovery.close(); } catch (e) { /* closing anyway */ }
           try { await machine.stop(); } catch (e) { /* closing anyway */ }
           try { if (machine.link) await machine.link.close(); } catch (e) { /* closing anyway */ }
           server.close();
@@ -509,7 +532,7 @@ if (require.main === module) {
   const argv = process.argv.slice(2);
   const arg = (k, d) => { const i = argv.indexOf('--' + k); return i >= 0 && argv[i + 1] && !argv[i + 1].startsWith('--') ? argv[i + 1] : d; };
   const flag = (k) => argv.includes('--' + k);
-  start({ dataDir: config.dataDir(arg('data')), port: arg('port'), sim: flag('sim'), controller: arg('controller') }).then((s) => {
+  start({ dataDir: config.dataDir(arg('data')), port: arg('port'), sim: flag('sim'), controller: arg('controller'), announce: flag('announce') || undefined, mdnsPort: arg('mdns-port') && Number(arg('mdns-port')) }).then((s) => {
     if (flag('open')) {
       const u = 'http://localhost:' + s.port + '/';
       const cmd = process.platform === 'win32' ? ['cmd', ['/c', 'start', '', u]] : process.platform === 'darwin' ? ['open', [u]] : ['xdg-open', [u]];

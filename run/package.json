@@ -76,6 +76,7 @@
       "shortcutName": "Pathline Run",
       "installerIcon": "build/icon.ico",
       "uninstallerIcon": "build/icon.ico",
+      "include": "build/installer.nsh",
       "artifactName": "Pathline-Run-Setup-${version}.exe"
     },
     "portable": {

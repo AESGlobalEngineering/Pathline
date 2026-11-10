@@ -81,8 +81,19 @@ Add both as inbound rules in the NSIS installer (`netsh advfirewall firewall add
 
 ## Done when
 
-- [ ] `GET /info` has a stable `id`.
-- [ ] Run answers `_pathline._tcp.local` with PTR, SRV, TXT and A, replying straight to questions that come from an ordinary port.
-- [ ] Run announces itself on start-up and when its name or address changes.
-- [ ] The installer opens TCP 8470 and UDP 5353 inbound for Run.
+- [x] `GET /info` has a stable `id`.
+- [x] Run answers `_pathline._tcp.local` with PTR, SRV, TXT and A, replying straight to questions that come from an ordinary port.
+- [x] Run announces itself on start-up and when its name or address changes.
+- [x] The installer opens TCP and UDP 5353 inbound for Run.
 - [ ] Prepare lists the machine with `via` including `announce`, and follows it to a new IP address.
+
+## Done in Pathline Run 0.7.11
+
+- **`id`:** `run-` plus 8 hex digits, made the first time Run starts and kept in `app.json` in Run's data folder, beside the app's own state rather than the machine's setup. Setup and Remove machine can't change it. A fresh data folder gets a new one.
+- **Responder:** `run/src/discovery.js`, on Node's own `dgram` with no extra modules.
+  - It answers PTR for `_pathline._tcp.local`, and SRV, TXT and A for its own names. Questions from an ordinary port get a legacy unicast reply with the question's ID and question echoed. QU questions from 5353 are answered straight back, and others by multicast.
+  - The A records list the address on the asker's network first.
+  - It announces twice, 1 s apart, on start-up, and again when the name, port or an address changes. It checks every 10 s and also when Setup is saved, and says goodbye with TTL 0 on quit.
+  - It stays quiet until a machine is set up. A simulated machine (`--sim`) doesn't announce unless it's started with `--announce`.
+- **Firewall:** `run/build/installer.nsh` adds "Pathline Run", TCP for the program on any port so a changed HTTP port still works, and "Pathline Run (discovery)", UDP 5353. The uninstaller removes both. The rules need the installer to run elevated (an install for all users). A per-user install, or the portable exe, relies on Windows' own "allow this app" prompt.
+- **Self-test:** `run/tools/selftest.js` → "Found on the network". It checks that Prepare's own `browse()`, run against Run's responder, gets the `id`, name, port and type, and that a rename keeps the `id`. It also checks that `/info`'s `id` stays the same across restarts.
