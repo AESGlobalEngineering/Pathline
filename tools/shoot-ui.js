@@ -49,10 +49,10 @@ app.whenReady().then(async () => {
       const lvl = e.level;
       if ((lvl === 'error' || lvl === 3) && !/Expected moveto/.test(e.message)) errs.push(e.message);
     });
-    // set the theme before the page paints
+    // set the theme before the page paints; &still turns motion off so nothing is caught mid-animation
     await w.webContents.session.clearStorageData();
-    try { await w.loadURL('file:///' + tmp.replace(/\\/g, '/') + '?scenario=' + scenario); } catch (err) { errs.push('load: ' + err.message); }
-    await w.webContents.executeJavaScript("window.LRC && window.LRC.theme ? (LRC.theme.set('" + theme + "', false), 'ok') : 'no LRC.theme'", true).catch((e) => errs.push(e.message));
+    try { await w.loadURL('file:///' + tmp.replace(/\\/g, '/') + '?scenario=' + scenario + '&still'); } catch (err) { errs.push('load: ' + err.message); }
+    await w.webContents.executeJavaScript("window.LRC && window.LRC.theme ? (document.documentElement.dataset.motion = 'off', LRC.theme.set('" + theme + "', false), 'ok') : 'no LRC.theme'", true).catch((e) => errs.push(e.message));
     await delay(Number(opt('wait', 1500)));
     for (const js of steps) {
       try { const r = await w.webContents.executeJavaScript(js, true); if (r !== undefined) console.log('  step: ' + String(r).slice(0, 200)); } catch (err) { errs.push('step: ' + err.message); }

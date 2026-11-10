@@ -33,7 +33,11 @@
 .ms-dot{width:7px;height:7px;border-radius:50%;flex:none}
 .ms-name{margin:0;font-size:16px;font-weight:600;line-height:var(--ctl-h);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .ms-conn{display:flex;flex-direction:column;gap:2px;font-size:12px;line-height:1.3;white-space:nowrap}
-.ms-ib{border:1px solid var(--line-strong)}
+/* duplicate / delete sit apart from the connection actions */
+.ms-more{display:flex;gap:2px;padding-left:10px;border-left:1px solid var(--line)}
+/* read-only (from the machine): no border, so it reads as a value, not an input, in both themes */
+.ms-card .fld:has(input:disabled),.ms-card .dd:disabled{border-color:transparent}
+.ms-card-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px}
 .ms-actions{display:flex;flex-wrap:wrap;justify-content:flex-end;align-items:center;gap:10px 12px;margin-left:auto}
 </style>
 </helmet>
@@ -54,7 +58,6 @@
       </div>
       <div style="display: flex; flex-direction: column; line-height: 1.25; min-width: 0">
         <h1 class="h-page">Machine setup</h1>
-        <span class="lbl">{{machineCount}}</span>
       </div>
     </div>
     <span class="spacer"></span>
@@ -64,6 +67,11 @@
     </sc-if>
     <button class="btn-primary" onClick="{{save}}" disabled="{{clean}}" style="opacity: {{saveOpacity}}; cursor: {{saveCursor}}">Save</button>
   </header>
+
+  <!-- ===== Loading (while the page reads its data): the page's own panels with the content greyed ===== -->
+  <sc-if value="{{loading}}" hint-placeholder-val="{{false}}">
+    <div class="loading-screen" role="status" aria-live="polite"><span class="sr-only">Loading…</span><div class="ld-col l" style="width: 300px; gap: 4px; padding: 14px"><span class="skel" style="width: 70px; height: 10px"></span><span style="height: 6px"></span><div class="ld-row" style="padding: 8px 10px; align-items: flex-start"><span class="skel" style="width: 62px; height: 22px"></span><span style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px"><span class="skel" style="width: 52%"></span><span class="skel" style="width: 64%; height: 9px"></span></span></div><div class="ld-row" style="padding: 8px 10px; align-items: flex-start"><span class="skel" style="width: 62px; height: 22px"></span><span style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px"><span class="skel" style="width: 48%"></span><span class="skel" style="width: 64%; height: 9px"></span></span></div><div class="ld-row" style="padding: 8px 10px; align-items: flex-start"><span class="skel" style="width: 62px; height: 22px"></span><span style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px"><span class="skel" style="width: 50%"></span><span class="skel" style="width: 64%; height: 9px"></span></span></div><span style="flex: 1"></span><span class="skel ctl" style="width: 100%"></span></div><div class="ld-main"><div class="ld-card ld-row" style="flex-direction: row; gap: 14px"><span class="skel" style="width: 54px; height: 28px"></span><span style="flex: 1; display: flex; flex-direction: column; gap: 8px"><span class="skel" style="width: 120px; height: 16px"></span><span class="skel" style="width: 130px; height: 10px"></span></span><span class="skel pill" style="width: 96px; height: 24px"></span><span class="skel ctl" style="width: 76px"></span><span class="skel ctl" style="width: 170px"></span><span class="skel" style="width: 36px; height: 36px"></span><span class="skel" style="width: 36px; height: 36px"></span></div><div class="ld-row" style="gap: 26px; height: 40px; padding: 0 12px; border-bottom: 1px solid var(--line)"><span class="skel" style="width: 56px"></span><span class="skel" style="width: 68px"></span><span class="skel" style="width: 80px"></span><span class="skel" style="width: 58px"></span><span class="skel" style="width: 62px"></span></div><div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 16px; align-items: start"><div class="ld-card"><span class="skel" style="width: 84px; height: 14px"></span><div class="ld-row" style="justify-content: space-between; min-height: 36px"><span class="skel" style="width: 80px"></span><span class="skel ctl" style="width: 220px"></span></div><div class="ld-row" style="justify-content: space-between; min-height: 36px"><span class="skel" style="width: 70px"></span><span class="skel ctl" style="width: 220px"></span></div><div class="ld-row" style="justify-content: space-between; min-height: 36px"><span class="skel" style="width: 50px"></span><span class="skel ctl" style="width: 220px"></span></div><div class="ld-row" style="justify-content: space-between; min-height: 36px"><span class="skel" style="width: 64px"></span><span class="skel ctl" style="width: 220px"></span></div><div class="ld-row" style="justify-content: space-between; min-height: 36px"><span class="skel" style="width: 48px"></span><span class="skel ctl" style="width: 220px"></span></div></div><div class="ld-card"><span class="skel" style="width: 96px; height: 14px"></span><div class="ld-row" style="justify-content: space-between; min-height: 36px"><span class="skel" style="width: 48px"></span><span class="skel ctl" style="width: 58px"></span></div><div class="ld-row" style="justify-content: space-between; min-height: 36px"><span class="skel" style="width: 40px"></span><span class="skel ctl" style="width: 100px"></span></div><div class="ld-row" style="justify-content: space-between; min-height: 36px"><span class="skel" style="width: 96px"></span><span class="skel ctl" style="width: 40px"></span></div><div class="ld-row" style="justify-content: space-between; min-height: 36px"><span class="skel" style="width: 110px"></span><span class="skel ctl" style="width: 220px"></span></div></div></div></div></div>
+  </sc-if>
 
   <div style="flex: 1; display: flex; min-height: 0">
 
@@ -76,7 +84,7 @@
           <span style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; line-height: 1.3">
             <span style="display: flex; align-items: center; gap: 8px; min-width: 0">
               <span style="flex: 1; min-width: 0; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{mc.name}}</span>
-              <span class="pill nodot" role="img" aria-label="{{mc.status}}" title="{{mc.status}}" style="height: 22px; padding: 0 8px; background: {{mc.pbg}}; color: {{mc.pfg}}"><span class="ms-dot" aria-hidden="true" style="background: {{mc.dot}}"></span>{{mc.short}}</span>
+              <span class="pill nodot {{mc.pcls}}" role="img" aria-label="{{mc.status}}" title="{{mc.status}}" style="height: 22px; padding: 0 8px; background: {{mc.pbg}}; color: {{mc.pfg}}"><span class="ms-dot" aria-hidden="true" style="background: {{mc.dot}}"></span>{{mc.short}}</span>
             </span>
             <span class="lbl" style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{mc.sub}}</span>
           </span>
@@ -94,7 +102,7 @@
           <div class="empty">
             <span class="em-icon"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.machine}}"></path></svg></span>
             <h2 class="em-title" style="margin: 0">No machines yet</h2>
-            <span class="em-text">Add the lasers and plotters this computer prepares jobs for. Set the connection here, then use the refresh icon to read the bed size, speeds and features.</span>
+            <span class="em-text">Add a laser or plotter to prepare jobs for it.</span>
             <div class="em-actions">
               <button class="btn-primary" onClick="{{addMachine}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.plus}}"></path></svg>Add machine</button>
             </div>
@@ -117,16 +125,16 @@
           <span class="lbl">{{m.sub}}</span>
         </div>
         <div class="ms-actions">
-        <span class="pill nodot" style="background: {{m.statusBg}}; color: {{m.statusFg}}"><span class="ms-dot" aria-hidden="true" style="background: {{m.dot}}"></span>{{m.status}}</span>
+        <span class="pill nodot {{m.pcls}}" style="background: {{m.statusBg}}; color: {{m.statusFg}}"><span class="ms-dot" aria-hidden="true" style="background: {{m.dot}}"></span>{{m.status}}</span>
         <sc-if value="{{conn.show}}" hint-placeholder-val="{{true}}">
           <div class="ms-conn">
             <span style="color: {{conn.fg}}">{{conn.line}}</span>
             <span class="lbl">{{conn.sync}}</span>
           </div>
-          <button class="ib ms-ib" onClick="{{runTest}}" aria-label="Test connection" title="Test connection"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.plug}}"></path></svg></button>
-          <button class="ib ms-ib" onClick="{{refresh}}" disabled="{{noSync}}" aria-label="{{refreshLabel}}" title="{{refreshLabel}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.sync}}"></path></svg></button>
+          <button class="tb" onClick="{{runTest}}" aria-label="Test connection" title="Test connection"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.plug}}"></path></svg>Test</button>
+          <button class="tb" onClick="{{refresh}}" disabled="{{noSync}}" aria-label="{{refreshLabel}}" title="{{refreshLabel}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.sync}}"></path></svg>{{refreshLabel}}</button>
         </sc-if>
-        <div style="display: flex; gap: 2px">
+        <div class="ms-more">
           <button class="ib" onClick="{{duplicate}}" aria-label="Duplicate machine" title="Duplicate"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.copy}}"></path></svg></button>
           <button class="ib" onClick="{{remove}}" aria-label="Delete machine" title="Delete"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.trash}}"></path></svg></button>
         </div>
@@ -142,7 +150,10 @@
       <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 16px; align-items: start">
         <sc-for list="{{cards}}" as="cd" hint-placeholder-count="2">
           <section aria-label="{{cd.title}}" class="card ms-card" style="grid-column: {{cd.span}}">
-            <h2 class="h-sec">{{cd.title}}</h2>
+            <div class="ms-card-head">
+              <h2 class="h-sec">{{cd.title}}</h2>
+              <sc-if value="{{cd.fromMachine}}" hint-placeholder-val="{{false}}"><svg class="i" viewBox="0 0 24 24" role="img" aria-label="Some settings are read from the machine" style="width: 15px; height: 15px; color: var(--text-4); align-self: center"><title>Greyed settings are read from the machine. Change them on its HMI, then Refresh from machine.</title><path d="{{icons.lock}}"></path></svg></sc-if>
+            </div>
 
             <sc-if value="{{cd.isFields}}" hint-placeholder-val="{{true}}">
               <div style="display: flex; flex-direction: column; gap: 10px">
@@ -259,6 +270,8 @@ class Component extends DCLogic {
       .then(([list, job]) => {
         this.setState({ ready: true, list: JSON.parse(JSON.stringify(list)), saved: list, mid: (job && list.some((m) => m.id === job.machineId)) ? job.machineId : (list[0] ? list[0].id : null) });
         this.pingAll();
+        // arrived from the Job page's empty machine box: start adding one
+        if (location.hash === '#add') { history.replaceState(null, '', location.pathname + location.search); this.addMachine(); }
       })
       .catch(LRC.fail);
     this.pinger = setInterval(() => this.pingAll(), 8000);
@@ -341,24 +354,77 @@ class Component extends DCLogic {
       box.querySelectorAll('[data-sim]').forEach((el) => { el.style.display = on ? 'none' : ''; });
     };
     const typeField = { key: 'type', label: 'Type', type: 'seg', value: 'laser', options: [{ value: 'laser', label: 'Laser' }, { value: 'plotter', label: 'Plotter' }] };
+    // machines found on the network (Pathline Run, by a network scan and its
+    // own announcements); picking one fills in its address
+    let picked = null, list = null;
+    const findMachines = (el, box) => {
+      const mk = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
+      const head = mk('div', 'found-head');
+      head.appendChild(mk('span', 'lbl', 'Machines on this network'));
+      const again = mk('button', '', 'Search again');
+      again.type = 'button';
+      head.appendChild(again);
+      el.replaceChildren(head);
+      list = mk('div', 'found');
+      list.setAttribute('role', 'listbox');
+      list.setAttribute('aria-label', 'Machines on this network');
+      el.appendChild(list);
+      const say = (text) => list.replaceChildren(mk('div', 'fmsg', text));
+      const search = async () => {
+        again.disabled = true;
+        say('Looking for machines…');
+        let found = [];
+        try { found = await window.api.discover.find(); } catch (e) { found = []; }
+        again.disabled = false;
+        if (!found.length) { say('No machines found on this network. Type the machine\'s IP address below.'); return; }
+        list.replaceChildren(...found.map((f) => {
+          const b = mk('button', 'list-item');
+          b.type = 'button';
+          b.setAttribute('role', 'option');
+          const t = mk('span', 'fm');
+          t.appendChild(mk('b', '', f.name || f.model || 'Pathline Run'));
+          t.appendChild(mk('span', '', [f.type === 'plotter' ? 'Plotter' : f.type === 'laser' ? 'Laser' : '', f.ctrl, f.ip + (f.port !== 8470 ? ':' + f.port : '')].filter(Boolean).join(' · ')));
+          b.appendChild(t);
+          if (f.added) {
+            b.disabled = true;
+            b.title = 'Already set up as ' + f.added.name;
+            b.appendChild(mk('span', 'tag', 'Added'));
+          } else {
+            b.onclick = () => {
+              picked = f;
+              [...list.children].forEach((c) => { c.classList.toggle('on', c === b); c.setAttribute('aria-selected', c === b ? 'true' : 'false'); });
+              box.setValue('ip', f.ip);
+            };
+          }
+          return b;
+        }));
+      };
+      again.onclick = (e) => { e.preventDefault(); search(); };
+      search();
+    };
     const r = await LRC.dialog({
       title: 'Add machine',
+      noFocus: true,
       fields: [
         { key: 'kind', label: 'Machine', type: 'seg', value: 'real', options: [{ value: 'real', label: 'Real' }, { value: 'sim', label: 'Simulated' }], onChange: (v, _vals, box) => realOnly(box, v === 'real') },
         { ...typeField, sim: true, hidden: true },
         { key: 'name', label: 'Name', value: '', full: true, sim: true, hidden: true },
-        { key: 'ip', label: 'IP address', value: '', full: true, real: true },
+        { key: 'found', type: 'custom', real: true, mount: findMachines },
+        { key: 'ip', label: 'IP address', value: '', full: true, real: true, placeholder: 'Or type it, e.g. 192.168.1.63',
+          // typing a different address leaves the machine picked above
+          onInput: (v) => { if (picked && v.trim() !== picked.ip && list) { picked = null; [...list.children].forEach((c) => { c.classList.remove('on'); c.setAttribute('aria-selected', 'false'); }); } } },
         { key: 'ctrl', label: 'Controller', type: 'select', value: 'Ruida', options: CONTROLLERS, full: true, sim: true, hidden: true }
       ],
       buttons: [{ label: 'Cancel', value: null }, { label: 'Add', value: 'ok', primary: true }]
     });
     if (!r) return;
     // a real machine reports its controller (until it does, the default for its type)
-    let type = r.values.type, ctrl = r.values.kind === 'sim' ? r.values.ctrl : null, found = null;
+    let type = r.values.type, ctrl = r.values.kind === 'sim' ? r.values.ctrl : null, found = null, port = 8470;
     if (r.values.kind !== 'sim') {
       // ask the machine whether it is a laser or a plotter (GET /info)
       const ip = String(r.values.ip || '').trim();
-      const info = ip ? await window.api.device.test({ ip, port: 8470, timeout: 3000, conn: 'Ethernet' }).then((t) => t.info || {}, () => null) : null;
+      port = picked && picked.ip === ip ? picked.port : 8470;
+      const info = ip ? await window.api.device.test({ ip, port, timeout: 3000, conn: 'Ethernet' }).then((t) => t.info || {}, () => null) : null;
       if (info && (info.type === 'laser' || info.type === 'plotter')) {
         type = info.type;
         found = info;
@@ -380,7 +446,7 @@ class Component extends DCLogic {
     const isPlot = type === 'plotter';
     const m = r.values.kind === 'sim'
       ? { ...base, sim: true, conn: 'Local', ip: '', ctrl, kind: isPlot ? 'Plotter' : 'Laser · CO2', name: r.values.name || (isPlot ? 'Simulated plotter' : 'Simulated laser') }
-      : { ...base, ip: String(r.values.ip || '').trim(), ctrl: ctrl || base.ctrl, ...(found && found.name ? { name: String(found.name).trim(), hmiName: true } : {}) };
+      : { ...base, ip: String(r.values.ip || '').trim(), port, ctrl: ctrl || base.ctrl, ...(found && found.name ? { name: String(found.name).trim(), hmiName: true } : {}), ...(found && found.id ? { deviceId: String(found.id) } : {}) };
     // created on disk already; keep the working copy in step
     this.setState((s) => ({ list: s.list.concat(m), saved: s.saved.concat(base), mid: m.id, tab: null }));
   }
@@ -402,6 +468,7 @@ class Component extends DCLogic {
     const accentSoft = 'var(--accent-soft)';
     const icons = {
       plus: 'M12 5v14 M5 12h14',
+      lock: 'M6 11h12v9H6z M8 11V8a4 4 0 0 1 8 0v3',
       copy: 'M8 8h12v12H8z M4 16V4h12',
       trash: 'M4 7h16 M9 7V4h6v3 M6 7l1 13h10l1-13',
       chev: 'M6 9l6 6 6-6',
@@ -411,14 +478,14 @@ class Component extends DCLogic {
       machine: 'M3 6h18v9H3z M7 15v4 M17 15v4 M5 19h14 M12 6v4 M10.5 10h3'
     };
     const S = this.state;
-    if (!S.ready) return { accent, icons, machineList: [], tabs: [], cards: [], heads: [], m: {} };
+    if (!S.ready) return { loading: true, accent, icons, machineList: [], tabs: [], cards: [], heads: [], m: {} };
     const R = (fn) => this.run(fn);
     const TYPE = { laser: { type: 'LASER', tbg: 'var(--badge-laser)' }, plotter: { type: 'PLOTTER', tbg: 'var(--badge-plotter)' } };
     const dirty = this.dirty();
     const common = {
       accent, icons,
       machineCount: S.list.length ? S.list.length + ' machine' + (S.list.length === 1 ? '' : 's') : 'No machines',
-      dirty, clean: !dirty, saveOpacity: dirty ? 1 : 0.45, saveCursor: dirty ? 'pointer' : 'default',
+      dirty, clean: !dirty, saveOpacity: 1, saveCursor: dirty ? 'pointer' : 'default',
       save: R(() => this.save()),
       discard: () => this.setState((s) => ({ list: JSON.parse(JSON.stringify(s.saved)), mid: s.saved.some((m) => m.id === s.mid) ? s.mid : (s.saved[0] && s.saved[0].id) })),
       addMachine: R(() => this.addMachine())
@@ -462,7 +529,8 @@ class Component extends DCLogic {
     const roPick = (l, v) => ({ isPick: true, l, v: v || '—', open: false, opts: [], toggle: () => {}, ...RO });
     // features the machine doesn't have are left out (falsy fields are dropped);
     // a simulated machine lists every feature so it can be switched on or off
-    const card = (title, fields, span) => ({ title, fields: fields.filter(Boolean), isFields: true, span: span || 'auto' });
+    // a card holding settings read from the machine says so, once, beside its title
+    const card = (title, fields, span) => { const fl = fields.filter(Boolean); return { title, fields: fl, isFields: true, span: span || 'auto', fromMachine: !sim && fl.some((x) => x.ro && !x.isAction) }; };
     const featCard = (list) => {
       if (sim) return card('Features', list.map(([l, k]) => roToggle(l, !!feat[k], setFeat(k))));
       const on = list.filter(([, k]) => feat[k]).map(([l]) => roToggle(l, true));
@@ -474,7 +542,7 @@ class Component extends DCLogic {
       // nothing to connect to: Ethernet is greyed out and jobs are saved as files
       connFields[0].opts.forEach((o) => { if (o.l === 'Ethernet') { o.ro = true; o.pick = () => {}; } });
     } else if (raw.conn === 'Ethernet') connFields.push(text('IP address', 'ip', '', '192.168.1.60'), text('Port', 'port', '', '8470'), text('Timeout', 'timeout', 'ms', '3000'));
-    else connFields.push({ isNote: true, l: 'Send to machine opens a save window so you can put the job (settings, DXF, preview and time estimate) wherever you like, then load it on the controller.' });
+    else connFields.push({ isNote: true, l: 'Send to machine saves the job as a file to load on the controller.' });
     if (sim) {
       // a simulated machine still has a controller type: the operator picks it
       const key = raw.id + '|ctrl', open = S.openPick === key;
@@ -542,8 +610,7 @@ class Component extends DCLogic {
         'Timing': [card('Time estimate', [
           roText('Tool down', (info.timing && info.timing.toolDown) ?? CC.DEFAULTS.plotter.toolDown, 's', setTiming('toolDown')), roText('Tool up', (info.timing && info.timing.toolUp) ?? CC.DEFAULTS.plotter.toolUp, 's', setTiming('toolUp')),
           roText('Tool change', (info.timing && info.timing.toolChange) ?? CC.DEFAULTS.plotter.toolChange, 's', setTiming('toolChange')), roText('Conveyor speed', (info.timing && info.timing.feedSpeed) ?? CC.DEFAULTS.plotter.feedSpeed, 'mm/s', setTiming('feedSpeed')),
-          { isNote: true, l: sim ? 'Used by the simulation to estimate job time.' : 'Used by the simulation to estimate job time. Read from the machine when it reports them.' }
-        ])]
+                  ])]
       };
     }
     const tab = tabsDef.includes(S.tab) ? S.tab : 'General';
@@ -556,7 +623,7 @@ class Component extends DCLogic {
       if (m.sim) return { status: 'Simulated', short: 'Simulated', ...IDLE };
       if (m.conn !== 'Ethernet') return { status: 'Save locally', short: 'Local', ...IDLE };
       const o = S.online[m.id];
-      if (o === undefined) return { status: 'Checking…', short: 'Checking…', ...IDLE };
+      if (o === undefined) return { status: 'Checking…', short: 'Checking…', pcls: 'busy', ...IDLE };
       // the HMI answers but its own link to the controller is down
       if (o && o.ok && o.link && o.link !== 'online') return { status: 'Connected · machine offline', short: 'Machine offline', dot: 'var(--warn-dot)', bg: 'var(--warn-soft)', fg: 'var(--warn)' };
       if (o && o.ok) return { status: 'Connected' + (o.state && o.state !== 'idle' ? ' · ' + o.state : ''), short: 'Connected', dot: 'var(--ok-dot)', bg: 'var(--ok-soft)', fg: 'var(--ok)' };
@@ -568,7 +635,7 @@ class Component extends DCLogic {
       return {
         ...TYPE[x.type], name: x.name,
         sub: x.sim ? 'Simulated' + (CONTROLLERS.includes(x.ctrl) ? ' · ' + x.ctrl : '') : (x.ctrl ? x.ctrl + ' · ' : '') + (x.conn === 'Ethernet' ? (x.ip || 'no IP') : 'save locally'),
-        status: st.status, short: st.short, dot: st.dot, pbg: st.bg, pfg: st.fg, cur: on ? 'page' : 'false',
+        status: st.status, short: st.short, pcls: st.pcls || '', dot: st.dot, pbg: st.bg, pfg: st.fg, cur: on ? 'page' : 'false',
         bg: on ? accentSoft : '', bd: on ? accent : 'transparent',
         pick: () => this.setState({ mid: x.id, tab: null })
       };
@@ -585,7 +652,7 @@ class Component extends DCLogic {
         ...TYPE[raw.type], name: raw.name, nameEdit: sim, nameText: !sim, nameTip: 'Set on the machine\'s HMI',
         kind: raw.kind || (isLaser ? 'Laser' : 'Plotter'), ctrl: raw.ctrl,
         sub: [raw.kind || (isLaser ? 'Laser' : 'Plotter'), raw.ctrl].filter(Boolean).join(' · '),
-        status: st.status, dot: st.dot, statusBg: st.bg, statusFg: st.fg
+        status: st.status, pcls: st.pcls || '', dot: st.dot, statusBg: st.bg, statusFg: st.fg
       },
       setName: set('name'),
       // connection (Ethernet): latency (from the last test, else the background check) over the last sync time
@@ -593,7 +660,7 @@ class Component extends DCLogic {
         const o = S.online[raw.id];
         // (the status pill already says Connected)
         const line = test ? (test.busy ? 'Testing…' : String(test.text).replace(/^Connected · /, ''))
-          : o && o.ok ? o.ms + ' ms' : o ? 'Not answering' + (o.msg ? ' · ' + o.msg : '') : o === null ? 'Not checked yet' : 'Checking…';
+          : o && o.ok ? o.ms + ' ms' : o ? 'Not answering' + (o.msg ? ' · ' + o.msg : '') : o === null ? 'Not checked yet' : '';
         const ok = test ? test.ok : o && o.ok;
         return {
           show: raw.conn === 'Ethernet' && !sim, line,

@@ -37,6 +37,7 @@ The wire protocol hasn't changed (`protocol: 1`). What the HMI will see differen
 - **Pathline prepares; Pathline Run runs.** Pathline never talks to motors, lasers or controller boards. It sends one self-contained JSON **job package**. The HMI turns that into machine motion, using whatever controller the machine has (a Trotec or Ruida controller, GRBL, a motion card, and so on). That translation is entirely the HMI's job.
 - Pathline is finished, and so is its side of the protocol. **The HMI implements the server side.** Pathline is only an HTTP client: it starts every request, and the HMI never calls Pathline.
 - One HMI serves one machine. Pathline can have several machines set up, each with its own IP and port.
+- **Finding the machine (from Prepare 1.6.11):** Add machine lists the machines on the network. It scans the local /24 for `GET /info` on port 8470, and asks for `_pathline._tcp.local` over mDNS. Run should give `/info` a stable `id`, announce itself, and have its installer open TCP 8470 and UDP 5353. See **hmi/RUN-DISCOVERY-BRIEF.md**.
 - Pathline's name for this app is **Pathline Run**. Its icon is in [`brand/`](brand/).
 
 ## 2. What the HMI must do
@@ -183,13 +184,18 @@ Bitmap/photo engraving isn't in Pathline yet. Today only vector shapes are fille
 ### 4.6 Registration marks (print and cut)
 The operator prints artwork with marks, puts the sheet on the bed, and the camera reads the marks so the cut lines up with the print, even if the sheet is shifted, rotated or slightly distorted.
 
-- `regMarks.marks` are the design positions (centre `x`, `y`, diameter `d`). The `inspect` steps visit them in Pathline's chosen order, ending nearest where the work starts.
+- `regMarks.marks` are the design positions (centre `x`, `y`, diameter `d`). The `inspect` steps visit them in a fixed order: top left, then bottom left, then top right (any others after, nearest next); the cutting starts from the last one. From Pathline Prepare 1.6.9.
 - `mode: "pos"` (2 marks): **position and rotation**. Fit a rigid transform (translation + rotation; scale is optional).
 - `mode: "linear"` (3 marks): **full linear**. Fit an affine transform (translation, rotation, scale and shear) from the 3 point pairs.
 - `mode: "nonlinear"` (3 marks): **non-linear**. The intent is to correct uneven distortion as well. The method is the HMI's choice (§11).
 - Apply the transform to every coordinate of every later step (paths, boxes, gaps). Pathline never sends more marks than the mode uses (such jobs are blocked). If there are fewer marks than the mode needs, Pathline only warns, so handle it: refuse to start, or fall back.
 - Machine settings that matter: `markType` (Dot), `markD`, `camX`/`camY` (camera offset from the beam), `calibrated` (date text), and `markTime` (seconds to read one mark, used by Pathline's estimate, default 1.5).
-- `markArea: [x0, y0, x1, y1]` (bed mm, optional): where the camera can read a mark. The camera sits off the beam and the head has limited travel, so it can't look right up to every edge. Pathline places every registration mark inside it. Pathline Run sends it whenever the camera is on: on the Q500, `[26.9, 3.5, 1300, 900]`. When it's missing, assume the whole bed. Pathline Run refuses a job at Start if a mark is outside it.
+- **Where marks can go (`markArea`, from Pathline Prepare 1.6.8):**
+  - Run sends `markArea: [x0, y0, x1, y1]` (bed mm, origin top-left, Y down) in GET /machine when the camera is on: the area the camera can read a mark in, from the camera offset and how far the head can travel. The Q500 sends [26.9, 3.5, 1298, 900] (its laser reaches X 1298).
+  - Run also refuses a job at Start if a mark is outside the camera's reach, or if the cuts, once lined up to the marks, would go past the bed; it says which way to move the sheet.
+  - Prepare keeps every mark centre 2 mm inside it. A mark outside blocks Send, naming the mark and the edge, and one click moves the whole job (marks and artwork together) into place. Marks further apart than `markArea` allows are reported as too big for print and cut on this machine. Parts aren't limited: they may go right up to the bed edge.
+  - On a camera machine the strips outside `markArea` are shaded on the bed and labelled "Registration marks can't go here".
+  - Without `markArea` (camera off, older Run) nothing is checked. Prepare doesn't work the area out from `camX`/`camY`.
 
 ## 5. Machine settings (`GET /machine`)
 

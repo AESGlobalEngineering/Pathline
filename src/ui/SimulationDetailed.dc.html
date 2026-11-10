@@ -29,7 +29,13 @@
 .sim-empty { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 420px; max-width: calc(100% - 48px); box-shadow: var(--shadow-pop); }
 .sim-checks { display: flex; flex-wrap: wrap; gap: 6px; }
 .sim-checks .pill svg.i { width: 14px; height: 14px; stroke-width: 2.2; }
-.sim-bar { display: flex; height: 14px; border-radius: 4px; overflow: hidden; box-shadow: inset 0 0 0 1px var(--line); }
+.sim-bar { display: flex; height: 16px; border-radius: 4px; overflow: hidden; box-shadow: inset 0 0 0 1px var(--line); }
+/* the timeline: one bar, scrubbed directly. A transparent range input on top keeps keyboard and pointer control. */
+.sim-track { position: relative; padding: 10px 0; margin: -4px 0 -6px; border-radius: 6px; cursor: pointer; }
+.sim-track:has(.sim-scrub:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+.sim-head { position: absolute; top: 4px; bottom: 4px; width: 2px; margin-left: -1px; border-radius: 1px; background: var(--text); box-shadow: 0 0 0 1.5px var(--surface); pointer-events: none; }
+.sim-head::before { content: ''; position: absolute; left: 50%; top: -3px; width: 12px; height: 12px; margin-left: -6px; border-radius: 50%; background: var(--text); box-shadow: 0 0 0 2px var(--surface), var(--shadow-1); }
+.sim-scrub { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
 /* each run gets the chip ring so dark ACI colours (7 = black) still show in dark mode */
 .sim-bar > span { border-right: 1px solid var(--surface); box-shadow: var(--chip-ring); }
 .sim-xy { display: inline-flex; gap: 4px; }
@@ -61,8 +67,13 @@
       </div>
     </div>
     <span class="spacer"></span>
-    <button class="btn-primary" onClick="{{send}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.send}}"></path></svg>Send to machine</button>
+    <button class="btn-primary" onClick="{{send}}" disabled="{{noProcs}}" title="{{sendTip}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.send}}"></path></svg>Send to machine</button>
   </header>
+
+  <!-- ===== Loading (while the page reads its data): the page's own panels with the content greyed ===== -->
+  <sc-if value="{{loading}}" hint-placeholder-val="{{false}}">
+    <div class="loading-screen" role="status" aria-live="polite"><span class="sr-only">Loading…</span><div class="ld-col l" style="width: 270px; gap: 14px"><span class="skel" style="width: 34%; height: 14px"></span><div style="display: flex; flex-direction: column; gap: 4px"><div class="ld-row" style="justify-content: space-between; min-height: 34px"><span class="skel" style="width: 62%"></span><span class="skel pill" style="width: 40px; height: 24px"></span></div><div class="ld-row" style="justify-content: space-between; min-height: 34px"><span class="skel" style="width: 48%"></span><span class="skel pill" style="width: 40px; height: 24px"></span></div><div class="ld-row" style="justify-content: space-between; min-height: 34px"><span class="skel" style="width: 70%"></span><span class="skel pill" style="width: 40px; height: 24px"></span></div><div class="ld-row" style="justify-content: space-between; min-height: 34px"><span class="skel" style="width: 55%"></span><span class="skel pill" style="width: 40px; height: 24px"></span></div><div class="ld-row" style="justify-content: space-between; min-height: 34px"><span class="skel" style="width: 66%"></span><span class="skel pill" style="width: 40px; height: 24px"></span></div></div><span class="ld-hr"></span><span class="skel" style="width: 40%; height: 14px"></span><div style="display: flex; flex-direction: column; gap: 2px"><div class="ld-row" style="min-height: 36px; padding: 0 8px"><span class="skel" style="width: 16px; height: 16px"></span><span class="skel" style="width: 18px; height: 18px"></span><span class="skel" style="width: 96px"></span><span style="flex: 1"></span><span class="skel" style="width: 30px; height: 10px"></span></div><div class="ld-row" style="min-height: 36px; padding: 0 8px"><span class="skel" style="width: 16px; height: 16px"></span><span class="skel" style="width: 18px; height: 18px"></span><span class="skel" style="width: 118px"></span><span style="flex: 1"></span><span class="skel" style="width: 30px; height: 10px"></span></div><div class="ld-row" style="min-height: 36px; padding: 0 8px"><span class="skel" style="width: 16px; height: 16px"></span><span class="skel" style="width: 18px; height: 18px"></span><span class="skel" style="width: 84px"></span><span style="flex: 1"></span><span class="skel" style="width: 30px; height: 10px"></span></div><div class="ld-row" style="min-height: 36px; padding: 0 8px"><span class="skel" style="width: 16px; height: 16px"></span><span class="skel" style="width: 18px; height: 18px"></span><span class="skel" style="width: 104px"></span><span style="flex: 1"></span><span class="skel" style="width: 30px; height: 10px"></span></div></div></div><div style="flex: 1; min-width: 0; display: flex; flex-direction: column"><div class="ld-bar" style="height: 52px; padding: 0 16px; border-bottom: 1px solid var(--line)"><span class="skel pill" style="width: 10px; height: 10px"></span><span class="skel" style="width: 120px"></span><span class="skel" style="width: 110px; height: 10px"></span><span style="flex: 1"></span><span class="skel ctl" style="width: 118px"></span><span class="skel ctl" style="width: 44px"></span></div><div class="viewport" style="flex: 1"></div><div class="ld-bar" style="flex-direction: column; align-items: stretch; gap: 14px; padding: 12px 16px 14px; border-top: 1px solid var(--line)"><div class="ld-row"><span class="skel" style="width: 20px; height: 20px"></span><span class="skel pill" style="width: 44px; height: 44px"></span><span class="skel" style="width: 20px; height: 20px"></span><span class="skel" style="width: 110px; height: 14px"></span><span style="flex: 1"></span><span class="skel ctl" style="width: 190px"></span></div><span class="skel" style="width: 100%; height: 16px"></span></div></div><div class="ld-col r" style="width: 310px; gap: 14px"><span class="skel" style="width: 48%; height: 10px"></span><span class="skel" style="width: 62%; height: 28px"></span><div style="display: flex; flex-direction: column; gap: 10px; margin-top: 4px"><div class="ld-row"><span class="skel" style="width: 10px; height: 10px"></span><span class="skel" style="width: 62%"></span><span style="flex: 1"></span><span class="skel" style="width: 36px; height: 10px"></span></div><div class="ld-row"><span class="skel" style="width: 10px; height: 10px"></span><span class="skel" style="width: 48%"></span><span style="flex: 1"></span><span class="skel" style="width: 36px; height: 10px"></span></div><div class="ld-row"><span class="skel" style="width: 10px; height: 10px"></span><span class="skel" style="width: 70%"></span><span style="flex: 1"></span><span class="skel" style="width: 36px; height: 10px"></span></div><div class="ld-row"><span class="skel" style="width: 10px; height: 10px"></span><span class="skel" style="width: 55%"></span><span style="flex: 1"></span><span class="skel" style="width: 36px; height: 10px"></span></div><div class="ld-row"><span class="skel" style="width: 10px; height: 10px"></span><span class="skel" style="width: 66%"></span><span style="flex: 1"></span><span class="skel" style="width: 36px; height: 10px"></span></div><div class="ld-row"><span class="skel" style="width: 10px; height: 10px"></span><span class="skel" style="width: 44%"></span><span style="flex: 1"></span><span class="skel" style="width: 36px; height: 10px"></span></div></div><span class="ld-hr"></span><div class="ld-row" style="justify-content: space-between"><span class="skel" style="width: 46%"></span><span class="skel" style="width: 44px; height: 10px"></span></div><div class="ld-row" style="justify-content: space-between"><span class="skel" style="width: 40%"></span><span class="skel" style="width: 44px; height: 10px"></span></div><div class="ld-row" style="justify-content: space-between"><span class="skel" style="width: 34%"></span><span class="skel" style="width: 44px; height: 10px"></span></div><div class="ld-row" style="justify-content: space-between"><span class="skel" style="width: 42%"></span><span class="skel" style="width: 44px; height: 10px"></span></div><span class="ld-hr"></span><span class="skel" style="width: 30%; height: 14px"></span><span class="skel ctl" style="width: 100%"></span><span class="skel ctl" style="width: 100%"></span></div></div>
+  </sc-if>
 
   <div style="flex: 1; display: flex; min-height: 0">
 
@@ -78,7 +89,7 @@
         </sc-for>
       </div>
       <sc-if value="{{thermal.on}}" hint-placeholder-val="{{false}}">
-        <div class="card" style="display: flex; flex-direction: column; gap: 8px; padding: 12px; background: var(--surface-2)">
+        <div class="card reveal" style="display: flex; flex-direction: column; gap: 8px; padding: 12px; background: var(--surface-2)">
           <h3 class="h-sec">Thermal map</h3>
           <label class="fcol" style="gap: 4px"><span class="lbl">Material</span>{{thermal.pick}}</label>
           <sc-if value="{{thermal.none}}" hint-placeholder-val="{{false}}"><span class="lbl">{{thermal.msg}}</span></sc-if>
@@ -96,14 +107,11 @@
           <sc-if value="{{thermal.hasWarn}}" hint-placeholder-val="{{false}}">
             <span class="sim-warn">{{thermal.warn}}</span>
           </sc-if>
-          <span class="lbl" style="font-size: 11px; line-height: 1.45">{{thermal.note}}</span>
-          <span class="lbl" style="font-size: 11px; line-height: 1.45">{{thermal.src}}</span>
           </sc-if>
         </div>
       </sc-if>
       <div class="hr"></div>
       <h2 class="h-sec">Processes</h2>
-      <sc-if value="{{noProcs}}" hint-placeholder-val="{{false}}"><span class="lbl">No output yet.</span></sc-if>
       <div style="display: flex; flex-direction: column; gap: 2px">
         <sc-for list="{{procs}}" as="p" hint-placeholder-count="3">
           <label class="sim-proc" style="background: {{p.bg}}">
@@ -151,7 +159,6 @@
             <div class="empty">
               <span class="em-icon"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.play}}"></path></svg></span>
               <span class="em-title">Nothing to simulate yet</span>
-              <span class="em-text">Add objects on the Job page and give their colours a process. The toolpath and time estimate show here.</span>
               <div class="em-actions"><a class="btn-primary" href="MainDetailed.dc.html">Go to Job</a></div>
             </div>
           </div>
@@ -173,24 +180,23 @@
             </sc-for>
           </div>
         </div>
-        <div style="position: relative">
+        <!-- one track: the run order in process colours; drag or click anywhere on it to move the playhead -->
+        <div class="sim-track">
           <div aria-hidden="true" class="sim-bar">
             <sc-for list="{{bar}}" as="g" hint-placeholder-count="12"><span title="{{g.tip}}" style="flex: {{g.f}} 1 0; background: {{g.bg}}; opacity: {{g.op}}"></span></sc-for>
           </div>
-          <span aria-hidden="true" style="position: absolute; left: {{marker}}; top: -4px; bottom: -4px; width: 2px; margin-left: -1px; background: var(--text)"></span>
+          <span aria-hidden="true" class="sim-head" style="left: {{marker}}"></span>
+          <input type="range" class="sim-scrub" min="0" max="{{T}}" step="{{tStep}}" value="{{t}}" onChange="{{scrub}}" aria-label="Job position" title="Drag to move through the job">
         </div>
-        <input type="range" min="0" max="{{T}}" step="{{tStep}}" value="{{t}}" onChange="{{scrub}}" aria-label="Job position" style="accent-color: {{accent}}">
       </div>
     </main>
 
     <!-- ===== Right: breakdown ===== -->
     <aside aria-label="Job breakdown" class="sim-side" style="width: 310px; border-left: 1px solid var(--line)">
       <div style="display: flex; flex-direction: column; gap: 2px">
-        <span class="lbl">Total job time (estimate)</span>
+        <span class="lbl">Estimated job time</span>
         <span class="mono" style="font-size: 26px; font-weight: 500">{{total}}</span>
-        <span class="lbl">{{machLine}}</span>
       </div>
-      <div style="height: 6px; border-radius: 3px; background: var(--sunken); overflow: hidden"><div style="height: 100%; width: {{marker}}; background: {{accent}}"></div></div>
       <div style="display: flex; flex-direction: column; gap: 8px">
         <sc-for list="{{breakdown}}" as="b" hint-placeholder-count="4">
           <div style="display: flex; align-items: center; gap: 10px">
@@ -414,7 +420,7 @@ class Component extends DCLogic {
       check: 'M5 12.5l4.5 4.5L19 7',
       warn: 'M12 4 2.5 20h19z M12 10v4 M12 17h.01'    };
     const S = this.state;
-    if (!S.ready) return { accent, icons, thermal: { on: false, rows: [] }, modes: [], toggles: [], procs: [], bar: [], breakdown: [], stats: [], checks: [], speeds: [], beds: [], now: {}, scene: null, zoom: '', jobName: '', total: '', clock: '', marker: '0%', T: 1, t: 0 };
+    if (!S.ready) return { loading: true, accent, icons, thermal: { on: false, rows: [] }, modes: [], toggles: [], procs: [], bar: [], breakdown: [], stats: [], checks: [], speeds: [], beds: [], now: {}, scene: null, zoom: '', jobName: '', total: '', clock: '', marker: '0%', T: 1, t: 0 };
 
     const h = React.createElement;
     const job = S.job;
@@ -449,7 +455,7 @@ class Component extends DCLogic {
       if (!model) {
         thermal = {
           on: true, none: true, rows: [], pick,
-          msg: !mat ? (mats.length ? 'Choose the material to see the thermal map.' : 'Add a material in Setup → Materials to see the thermal map.')
+          msg: !mat ? (mats.length ? 'Choose a material.' : 'No materials yet.')
             : !ref ? 'No reference thermal data for ' + mat.name + '. The map covers acrylic, wood, MDF, card, foam board, PET film, magnetic sheet, stainless 304/316, mild steel, aluminium and brass.'
               : 'Nothing to simulate yet.'
         };
@@ -570,7 +576,7 @@ class Component extends DCLogic {
       if (segs) kids.push(h('path', { key: 'travel', d: segs, fill: 'none', strokeWidth: px, strokeDasharray: 4 * px + ' ' + 4 * px, style: { stroke: 'var(--text-3)' } }));
     }
     // machine origin: where the head starts and finishes
-    if (est.home) kids.push(h('circle', { key: 'home', cx: est.home[0], cy: est.home[1], r: 6 * px, strokeWidth: 2 * px, style: { fill: 'var(--bed)', stroke: 'var(--accent)' } }));
+    if (est.home) kids.push(h('circle', { key: 'home', cx: est.home[0], cy: est.home[1], r: 6 * px, strokeWidth: 2 * px, style: { fill: 'var(--bed)', stroke: 'var(--ink)' } }));
     const vec = vops.filter((o) => o.kind === 'op' && o.mode === 'vector');
     const MAX_MARKS = 1500;
     if (S.vis.starts) {
@@ -608,8 +614,8 @@ class Component extends DCLogic {
         // light halo under the cursor so it reads on the bed and on the dark viewport
         h('circle', { r: 9 * px, fill: 'none', strokeWidth: 5 * px, style: { stroke: 'var(--bed)', opacity: 0.85 } }),
         h('path', { d: 'M' + -15 * px + ' 0h' + 30 * px + 'M0 ' + -15 * px + 'v' + 30 * px, strokeWidth: 4 * px, strokeLinecap: 'round', style: { stroke: 'var(--bed)', opacity: 0.85 } }),
-        h('circle', { r: 9 * px, fill: 'none', strokeWidth: 2 * px, style: { stroke: 'var(--accent)' } }),
-        h('path', { d: 'M' + -15 * px + ' 0h' + 30 * px + 'M0 ' + -15 * px + 'v' + 30 * px, strokeWidth: 1.5 * px, style: { stroke: 'var(--accent)' } })));
+        h('circle', { r: 9 * px, fill: 'none', strokeWidth: 2 * px, style: { stroke: 'var(--ink)' } }),
+        h('path', { d: 'M' + -15 * px + ' 0h' + 30 * px + 'M0 ' + -15 * px + 'v' + 30 * px, strokeWidth: 1.5 * px, style: { stroke: 'var(--ink)' } })));
     }
     const scene = h('svg', {
       viewBox: vb.x + ' ' + vb.y + ' ' + vb.w + ' ' + vb.h, role: 'img', 'aria-label': (isLaser ? 'Laser' : 'Plotter') + ' toolpath preview',
@@ -688,8 +694,8 @@ class Component extends DCLogic {
     const sumKind = (k) => tl.filter((o) => o.kind === k).reduce((a, o) => a + o.dur, 0);
     // travel on a fast machine is often under a second: show tenths rather than 0:00
     const fmtShort = (s) => (s < 60 ? (s || 0).toFixed(1) + ' s' : fmt(s));
-    const breakdown = procs.map((p, k) => ({ l: p.name, v: p.time, col: procCol(runOrder[k]) }))
-      .concat(isLaser ? [] : [{ l: 'Tool changes', v: fmt(sumKind('change')), col: 'var(--line)' }, { l: 'Conveyor feeds', v: fmt(sumKind('feed')), col: 'var(--line-hover)' }])
+    // each process and its time is listed once, on the left (with show/hide); here only the time that isn't a process
+    const breakdown = [].concat(isLaser ? [] : [{ l: 'Tool changes', v: fmt(sumKind('change')), col: 'var(--line)' }, { l: 'Conveyor feeds', v: fmt(sumKind('feed')), col: 'var(--line-hover)' }])
       .concat(est.dwellTime ? [{ l: 'Dwell between passes', v: fmtShort(est.dwellTime), col: 'var(--surface)' }] : [])
       .concat([{ l: 'Travel', v: fmtShort(est.travelTime), col: 'var(--track)' }]);
     if (est.marks) breakdown.unshift({ l: 'Registration marks (' + est.marks + ')', v: fmtShort(est.inspectTime), col: '#6E56CF' });
@@ -706,7 +712,7 @@ class Component extends DCLogic {
     const marker = ((sim.total ? t / T : 0) * 100).toFixed(2) + '%';
 
     return {
-      accent, icons, isLaser, isPlotter: !isLaser, modes, beds, thermal, multiBed: nBeds > 1, speeds, toggles, procs, noProcs: !procs.length,
+      accent, icons, isLaser, isPlotter: !isLaser, modes, beds, thermal, multiBed: nBeds > 1, speeds, toggles, procs, noProcs: !procs.length, sendTip: procs.length ? 'Check and send this job' : 'Nothing to send yet: add objects with a process on the Job page',
       jobName: job.name + (job.dirty ? ' · unsaved' : ''),
       machLine: machine.name + ' · travel ' + Math.round(est.machine.travelSpeed) + ' mm/s · ' + Math.round(est.machine.travelAcc) + ' mm/s²' + (est.machine.jerk ? ' · jerk ' + Math.round(est.machine.jerk) + ' mm/s³' : ''),
       scene,

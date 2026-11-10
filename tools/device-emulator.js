@@ -95,7 +95,7 @@ function send(res, code, data) {
 
 const busy = () => st.state === 'running' || st.state === 'framing';
 const routes = {
-  'GET /info': () => ({ name: machine.name, type: machine.type, ctrl: machine.ctrl, model: machine.name, firmware: 'emulator 1.0', protocol: 1, bed: machine.bed }),
+  'GET /info': () => ({ id: arg('id', 'emu-' + PORT), name: machine.name, type: machine.type, ctrl: machine.ctrl, model: machine.name, firmware: 'emulator 1.0', protocol: 1, bed: machine.bed }),
   'GET /machine': () => machine,
   'GET /status': () => ({ ...st, pos: { ...st.pos }, queued: jobs.filter((j) => j.status === 'queued').length }),
   // material settings kept on the machine (HMI-BRIEF §5.3): Pathline Prepare

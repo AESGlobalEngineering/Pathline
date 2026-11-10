@@ -11,6 +11,7 @@ const CC = require('../src/shared/core');
 const { importFile } = require('../src/main/importers');
 const ex = require('../src/main/exporters');
 const device = require('../src/main/device');
+const discover = require('../src/main/discover');
 const seed = require('../src/main/seed');
 
 let failed = 0;
@@ -152,6 +153,61 @@ async function main() {
       const seq = ops.map((o) => o.ent + o.round).join(' ');
       ok(seq === 'a1 b1 l1 a2 b2 a3 b3', 'repeat runs the whole job, then again; once-only processes once (' + seq + ')');
     }
+    // print and cut: registration marks must be inside the machine's markArea (where Run's camera can read them)
+    {
+      const dot = (id, x, y) => ({ id, aci: 5, paths: [{ p: CC.shapes.ellipse(x, y, 2.5, 2.5), c: true }] });
+      const procs = [{ name: 'Cut', proc: 'Cut', power: 80, speed: 20, f: 5000, passes: 1, out: true, aci: [1] }, { ...CC.regProcess(), aci: [5] }];
+      const pc = (marks, art) => ({ ...pj, regMode: 'nonlinear', entities: [art || { id: 'art', aci: 1, paths: [{ p: CC.shapes.rect(60, 60, 300, 200, 0), c: true }] }].concat(marks), processes: procs });
+      const mach = (area, extra) => ({ id: 'q', type: 'laser', info: { bed: [1300, 900], markArea: area, camX: '-41.74', camY: '-12.99', f: { camera: true }, ...(extra || {}) } });
+      // the owner's Q500 sends [26.9, 3.5, 1300, 900]: marks at x ≥ 28.9, y ≥ 5.5 (2 mm inside it)
+      const q500 = mach([26.9, 3.5, 1300, 900]);
+      const R = CC.camReach(q500);
+      ok(Math.abs(R.keep.x0 - 28.9) < 1e-9 && Math.abs(R.keep.y0 - 5.5) < 1e-9 && R.keep.x1 === 1298 && R.keep.y1 === 898, 'Q500 markArea: marks kept in x 28.9–1298, y 5.5–898 (not worked out from camX/camY)');
+      const x28 = pc([dot('m1', 13, 13), dot('m2', 1269.57, 13), dot('m3', 13, 844.35)]);
+      const far = CC.marksOutOfReach(x28, q500);
+      ok(far.length === 2 && far.every((f) => f.edge === 'left' && f.from === 13 && f.see === 26.9), 'the X28 job: marks 1 and 3 are 13 mm from the left edge, the camera sees from 26.9 mm');
+      const chk = CC.checkJob(x28, q500).find((c) => c.reach);
+      ok(chk && chk.block && /Mark 1 is 13 mm from the left edge; this laser's camera can only see from 26.9 mm/.test(chk.l), 'out-of-reach marks block Send and name the mark and the edge (' + (chk && chk.l) + ')');
+      const sh = CC.reachShift(x28, q500);
+      const moved = { ...x28, entities: x28.entities.map((e) => CC.translate(e, sh.dx, sh.dy)) };
+      const mk = CC.regMarks(moved, q500);
+      ok(mk.every((m) => m.x >= 28.9 - 1e-6 && m.y >= 5.5 - 1e-6) && !CC.checkJob(moved, q500).some((c) => c.block), 'moving the job ' + sh.dx + ' mm right puts every mark at x ≥ 28.9, y ≥ 5.5 and nothing blocks Send');
+      // each edge: a mark too near it is flagged, and the job moves away from it
+      const area = mach([40, 30, 1260, 870]);
+      const edgeOf = (x, y) => CC.marksOutOfReach(pc([dot('a', x, y), dot('b', 650, 450), dot('c', 600, 400)]), area).map((f) => f.edge).join();
+      ok(edgeOf(35, 450) === 'left' && edgeOf(1262, 450) === 'right' && edgeOf(650, 20) === 'back' && edgeOf(650, 880) === 'front', 'marks too near each edge are flagged with that edge');
+      const away = (x, y) => CC.reachShift(pc([dot('a', x, y), dot('b', 650, 450), dot('c', 600, 400)]), area);
+      ok(away(35, 450).dx > 0 && away(1262, 450).dx < 0 && away(650, 20).dy > 0 && away(650, 880).dy < 0, 'the job moves away from whichever edge a mark is too near');
+      // parts may sit outside the marks, right up to the bed edge: only the marks are limited
+      const edgeArt = { id: 'art', aci: 1, paths: [{ p: CC.shapes.rect(0, 0, 1300, 120, 0), c: true }] };
+      const inside = pc([dot('m1', 40, 200), dot('m2', 1200, 200), dot('m3', 40, 700)], edgeArt);
+      ok(!CC.marksOutOfReach(inside, q500).length && !CC.checkJob(inside, q500).some((c) => c.block), 'parts right up to the bed edge are fine when the marks are inside markArea');
+      // marks further apart than markArea: no placement works
+      const big = pc([dot('m1', 2, 100), dot('m2', 1299, 100), dot('m3', 2, 500)]);
+      const bs = CC.reachShift(big, q500), bc = CC.checkJob(big, q500).find((c) => c.block && /too big for print and cut/.test(c.l));
+      ok(bs.tooWide === 'x' && bc, 'marks further apart than markArea: the job is too big for print and cut on this machine (' + (bc && bc.l) + ')');
+      // no markArea (camera off, older Run, even with camX/camY), camera off, or a plotter: nothing is checked
+      ok(!CC.camReach(mach(undefined)) && !CC.camReach(mach([26.9, 3.5, 1300, 900], { f: { camera: false } })) && !CC.camReach({ type: 'plotter', info: { markArea: [10, 10, 100, 100] } }), 'no markArea, camera off or a plotter: marks are not checked');
+      ok(!CC.marksOutOfReach(x28, mach(undefined)).length && !CC.checkJob(x28, mach(undefined)).some((c) => c.reach || /too big/.test(c.l)), 'without markArea the X28 marks pass as before');
+      ok(!CC.marksOutOfReach({ ...x28, regMode: 'off' }, q500).length, 'registration marks off: nothing is checked');
+    }
+    // same-size parts touching side by side are never "inside" each other (a first point on the shared
+    // edge, and rounding in the areas, made a part count as a hole of its neighbour and get cut early)
+    {
+      const ents = [];
+      for (let k = 0; k < 3; k++) {
+        const x = 20 + k * 100;
+        // start each outline on the edge it shares with the next part, like the owner's job
+        const w = 100 + k * 1e-7, r = CC.shapes.rect(x, 20, w, 297, 0); const i0 = r.findIndex((q) => q[0] === x + w);
+        ents.push({ id: 'o' + k, aci: 1, paths: [{ p: r.slice(i0).concat(r.slice(0, i0)), c: true }] });
+        for (let j = 0; j < 4; j++) ents.push({ id: 'h' + k + j, aci: 1, paths: [{ p: CC.shapes.ellipse(x + 50, 60 + j * 60, 8, 8), c: true }] });
+      }
+      const pj2 = { ...pj, regMode: 'off', repeat: 1, entities: ents, processes: [{ name: 'Cut', proc: 'Cut', power: 80, speed: 20, f: 5000, passes: 2, out: true, aci: [1] }] };
+      for (const order of ['ordered', 'speed', 'process']) {
+        const seq = CC.estimate({ ...pj2, cutOrder: { order, inside: 'all' } }, laser, { timeline: true }).timeline.filter((o) => o.kind === 'op').map((o) => o.ent[0]);
+        ok(seq.lastIndexOf('h') < seq.indexOf('o'), order + ', all insides, touching parts and 2 passes: every hole before any outline (' + seq.join('') + ')');
+      }
+    }
     // print and cut: the first cut is next to the last registration mark read, in every inside-first mode
     {
       const dot = (id, x, y) => ({ id, aci: 5, paths: [{ p: CC.shapes.ellipse(x, y, 2.5, 2.5), c: true }] });
@@ -164,6 +220,14 @@ async function main() {
         const last = tl.filter((o) => o.kind === 'inspect').pop(), first = tl.find((o) => o.kind === 'op');
         const hop = Math.hypot(first.path.p[0][0] - last.at[0], first.path.p[0][1] - last.at[1]);
         ok(hop < 200, inside + ': print and cut starts cutting next to the last mark read (' + Math.round(hop) + ' mm from it)');
+        const read = tl.filter((o) => o.kind === 'inspect').map((o) => o.at.map(Math.round).join(','));
+        ok(read.join(' ') === '10,10 10,300 600,10', inside + ': registration marks are read top left, bottom left, top right (' + read.join(' → ') + ')');
+      }
+      // whatever order the marks were drawn in
+      {
+        const shuffled = [dot('m3', 600, 10), dot('m1', 10, 10), dot('m2', 10, 300)].concat(part(0, 30, 30), part(1, 450, 30), part(2, 30, 200), part(3, 450, 200));
+        const read = CC.estimate({ ...pj, regMode: 'linear', repeat: 1, entities: shuffled, processes: procs, cutOrder: { order: 'speed', inside: 'all' } }, laser, { timeline: true }).timeline.filter((o) => o.kind === 'inspect').map((o) => o.at.map(Math.round).join(','));
+        ok(read.join(' ') === '10,10 10,300 600,10', 'marks drawn in another order are still read top left, bottom left, top right (' + read.join(' → ') + ')');
       }
     }
     // open lines inside a part are inside it: cut with its holes, before its outline
@@ -183,6 +247,15 @@ async function main() {
       const onCorner = ops.filter((o) => corners.some((c) => c.some((v) => Math.hypot(v[0] - o.path.p[0][0], v[1] - o.path.p[0][1]) < 0.05)));
       ok(ops.length === 3 && !onCorner.length, 'squares start along an edge, not on a corner (' + ops.map((o) => o.path.p[0].map((v) => v.toFixed(1)).join(',')).join(' · ') + ')');
       ok(ops.every((o) => Math.abs(CC.polyLen(o.path.p, true) - 120) < 0.01), 'starting along an edge keeps the whole outline (120 mm each)');
+    }
+    // the start/stop gap from corners is a job setting (Job settings), down to 0
+    {
+      const sq = [{ id: 'q', aci: 1, paths: [{ p: CC.shapes.rect(40, 40, 30, 30, 0), c: true }] }];
+      const startOf = (gap) => CC.estimate({ ...pj, regMode: 'off', repeat: 1, entities: sq, cutOrder: { order: 'speed', inside: 'off' }, ...(gap === undefined ? {} : { startClear: gap }) }, laser, { timeline: true }).timeline.find((o) => o.kind === 'op').path.p[0];
+      const toCorner = (q) => Math.min(...sq[0].paths[0].p.map((v) => Math.hypot(v[0] - q[0], v[1] - q[1])));
+      ok(Math.abs(toCorner(startOf()) - CC.START_CLEAR) < 1e-6, 'default start/stop gap ' + CC.START_CLEAR + ' mm from the corner');
+      ok(Math.abs(toCorner(startOf(0.5)) - 0.5) < 1e-6, 'a job gap of 0.5 mm starts 0.5 mm from the corner (' + toCorner(startOf(0.5)).toFixed(3) + ')');
+      ok(toCorner(startOf(0)) < 1e-6, 'a gap of 0 may start right on the corner (' + startOf(0).join(',') + ')');
     }
     // overlapping lines are cut once
     {
@@ -225,11 +298,11 @@ async function main() {
     // fastest pays the dwell once per round when that beats once per item
     const estSpeed = CC.estimate({ ...dwellJob, cutOrder: { inside: 'off', order: 'speed' } }, laser, { timeline: true });
     ok(estSpeed.total <= estFile.total + 1e-6 && estSpeed.timeline.filter((o) => o.kind === 'dwell').length === 1, 'fastest with a dwell: whole rounds when quicker (' + estSpeed.total.toFixed(1) + ' s vs ' + estFile.total.toFixed(1) + ' s as drawn)');
-    // marks are read in the order that ends where the work starts
+    // marks are read top left, bottom left, top right; the job starts at the last one (top right)
     const regJob = { ...pj, regMode: 'linear', processes: pj.processes.concat([{ ...CC.regProcess(), aci: [9] }]), cutOrder: { order: 'speed', inside: 'part' },
       entities: [[45, 55], [140, 55], [55, 485]].flatMap(([x, y], i) => [{ id: 'r' + i, aci: 7, paths: [{ p: CC.shapes.ellipse(x, y, 15, 15), c: true }, { p: CC.shapes.ellipse(x, y, 6, 6), c: true }] }, { id: 'm' + i, aci: 9, paths: [{ p: CC.shapes.ellipse(x, y, 6, 6), c: true }] }]) };
     const regOps = CC.estimate(regJob, laser, { timeline: true }).timeline.filter((o) => o.kind === 'op');
-    ok(regOps[0].ents.includes('r0'), 'after reading the marks, the job starts at the top (' + regOps.map((o) => o.ents.join('+')).join(' > ') + ')');
+    ok(regOps[0].ents.includes('r1'), 'after reading the marks (top right last), the job starts at the top right (' + regOps.map((o) => o.ents.join('+')).join(' > ') + ')');
     // close together on a slow-accelerating laser: one side-to-side scan is quicker
     const slow = { ...laser, info: { ...laser.info, speed: 600, acc: 8000 } };
     const close = { ...pj, entities: [{ id: 'n1', aci: 7, paths: [{ p: CC.shapes.dot(30, 30, 10), c: true }] }, { id: 'n2', aci: 7, paths: [{ p: CC.shapes.dot(48, 30, 10), c: true }] }] };
@@ -481,6 +554,34 @@ async function main() {
       let err = null;
       try { await device.test({ ...m, port: port + 1, timeout: 500 }); } catch (e) { err = e; }
       ok(err && err.offline, 'offline machine reported as offline (' + (err && err.message) + ')');
+      // finding machines without an IP address (discover.js)
+      const hosts = discover.scanHosts({ eth: [{ family: 'IPv4', address: '192.168.1.40', netmask: '255.255.255.0', internal: false }], lo: [{ family: 'IPv4', address: '127.0.0.1', netmask: '255.0.0.0', internal: true }], big: [{ family: 'IPv4', address: '10.20.30.40', netmask: '255.255.0.0', internal: false }] });
+      ok(hosts.length === 508 && hosts.includes('192.168.1.1') && hosts.includes('192.168.1.254') && hosts.includes('10.20.30.1') && !hosts.includes('10.20.31.1') && !hosts.some((h) => h.startsWith('127.')), 'scan asks each local /24, never more (' + hosts.length + ' addresses)');
+      const scanned = await discover.scan({ hosts: ['127.0.0.1'], port, timeout: 800 });
+      const nobody = await discover.scan({ hosts: ['127.0.0.1'], port: port + 1, timeout: 500 });
+      ok(nobody.length === 0, 'nothing listed where no machine answers');
+      ok(scanned.length === 1 && scanned[0].ip === '127.0.0.1' && scanned[0].type === 'laser' && scanned[0].id === 'emu-' + port, 'network scan finds the machine, with its type and id (' + JSON.stringify(scanned.map((x) => x.name + ' ' + x.ip)) + ')');
+      // a machine that announces itself (as Pathline Run does): answers straight back to the question
+      const dgram = require('dgram');
+      const responder = dgram.createSocket('udp4');
+      let asked = null;
+      responder.on('message', (msg, rinfo) => {
+        const q = discover._packet.decode(msg);
+        asked = q;
+        if (q && !q.response) responder.send(discover._packet.encodeAnswer({ instance: 'Trotec Q500', host: 'q500.local', ip: '192.168.1.63', port: 8470, txt: { id: 'run-7f3a', name: 'Trotec Q500', type: 'laser', ctrl: 'Trotec', protocol: 1 } }, msg.readUInt16BE(0)), rinfo.port, rinfo.address);
+      });
+      await new Promise((r) => responder.bind(0, '127.0.0.1', r));
+      try {
+        const heard = await discover.browse({ to: { address: '127.0.0.1', port: responder.address().port }, timeout: 600 });
+        ok(asked && !asked.response, 'asks the network for Pathline machines');
+        ok(heard.length === 1 && heard[0].ip === '192.168.1.63' && heard[0].port === 8470 && heard[0].id === 'run-7f3a' && heard[0].name === 'Trotec Q500' && heard[0].type === 'laser', 'hears a machine that announces itself (' + JSON.stringify(heard) + ')');
+        const moved = await discover.relocate([{ id: 'm1', deviceId: 'run-7f3a', conn: 'Ethernet', ip: '192.168.1.20', port: 8470 }, { id: 'm2', deviceId: 'other', conn: 'Ethernet', ip: '192.168.1.21' }, { id: 'm3', conn: 'Ethernet', ip: '192.168.1.22' }], { to: { address: '127.0.0.1', port: responder.address().port }, timeout: 600 });
+        ok(moved.length === 1 && moved[0].id === 'm1' && moved[0].ip === '192.168.1.63', 'a saved machine whose IP changed is found at its new address (' + JSON.stringify(moved) + ')');
+      } finally {
+        responder.close();
+      }
+      const both = discover.merge([{ ip: '10.0.0.5', port: 8470, id: 'a', name: 'Laser', via: ['scan'] }, { ip: '10.0.0.5', port: 8470, id: 'a', name: '', type: 'laser', via: ['announce'] }, { ip: '10.0.0.6', port: 8470, id: null, name: 'Old Run', via: ['scan'] }]);
+      ok(both.length === 2 && both.find((x) => x.id === 'a').via.length === 2 && both.find((x) => x.id === 'a').type === 'laser', 'the same machine found both ways is listed once');
     } finally {
       emu.kill();
     }

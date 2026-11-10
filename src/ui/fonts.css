@@ -46,6 +46,18 @@ html, body { height: 100%; overflow: hidden; background: var(--bg, #F3F4F6); }
 .lrc-dlg .seg button:disabled { opacity: 0.45; cursor: default; }
 .lrc-dlg .chk { flex-direction: row; align-items: center; gap: 8px; }
 .lrc-dlg .chk input { width: 18px; height: 18px; margin: 0; accent-color: var(--accent); }
+.lrc-dlg .custom { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.lrc-dlg .found { display: flex; flex-direction: column; gap: 2px; max-height: 232px; overflow: auto; border: 1px solid var(--line); border-radius: var(--ctl-r); padding: 4px; }
+.lrc-dlg .found .list-item { font: 13px var(--font); }
+.lrc-dlg .found .list-item:disabled { cursor: default; opacity: 1; }
+.lrc-dlg .found .list-item:disabled:hover { background: transparent; }
+.lrc-dlg .found .fm { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.lrc-dlg .found .fm b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lrc-dlg .found .fm span { font-size: 12px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lrc-dlg .found .fmsg { padding: 10px; color: var(--text-3); line-height: 1.4; }
+.lrc-dlg .found-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.lrc-dlg .found-head button { border: 0; background: transparent; color: var(--accent-fg); font: 500 12px var(--font); cursor: pointer; padding: 2px 4px; border-radius: 4px; }
+.lrc-dlg .found-head button:disabled { color: var(--text-4); cursor: default; }
 .lrc-dlg .note { padding: 8px 10px; border-radius: var(--ctl-r); background: var(--sunken); color: var(--text-2); line-height: 1.4; }
 .lrc-dlg .note.warn { background: var(--warn-soft); color: var(--warn); }
 .lrc-dlg .note.err { background: var(--err-soft); color: var(--err); font-weight: 500; }
@@ -53,13 +65,14 @@ html, body { height: 100%; overflow: hidden; background: var(--bg, #F3F4F6); }
 .lrc-dlg .note.muted { background: var(--sunken); color: var(--text-2); }
 .lrc-dlg .note button { border: 0; background: transparent; padding: 0 0 0 8px; font: inherit; font-weight: 600; color: inherit; text-decoration: underline; cursor: pointer; }
 .lrc-progress { height: 8px; border-radius: 4px; background: var(--sunken); overflow: hidden; }
-.lrc-progress > div { height: 100%; width: 0; border-radius: 4px; background: var(--accent); transition: width 2.5s cubic-bezier(0.1, 0.7, 0.2, 1); }
+.lrc-progress > div { height: 100%; width: 0; border-radius: 4px; background: var(--action); transition: width 2.5s cubic-bezier(0.1, 0.7, 0.2, 1); }
 .lrc-progress.done > div { width: 100% !important; background: var(--ok-dot); transition: width 0.25s ease-out; }
 .lrc-dlg .btns { display: flex; justify-content: flex-end; gap: 8px; padding-top: 4px; }
 .lrc-dlg .btns button { height: var(--ctl-h); padding: 0 16px; border: 1px solid var(--line-strong); border-radius: var(--ctl-r); background: var(--surface); cursor: pointer; font: 13px var(--font); color: var(--text); }
 .lrc-dlg .btns button:hover { border-color: var(--line-hover); }
-.lrc-dlg .btns button.primary { border: 0; background: var(--accent); color: var(--on-accent); font-weight: 600; }
-.lrc-dlg .btns button.primary:hover { background: var(--accent-hover); }
+.lrc-dlg .btns button.primary { border: 0; background: var(--action); color: var(--on-action); font-weight: 600; }
+.lrc-dlg .btns button.primary:hover { background: var(--action-hover); }
+.lrc-dlg .btns button.primary:disabled, .lrc-dlg .btns button.primary:disabled:hover { background: var(--sunken); color: var(--text-4); opacity: 1; }
 .lrc-dlg .btns button.danger { border: 0; background: var(--err-dot); color: #FFFFFF; font-weight: 600; }
 .lrc-dlg .btns button:disabled { opacity: 0.45; cursor: default; }
 .lrc-dlg table { border-collapse: collapse; width: 100%; }
@@ -83,3 +96,16 @@ html, body { height: 100%; overflow: hidden; background: var(--bg, #F3F4F6); }
 .lrc-menu .mi .k { font: 12px var(--mono); color: var(--text-3); }
 
 button:disabled { cursor: default !important; }
+
+/* dialogs: the backdrop fades, the box rises and settles; both fade out on close (app.js adds .out) */
+.lrc-scrim { animation: scrim-in 0.16s ease-out; }
+.lrc-dlg { animation: dlg-in 0.2s cubic-bezier(0.23, 1, 0.32, 1); }
+.lrc-scrim.out { animation: scrim-out 0.12s ease-in forwards; pointer-events: none; }
+.lrc-scrim.out .lrc-dlg { animation: dlg-out 0.12s ease-in forwards; }
+.lrc-toast.out { animation: toast-out 0.14s ease-in forwards; pointer-events: none; }
+.lrc-menu { animation: pop-in 0.12s cubic-bezier(0.23, 1, 0.32, 1); }
+@keyframes scrim-in { from { opacity: 0; } }
+@keyframes scrim-out { to { opacity: 0; } }
+@keyframes dlg-in { from { opacity: 0; transform: translateY(8px) scale(0.98); } }
+@keyframes dlg-out { to { opacity: 0; transform: scale(0.98); } }
+@keyframes toast-out { to { opacity: 0; transform: translateY(4px); } }

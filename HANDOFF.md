@@ -15,6 +15,45 @@ Latest round (28 Oct, final):
 - **Dark mode bed is grey** (`--bed`, `--sheet`, `--bed-grid*` in theme.css). **ACI 7 shows as white in dark mode** (black in light), as in CAD, and so do the marks drawn on the bed (registration marks, engrave hatching, arrows, start points): see the `--aci7*` and `--ink` tokens, and `LRC.aci.hex/fg/stroke` in app.js. Exports (DXF/SVG/PDF) still use real black.
 - **Sample machines and materials from earlier builds are removed on first start** (main.js, tracked by `settings.samplesRemoved`). This is by exact id (trotec, flatbed, laser2, acr-print-3 … brass-1); anything the operator created stays.
 
+Version 1.6.11 (10 Nov):
+- **Finding machines without an IP address** (owner's request), in `src/main/discover.js`:
+  - `scan()`: `GET /api/v1/info` on port 8470 for every host of each local IPv4 network (narrowed to the /24 around the PC's address; 128 at a time, 0.9 s each). Works with any Run today.
+  - `browse()`: an mDNS PTR question for `_pathline._tcp.local`, sent from an ordinary port (QU), so Run answers by unicast and Windows Firewall lets it in. It also listens on 5353 where it can. The DNS packet code is hand-written (no dependency); `_packet.encodeAnswer` is the reference for Run.
+  - `find()` runs both and `merge()`s the results by `id`, else by address and port. IPC `discover:find` marks each result with the saved machine it already is (`added`).
+- **Add machine** has a `custom` dialog field (`mount(el, box)`, plus `box.setValue`; new in `LRC.dialog`): "Machines on this network", with Search again. Picking one fills in the IP and port. Already-added machines show an Added tag. Typing a different IP drops the pick.
+- **machine.deviceId** = Run's `/info` id. It's saved on Add, on Test connection and on sync. `follow(id)` runs when a status check fails (at most once a minute): `discover.relocate` looks for that id among the machines announcing themselves and moves the saved machine to the new IP and port (`machines:updated`, log `[discover]`). It needs Run's `id` and announcements: **hmi/RUN-DISCOVERY-BRIEF.md**.
+- The emulator's `/info` has an `id` (`--id`, default `emu-<port>`). Self-test: the /24 host list, the scan against the emulator, a stand-in Run answering the mDNS question, relocate, and merge.
+
+Version 1.6.10 (10 Nov):
+- Release of the muted teal accent (`--accent` #3D6C71 light / #83B5B9 dark, commit db0cbc1; see design/HARMONISE-SPEC.md). No other changes. Segmented controls (`.seg`) stay neutral and bed markers stay `--ink`, as the spec says.
+
+Version 1.6.9 (10 Nov):
+- **Registration marks are always read top left, bottom left, top right** (owner's rule; any others after, nearest next). `markOrder(list, home)` no longer searches for the least travel or an end point; both callers (the part-by-part plan and `estimateIn`) start the cutting from the last mark, so the top right. Run follows the `inspect` steps as sent (HMI-BRIEF §4.6 updated).
+- Checked the owner's full-bed X28 job (1322 cuts, All insides, Q500: 2000 mm/s, 352 mm/s², jerk 10000): travel 25.5 m / 475 s → 22.9 m / 470 s. The hole route has settled (more search time changes nothing).
+  - Known, left alone: holes with a shape inside (10 on that job) split the holes run into separate groups that 2-opt can't reorder across. Joining them as chains saved 1.6 m in distance but only ~4 s, and made the search 4× slower, so it wasn't kept.
+
+Version 1.6.8 (10 Nov):
+- **`camReach` uses the machine's `markArea`** (`[x0, y0, x1, y1]` from Run's GET /machine; the Q500 sends [26.9, 3.5, 1300, 900]). Run works it out from the camera offset and the head's travel, which Prepare can't know, so `camX`/`camY` are no longer used for it. Without `markArea` (or with the camera off, or on a plotter) it returns null and nothing is checked. `keep` is 2 mm inside it.
+  - The "too wide" check now says the job "is too big for print and cut on this machine".
+  - The bed band shows on any camera machine (`reach`), fainter while registration marks are off (`reachOn`). It is labelled "Registration marks can't go here" in the widest strip when there's room, and in a tooltip.
+- **Start/stop gap** (owner's request): `job.startClear` in mm, default `START_CLEAR` (0.1), set in Job settings and clamped to 0–20. `startPoints(p, clear)` adds corners as candidates when it is 0. It is passed through `orderPaths` → `refineStarts` / `bestStarts` as `opts.startClear`. `newJob` takes `settings.startClear` (saved from Job settings), and the job sheet prints "Start/stop: … mm from corners".
+
+Version 1.6.7 (10 Nov):
+- **Registration marks within the head camera's reach** (brief from the Pathline Run session; the X28 job had marks at 28 mm from the left on a Q500 whose camera sits 41.74 mm from the beam). In core.js:
+  - `camReach(machine)` returns `{ see, keep, W, H, camX, camY }` from `info.camX`/`camY` (strings) and `bed`; `keep` is `see` with `REACH_MARGIN` (2 mm). It is null for plotters, `f.camera === false`, or a missing offset.
+  - `marksOutOfReach(job, machine)` lists `{ n, id, edge, from, see, keep }`.
+  - `reachShift(job, machine)` gives the smallest whole-job move `{ dx, dy }`, keeping the job on the bed where possible, or `{ tooWide, span, reach }`.
+  - `checkJob` adds a blocking check (`reach: true`), or a blocking "too wide" check.
+- On the Job page, the check pill runs `moveIntoReach()`: it translates every entity, and the sheet when on, and says to place the printed sheet there too. `JobCanvas` draws the unreachable band from `props.reach`, passed only while registration marks are on.
+- Prepare never places marks itself; they are objects in the drawing given the Registration marks colour, which is why the fix moves the job rather than the marks. HMI-BRIEF §4.6 documents the rule.
+
+Version 1.6.6 (10 Nov):
+- **Inside test for nesting** (`insideOf(inner, innerBox, innerArea, outer, outerBox, outerArea)`), used by `nestDepth` and by `isHole` in `estimate()`. A shape is inside another only when:
+  - its box fits within the other's;
+  - the other's area is clearly bigger (relative and absolute margins);
+  - its box middle is inside the other. For an open line the middle point is used; for a concave shape whose box middle falls outside itself, its first point.
+- This came from a bug report (X28 job: 4 touching parts of the same size, 2 passes, Ordered + All insides). Two part outlines were cut among the holes. Each started on the edge it shared with its neighbour, where the old first-point test could say "inside", and floating-point rounding made the neighbour's area a hair bigger. The self-test reproduces this with widths differing by 1e-7 mm: the old core cuts outlines among the holes.
+
 Version 1.6.5 (6 Nov):
 - **Job page speed on large jobs.** Measured on the owner's PCB Cover job: 4176 objects and about 140 000 points, 150 of them cut. An edit used to take 984 ms: about 725 ms for the estimate and about 200 ms to send the 15 MB job to main. It now takes about 20 ms.
   - The estimate runs in `src/ui/estimate-worker.js` (a Worker that loads core.js).

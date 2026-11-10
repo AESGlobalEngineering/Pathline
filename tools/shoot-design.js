@@ -11,7 +11,7 @@ const path = require('path');
 const ROOT = path.join(__dirname, '..');
 const UI = path.join(ROOT, 'design-handoff', 'src', 'ui');
 const OUT = path.join(ROOT, 'design', 'screenshots');
-const page = (p, scenario) => 'file:///' + path.join(UI, p + '.dc.html').replace(/\\/g, '/') + '?scenario=' + scenario;
+const page = (p, scenario) => 'file:///' + path.join(UI, p + '.dc.html').replace(/\\/g, '/') + '?scenario=' + scenario + '&still'; // still: no motion, so nothing is caught mid-animation
 const J = 'MainDetailed', S = 'SimulationDetailed', MA = 'MaterialsDetailed', MC = 'MachineSetupDetailed';
 const clickText = (t) => `(() => { const b = [...document.querySelectorAll('button, [role=menuitem], a')].find((x) => x.textContent.trim() === ${JSON.stringify(t)}); if (!b) return 'missing ${t}'; b.click(); return 'clicked ${t}'; })()`;
 
@@ -51,6 +51,7 @@ app.whenReady().then(async () => {
       if ((lvl === 'error' || lvl === 3) && !/Expected moveto/.test(msg)) errs.push(msg);
     });
     try { await w.loadURL(s.url); } catch (err) { errs.push('load: ' + err.message); }
+    await w.webContents.executeJavaScript("document.documentElement.dataset.motion = 'off'", true).catch(() => {});
     await delay(s.wait || 1500);
     const out = [];
     for (const js of s.steps || []) {

@@ -41,7 +41,8 @@ Light is default; dark applies when `<html data-theme="dark">`. `LRC.theme` (app
 | Secondary text | `--text-2` | `#3A414C` |
 | Muted text, labels, units | `--text-3` | `#5B6370` |
 | Faint text, placeholders | `--text-4` | `#8A919C` |
-| Accent fill (white text on it) | `--accent`, hover `--accent-hover` | `#2457D6`, `#1A43AB` |
+| Action fill (Send, Save, primary buttons; white text) | `--action`, hover `--action-hover`, text `--on-action` | Path red `#D62828` |
+| Accent fill: ink (selection, switches; `--on-accent` text) | `--accent`, hover `--accent-hover` | `#2457D6`, `#1A43AB` |
 | Accent text/icon/indicator on a surface | `--accent-fg` | `#2457D6` used as a text/icon colour |
 | Accent tint (selected rows, tags) | `--accent-soft` | `#EEF2FC`, `soft(accent, 0.9)` |
 | Focus ring | `--accent-ring` | `#DCE6FB` |

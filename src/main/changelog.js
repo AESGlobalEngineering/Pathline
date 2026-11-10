@@ -5,6 +5,52 @@
 
 module.exports = [
   {
+    version: '1.6.11', date: '10 Nov 2026',
+    added: [
+      'Add machine lists the machines on this network, so there\'s no IP address to look up: pick one and its address is filled in (Search again to look once more). Typing the address still works, for a machine on another part of the network.',
+      'A machine that is given a new IP address by the network is followed to it automatically (once Pathline Run announces itself on the network).'
+    ],
+    fixed: []
+  },
+  {
+    version: '1.6.10', date: '10 Nov 2026',
+    added: [
+      'A muted teal accent for what\'s selected or switched on: tabs, switches, sliders, checkboxes, the open process, progress and the play button. Red is kept for the buttons that act (Send to machine, Save, a dialog\'s main button), and marks on the bed stay black or white so they can\'t be mistaken for a drawing colour.'
+    ],
+    fixed: []
+  },
+  {
+    version: '1.6.9', date: '10 Nov 2026',
+    added: [],
+    fixed: [
+      'Print and cut: registration marks are always read top left, then bottom left, then top right (the cutting starts from the top right). On a full-bed job this also cuts about 2.5 m of travel.'
+    ]
+  },
+  {
+    version: '1.6.8', date: '10 Nov 2026',
+    added: [
+      'Job settings → Start/stop gap from corners: how far from a corner a closed cut starts and finishes, down to 0 (which may start on the corner). New jobs start with the last one chosen.',
+      'On a laser with a head camera, the strips where registration marks can\'t go are shaded on the bed (cutting isn\'t limited there).'
+    ],
+    fixed: [
+      'Print and cut: where marks can go now comes from the machine (Pathline Run\'s markArea, the Q500: x ≥ 26.9, y ≥ 3.5 mm), not from the camera offset alone, which put the limit at 41.7 mm. Marks are kept 2 mm inside it; marks further apart than it allows are reported as too big for print and cut on this machine.'
+    ]
+  },
+  {
+    version: '1.6.7', date: '10 Nov 2026',
+    added: [
+      'Print and cut: registration marks are checked against where the laser\'s head camera can reach (from the camera offset the machine reports). A mark out of reach is named with its edge and blocks Send; click the warning to move the whole job, marks and artwork together, just far enough. Marks further apart than the camera can reach are reported as too wide. While registration marks are on, the band the camera can\'t reach is shown on the bed.'
+    ],
+    fixed: []
+  },
+  {
+    version: '1.6.6', date: '10 Nov 2026',
+    added: [],
+    fixed: [
+      'Inside-first could cut a part\'s outline before the holes: with parts of the same size touching side by side, a part whose outline starts on the shared edge could count as a hole of its neighbour (the test for "inside" went either way on the edge, and rounding made one area a hair bigger). A shape now only counts as inside another when it fits within it, the other is clearly bigger, and its middle is inside.'
+    ]
+  },
+  {
     version: '1.6.5', date: '6 Nov 2026',
     added: [],
     fixed: [
