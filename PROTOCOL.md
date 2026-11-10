@@ -11,7 +11,7 @@ This is how **Pathline** talks to the device that runs the machine (the HMI / co
 
 | Method | Path | Returns |
 |---|---|---|
-| GET | `/info` | `{ name, type: "laser" \| "plotter", ctrl, model, firmware, protocol: 1, bed: [w, h] }`, used by **Test connection** |
+| GET | `/info` | `{ id, name, type: "laser" \| "plotter", ctrl, model, firmware, protocol: 1, bed: [w, h] }`, used by **Test connection** and the network scan in Add machine. `id` is the machine's own id, which never changes; Prepare uses it to follow a machine to a new IP address. See hmi/RUN-DISCOVERY-BRIEF.md, which also covers announcing the machine (mDNS `_pathline._tcp.local`). |
 | GET | `/machine` | Settings set on the HMI, shown read-only on the Machines page (**Refresh from machine**). See *Machine settings* below. |
 | GET | `/status` | `{ state: "idle" \| "running" \| "paused" \| "framing" \| "alarm", pos: { x, y, z }, progress: 0–1, job, message, io: { air, pointer, vacuum, exhaust } }`, polled every 1.5 s |
 | GET | `/jobs` | The machine's queue, in run order: `[{ id, name, status: "queued" \| "running" \| "done" \| "stopped", progress: 0–1, seconds, receivedAt, finishedAt }]`. The app's Queue tab shows this list, polled every 3 s. |

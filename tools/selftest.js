@@ -11,6 +11,7 @@ const CC = require('../src/shared/core');
 const { importFile } = require('../src/main/importers');
 const ex = require('../src/main/exporters');
 const device = require('../src/main/device');
+const discover = require('../src/main/discover');
 const seed = require('../src/main/seed');
 
 let failed = 0;
@@ -553,6 +554,34 @@ async function main() {
       let err = null;
       try { await device.test({ ...m, port: port + 1, timeout: 500 }); } catch (e) { err = e; }
       ok(err && err.offline, 'offline machine reported as offline (' + (err && err.message) + ')');
+      // finding machines without an IP address (discover.js)
+      const hosts = discover.scanHosts({ eth: [{ family: 'IPv4', address: '192.168.1.40', netmask: '255.255.255.0', internal: false }], lo: [{ family: 'IPv4', address: '127.0.0.1', netmask: '255.0.0.0', internal: true }], big: [{ family: 'IPv4', address: '10.20.30.40', netmask: '255.255.0.0', internal: false }] });
+      ok(hosts.length === 508 && hosts.includes('192.168.1.1') && hosts.includes('192.168.1.254') && hosts.includes('10.20.30.1') && !hosts.includes('10.20.31.1') && !hosts.some((h) => h.startsWith('127.')), 'scan asks each local /24, never more (' + hosts.length + ' addresses)');
+      const scanned = await discover.scan({ hosts: ['127.0.0.1'], port, timeout: 800 });
+      const nobody = await discover.scan({ hosts: ['127.0.0.1'], port: port + 1, timeout: 500 });
+      ok(nobody.length === 0, 'nothing listed where no machine answers');
+      ok(scanned.length === 1 && scanned[0].ip === '127.0.0.1' && scanned[0].type === 'laser' && scanned[0].id === 'emu-' + port, 'network scan finds the machine, with its type and id (' + JSON.stringify(scanned.map((x) => x.name + ' ' + x.ip)) + ')');
+      // a machine that announces itself (as Pathline Run does): answers straight back to the question
+      const dgram = require('dgram');
+      const responder = dgram.createSocket('udp4');
+      let asked = null;
+      responder.on('message', (msg, rinfo) => {
+        const q = discover._packet.decode(msg);
+        asked = q;
+        if (q && !q.response) responder.send(discover._packet.encodeAnswer({ instance: 'Trotec Q500', host: 'q500.local', ip: '192.168.1.63', port: 8470, txt: { id: 'run-7f3a', name: 'Trotec Q500', type: 'laser', ctrl: 'Trotec', protocol: 1 } }, msg.readUInt16BE(0)), rinfo.port, rinfo.address);
+      });
+      await new Promise((r) => responder.bind(0, '127.0.0.1', r));
+      try {
+        const heard = await discover.browse({ to: { address: '127.0.0.1', port: responder.address().port }, timeout: 600 });
+        ok(asked && !asked.response, 'asks the network for Pathline machines');
+        ok(heard.length === 1 && heard[0].ip === '192.168.1.63' && heard[0].port === 8470 && heard[0].id === 'run-7f3a' && heard[0].name === 'Trotec Q500' && heard[0].type === 'laser', 'hears a machine that announces itself (' + JSON.stringify(heard) + ')');
+        const moved = await discover.relocate([{ id: 'm1', deviceId: 'run-7f3a', conn: 'Ethernet', ip: '192.168.1.20', port: 8470 }, { id: 'm2', deviceId: 'other', conn: 'Ethernet', ip: '192.168.1.21' }, { id: 'm3', conn: 'Ethernet', ip: '192.168.1.22' }], { to: { address: '127.0.0.1', port: responder.address().port }, timeout: 600 });
+        ok(moved.length === 1 && moved[0].id === 'm1' && moved[0].ip === '192.168.1.63', 'a saved machine whose IP changed is found at its new address (' + JSON.stringify(moved) + ')');
+      } finally {
+        responder.close();
+      }
+      const both = discover.merge([{ ip: '10.0.0.5', port: 8470, id: 'a', name: 'Laser', via: ['scan'] }, { ip: '10.0.0.5', port: 8470, id: 'a', name: '', type: 'laser', via: ['announce'] }, { ip: '10.0.0.6', port: 8470, id: null, name: 'Old Run', via: ['scan'] }]);
+      ok(both.length === 2 && both.find((x) => x.id === 'a').via.length === 2 && both.find((x) => x.id === 'a').type === 'laser', 'the same machine found both ways is listed once');
     } finally {
       emu.kill();
     }

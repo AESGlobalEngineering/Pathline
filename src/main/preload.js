@@ -30,6 +30,7 @@ contextBridge.exposeInMainWorld('api', {
     create: call('job:new'), replace: call('job:replace'), open: call('job:open'), save: call('job:save'), saveToComputer: call('job:saveToComputer'),
     exportAs: call('job:export'), importDialog: call('job:importDialog'), importPath: call('job:importPath'), recent: call('job:recent')
   },
+  discover: { find: call('discover:find') },
   device: {
     test: call('device:test'), sync: call('device:sync'), status: call('device:status'), command: call('device:command'), send: call('device:send'),
     jobs: call('device:jobs'), removeJob: call('device:removeJob'), orderJobs: call('device:orderJobs')

@@ -15,6 +15,15 @@ Latest round (28 Oct, final):
 - **Dark mode bed is grey** (`--bed`, `--sheet`, `--bed-grid*` in theme.css). **ACI 7 shows as white in dark mode** (black in light), as in CAD, and so do the marks drawn on the bed (registration marks, engrave hatching, arrows, start points): see the `--aci7*` and `--ink` tokens, and `LRC.aci.hex/fg/stroke` in app.js. Exports (DXF/SVG/PDF) still use real black.
 - **Sample machines and materials from earlier builds are removed on first start** (main.js, tracked by `settings.samplesRemoved`). This is by exact id (trotec, flatbed, laser2, acr-print-3 … brass-1); anything the operator created stays.
 
+Version 1.6.11 (10 Nov):
+- **Finding machines without an IP address** (owner's request), in `src/main/discover.js`:
+  - `scan()`: `GET /api/v1/info` on port 8470 for every host of each local IPv4 network (narrowed to the /24 around the PC's address; 128 at a time, 0.9 s each). Works with any Run today.
+  - `browse()`: an mDNS PTR question for `_pathline._tcp.local`, sent from an ordinary port (QU), so Run answers by unicast and Windows Firewall lets it in. It also listens on 5353 where it can. The DNS packet code is hand-written (no dependency); `_packet.encodeAnswer` is the reference for Run.
+  - `find()` runs both and `merge()`s the results by `id`, else by address and port. IPC `discover:find` marks each result with the saved machine it already is (`added`).
+- **Add machine** has a `custom` dialog field (`mount(el, box)`, plus `box.setValue`; new in `LRC.dialog`): "Machines on this network", with Search again. Picking one fills in the IP and port. Already-added machines show an Added tag. Typing a different IP drops the pick.
+- **machine.deviceId** = Run's `/info` id. It's saved on Add, on Test connection and on sync. `follow(id)` runs when a status check fails (at most once a minute): `discover.relocate` looks for that id among the machines announcing themselves and moves the saved machine to the new IP and port (`machines:updated`, log `[discover]`). It needs Run's `id` and announcements: **hmi/RUN-DISCOVERY-BRIEF.md**.
+- The emulator's `/info` has an `id` (`--id`, default `emu-<port>`). Self-test: the /24 host list, the scan against the emulator, a stand-in Run answering the mDNS question, relocate, and merge.
+
 Version 1.6.10 (10 Nov):
 - Release of the muted teal accent (`--accent` #3D6C71 light / #83B5B9 dark, commit db0cbc1; see design/HARMONISE-SPEC.md). No other changes. Segmented controls (`.seg`) stay neutral and bed markers stay `--ink`, as the spec says.
 

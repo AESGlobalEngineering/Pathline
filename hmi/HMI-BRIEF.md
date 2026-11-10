@@ -37,6 +37,7 @@ The wire protocol hasn't changed (`protocol: 1`). What the HMI will see differen
 - **Pathline prepares; Pathline Run runs.** Pathline never talks to motors, lasers or controller boards. It sends one self-contained JSON **job package**. The HMI turns that into machine motion, using whatever controller the machine has (a Trotec or Ruida controller, GRBL, a motion card, and so on). That translation is entirely the HMI's job.
 - Pathline is finished, and so is its side of the protocol. **The HMI implements the server side.** Pathline is only an HTTP client: it starts every request, and the HMI never calls Pathline.
 - One HMI serves one machine. Pathline can have several machines set up, each with its own IP and port.
+- **Finding the machine (from Prepare 1.6.11):** Add machine lists the machines on the network. It scans the local /24 for `GET /info` on port 8470, and asks for `_pathline._tcp.local` over mDNS. Run should give `/info` a stable `id`, announce itself, and have its installer open TCP 8470 and UDP 5353. See **hmi/RUN-DISCOVERY-BRIEF.md**.
 - Pathline's name for this app is **Pathline Run**. Its icon is in [`brand/`](brand/).
 
 ## 2. What the HMI must do

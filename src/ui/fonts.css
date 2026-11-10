@@ -46,6 +46,18 @@ html, body { height: 100%; overflow: hidden; background: var(--bg, #F3F4F6); }
 .lrc-dlg .seg button:disabled { opacity: 0.45; cursor: default; }
 .lrc-dlg .chk { flex-direction: row; align-items: center; gap: 8px; }
 .lrc-dlg .chk input { width: 18px; height: 18px; margin: 0; accent-color: var(--accent); }
+.lrc-dlg .custom { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.lrc-dlg .found { display: flex; flex-direction: column; gap: 2px; max-height: 232px; overflow: auto; border: 1px solid var(--line); border-radius: var(--ctl-r); padding: 4px; }
+.lrc-dlg .found .list-item { font: 13px var(--font); }
+.lrc-dlg .found .list-item:disabled { cursor: default; opacity: 1; }
+.lrc-dlg .found .list-item:disabled:hover { background: transparent; }
+.lrc-dlg .found .fm { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.lrc-dlg .found .fm b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lrc-dlg .found .fm span { font-size: 12px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lrc-dlg .found .fmsg { padding: 10px; color: var(--text-3); line-height: 1.4; }
+.lrc-dlg .found-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.lrc-dlg .found-head button { border: 0; background: transparent; color: var(--accent-fg); font: 500 12px var(--font); cursor: pointer; padding: 2px 4px; border-radius: 4px; }
+.lrc-dlg .found-head button:disabled { color: var(--text-4); cursor: default; }
 .lrc-dlg .note { padding: 8px 10px; border-radius: var(--ctl-r); background: var(--sunken); color: var(--text-2); line-height: 1.4; }
 .lrc-dlg .note.warn { background: var(--warn-soft); color: var(--warn); }
 .lrc-dlg .note.err { background: var(--err-soft); color: var(--err); font-weight: 500; }

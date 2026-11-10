@@ -162,7 +162,9 @@
   }
 
   // ------------------------------------------------------------ dialogs
-  // fields: [{ key, label, type: text|textarea|number|select|seg|check|info|note, value, options, unit, full, warn, rows, placeholder }]
+  // fields: [{ key, label, type: text|textarea|number|select|seg|check|info|note|custom, value, options, unit, full, warn, rows, placeholder }]
+  // custom: { mount(el, box) } fills its own element (e.g. Add machine's list of machines found);
+  // box.setValue(key, value) changes another field from there.
   // buttons: [{ label, value, primary, danger }] — resolves { button, values } or null on cancel.
   function dialog(spec) {
     return new Promise((resolve) => {
@@ -183,8 +185,22 @@
       if (spec.message) box.appendChild(add('p', '', spec.message));
       let row = null;
       const inputs = [];
+      const setters = {};
+      box.setValue = (key, v) => { values[key] = v; if (setters[key]) setters[key](v); };
+      const mounts = [];
       (spec.fields || []).forEach((f) => {
         values[f.key] = f.value;
+        if (f.type === 'custom') {
+          const el = add('div', 'custom full');
+          if (f.real) el.dataset.real = '1';
+          if (f.sim) el.dataset.sim = '1';
+          if (f.hidden) el.style.display = 'none';
+          if (f.label) el.appendChild(add('span', 'lbl', f.label));
+          box.appendChild(el);
+          row = null;
+          if (f.mount) mounts.push(() => f.mount(el, box));
+          return;
+        }
         if (f.type === 'note') {
           box.appendChild(add('div', 'note' + (f.warn ? ' warn' : ''), f.label));
           row = null;
@@ -259,7 +275,9 @@
               inp = add('input', f.type === 'number' ? '' : 'sans');
               inp.type = 'text';
               inp.value = f.value === undefined || f.value === null ? '' : String(f.value);
-              inp.oninput = () => { values[f.key] = f.type === 'number' ? inp.value : inp.value; };
+              if (f.placeholder) inp.placeholder = f.placeholder;
+              inp.oninput = () => { values[f.key] = f.type === 'number' ? inp.value : inp.value; if (f.onInput) f.onInput(inp.value, values, box); };
+              setters[f.key] = (v) => { inp.value = v === undefined || v === null ? '' : String(v); };
             }
             inputs.push(inp);
             fld.appendChild(inp);
@@ -303,7 +321,8 @@
       scrim.appendChild(box);
       scrim.onmousedown = (e) => { if (e.target === scrim) close(null); };
       document.body.appendChild(scrim);
-      setTimeout(() => (inputs[0] ? (inputs[0].focus(), inputs[0].select && inputs[0].select()) : btns.lastChild.focus()), 0);
+      mounts.forEach((fn) => fn());
+      setTimeout(() => (spec.noFocus ? btns.lastChild.focus() : inputs[0] ? (inputs[0].focus(), inputs[0].select && inputs[0].select()) : btns.lastChild.focus()), 0);
     });
   }
   const confirm = async (title, message, okLabel, danger) => {

@@ -10,6 +10,7 @@ const CC = require('../shared/core');
 const { importFile, EXTENSIONS } = require('./importers');
 const ex = require('./exporters');
 const device = require('./device');
+const discover = require('./discover');
 const { Reports } = require('./reports');
 const updates = require('./updates');
 const changelog = require('./changelog');
@@ -268,6 +269,10 @@ async function syncMachine(id) {
     info: { ...(cur.info || {}), ...settings, f: { ...((cur.info && cur.info.f) || {}), ...(settings.f || {}) } },
     syncedAt: new Date().toISOString()
   };
+  // the machine's own id (from /info): lets Prepare follow it to a new IP address
+  if (!merged.deviceId) {
+    try { const i = (await device.test(m)).info || {}; if (i.id) merged.deviceId = String(i.id); } catch (e) { /* not this time */ }
+  }
   store.upsert('machines', merged);
   lastSync.set(m.id, Date.now());
   if (win && !win.isDestroyed()) win.webContents.send('machines:updated', merged);
@@ -361,6 +366,26 @@ function noteOnline(id, ok) {
   const was = online.get(id);
   online.set(id, ok);
   if (ok && !was) autoSync(id);
+  if (!ok) follow(id);
+}
+// A machine that stopped answering may have been given a new IP address (by
+// the network's DHCP): look for it by its own id among the machines that
+// announce themselves, at most once a minute, and move it there.
+const lastFollow = new Map();
+async function follow(id) {
+  const m = store.find('machines', id);
+  if (!m || !m.deviceId || m.sim || m.conn !== 'Ethernet') return;
+  if (Date.now() - (lastFollow.get(id) || 0) < 60000) return;
+  lastFollow.set(id, Date.now());
+  try {
+    const [moved] = await discover.relocate([m]);
+    if (!moved) return;
+    const cur = store.find('machines', id) || m;
+    const next = { ...cur, ip: moved.ip, port: moved.port };
+    store.upsert('machines', next);
+    reports && reports.log('discover', m.name + ' moved from ' + moved.was + ' to ' + moved.ip + ':' + moved.port);
+    if (win && !win.isDestroyed()) win.webContents.send('machines:updated', next);
+  } catch (e) { reports && reports.log('discover', m.name + ': ' + e.message); }
 }
 
 // ------------------------------------------------------------------ IPC
@@ -599,10 +624,21 @@ function registerIpc() {
   handle('device:test', async (m) => {
     const r = await device.test(m);
     const saved = store.find('machines', m.id);
+    if (saved && r.info && r.info.id && saved.deviceId !== String(r.info.id)) store.upsert('machines', { ...saved, deviceId: String(r.info.id) });
     if (saved && saved.conn === 'Ethernet' && String(saved.ip).trim() === String(m.ip).trim() && Number(saved.port || 8470) === Number(m.port || 8470)) autoSync(m.id, true);
     return r;
   });
   handle('device:sync', (id) => syncMachine(id));
+  // Add machine → Find machines: every Pathline machine on the network, each
+  // marked with the saved machine it already is (by its id, or address)
+  handle('discover:find', async () => {
+    const saved = store.get('machines').filter((m) => m.conn === 'Ethernet' && !m.sim);
+    const found = await discover.find();
+    return found.map((f) => {
+      const m = saved.find((x) => (f.id && x.deviceId === f.id) || (String(x.ip || '').trim() === f.ip && (Number(x.port) || 8470) === f.port));
+      return { ...f, added: m ? { id: m.id, name: m.name } : null };
+    });
+  });
   // the first answer from a machine (after starting, or after it was offline) reads its settings
   handle('device:status', async (id) => {
     const m = machineById(id);
