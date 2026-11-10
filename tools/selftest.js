@@ -219,6 +219,14 @@ async function main() {
         const last = tl.filter((o) => o.kind === 'inspect').pop(), first = tl.find((o) => o.kind === 'op');
         const hop = Math.hypot(first.path.p[0][0] - last.at[0], first.path.p[0][1] - last.at[1]);
         ok(hop < 200, inside + ': print and cut starts cutting next to the last mark read (' + Math.round(hop) + ' mm from it)');
+        const read = tl.filter((o) => o.kind === 'inspect').map((o) => o.at.map(Math.round).join(','));
+        ok(read.join(' ') === '10,10 10,300 600,10', inside + ': registration marks are read top left, bottom left, top right (' + read.join(' → ') + ')');
+      }
+      // whatever order the marks were drawn in
+      {
+        const shuffled = [dot('m3', 600, 10), dot('m1', 10, 10), dot('m2', 10, 300)].concat(part(0, 30, 30), part(1, 450, 30), part(2, 30, 200), part(3, 450, 200));
+        const read = CC.estimate({ ...pj, regMode: 'linear', repeat: 1, entities: shuffled, processes: procs, cutOrder: { order: 'speed', inside: 'all' } }, laser, { timeline: true }).timeline.filter((o) => o.kind === 'inspect').map((o) => o.at.map(Math.round).join(','));
+        ok(read.join(' ') === '10,10 10,300 600,10', 'marks drawn in another order are still read top left, bottom left, top right (' + read.join(' → ') + ')');
       }
     }
     // open lines inside a part are inside it: cut with its holes, before its outline
@@ -289,11 +297,11 @@ async function main() {
     // fastest pays the dwell once per round when that beats once per item
     const estSpeed = CC.estimate({ ...dwellJob, cutOrder: { inside: 'off', order: 'speed' } }, laser, { timeline: true });
     ok(estSpeed.total <= estFile.total + 1e-6 && estSpeed.timeline.filter((o) => o.kind === 'dwell').length === 1, 'fastest with a dwell: whole rounds when quicker (' + estSpeed.total.toFixed(1) + ' s vs ' + estFile.total.toFixed(1) + ' s as drawn)');
-    // marks are read in the order that ends where the work starts
+    // marks are read top left, bottom left, top right; the job starts at the last one (top right)
     const regJob = { ...pj, regMode: 'linear', processes: pj.processes.concat([{ ...CC.regProcess(), aci: [9] }]), cutOrder: { order: 'speed', inside: 'part' },
       entities: [[45, 55], [140, 55], [55, 485]].flatMap(([x, y], i) => [{ id: 'r' + i, aci: 7, paths: [{ p: CC.shapes.ellipse(x, y, 15, 15), c: true }, { p: CC.shapes.ellipse(x, y, 6, 6), c: true }] }, { id: 'm' + i, aci: 9, paths: [{ p: CC.shapes.ellipse(x, y, 6, 6), c: true }] }]) };
     const regOps = CC.estimate(regJob, laser, { timeline: true }).timeline.filter((o) => o.kind === 'op');
-    ok(regOps[0].ents.includes('r0'), 'after reading the marks, the job starts at the top (' + regOps.map((o) => o.ents.join('+')).join(' > ') + ')');
+    ok(regOps[0].ents.includes('r1'), 'after reading the marks (top right last), the job starts at the top right (' + regOps.map((o) => o.ents.join('+')).join(' > ') + ')');
     // close together on a slow-accelerating laser: one side-to-side scan is quicker
     const slow = { ...laser, info: { ...laser.info, speed: 600, acc: 8000 } };
     const close = { ...pj, entities: [{ id: 'n1', aci: 7, paths: [{ p: CC.shapes.dot(30, 30, 10), c: true }] }, { id: 'n2', aci: 7, paths: [{ p: CC.shapes.dot(48, 30, 10), c: true }] }] };

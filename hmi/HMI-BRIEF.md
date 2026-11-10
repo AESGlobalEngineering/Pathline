@@ -183,7 +183,7 @@ Bitmap/photo engraving isn't in Pathline yet. Today only vector shapes are fille
 ### 4.6 Registration marks (print and cut)
 The operator prints artwork with marks, puts the sheet on the bed, and the camera reads the marks so the cut lines up with the print, even if the sheet is shifted, rotated or slightly distorted.
 
-- `regMarks.marks` are the design positions (centre `x`, `y`, diameter `d`). The `inspect` steps visit them in Pathline's chosen order, ending nearest where the work starts.
+- `regMarks.marks` are the design positions (centre `x`, `y`, diameter `d`). The `inspect` steps visit them in a fixed order: top left, then bottom left, then top right (any others after, nearest next); the cutting starts from the last one. From Pathline Prepare 1.6.9.
 - `mode: "pos"` (2 marks): **position and rotation**. Fit a rigid transform (translation + rotation; scale is optional).
 - `mode: "linear"` (3 marks): **full linear**. Fit an affine transform (translation, rotation, scale and shear) from the 3 point pairs.
 - `mode: "nonlinear"` (3 marks): **non-linear**. The intent is to correct uneven distortion as well. The method is the HMI's choice (§11).

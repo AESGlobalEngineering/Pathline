@@ -767,25 +767,19 @@
    * is ignored. Closed paths then start wherever is most convenient on the
    * travel path (see refineStarts).
    */
-  // The order to read registration marks in (up to 6, every order tried): the
-  // least travel from the origin through all of them, ending nearest `end`
-  // (where the work begins, so the job then runs from that end).
-  function markOrder(list, home, end) {
-    if (list.length < 2 || list.length > 6) return list;
-    const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
-    let best = list, bd = Infinity;
-    const perm = (done, left) => {
-      if (!left.length) {
-        let d = dist(home, [done[0].x, done[0].y]);
-        for (let i = 1; i < done.length; i++) d += dist([done[i - 1].x, done[i - 1].y], [done[i].x, done[i].y]);
-        d += dist([done[done.length - 1].x, done[done.length - 1].y], end);
-        if (d < bd - 1e-9) { bd = d; best = done; }
-        return;
-      }
-      left.forEach((m, i) => perm(done.concat([m]), left.filter((_, k) => k !== i)));
-    };
-    perm([], list);
-    return best;
+  // The order to read registration marks in: always top left, then bottom
+  // left, then top right (the shop's rule), any others after those, nearest
+  // next. Bed y runs down from the top. The cutting then starts from the last
+  // mark read.
+  function markOrder(list, home) {
+    if (list.length < 2) return list;
+    const left = list.slice(), out = [];
+    const take = (score) => { let bi = 0; left.forEach((m, i) => { if (score(m) < score(left[bi])) bi = i; }); out.push(left.splice(bi, 1)[0]); };
+    take((m) => m.x + m.y); // top left
+    if (left.length) take((m) => m.x - m.y); // bottom left
+    if (left.length) take((m) => m.y - m.x); // top right
+    while (left.length) { const a = out[out.length - 1]; take((m) => Math.hypot(m.x - a.x, m.y - a.y)); }
+    return out;
   }
 
   // The order to visit parts in. The head leaves a part from its outline, and
@@ -1271,10 +1265,7 @@
       const home = [o.includes('r') ? bedSize[0] : 0, o.includes('b') ? bedSize[1] : 0];
       let at = home;
       if (isLaser) {
-        const cutEnts = ents.filter((e) => procOf(e) !== undefined);
-        let near = home, nd = Infinity;
-        for (const e of cutEnts) { const b = entityBox(e); const q = [Math.max(b.x0, Math.min(home[0], b.x1)), Math.max(b.y0, Math.min(home[1], b.y1))]; const d = Math.hypot(q[0] - home[0], q[1] - home[1]); if (d < nd) { nd = d; near = q; } }
-        const read = markOrder(regMarks(job, machine), home, near);
+        const read = markOrder(regMarks(job, machine), home);
         if (read.length) at = [read[read.length - 1].x, read[read.length - 1].y];
       }
       const left = [...groups.values()].map((list) => { const b = boxOf(list); return { list, c: [(b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2] }; });
@@ -1396,26 +1387,9 @@
     let inspectTime = 0, dwellTime = 0;
     const regIdx = job.processes.findIndex(isRegProc);
     const markTime = Number(info.markTime) || 1.5;
-    // where the work begins, seen from the machine origin: the first item to
-    // run (as drawn) or the one nearest the origin
-    const workStart = () => {
-      for (const pi of order) {
-        const mine = ents.filter((e) => (job.processes[pi].aci || []).includes(e.aci) && (isLaser || !(e.bed || 0)));
-        if (!mine.length) continue;
-        let best = null, bd = Infinity;
-        for (const e of mine) {
-          const b = entityBox(e);
-          const q = [Math.max(b.x0, Math.min(home[0], b.x1)), Math.max(b.y0, Math.min(home[1], b.y1))];
-          const d = Math.hypot(q[0] - home[0], q[1] - home[1]);
-          if (d < bd) { bd = d; best = q; }
-        }
-        return best;
-      }
-      return home;
-    };
-    // read the marks in the order with the least travel that ends nearest
-    // where the work begins, so the job then runs from that end
-    const marks = markOrder(isLaser ? regMarks(job, machine) : [], home, workStart());
+    // read the marks top left, bottom left, top right (markOrder); the job
+    // then runs from the last one
+    const marks = markOrder(isLaser ? regMarks(job, machine) : [], home);
 
     marks.forEach((m, i) => {
       travelTo([m.x, m.y], 0, -1);

@@ -15,6 +15,11 @@ Latest round (28 Oct, final):
 - **Dark mode bed is grey** (`--bed`, `--sheet`, `--bed-grid*` in theme.css). **ACI 7 shows as white in dark mode** (black in light), as in CAD, and so do the marks drawn on the bed (registration marks, engrave hatching, arrows, start points): see the `--aci7*` and `--ink` tokens, and `LRC.aci.hex/fg/stroke` in app.js. Exports (DXF/SVG/PDF) still use real black.
 - **Sample machines and materials from earlier builds are removed on first start** (main.js, tracked by `settings.samplesRemoved`). This is by exact id (trotec, flatbed, laser2, acr-print-3 … brass-1); anything the operator created stays.
 
+Version 1.6.9 (10 Nov):
+- **Registration marks are always read top left, bottom left, top right** (owner's rule; any others after, nearest next). `markOrder(list, home)` no longer searches for the least travel or an end point; both callers (the part-by-part plan and `estimateIn`) start the cutting from the last mark, so the top right. Run follows the `inspect` steps as sent (HMI-BRIEF §4.6 updated).
+- Checked the owner's full-bed X28 job (1322 cuts, All insides, Q500: 2000 mm/s, 352 mm/s², jerk 10000): travel 25.5 m / 475 s → 22.9 m / 470 s. The hole route has settled (more search time changes nothing).
+  - Known, left alone: holes with a shape inside (10 on that job) split the holes run into separate groups that 2-opt can't reorder across. Joining them as chains saved 1.6 m in distance but only ~4 s, and made the search 4× slower, so it wasn't kept.
+
 Version 1.6.8 (10 Nov):
 - **`camReach` uses the machine's `markArea`** (`[x0, y0, x1, y1]` from Run's GET /machine; the Q500 sends [26.9, 3.5, 1300, 900]). Run works it out from the camera offset and the head's travel, which Prepare can't know, so `camX`/`camY` are no longer used for it. Without `markArea` (or with the camera off, or on a plotter) it returns null and nothing is checked. `keep` is 2 mm inside it.
   - The "too wide" check now says the job "is too big for print and cut on this machine".

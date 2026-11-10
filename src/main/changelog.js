@@ -5,6 +5,13 @@
 
 module.exports = [
   {
+    version: '1.6.9', date: '10 Nov 2026',
+    added: [],
+    fixed: [
+      'Print and cut: registration marks are always read top left, then bottom left, then top right (the cutting starts from the top right). On a full-bed job this also cuts about 2.5 m of travel.'
+    ]
+  },
+  {
     version: '1.6.8', date: '10 Nov 2026',
     added: [
       'Job settings → Start/stop gap from corners: how far from a corner a closed cut starts and finishes, down to 0 (which may start on the corner). New jobs start with the last one chosen.',
