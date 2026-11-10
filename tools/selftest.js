@@ -152,6 +152,23 @@ async function main() {
       const seq = ops.map((o) => o.ent + o.round).join(' ');
       ok(seq === 'a1 b1 l1 a2 b2 a3 b3', 'repeat runs the whole job, then again; once-only processes once (' + seq + ')');
     }
+    // same-size parts touching side by side are never "inside" each other (a first point on the shared
+    // edge, and rounding in the areas, made a part count as a hole of its neighbour and get cut early)
+    {
+      const ents = [];
+      for (let k = 0; k < 3; k++) {
+        const x = 20 + k * 100;
+        // start each outline on the edge it shares with the next part, like the owner's job
+        const w = 100 + k * 1e-7, r = CC.shapes.rect(x, 20, w, 297, 0); const i0 = r.findIndex((q) => q[0] === x + w);
+        ents.push({ id: 'o' + k, aci: 1, paths: [{ p: r.slice(i0).concat(r.slice(0, i0)), c: true }] });
+        for (let j = 0; j < 4; j++) ents.push({ id: 'h' + k + j, aci: 1, paths: [{ p: CC.shapes.ellipse(x + 50, 60 + j * 60, 8, 8), c: true }] });
+      }
+      const pj2 = { ...pj, regMode: 'off', repeat: 1, entities: ents, processes: [{ name: 'Cut', proc: 'Cut', power: 80, speed: 20, f: 5000, passes: 2, out: true, aci: [1] }] };
+      for (const order of ['ordered', 'speed', 'process']) {
+        const seq = CC.estimate({ ...pj2, cutOrder: { order, inside: 'all' } }, laser, { timeline: true }).timeline.filter((o) => o.kind === 'op').map((o) => o.ent[0]);
+        ok(seq.lastIndexOf('h') < seq.indexOf('o'), order + ', all insides, touching parts and 2 passes: every hole before any outline (' + seq.join('') + ')');
+      }
+    }
     // print and cut: the first cut is next to the last registration mark read, in every inside-first mode
     {
       const dot = (id, x, y) => ({ id, aci: 5, paths: [{ p: CC.shapes.ellipse(x, y, 2.5, 2.5), c: true }] });

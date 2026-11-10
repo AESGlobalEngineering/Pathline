@@ -578,17 +578,26 @@
   }
 
   // ---------------------------------------------------------------- path ordering
+  // Is the path inner inside the closed outline outer (points)? Its box
+  // must fit within outer's, outer must be clearly bigger, and a point well
+  // inside it (the middle of its box; for an open line its middle point) must
+  // be inside outer. Shapes that only touch, e.g. parts of the same size side
+  // by side, are never one inside the other: a point on a shared edge can test
+  // either way, and rounding can make one area a hair bigger.
+  function insideOf(inner, ib, ia, outer, ob, oa) {
+    const e = 1e-6;
+    if (!(oa > ia * (1 + 1e-6) + 1e-6)) return false;
+    if (ib.x0 < ob.x0 - e || ib.x1 > ob.x1 + e || ib.y0 < ob.y0 - e || ib.y1 > ob.y1 + e) return false;
+    let [x, y] = inner.c ? [(ib.x0 + ib.x1) / 2, (ib.y0 + ib.y1) / 2] : inner.p[Math.floor(inner.p.length / 2)];
+    // a concave shape's box middle can fall outside the shape itself: use one of its points then
+    if (inner.c && inner.p.length > 2 && !pointInPoly(x, y, inner.p)) [x, y] = inner.p[0];
+    return pointInPoly(x, y, outer);
+  }
+  // how many closed paths a path is inside (an open line inside a closed shape
+  // is inside it too, so it is cut before that shape's outline)
   function nestDepth(path, all) {
-    // an open line inside a closed shape is inside it too (cut before that
-    // shape's outline): judged at its middle point
-    const [x, y] = path.c ? path.p[0] : path.p[Math.floor(path.p.length / 2)];
     let d = 0;
-    for (const o of all) {
-      if (o === path || !o.c || o.area <= path.area) continue;
-      const b = o.box;
-      if (x < b.x0 || x > b.x1 || y < b.y0 || y > b.y1) continue;
-      if (pointInPoly(x, y, o.p)) d++;
-    }
+    for (const o of all) if (o !== path && o.c && insideOf(path, path.box, path.area || 0, o.p, o.box, o.area)) d++;
     return d;
   }
   // Job-level cut order settings.
@@ -1203,7 +1212,7 @@
     const boxArea = (b) => boxW(b) * boxH(b);
     const encl = new Map(ents.map((e) => {
       const b = entityBox(e), x = (b.x0 + b.x1) / 2, y = (b.y0 + b.y1) / 2, a = boxArea(b);
-      return [e, cuts.filter((c) => c.e !== e && boxArea(c.b) > a && x >= c.b.x0 && x <= c.b.x1 && y >= c.b.y0 && y <= c.b.y1 && c.rings.some((r) => pointInPoly(x, y, r)))];
+      return [e, cuts.filter((c) => c.e !== e && boxArea(c.b) > a * (1 + 1e-6) + 1e-6 && x >= c.b.x0 && x <= c.b.x1 && y >= c.b.y0 && y <= c.b.y1 && c.rings.some((r) => pointInPoly(x, y, r)))];
     }));
     // "Cut inside shapes first": a closed cut path inside another closed cut
     // path is a hole (open cuts go with the holes: nothing drops out)
@@ -1211,8 +1220,8 @@
     const rings = cuts.flatMap((c) => c.e.paths.filter((p) => p.c && p.p.length > 2).map((p) => ({ p, a: Math.abs(polyArea(p.p)), b: entityBox({ paths: [p] }) })));
     const isHole = (path) => {
       if (!path.c) return true;
-      const a = Math.abs(polyArea(path.p)), [x, y] = path.p[0];
-      return rings.some((r) => r.p !== path && r.a > a && x >= r.b.x0 && x <= r.b.x1 && y >= r.b.y0 && y <= r.b.y1 && pointInPoly(x, y, r.p.p));
+      const a = Math.abs(polyArea(path.p)), b = entityBox({ paths: [path] });
+      return rings.some((r) => r.p !== path && insideOf(path, b, a, r.p.p, r.b, r.a));
     };
     const hasHole = new Set(), hasOuter = new Set();
     for (const c of cuts) for (const p of c.e.paths) (isHole(p) ? hasHole : hasOuter).add(procOf(c.e));

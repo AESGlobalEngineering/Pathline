@@ -5,6 +5,13 @@
 
 module.exports = [
   {
+    version: '1.6.6', date: '10 Nov 2026',
+    added: [],
+    fixed: [
+      'Inside-first could cut a part\'s outline before the holes: with parts of the same size touching side by side, a part whose outline starts on the shared edge could count as a hole of its neighbour (the test for "inside" went either way on the edge, and rounding made one area a hair bigger). A shape now only counts as inside another when it fits within it, the other is clearly bigger, and its middle is inside.'
+    ]
+  },
+  {
     version: '1.6.5', date: '6 Nov 2026',
     added: [],
     fixed: [

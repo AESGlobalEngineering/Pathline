@@ -15,6 +15,13 @@ Latest round (28 Oct, final):
 - **Dark mode bed is grey** (`--bed`, `--sheet`, `--bed-grid*` in theme.css). **ACI 7 shows as white in dark mode** (black in light), as in CAD, and so do the marks drawn on the bed (registration marks, engrave hatching, arrows, start points): see the `--aci7*` and `--ink` tokens, and `LRC.aci.hex/fg/stroke` in app.js. Exports (DXF/SVG/PDF) still use real black.
 - **Sample machines and materials from earlier builds are removed on first start** (main.js, tracked by `settings.samplesRemoved`). This is by exact id (trotec, flatbed, laser2, acr-print-3 … brass-1); anything the operator created stays.
 
+Version 1.6.6 (10 Nov):
+- **Inside test for nesting** (`insideOf(inner, innerBox, innerArea, outer, outerBox, outerArea)`), used by `nestDepth` and by `isHole` in `estimate()`. A shape is inside another only when:
+  - its box fits within the other's;
+  - the other's area is clearly bigger (relative and absolute margins);
+  - its box middle is inside the other. For an open line the middle point is used; for a concave shape whose box middle falls outside itself, its first point.
+- This came from a bug report (X28 job: 4 touching parts of the same size, 2 passes, Ordered + All insides). Two part outlines were cut among the holes. Each started on the edge it shared with its neighbour, where the old first-point test could say "inside", and floating-point rounding made the neighbour's area a hair bigger. The self-test reproduces this with widths differing by 1e-7 mm: the old core cuts outlines among the holes.
+
 Version 1.6.5 (6 Nov):
 - **Job page speed on large jobs.** Measured on the owner's PCB Cover job: 4176 objects and about 140 000 points, 150 of them cut. An edit used to take 984 ms: about 725 ms for the estimate and about 200 ms to send the 15 MB job to main. It now takes about 20 ms.
   - The estimate runs in `src/ui/estimate-worker.js` (a Worker that loads core.js).
