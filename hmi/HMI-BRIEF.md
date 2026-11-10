@@ -189,6 +189,7 @@ The operator prints artwork with marks, puts the sheet on the bed, and the camer
 - `mode: "nonlinear"` (3 marks): **non-linear**. The intent is to correct uneven distortion as well. The method is the HMI's choice (§11).
 - Apply the transform to every coordinate of every later step (paths, boxes, gaps). Pathline never sends more marks than the mode uses (such jobs are blocked). If there are fewer marks than the mode needs, Pathline only warns, so handle it: refuse to start, or fall back.
 - Machine settings that matter: `markType` (Dot), `markD`, `camX`/`camY` (camera offset from the beam), `calibrated` (date text), and `markTime` (seconds to read one mark, used by Pathline's estimate, default 1.5).
+- `markArea: [x0, y0, x1, y1]` (bed mm, optional): where the camera can read a mark. The camera sits off the beam and the head has limited travel, so it can't look right up to every edge. Pathline places every registration mark inside it. Pathline Run sends it whenever the camera is on: on the Q500, `[26.9, 3.5, 1300, 900]`. When it's missing, assume the whole bed. Pathline Run refuses a job at Start if a mark is outside it.
 
 ## 5. Machine settings (`GET /machine`)
 

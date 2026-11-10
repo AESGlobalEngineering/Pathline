@@ -9,7 +9,12 @@ body{margin:0}
   --canvas:#E7E9EC;--canvas-dot:#CDD2D9;--seg-on:#FFFFFF;--knob:#FFFFFF;
   --line:#E1E4E8;--line-soft:#EEF0F3;--line-strong:#D5D9DF;--line-hover:#AEB5C0;--track:#C9CED6;
   --text:#111214;--text-2:#3A414C;--text-3:#5B6370;--text-4:#8A919C;
-  --accent:#D62828;--accent-hover:#BC1F1F;--accent-fg:#C21F1F;--accent-soft:#FCECEB;--accent-ring:rgba(214,40,40,0.22);--on-accent:#FFFFFF;
+  /* red acts (Save, Add machine, a dialog's main button); muted teal selects (tabs, switches,
+     the chosen job, progress). Red is also ACI 1 and the error colour; the head on the bed is ink.
+     Start / Pause / Stop keep the machine colours: green, amber, red outline. */
+  --action:#D62828;--action-hover:#BC1F1F;--on-action:#FFFFFF;
+  --accent:#3D6C71;--accent-hover:#325A5E;--accent-fg:#386469;--accent-soft:#E9EFF0;--accent-ring:rgba(61,108,113,0.22);--on-accent:#FFFFFF;
+  --ink:#15181E;--skel:#E6E8EC;--shimmer:rgba(255,255,255,0.7);
   --ok:#1B6B43;--ok-soft:#EDF7F1;--ok-dot:#30A46C;
   --warn:#8A4B00;--warn-soft:#FFF1DB;--warn-dot:#E5A000;
   --err:#B42318;--err-soft:#FDECEC;--err-dot:#E5484D;--idle-dot:#AEB5C0;
@@ -29,7 +34,9 @@ body{margin:0}
   --canvas:#0B0C0E;--canvas-dot:#2A2D33;--seg-on:#2C2F36;--knob:#FFFFFF;
   --line:#2A2D33;--line-soft:#222429;--line-strong:#3A3E46;--line-hover:#555B66;--track:#4A4F59;
   --text:#ECEDEF;--text-2:#C3C7CE;--text-3:#9AA1AC;--text-4:#727985;
-  --accent:#D62828;--accent-hover:#E5332D;--accent-fg:#FF6159;--accent-soft:rgba(239,59,51,0.16);--accent-ring:rgba(239,59,51,0.35);--on-accent:#FFFFFF;
+  --action:#D62828;--action-hover:#E5332D;--on-action:#FFFFFF;
+  --accent:#83B5B9;--accent-hover:#9DC5C8;--accent-fg:#9AC3C6;--accent-soft:rgba(131,181,185,0.16);--accent-ring:rgba(131,181,185,0.32);--on-accent:#0E0F11;
+  --ink:#FFFFFF;--skel:#22252A;--shimmer:rgba(255,255,255,0.05);
   --ok:#5CCB95;--ok-soft:rgba(48,164,108,0.16);--ok-dot:#30A46C;
   --warn:#F2B65C;--warn-soft:rgba(229,160,0,0.16);--warn-dot:#E5A000;
   --err:#FF7B72;--err-soft:rgba(229,72,77,0.16);--err-dot:#E5484D;--idle-dot:#6F7682;
@@ -69,12 +76,13 @@ body{margin:0}
 .hmi .tb{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:var(--ctl-h);padding:0 14px;border:1px solid var(--line-strong);border-radius:var(--ctl-r);background:var(--surface);cursor:pointer;font-size:14px;color:var(--text);white-space:nowrap;text-decoration:none;box-sizing:border-box}
 .hmi .tb:hover{border-color:var(--line-hover);color:var(--text)}
 .hmi .tb.sm{height:40px;padding:0 12px;font-size:13px}
-.hmi .btn-primary{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:var(--ctl-h);padding:0 20px;border:0;border-radius:var(--ctl-r);background:var(--accent);color:var(--on-accent);font-size:14px;font-weight:600;cursor:pointer;white-space:nowrap;box-sizing:border-box}
-.hmi .btn-primary:hover{background:var(--accent-hover);color:var(--on-accent)}
-.hmi .btn-primary:disabled:hover{background:var(--accent)}
+.hmi .btn-primary{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:var(--ctl-h);padding:0 20px;border:0;border-radius:var(--ctl-r);background:var(--action);color:var(--on-action);font-size:14px;font-weight:600;cursor:pointer;white-space:nowrap;box-sizing:border-box}
+.hmi .btn-primary:hover{background:var(--action-hover);color:var(--on-action)}
+/* nothing to act on yet (Save with no changes): neutral, not faded red */
+.hmi .btn-primary:disabled,.hmi .btn-primary:disabled:hover{background:var(--sunken);color:var(--text-4);opacity:1}
 .hmi .ib{display:inline-flex;align-items:center;justify-content:center;width:var(--ctl-h);height:var(--ctl-h);border:0;border-radius:var(--ctl-r);background:transparent;cursor:pointer;color:var(--text-2);padding:0;flex:none;box-sizing:border-box}
 .hmi .ib:hover{background:var(--hover);color:var(--text)}
-.hmi .run-btn{width:64px;height:64px;border:0;border-radius:12px;color:var(--on-accent);display:inline-flex;align-items:center;justify-content:center;flex:none}
+.hmi .run-btn{width:64px;height:64px;border:0;border-radius:12px;color:#FFFFFF;display:inline-flex;align-items:center;justify-content:center;flex:none}
 .hmi .run-btn.stop{border:1px solid var(--line-strong);background:var(--surface);cursor:pointer}
 
 /* fields */
@@ -119,6 +127,7 @@ body{margin:0}
 .hmi .sw{width:48px;height:28px;flex:none;border:0;border-radius:14px;padding:3px;box-sizing:border-box;background:var(--track);display:inline-flex;justify-content:flex-start;cursor:pointer;transition:background 0.12s}
 .hmi .sw::after{content:'';width:22px;height:22px;border-radius:50%;background:var(--knob);box-shadow:0 1px 2px rgba(0,0,0,0.3)}
 .hmi .sw[aria-checked="true"]{background:var(--accent);justify-content:flex-end}
+.hmi .sw[aria-checked="true"]::after{background:var(--knob)}
 
 /* containers */
 .hmi .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--card-r)}
@@ -133,8 +142,8 @@ body{margin:0}
 .hmi .pill.warn::before{background:var(--warn-dot)}
 .hmi .pill.err{background:var(--err-soft);color:var(--err)}
 .hmi .pill.err::before{background:var(--err-dot)}
-.hmi .pill.accent{background:var(--accent-soft);color:var(--accent-fg)}
-.hmi .pill.accent::before{background:var(--accent)}
+.hmi .pill.accent{background:var(--accent);color:var(--on-accent)}
+.hmi .pill.accent::before{background:var(--on-accent)}
 .hmi .pill.lg{height:48px;padding:0 20px 0 18px;gap:12px;border-radius:24px;font-size:26px;font-weight:600}
 .hmi .pill.lg::before{width:12px;height:12px}
 .hmi .tag{display:inline-flex;align-items:center;height:26px;padding:0 10px;border-radius:6px;font-size:12px;font-weight:600;white-space:nowrap;flex:none;background:var(--sunken);color:var(--text-2)}
@@ -191,3 +200,33 @@ body{overflow:hidden}
 @media (max-width:760px){.hmi .qlist{min-width:170px}.hmi .qinfo{min-width:0}}
 @keyframes plr-pulse{0%,100%{box-shadow:0 0 0 3px var(--accent-ring)}50%{box-shadow:0 0 0 7px var(--accent-ring)}}
 @keyframes plr-pulse-blue{0%,100%{box-shadow:0 0 0 2px rgba(62,99,221,.25)}50%{box-shadow:0 0 0 6px rgba(62,99,221,.25)}}
+
+/* ---- motion ----
+   The screen is redrawn every 0.7 s (innerHTML), so nothing may animate just because it was
+   drawn: a dialog, menu or toast gets .in only on the render that opens it (render() in app.js),
+   and a looping animation (.loop) takes its phase from --clock so a redraw doesn't restart it. */
+@media (prefers-reduced-motion:no-preference){
+  .hmi .seg>button,.hmi .tabs>button,.hmi .pop .opt,.hmi .dd,.hmi .fld,.hmi .cell,.hmi .jobcard{transition:background-color .12s ease-out,border-color .12s ease-out,color .12s ease-out,box-shadow .12s ease-out}
+  .hmi .tb,.hmi .ib,.hmi .btn-primary,.hmi .run-btn{transition:background-color .12s ease-out,border-color .12s ease-out,color .12s ease-out,transform .1s ease-out}
+  .hmi .tb:active:not(:disabled),.hmi .ib:active:not(:disabled),.hmi .btn-primary:active:not(:disabled),.hmi .run-btn:active:not(:disabled),.hmi .seg>button:active,.hmi .jobcard>button.pick:active{transform:scale(.97)}
+  .hmi .scrim.in{animation:plr-fade .16s ease-out}
+  .hmi .scrim.in>.dlg{animation:plr-dlg .2s cubic-bezier(.2,.8,.2,1)}
+  .hmi .pop.in{animation:plr-pop .14s ease-out;transform-origin:top}
+  .hmi .toast.in{animation:plr-toast .2s cubic-bezier(.2,.8,.2,1)}
+}
+@keyframes plr-fade{from{opacity:0}}
+@keyframes plr-dlg{from{opacity:0;transform:translateY(8px) scale(.98)}}
+@keyframes plr-pop{from{opacity:0;transform:translateY(-4px) scale(.98)}}
+@keyframes plr-toast{from{opacity:0;transform:translate(-50%,8px)}}
+.hmi .loop{animation-delay:var(--clock,0ms) !important}
+
+/* ---- loading: the queue's own panels with the content greyed, one shimmer across them ---- */
+.hmi .skel{display:block;flex:none;height:12px;border-radius:6px;background-color:var(--skel);background-image:linear-gradient(100deg,transparent 40%,var(--shimmer) 50%,transparent 60%);background-size:200vw 100%;background-attachment:fixed;animation:plr-sweep 1.8s linear infinite}
+.hmi .skel.ctl{height:var(--ctl-h);border-radius:var(--ctl-r)}
+.hmi .sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+@keyframes plr-sweep{from{background-position:100vw 0}to{background-position:-100vw 0}}
+@media (prefers-reduced-motion:reduce){.hmi .loop{animation:none !important}.hmi .skel{background-image:none;animation:none}}
+
+/* not running: the big Estimated time says it, so the small one under the bar goes (it stays
+   on a narrow screen, where the big one is hidden) */
+@media (min-width:1101px){.hmi .qest-idle{visibility:hidden}}

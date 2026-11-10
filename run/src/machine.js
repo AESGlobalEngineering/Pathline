@@ -9,7 +9,8 @@ const plan = require('./job/plan');
 const validate = require('./job/validate');
 const anchorJob = require('./job/anchor');
 const fitting = require('./vision/fit');
-const { Vision } = require('./vision/vision');
+const config = require('./config');
+const { Vision, reach, reachInfo, fitInfo } = require('./vision/vision');
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const busyErr = (msg) => Object.assign(new Error(msg), { code: 409 });
@@ -148,13 +149,22 @@ class Machine {
   clampX(x) { return Math.max(0, Math.min(this.cfg.bed[0], x)); }
   clampY(y) { return Math.max(0, Math.min(this.cfg.bed[1], y)); }
 
-  // How far a jog may go along an axis: the bed, widened to wherever the head is now. A head
-  // outside the bed set in Setup (bed set smaller than the machine) is never pulled back
-  // across to the bed edge: that was a long rapid, in whichever direction was pressed.
+  // where the head may go with the beam off (config.travelBox: a Trotec's strip to its zero too)
+  travel() { return config.travelBox(this.cfg); }
+  clampTravel(x, y) {
+    const t = this.travel();
+    return [Math.max(t[0], Math.min(t[2], x)), Math.max(t[1], Math.min(t[3], y))];
+  }
+
+  // How far a jog may go along an axis: the travel (the bed, and a Trotec's strip behind and left
+  // of it), widened to wherever the head is now. A head outside the bed set in Setup (bed set
+  // smaller than the machine) is never pulled back across to the bed edge: that was a long rapid,
+  // in whichever direction was pressed.
   jogRange(axis) {
-    const max = axis === 'x' ? this.cfg.bed[0] : this.cfg.bed[1];
+    const t = this.travel();
+    const [min, max] = axis === 'x' ? [t[0], t[2]] : [t[1], t[3]];
     const cur = this.st.pos[axis];
-    return Number.isFinite(cur) ? [Math.min(0, cur), Math.max(max, cur)] : [0, max];
+    return Number.isFinite(cur) ? [Math.min(min, cur), Math.max(max, cur)] : [min, max];
   }
 
   async jog(b) {
@@ -164,7 +174,7 @@ class Machine {
       if (b.x !== undefined) x = Number(b.x);
       if (b.y !== undefined) y = Number(b.y);
       if (!Number.isFinite(x) || !Number.isFinite(y)) throw Object.assign(new Error('x and y must be numbers'), { code: 400 });
-      x = this.clampX(x); y = this.clampY(y);
+      [x, y] = this.clampTravel(x, y);
     } else {
       const d = Number(b.distance);
       if (!Number.isFinite(d)) throw Object.assign(new Error('distance must be a number'), { code: 400 });
@@ -438,14 +448,27 @@ class Machine {
       this.batch = [];
     }
     if (!job) return { state: this.st.state, message: 'Nothing queued' };
+    // where the head is as Start is pressed: the anchor (if on), and where it goes back to after
+    if (this.st.link === 'online') { try { this.apply(await this.link.poll()); } catch (e) { /* the last position */ } }
+    const p0 = this.st.pos;
+    const back = p0 && Number.isFinite(p0.x) && Number.isFinite(p0.y) ? { x: p0.x, y: p0.y } : null;
     // Anchor to toolhead switched on: the job's top-left corner goes where the head is now, as
     // Start is pressed (not where it was when the switch was turned on)
     if (job.anchorAtStart) {
-      if (this.st.link === 'online') { try { this.apply(await this.link.poll()); } catch (e) { /* the last position */ } }
       const pos = this.st.pos;
       if (this.st.link !== 'online' || !pos || !Number.isFinite(pos.x)) throw busyErr('"' + job.name + '" is anchored to the toolhead, but the head position isn\'t known');
       const at = { x: +pos.x.toFixed(3), y: +pos.y.toFixed(3) };
-      try { anchorJob.check(this.store.pkg(job.id), at, this.cfg.bed); } catch (e) { throw busyErr('"' + job.name + '": ' + e.message); }
+      const raw = this.store.pkg(job.id);
+      try { anchorJob.check(raw, at, this.cfg.bed); } catch (e) {
+        // print and cut: the laser is on the dot, so it's the sheet that has to move (the general
+        // message said to move the head; J0065's laser was rightly on the dot, the sheet 15 mm too far right)
+        const fit = e.over && (raw.toolpath || []).some((s) => s.type === 'inspect') ? fitInfo(e.over, this.cfg.bed, true) : null;
+        if (fit) {
+          this.log(job.name + ': ' + fit.text);
+          throw Object.assign(busyErr('"' + job.name + '": ' + fit.text), { detail: { ...fit, job: job.name } });
+        }
+        throw busyErr('"' + job.name + '": ' + e.message);
+      }
       this.store.setAnchor(job.id, at);
       this.log('anchored ' + job.name + ' at the head, X ' + at.x + ' Y ' + at.y);
     }
@@ -470,12 +493,24 @@ class Machine {
       throw busyErr('"' + job.name + '" uses registration marks. Turn the camera on in Setup → Camera, or set Registration marks to "Skip" in Setup to run it uncorrected.');
     }
     if (camera) {
+      // every mark where the camera can look, before the head moves at all
+      const far = reachInfo(reach(pkg, this.vision.cfg.offset, this.cfg.bed, this.travel()), !!job.anchor);
+      if (far) {
+        this.log(job.name + ': registration marks out of the camera\'s reach: ' + far.text);
+        // (detail: the screen shows it as a dialog, not a passing message)
+        throw Object.assign(busyErr('"' + job.name + '": ' + far.text), { detail: { ...far, job: job.name } });
+      }
       this.execute(job, null, async (ctl, status) => {
-        const r = await this.vision.readMarks(pkg, ctl, status);
+        const r = await this.vision.readMarks(pkg, ctl, status, { anchored: !!job.anchor });
         this.st.marks = r.found;
         // the job as moved onto the marks: the screen follows the head along this one (the
         // package as sent sat ~150 mm away on the X8 sheet: no position fitted it, the head jumped)
         const placed = Vision.corrected(pkg, r.f);
+        // where the marks were found, the cuts must still be on the bed: checked at Start where the
+        // job was expected, it wasn't checked again (J0064 was expected 42 mm left of its marks, and
+        // then cut out to X 1313 on the 1300 mm bed)
+        const fit = fitInfo(anchorJob.overBed(placed, this.cfg.bed), this.cfg.bed, !!job.anchor, true);
+        if (fit) { this.log(job.name + ': after reading the marks: ' + fit.text); throw new Error(fit.text); }
         if (this.run && this.run.job === job) {
           const sh = pkg.sheet;
           const shown = { ...placed };
@@ -488,16 +523,16 @@ class Machine {
           this.st.placed = job.id + ':' + Date.now();
         }
         try { return this.compile(placed, opts); } catch (e) { throw new Error('Couldn\'t convert "' + job.name + '" after reading its marks: ' + e.message); }
-      });
+      }, back);
       return { state: 'running', job: job.id };
     }
-    this.execute(job, program);
+    this.execute(job, program, null, back);
     return { state: 'running', job: job.id };
   }
 
   // prepare(ctl, status): work done before the job is sent (reading registration marks), giving
-  // the program to send
-  execute(job, program, prepare) {
+  // the program to send; back: where the head was at Start (it goes back there once the job is done)
+  execute(job, program, prepare, back) {
     const ctl = { aborted: false, paused: false };
     const startedAt = new Date().toISOString();
     this.run = { job, program, ctl };
@@ -606,6 +641,17 @@ class Machine {
       }
       // RDD6584: after a job the head parks at home, so measure from there
       if (result === 'Completed' && program && program.knife && this.link.learnHome) await this.link.learnHome().catch(() => {});
+      // Setup → Jobs → Return head to start: done, the head goes back to where it was at Start
+      // (a plotter parks at home itself). Stopped jobs stay put, to look at where it stopped
+      else if (result === 'Completed' && back && this.cfg.returnHead !== false && this.cfg.type !== 'plotter' && !ctl.aborted && this.st.link === 'online') {
+        try {
+          this.st.progress = 1; job.progress = 1;
+          this.st.message = 'Returning to the start position';
+          await this.link.moveTo(...this.clampTravel(back.x, back.y));
+          await this.waitIdle(60000, 300);
+          this.log('back to the start position, X ' + back.x.toFixed(1) + ' Y ' + back.y.toFixed(1));
+        } catch (e) { this.log('return to start: ' + e.message); }
+      }
       this.store.finish(job, result, startedAt, this.cfg.removeDone);
       if (timeline.length && this.store.saveRun) this.store.saveRun(job, { startedAt, result, estimate: program ? program.seconds : null, steps: program ? program.segments.filter((s) => s.kind === 'stream').flatMap((s) => s.steps) : [], timeline });
       this.run = null;

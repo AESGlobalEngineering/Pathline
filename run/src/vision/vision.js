@@ -160,9 +160,11 @@ class Vision {
 
   async moveCamera(p, opts = {}) {
     const [x, y] = this.laserFor(p, opts.raw);
-    const [W, H] = this.m.cfg.bed;
-    if (x < -0.5 || y < -0.5 || x > W + 0.5 || y > H + 0.5) throw err('The camera can\'t reach ' + p.map((v) => v.toFixed(1)).join(', ') + ' mm: the head would leave the bed');
-    await this.m.link.moveTo(x, y);
+    // beam off: the head may use the travel past the bed's corner (Machine.travel)
+    const t = this.m.travel ? this.m.travel() : [0, 0, ...this.m.cfg.bed];
+    if (x < t[0] - 0.5 || y < t[1] - 0.5 || x > t[2] + 0.5 || y > t[3] + 0.5) throw err('The camera can\'t reach ' + p.map((v) => v.toFixed(1)).join(', ') + ' mm: the head would leave the bed');
+    // (within the half mm allowed: to the edge of the travel, never past the machine's zero)
+    await this.m.link.moveTo(Math.max(t[0], Math.min(t[2], x)), Math.max(t[1], Math.min(t[3], y)));
     await this.m.waitIdle(30000, 150);
   }
 
@@ -220,7 +222,8 @@ class Vision {
 
   // ---------------------------------------------------------------- print and cut
   // Reads the job's registration marks in Pathline's order; returns the fit (design → found).
-  async readMarks(pkg, ctl = {}, status = () => {}) {
+  // opts.anchored: the job was put at the laser as Start was pressed
+  async readMarks(pkg, ctl = {}, status = () => {}, opts = {}) {
     const steps = (pkg.toolpath || []).filter((s) => s.type === 'inspect');
     const E = [], D = [];
     this.clearMarkFrames();
@@ -232,6 +235,15 @@ class Vision {
       status('Reading mark ' + s.mark + ' of ' + s.of);
       let r = await this.measure(pred, 'dot', { d: s.d, ctl, whiteRing: true });
       this.saveMarkFrame('mark' + s.mark, { mark: s.mark, design: s.at, expected: pred, d: s.d, found: r ? r.found : null, hit: r ? r.hit : null });
+      // Anchored, and the first mark isn't there: the camera may have been put over the dot at
+      // Start in place of the laser (J0064: every mark 42, 19 mm off, the camera's offset). Look
+      // one offset over before asking for the camera to be jogged by hand
+      if (!r && !E.length && opts.anchored) {
+        const o = this.cfg.offset, alt = [pred[0] - o[0], pred[1] - o[1]];
+        status('Reading mark ' + s.mark + ' of ' + s.of + ' (as if the camera was put over the dot)');
+        r = await this.measure(alt, 'dot', { d: s.d, ctl, whiteRing: true }).catch((e) => { if (ctl.aborted) throw e; return null; });
+        if (r) this.log('mark ' + s.mark + ': found one camera offset from where it should be: the camera, not the laser, was put over the dot at Start. Put the laser over it next time');
+      }
       // not where it should be: the job waits while the user jogs the camera over it (Jog page),
       // then the dot finder looks again from there. Put there by hand, the dot nearest the
       // crosshair counts even without clean white round it (artwork close by may be why it was missed)
@@ -550,4 +562,100 @@ function squareness(grid, found) {
   return d;
 }
 
-module.exports = { Vision, DEFAULTS };
+// Where the head camera can look. The laser must stay within its travel (moveCamera: the bed, and
+// on a Trotec the strip to its zero), so the camera only reaches that shifted by the offset: on the
+// Q500, camera 41.7 mm right of the laser and 14.8 mm of travel left of the bed, nothing nearer
+// than 26.9 mm to the left edge. Checked at Start, before the head moves (the X28 sheet's marks
+// 1 and 3 sat 28 mm from the left edge: "the head would leave the bed" after Start)
+const SLACK = 0.5; // as moveCamera allows
+// travel: where the head may go, beam off ([x0, y0, x1, y1], Machine.travel; the bed if not given)
+// (where the camera can physically look: past the bed's far edges too, as the head can go right up
+// to them; J0064 read its top-right mark at X 1322.9 on the 1300 mm bed. Pathline's markArea keeps
+// marks on the bed)
+function reach(pkg, offset, bed, travel) {
+  const [W, H] = bed, [ox, oy] = offset;
+  const t = travel || [0, 0, W, H];
+  const lim = { x0: Math.max(0, t[0] - ox), y0: Math.max(0, t[1] - oy), x1: t[2] - ox, y1: t[3] - oy };
+  const marks = (pkg.toolpath || []).filter((s) => s.type === 'inspect' && Array.isArray(s.at));
+  const out = [];
+  for (const s of marks) {
+    const [x, y] = s.at, edges = [];
+    if (x < lim.x0 - SLACK) edges.push('left');
+    if (x > lim.x1 + SLACK) edges.push('right');
+    if (y < lim.y0 - SLACK) edges.push('back');
+    if (y > lim.y1 + SLACK) edges.push('front');
+    if (edges.length) out.push({ mark: s.mark, at: s.at, edges });
+  }
+  return { W, H, lim, marks, out };
+}
+
+// What to tell the operator when marks are out of reach (null when all can be read), for the
+// screen's dialog: moves [{ dir: 'right' | 'left' | 'front' | 'back', mm }] (each rounded up to the
+// next 10 mm: an amount to slide a sheet by, not a measurement), why (one line per edge), then
+// (what to do after), wide (marks further apart than the camera reaches: moving can't help), text
+// (all of it, as one message). anchored: the job is put at the head as Start is pressed
+function reachInfo(r, anchored) {
+  if (!r.out.length) return null;
+  const names = (l) => (l.length === 1 ? 'Mark ' + l[0] + ' is' : 'Marks ' + l.slice(0, -1).join(', ') + ' and ' + l[l.length - 1] + ' are');
+  const mm = (v) => Math.max(0, Math.round(v));
+  const E = {
+    left: { from: (p) => p[0], see: r.lim.x0, dir: 'right' },
+    right: { from: (p) => r.W - p[0], see: r.W - r.lim.x1, dir: 'left' },
+    back: { from: (p) => p[1], see: r.lim.y0, dir: 'front' },
+    front: { from: (p) => r.H - p[1], see: r.H - r.lim.y1, dir: 'back' }
+  };
+  const why = [], moves = [];
+  for (const edge of ['left', 'right', 'back', 'front']) {
+    const hit = r.out.filter((o) => o.edges.includes(edge));
+    if (!hit.length) continue;
+    const e = E[edge];
+    // (past the far edges the distances are negative: "past the right edge")
+    const ds = hit.map((o) => Math.round(e.from(o.at)));
+    const near = Math.min(...ds);
+    const where = near >= 0 ? (ds.every((d) => d === near) ? '' : 'as little as ') + near + ' mm from the ' + edge + ' edge' : -near + ' mm past the ' + edge + ' edge';
+    why.push(names(hit.map((o) => o.mark)) + ' ' + where + '; the camera can only see ' + (e.see >= 0 ? 'from ' + Math.ceil(e.see) + ' mm' : 'up to ' + Math.floor(-e.see) + ' mm past it') + '.');
+    const need = Math.max(...hit.map((o) => e.see - e.from(o.at)));
+    moves.push({ dir: e.dir, mm: Math.max(10, Math.ceil((need + 1e-6) / 10) * 10) });
+  }
+  // marks further apart than the camera reaches: moving the sheet can't help
+  const xs = r.marks.map((s) => s.at[0]), ys = r.marks.map((s) => s.at[1]);
+  const spanX = Math.max(...xs) - Math.min(...xs), spanY = Math.max(...ys) - Math.min(...ys);
+  const wideX = r.lim.x1 - r.lim.x0, wideY = r.lim.y1 - r.lim.y0;
+  if (spanX > wideX + 2 * SLACK || spanY > wideY + 2 * SLACK) {
+    const across = spanX > wideX + 2 * SLACK ? [spanX, wideX, 'across'] : [spanY, wideY, 'front to back'];
+    const wide = 'The marks are ' + mm(across[0]) + ' mm apart ' + across[2] + ', but the camera can only reach ' + Math.floor(across[1]) + ' mm. Move the marks closer together in Prepare.';
+    return { kind: 'reach', moves: [], why, wide, then: '', text: why.join(' ') + ' ' + wide };
+  }
+  const head = 'Move the sheet ' + moves.map((m) => m.mm + ' mm to the ' + m.dir).join(' and ') + '.';
+  // (J0064: the camera was put over the dot, 42 mm from where the laser needed to be)
+  const then = (anchored ? 'Then put the laser (not the camera) back over the top-left dot and press Start.'
+    : 'Then switch Anchor to toolhead on, put the laser (not the camera) over the top-left dot and press Start.') + ' Or move the marks in Prepare.';
+  return { kind: 'reach', moves, why, wide: '', then, text: head + ' ' + why.join(' ') + ' ' + then };
+}
+function reachMessage(r, anchored) { const i = reachInfo(r, anchored); return i ? i.text : null; }
+
+// The same for a print and cut job whose cuts would go past the bed (anchor.overBed's answer), as
+// it lies on the bed: the sheet is to be moved, not the head (which belongs on the dot). after:
+// found once the marks were read (nothing cut yet). J0065: the X28 sheet's cuts reached X 1315
+function fitInfo(ov, bed, anchored, after) {
+  if (!ov || !(ov.left || ov.right || ov.back || ov.front)) return null;
+  const [W, H] = bed, b = ov.box;
+  const ten = (v) => Math.max(10, Math.ceil((v + 1e-6) / 10) * 10);
+  const E = [
+    ['right', ov.right, 'left', 'The cuts reach X ' + b[2].toFixed(0) + ', ' + Math.ceil(ov.right) + ' mm past the right end of the bed (' + W + ' mm).'],
+    ['left', ov.left, 'right', 'The cuts reach ' + Math.ceil(ov.left) + ' mm past the left edge of the bed.'],
+    ['back', ov.back, 'front', 'The cuts reach ' + Math.ceil(ov.back) + ' mm past the back of the bed.'],
+    ['front', ov.front, 'back', 'The cuts reach Y ' + b[3].toFixed(0) + ', ' + Math.ceil(ov.front) + ' mm past the front of the bed (' + H + ' mm).']
+  ].filter((e) => e[1]);
+  const moves = E.map((e) => ({ dir: e[2], mm: ten(e[1]) }));
+  const why = E.map((e) => e[3]);
+  if ((ov.left && ov.right) || (ov.back && ov.front)) {
+    const wide = 'The job is bigger than the bed. Make it smaller in Prepare.';
+    return { kind: 'reach', title: 'The job doesn\'t fit on the bed', moves: [], why, wide, then: '', text: why.join(' ') + ' ' + wide };
+  }
+  const head = 'Move the sheet ' + moves.map((m) => m.mm + ' mm to the ' + m.dir).join(' and ') + '.';
+  const then = (after ? 'Nothing was cut. ' : '') + (anchored ? 'Then put the laser (not the camera) back over the top-left dot and press Start.' : 'Then switch Anchor to toolhead on, put the laser (not the camera) over the top-left dot and press Start.');
+  return { kind: 'reach', title: 'The job doesn\'t fit on the bed where the sheet is', moves, why, wide: '', then, text: head + ' ' + why.join(' ') + ' ' + then };
+}
+
+module.exports = { Vision, DEFAULTS, reach, reachInfo, reachMessage, fitInfo };

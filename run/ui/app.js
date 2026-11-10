@@ -44,7 +44,7 @@ const stamp = (iso) => { if (!iso) return ''; const d = new Date(iso); const p =
 async function call(method, url, body) {
   const r = await fetch(url, { method, headers: body !== undefined ? { 'content-type': 'application/json' } : {}, body: body !== undefined ? JSON.stringify(body) : undefined });
   const data = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(data.error || r.status + ' ' + r.statusText);
+  if (!r.ok) throw Object.assign(new Error(data.error || r.status + ' ' + r.statusText), data.detail ? { detail: data.detail } : {});
   return data;
 }
 // opts: { action: button label, onAction: handler name in H, ms }
@@ -314,30 +314,80 @@ function followFrame(ts) {
 requestAnimationFrame(followFrame);
 
 // ---------------------------------------------------------------- drawing
-function bedSvg(pkg, opts = {}) {
-  const [W, H] = cfg().bed;
-  let body = '';
-  if (pkg && pkg !== 'loading') {
-    if (pkg.sheet) body += '<rect x="' + pkg.sheet.x + '" y="' + pkg.sheet.y + '" width="' + pkg.sheet.w + '" height="' + pkg.sheet.h + '" fill="var(--sheet)" stroke="var(--bed-line)" stroke-width="' + W / 600 + '"/>';
-    const sw = W / (opts.big ? 500 : 260);
+// A job's artwork, drawn once. The screen is redrawn every 0.7 s; the X28 sheet's 1325 paths
+// (34 000 points) made each redraw 2.3 MB of markup (bed view and its two thumbnails), 60–100 ms
+// of script before any layout, and clicks landed on parts that had just been replaced. The
+// artwork goes in as an empty <g data-art>, and render() moves the shapes already drawn across
+// into it (artFill), so only what changes is rebuilt
+const art = { ids: new WeakMap(), html: new Map(), n: 0 };
+function artSlot(pkg, big) {
+  let id = art.ids.get(pkg);
+  if (!id) { id = 'a' + ++art.n; art.ids.set(pkg, id); }
+  const [W] = cfg().bed;
+  const key = id + (big ? 'b' : 's') + (ui.dark ? 'd' : 'l') + W;
+  if (!art.html.has(key)) {
+    let s = '';
+    const sw = W / (big ? 500 : 260);
     for (const e of pkg.entities || []) {
       const col = aciHex(e.aci);
       for (const p of e.paths || []) {
         const d = 'M' + p.p.map((q) => q[0].toFixed(2) + ' ' + q[1].toFixed(2)).join('L') + (p.c ? 'Z' : '');
-        body += '<path d="' + d + '" fill="none" ' + (col ? 'stroke="' + col + '"' : 'class="ink"') + ' stroke-width="' + sw + '" vector-effect="non-scaling-stroke" style="stroke-width:' + (opts.big ? 1.5 : 1) + 'px"/>';
+        s += '<path d="' + d + '" fill="none" ' + (col ? 'stroke="' + col + '"' : 'class="ink"') + ' stroke-width="' + sw + '" vector-effect="non-scaling-stroke" style="stroke-width:' + (big ? 1.5 : 1) + 'px"/>';
       }
     }
+    art.html.set(key, s);
+    // (the last few jobs' only)
+    while (art.html.size > 24) art.html.delete(art.html.keys().next().value);
+  }
+  return '<g data-art="' + key + '"></g>';
+}
+// after the screen's markup is replaced: the artwork drawn last time into its places again (the
+// same nodes, not parsed afresh), new artwork drawn once
+function artFill(old) {
+  for (const g of $app.querySelectorAll('g[data-art]')) {
+    const k = g.dataset.art;
+    const prev = old.get(k);
+    if (prev && prev.length) g.replaceWith(prev.shift());
+    else g.innerHTML = art.html.get(k) || '';
+  }
+}
+// a job's thumbnail as a picture: drawn once, then cached by the browser. As live drawing, the
+// two X8/X28 thumbnails alone (1325 paths each) were laid out again at every redraw
+const thumbs = new Map();
+function thumbImg(pkg) {
+  const [W, H] = cfg().bed;
+  const key = artSlot(pkg, false).match(/data-art="([^"]+)"/)[1];
+  let url = thumbs.get(key);
+  if (!url) {
+    const cs = getComputedStyle($app);
+    const v = (n, d) => (cs.getPropertyValue(n) || '').trim() || d;
+    const sh = pkg.sheet;
+    const sheet = sh ? '<rect x="' + sh.x + '" y="' + sh.y + '" width="' + sh.w + '" height="' + sh.h + '" fill="' + v('--sheet', '#FBFBFC') + '" stroke="' + v('--bed-line', '#CDD2D9') + '" stroke-width="' + W / 600 + '"/>' : '';
+    const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="xMidYMid meet"><style>.ink{stroke:' + v('--text', '#111') + '}</style>' + sheet + art.html.get(key) + '</svg>';
+    url = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml' }));
+    thumbs.set(key, url);
+    while (thumbs.size > 24) { const k = thumbs.keys().next().value; URL.revokeObjectURL(thumbs.get(k)); thumbs.delete(k); }
+  }
+  return '<img class="bedsvg" src="' + url + '" alt="" draggable="false" style="aspect-ratio:' + W + '/' + H + '">';
+}
+function bedSvg(pkg, opts = {}) {
+  const [W, H] = cfg().bed;
+  if (!opts.head && pkg && pkg !== 'loading') return thumbImg(pkg);
+  let body = '';
+  if (pkg && pkg !== 'loading') {
+    if (pkg.sheet) body += '<rect x="' + pkg.sheet.x + '" y="' + pkg.sheet.y + '" width="' + pkg.sheet.w + '" height="' + pkg.sheet.h + '" fill="var(--sheet)" stroke="var(--bed-line)" stroke-width="' + W / 600 + '"/>';
+    body += artSlot(pkg, !!opts.big);
   }
   // zoomed in, the head ring and markers keep their size on screen
   const r = Math.max(W, H) / 70 / (opts.head ? ui.zoom.k : 1);
   // where an anchored job's top-left corner was pinned (green, as in the design)
   // (pkg is 'loading' while it's fetched: a string, whose old .anchor() method is always there)
   if (opts.big && pkg && pkg !== 'loading' && pkg.anchor) {
-    body += '<circle cx="' + pkg.anchor.x + '" cy="' + pkg.anchor.y + '" r="' + r * 0.6 + '" fill="var(--bed)" stroke="#30A46C" stroke-width="' + r / 4 + '"/>';
+    body += '<circle cx="' + pkg.anchor.x + '" cy="' + pkg.anchor.y + '" r="' + r * 0.6 + '" fill="var(--bed)" stroke="var(--ok-dot)" stroke-width="' + r / 4 + '"/>';
   }
   // print and cut: where the camera found the registration marks (green rings)
   if (opts.head && Array.isArray(S.status.marks)) {
-    for (const m of S.status.marks) body += '<circle cx="' + m[0] + '" cy="' + m[1] + '" r="' + r * 0.7 + '" fill="none" stroke="#30A46C" vector-effect="non-scaling-stroke" style="stroke-width:2px"/><circle cx="' + m[0] + '" cy="' + m[1] + '" r="' + r * 0.12 + '" fill="#30A46C"/>';
+    for (const m of S.status.marks) body += '<circle cx="' + m[0] + '" cy="' + m[1] + '" r="' + r * 0.7 + '" fill="none" stroke="var(--ok-dot)" vector-effect="non-scaling-stroke" style="stroke-width:2px"/><circle cx="' + m[0] + '" cy="' + m[1] + '" r="' + r * 0.12 + '" fill="var(--ok-dot)"/>';
   }
   // what's been run of this job: along its own paths while the head can be followed on them,
   // else the trace of where the head has been
@@ -349,18 +399,18 @@ function bedSvg(pkg, opts = {}) {
     let first = pr.k;
     while (first > 0 && follow.route.segs[first - 1].step === follow.route.segs[pr.k].step) first--;
     follow.doneK = first;
-    const line = (id, d) => '<path id="' + id + '" d="' + d + '" fill="none" stroke="var(--accent)" vector-effect="non-scaling-stroke" style="stroke-width:2.5px" stroke-linecap="round"/>';
+    const line = (id, d) => '<path id="' + id + '" d="' + d + '" fill="none" stroke="var(--ink)" vector-effect="non-scaling-stroke" style="stroke-width:2.5px" stroke-linecap="round"/>';
     body += line('run-done', doneD(0, first - 1)) + line('run-now', doneD(first, pr.k, pr.p));
   } else if (opts.head && ui.trail.pts.length > 1) {
-    body += '<polyline points="' + ui.trail.pts.map((p) => p[0].toFixed(1) + ',' + p[1].toFixed(1)).join(' ') + '" fill="none" stroke="var(--accent)" stroke-opacity="0.45" vector-effect="non-scaling-stroke" style="stroke-width:1.5px" stroke-linejoin="round"/>';
+    body += '<polyline points="' + ui.trail.pts.map((p) => p[0].toFixed(1) + ',' + p[1].toFixed(1)).join(' ') + '" fill="none" stroke="var(--ink)" stroke-opacity="0.45" vector-effect="non-scaling-stroke" style="stroke-width:1.5px" stroke-linejoin="round"/>';
   }
   // the toolhead: crosshair across the bed and a ring at its position (only when it's known;
   // followed along the job, where it's predicted to be now)
   if (opts.head && Number.isFinite(S.status.pos.x) && S.status.link === 'online') {
     const [x, y] = at || [S.status.pos.x, S.status.pos.y];
-    body += '<line id="head-vx" x1="' + x + '" y1="0" x2="' + x + '" y2="' + H + '" stroke="var(--accent)" stroke-opacity="0.35" vector-effect="non-scaling-stroke" stroke-dasharray="4 4" style="stroke-width:1px"/>' +
-      '<line id="head-hy" x1="0" y1="' + y + '" x2="' + W + '" y2="' + y + '" stroke="var(--accent)" stroke-opacity="0.35" vector-effect="non-scaling-stroke" stroke-dasharray="4 4" style="stroke-width:1px"/>' +
-      '<circle id="head-ring" cx="' + x + '" cy="' + y + '" r="' + r + '" fill="var(--accent-ring)" stroke="var(--accent)" stroke-width="' + r / 4 + '"/><circle id="head-dot" cx="' + x + '" cy="' + y + '" r="' + r / 4 + '" fill="var(--accent)"/>';
+    body += '<line id="head-vx" x1="' + x + '" y1="0" x2="' + x + '" y2="' + H + '" stroke="var(--ink)" stroke-opacity="0.35" vector-effect="non-scaling-stroke" stroke-dasharray="4 4" style="stroke-width:1px"/>' +
+      '<line id="head-hy" x1="0" y1="' + y + '" x2="' + W + '" y2="' + y + '" stroke="var(--ink)" stroke-opacity="0.35" vector-effect="non-scaling-stroke" stroke-dasharray="4 4" style="stroke-width:1px"/>' +
+      '<circle id="head-ring" cx="' + x + '" cy="' + y + '" r="' + r + '" fill="var(--accent-ring)" stroke="var(--ink)" stroke-width="' + r / 4 + '"/><circle id="head-dot" cx="' + x + '" cy="' + y + '" r="' + r / 4 + '" fill="var(--ink)"/>';
   }
   if (!opts.head) return '<svg class="bedsvg" viewBox="0 0 ' + W + ' ' + H + '" style="aspect-ratio:' + W + '/' + H + '" preserveAspectRatio="xMidYMid meet" aria-hidden="true">' + body + '</svg>';
   // with the head shown: the whole viewport, zoomed and panned (bedViewBox)
@@ -432,7 +482,7 @@ function jobBox(pkg) {
 // The machine's status, shown top right:
 // orange = a warning or error that needs attention (flagged), red = not connected,
 // blue = processing, green = connected and ready
-const STATUS_COLOR = { warn: '#F5841F', off: 'var(--err-dot)', busy: '#3E63DD', ok: 'var(--ok-dot)' };
+const STATUS_COLOR = { warn: 'var(--warn-dot)', off: 'var(--err-dot)', busy: 'var(--accent)', ok: 'var(--ok-dot)' };
 function machineStatus() {
   if (!S || S.offline) return { key: 'off', label: 'Pathline Run isn\'t responding', detail: 'The screen lost contact with Pathline Run.' };
   const st = S.status;
@@ -462,7 +512,7 @@ function machinePanel() {
   const addrs = ui.net && ui.net.adapters ? ui.net.adapters.filter((a) => a.addresses.length).map((a) => a.addresses.map((x) => esc(x.ip) + ':' + ui.net.port).join(', ') + ' <span class="lbl">(' + esc(a.label) + ')</span>').join('<br>') : '…';
   return '<div role="dialog" aria-label="Machine status" class="pop" style="position:absolute;right:0;top:56px;width:360px;padding:16px;gap:10px;border-radius:12px;z-index:60;cursor:default">' +
     '<div style="display:flex;align-items:center;gap:10px"><span style="width:12px;height:12px;border-radius:50%;background:' + STATUS_COLOR[ms.key] + ';flex:none"></span><span style="font-size:17px;font-weight:600">' + esc(ms.label) + '</span></div>' +
-    (ms.key === 'warn' || ms.key === 'off' ? '<div style="padding:10px 12px;border-radius:10px;background:' + (ms.key === 'warn' ? 'rgba(245,132,31,0.14)' : 'var(--err-soft)') + ';color:' + (ms.key === 'warn' ? '#F5841F' : 'var(--err)') + ';line-height:1.4">' + esc(ms.detail || '') + '</div>' : '') +
+    (ms.key === 'warn' || ms.key === 'off' ? '<div style="padding:10px 12px;border-radius:10px;background:' + (ms.key === 'warn' ? 'var(--warn-soft)' : 'var(--err-soft)') + ';color:' + (ms.key === 'warn' ? 'var(--warn)' : 'var(--err)') + ';line-height:1.4">' + esc(ms.detail || '') + '</div>' : '') +
     '<div>' + (c.configured ? row('Machine', esc(c.name)) + row('Controller', c.controller === 'ruida' ? 'Ruida' : 'Trotec') + row('Connection', esc(connText(c))) : row('Machine', 'None yet')) +
     (S.info.model ? row('Model', esc(S.info.model)) : '') + (S.info.firmware ? row('Firmware', esc(S.info.firmware)) : '') +
     (st.link === 'online' && Number.isFinite(st.pos.x) ? row('Head', '<span class="mono">X ' + shownPos(st).x.toFixed(1) + '  Y ' + shownPos(st).y.toFixed(1) + ' mm</span>') : '') +
@@ -498,7 +548,7 @@ function header() {
     (c ? '<div style="position:relative"><button data-a="machMenu" aria-haspopup="dialog" aria-expanded="' + !!ui.machOpen + '" aria-label="' + esc((c.configured ? c.name : 'No machine') + ': ' + ms.label) + '" title="' + esc(ms.label) + '" style="display:flex;align-items:center;gap:10px;height:48px;padding:0 12px 0 8px;border:1px solid ' + (ms.flag ? STATUS_COLOR.warn : 'var(--line-strong)') + ';border-radius:var(--ctl-r);background:var(--surface);color:var(--text);cursor:pointer;text-align:left">' +
       (c.controller === 'ruida' && c.type === 'plotter' ? '<span class="badge" style="background:var(--badge-plotter)">PLOTTER</span>' : '<span class="badge">LASER</span>') + '<span style="display:flex;flex-direction:column;line-height:1.2"><span style="font-weight:600">' + esc(c.configured ? c.name : 'No machine') + '</span><span class="lbl">' + esc(ms.label) + '</span></span>' +
       (ms.flag ? '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" style="flex:none"><path d="M12 3L2 21h20z" fill="' + STATUS_COLOR.warn + '"/><path d="M12 10v5 M12 17.5v.5" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round"/></svg>' : '') +
-      '<span aria-hidden="true" style="width:11px;height:11px;border-radius:50%;background:' + dot + (ms.key === 'busy' ? ';animation:plr-pulse-blue 1.4s ease-in-out infinite' : '') + '"></span></button>' +
+      '<span aria-hidden="true"' + (ms.key === 'busy' ? ' class="loop"' : '') + ' style="width:11px;height:11px;border-radius:50%;background:' + dot + (ms.key === 'busy' ? ';animation:plr-pulse 1.4s ease-in-out infinite' : '') + '"></span></button>' +
       (ui.machOpen ? machinePanel() : '') + '</div>' : '') +
     '</div></header>';
 }
@@ -538,17 +588,17 @@ function updateWindow() {
   const btns = (list) => '<div style="display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap">' + list.map(([l, a, primary, off]) => '<button class="' + (primary ? 'btn-primary' : 'tb') + '" data-a="' + a + '"' + (off ? ' disabled' : '') + '>' + l + '</button>').join('') + '</div>';
   let inner;
   if (u.state === 'available') {
-    inner = '<span class="h-sec" style="font-size:18px">Update available</span><span style="color:var(--text-2);line-height:1.5">Pathline Run ' + v + ' is available. You have version ' + esc(u.current) + '.<br>Download it now, then restart Pathline Run to install it.</span>' +
+    inner = '<span class="h-sec" style="font-size:18px">Update available</span><span style="color:var(--text-2);line-height:1.5">Pathline Run ' + v + ' is available. You have ' + esc(u.current) + '.</span>' +
       btns([['Later', 'close'], ['Download and install', 'download', true]]);
   } else if (u.state === 'downloading') {
     const pct = Math.max(1, Math.min(100, u.percent || 0));
     inner = '<span class="h-sec" style="font-size:18px">Downloading Pathline Run ' + v + '</span>' +
-      '<div role="progressbar" aria-valuenow="' + Math.round(pct) + '" style="height:12px;border-radius:6px;background:var(--sunken);box-shadow:inset 0 0 0 1px var(--line);overflow:hidden"><div style="height:100%;width:' + pct + '%;background:var(--accent);transition:width .3s ease-out"></div></div>' +
+      '<div role="progressbar" aria-valuenow="' + Math.round(pct) + '" style="height:12px;border-radius:6px;background:var(--sunken);box-shadow:inset 0 0 0 1px var(--line);overflow:hidden"><div style="height:100%;width:' + pct + '%;background:var(--action);transition:width .3s ease-out"></div></div>' +
       '<span class="mono" style="color:var(--text-2)">' + Math.round(u.percent || 0) + ' %' + (u.total ? ' · ' + mb(u.transferred || 0) + ' of ' + mb(u.total) : '') + (u.bytesPerSecond ? ' · ' + mb(u.bytesPerSecond) + '/s' : '') + '</span>' +
-      '<span class="lbl">The machine keeps working. Hide this window and you\'ll be told when the download has finished.</span>' + btns([['Hide', 'close']]);
+      '<span class="lbl">The machine keeps working. You\'ll be told when it\'s ready.</span>' + btns([['Hide', 'close']]);
   } else if (u.state === 'ready') {
     const busy = running();
-    inner = '<span class="h-sec" style="font-size:18px">Update ready to install</span><span style="color:var(--text-2);line-height:1.5">Pathline Run ' + v + ' has downloaded. Restart to install it: Pathline Run closes, installs the update and opens again. Queued jobs and settings are kept.' +
+    inner = '<span class="h-sec" style="font-size:18px">Update ready to install</span><span style="color:var(--text-2);line-height:1.5">Pathline Run ' + v + ' has downloaded. Restarting installs it and opens Pathline Run again. Queued jobs and settings are kept.' +
       (busy ? '<br><b>A job is running: restart once it has finished.</b>' : '') + '</span>' + btns([['Later', 'close'], ['Restart and install', 'install', true, busy]]);
   } else if (u.state === 'error') {
     inner = '<span class="h-sec" style="font-size:18px">Update didn\'t download</span><div class="errbox">' + esc(u.message || 'The download failed.') + '</div>' + btns([['Close', 'close'], ['Try again', 'download', true]]);
@@ -594,7 +644,7 @@ function headReadout(st, isRun) {
   const ok = Number.isFinite(st.pos.x) && st.link === 'online';
   const label = isRun ? (st.state === 'paused' ? 'Toolhead · paused' : 'Toolhead · processing') : 'Toolhead';
   return '<div style="position:absolute;left:12px;top:12px;display:flex;align-items:center;gap:10px;padding:6px 12px;border-radius:8px;background:var(--surface);box-shadow:var(--shadow-1);font-size:13px">' +
-    '<span aria-hidden="true" style="width:10px;height:10px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 3px var(--accent-ring)' + (isRun && st.state === 'running' ? ';animation:plr-pulse 1.2s ease-in-out infinite' : '') + '"></span>' +
+    '<span aria-hidden="true" class="loop" style="width:10px;height:10px;border-radius:50%;background:var(--ink);box-shadow:0 0 0 3px var(--accent-ring)' + (isRun && st.state === 'running' ? ';animation:plr-pulse 1.2s ease-in-out infinite' : '') + '"></span>' +
     '<span style="color:var(--text-2)">' + label + '</span>' +
     (ok ? '<span class="mono" style="font-weight:500">X ' + shownPos(st).x.toFixed(1) + '</span><span class="mono" style="font-weight:500">Y ' + shownPos(st).y.toFixed(1) + '</span><span class="lbl">mm</span>' : '<span class="lbl">position unknown</span>') + '</div>';
 }
@@ -646,14 +696,14 @@ function queueView() {
     // Select: tick several jobs; Start runs them one after another (plotters / routers)
     (canMulti ? '<label style="display:inline-flex;align-items:center;gap:8px;cursor:pointer" title="Tick several jobs, then Start runs them one after another"><span class="lbl" style="font-size:13px;color:var(--text-2)">' + (ui.multi ? ui.picked.length + ' ticked' : 'Select') + '</span><button role="switch" class="sw" aria-checked="' + !!ui.multi + '" data-a="multi" aria-label="Select several jobs"></button></label>' : '') +
     '<button class="tb sm" data-a="import">' + ic(ICON.upload, 16) + 'Import</button></div>' +
-    '<div data-keep="qlist" style="flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:8px;padding:0 12px 12px">' + (list || '<div style="padding:28px 8px;text-align:center;color:var(--text-3)">Queue empty. Send a job from Pathline, or import a .cjob file.</div>') + '</div>' +
+    '<div data-keep="qlist" style="flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:8px;padding:0 12px 12px">' + (list || '<div style="padding:28px 8px;text-align:center;color:var(--text-3)">No jobs yet. Send one from Pathline, or Import a file.</div>') + '</div>' +
     '<div style="display:flex;gap:8px;padding:12px;border-top:1px solid var(--line)"><button class="tb" data-a="remove"' + (!job || job.status === 'running' ? ' disabled' : '') + '>' + ic(ICON.trash, 18) + 'Remove</button></div></aside>' +
 
     '<main class="card qmain">' +
     '<div class="qtop">' +
     '<div class="qinfo" data-keep="qinfo">' +
     '<div style="display:flex;flex-direction:column;gap:4px"><h1 style="margin:0;font-size:24px;font-weight:600;line-height:1.2">' + esc(shown ? shown.name : 'No job selected') + '</h1>' +
-    '<span style="color:var(--text-2)">' + esc(shown ? (shown.material || 'No material') + (cfg().configured ? ' · ' + cfg().name + ' · ' + ctrlName : '') : 'Choose a job from the queue') + '</span></div>' +
+    '<span style="color:var(--text-2)">' + esc(shown ? (shown.material || 'No material') + (cfg().configured ? ' · ' + cfg().name + ' · ' + ctrlName : '') : '') + '</span></div>' +
     // the two switches first, always in the same place (the material's processes below can be long)
     '<div style="display:flex;flex-direction:column;gap:2px;padding-bottom:8px;border-bottom:1px solid var(--line-soft)">' +
     // pin the job's top-left corner to the head: where the head is when Start is pressed, for that
@@ -662,15 +712,16 @@ function queueView() {
       const on = !!(job && (job.anchorAtStart || job.anchor));
       const off = !job || isRun;
       const here = Number.isFinite(st.pos.x) ? ' (now X ' + shownPos(st).x.toFixed(1) + ', Y ' + shownPos(st).y.toFixed(1) + ' mm)' : '';
-      // print and cut: the top-left corner is the top-left registration mark
+      // print and cut: the top-left corner is the top-left registration mark, under the laser
+      // (J0064: the camera was put over it, 42 mm out)
       const marks = !!(shownPkg && shownPkg !== 'loading' && (shownPkg.toolpath || []).some((s) => s.type === 'inspect'));
-      const note = !on ? (marks ? 'Off: the camera looks for the marks where Pathline placed the job' : 'Moves the job so its top-left corner starts at the head')
-        : job.anchor ? 'The job\'s top-left corner starts at X ' + job.anchor.x.toFixed(1) + ', Y ' + job.anchor.y.toFixed(1) + ' mm'
-          : marks ? 'Put the laser head over the top-left registration mark, then press Start' + here
-            : 'Its top-left corner goes where the head is when you press Start' + here;
+      const note = !on ? ''
+        : job.anchor ? 'Top-left corner at X ' + job.anchor.x.toFixed(1) + ', Y ' + job.anchor.y.toFixed(1) + ' mm'
+          : marks ? 'Put the laser (not the camera) over the top-left dot, then press Start' + here
+            : 'Top-left corner goes to the head when you press Start' + here;
       return '<div style="display:flex;align-items:center;gap:12px;min-height:44px"><button role="switch" class="sw" aria-checked="' + on + '" data-a="anchor"' + (on ? ' data-v="clear"' : '') + ' aria-label="Anchor to toolhead"' + (off ? ' disabled' : '') + '></button>' +
         '<span style="display:flex;flex-direction:column;gap:2px;line-height:1.3"><span style="font-size:16px">Anchor to toolhead</span>' +
-        '<span class="lbl">' + note + '</span></span></div>';
+        (note ? '<span class="lbl">' + note + '</span>' : '') + '</span></div>';
     })() +
     '<div style="display:flex;align-items:center;gap:12px;min-height:44px"><button role="switch" class="sw" aria-checked="' + !!cfg().removeDone + '" data-a="removeDone" aria-label="Remove completed job from queue"></button><span style="font-size:16px">Remove completed job from queue</span></div>' +
     '</div>' +
@@ -679,7 +730,7 @@ function queueView() {
     '<div class="qbed"><div class="viewport" style="position:relative;flex:1;min-height:0;border:1px solid var(--line);border-radius:10px;overflow:hidden">' +
     '<div style="position:absolute;inset:50px 8px 8px">' + bedSvg(shownPkg, { big: true, head: true }) + '</div>' +
     headReadout(st, isRun) + bedTools() + '</div>' +
-    (shown && shownPkg && shownPkg !== 'loading' && shownPkg.anchor ? '<span class="lbl" style="display:flex;align-items:center;gap:8px"><span style="width:10px;height:10px;border-radius:50%;border:2px solid #30A46C;background:var(--bed);flex:none"></span>Anchored: the job\'s top-left corner is at the toolhead position X ' + shownPkg.anchor.x.toFixed(1) + ', Y ' + shownPkg.anchor.y.toFixed(1) + ' mm</span>' : '') +
+    (shown && shownPkg && shownPkg !== 'loading' && shownPkg.anchor ? '<span class="lbl" style="display:flex;align-items:center;gap:8px"><span style="width:10px;height:10px;border-radius:50%;border:2px solid var(--ok-dot);background:var(--bed);flex:none"></span>Anchored at X ' + shownPkg.anchor.x.toFixed(1) + ', Y ' + shownPkg.anchor.y.toFixed(1) + ' mm</span>' : '') +
     '</div></div>' +
 
     '<div class="qrun">' +
@@ -690,7 +741,7 @@ function queueView() {
     // the bar, with the percentage complete at its end
     '<div style="display:flex;align-items:center;gap:12px"><div role="progressbar" aria-label="Job progress" aria-valuenow="' + Math.round(frac * 100) + '" aria-valuemin="0" aria-valuemax="100" style="flex:1;height:14px;border-radius:7px;background:var(--sunken);box-shadow:inset 0 0 0 1px var(--line);overflow:hidden"><div style="height:100%;width:' + (frac * 100).toFixed(1) + '%;background:var(--accent)"></div></div>' +
     '<span class="mono" style="min-width:52px;text-align:right;font-size:18px;font-weight:500;color:' + (isRun ? 'var(--text)' : 'var(--text-3)') + '">' + Math.floor(frac * 100) + ' %</span></div>' +
-    '<div style="display:flex;justify-content:space-between;gap:8px"><span style="color:var(--text-2)">' + esc(isRun ? (st.state === 'paused' ? 'Paused' : 'Running') + ' · ' + st.message : /^(Finished|Stopped)/.test(st.message) ? st.message : 'Not started') + '</span><span class="mono" style="color:var(--text-2)">' + (isRun ? hms(frac * total) + ' / ' + hms(total) : 'Estimated ' + hms(total)) + '</span></div></div>' +
+    '<div style="display:flex;justify-content:space-between;gap:8px"><span style="color:var(--text-2)">' + esc(isRun ? (st.state === 'paused' ? 'Paused' : 'Running') + ' · ' + st.message : /^(Finished|Stopped)/.test(st.message) ? st.message : 'Not started') + '</span><span class="mono' + (isRun ? '' : ' qest-idle') + '" style="color:var(--text-2)">' + (isRun ? hms(frac * total) + ' / ' + hms(total) : 'Estimated ' + hms(total)) + '</span></div></div>' +
     '<div class="qremain" style="display:flex;flex-direction:column;align-items:flex-end"><span class="lbl">' + (isRun ? 'Remaining' : 'Estimated time') + '</span><span class="mono" id="remain" style="font-size:44px;font-weight:500;line-height:1">' + hms(isRun ? remaining() : total) + '</span></div>' +
     '</div></main></div>';
 }
@@ -726,13 +777,13 @@ function jogView() {
     '<span></span>' + arrow('y+', ICON.down, 'Jog Y plus') + '<span></span></div>';
   const steps = '<div style="display:flex;flex-direction:column;gap:6px"><span class="lbl">Tap: step in mm · Hold: speed in mm/s</span><div role="radiogroup" aria-label="Step size, or speed while held" class="seg">' +
     ['0.1', '1', '10', '100'].map((v) => '<button role="radio" class="mono" style="min-width:56px" aria-checked="' + (ui.step === v) + '" data-a="step" data-v="' + v + '">' + v + '</button>').join('') + '</div>' +
-    '<span class="lbl" style="min-height:18px">' + (ui.hold && ui.hold.held ? 'Moving ' + ui.hold.axis.toUpperCase() + (ui.hold.dir < 0 ? '−' : '+') + ' at ' + ui.step + ' mm/s' : 'Hold an arrow to keep moving') + '</span></div>';
+    '<span class="lbl" style="min-height:18px">' + (ui.hold && ui.hold.held ? 'Moving ' + ui.hold.axis.toUpperCase() + (ui.hold.dir < 0 ? '−' : '+') + ' at ' + ui.step + ' mm/s' : '') + '</span></div>';
   // a mark to find by hand: the camera picture beside the arrows, both in sight at once
   const body = mw
     ? '<div style="display:flex;flex-wrap:wrap;gap:20px;align-items:flex-start">' + camPicture(c) +
       '<div style="display:flex;flex-direction:column;gap:14px">' + coords + pad + steps + '</div></div>'
     : '<h2 class="h-sec">Position</h2>' +
-      (outside ? '<div class="warnbox">The head is outside the ' + bw + ' × ' + bh + ' mm bed set in Setup. If the machine is bigger than that, set its work area in Setup → Work area (Read from controller fills it in).</div>' : '') +
+      (outside ? '<div class="warnbox">The head is outside the ' + bw + ' × ' + bh + ' mm bed. If the machine is bigger, set its size in Setup → Work area.</div>' : '') +
       coords + '<div style="display:flex;flex-wrap:wrap;align-items:center;gap:28px">' + pad + steps + '</div>' + camCard(c, st);
   return '<div class="view fit jview">' +
     '<section aria-label="Jog" data-keep="jogpos" class="card" style="flex:1 1 auto;min-width:0;min-height:0;overflow-y:auto;padding:20px;display:flex;flex-direction:column;gap:16px">' + markBox + body + '</section>' +
@@ -748,7 +799,7 @@ function jogView() {
     (sim ? '<div style="display:flex;align-items:center;justify-content:space-between;min-height:48px;border-bottom:1px solid var(--line-soft)"><span>Lid closed (simulated)</span><button role="switch" class="sw" aria-checked="' + !st.interlock + '" data-a="simLid" aria-label="Lid closed"></button></div>'
       : pill('Lid', st.interlock ? 'Open' : c.f.interlock ? 'Closed' : 'Not monitored', !st.interlock)) +
     (c.f.air && c.controller === 'trotec' ? tog('Air assist', 'air') : '') +
-    pill('State', st.state, st.state !== 'alarm') + '</div></section></div>';
+    pill('State', st.state.charAt(0).toUpperCase() + st.state.slice(1), st.state !== 'alarm') + '</div></section></div>';
 }
 
 // Jog → Camera (Trotec with the head camera on): the live picture, and camera ↔ laser moves
@@ -868,7 +919,7 @@ function setupView() {
   const tabs = { Machine: [], Network: [], 'Work area': [], Controller: [], Jobs: [] };
   tabs.Network.push(networkCard(card), card('Pathline connection', num('HTTP port', 'httpPort', '', 'Takes effect after a restart') +
     '<div class="row"><span>This screen is showing</span><span class="mono">' + esc(location.host) + '</span></div>',
-  'Pathline talks to Pathline Run on this port. Use the same port in Pathline\'s machine setup.'));
+  'Use the same port in Pathline\'s machine setup.'));
   // Ruida: which controller model (sets laser or plotter, and the swizzle magic)
   const models = S.ruidaModels || [];
   const model = models.find((m) => m.id === d.ruida.model) || models.find((m) => m.id === 'OTHER') || { kind: 'laser', note: '' };
@@ -894,11 +945,11 @@ function setupView() {
     (d.connection.mode === 'udp' ? text('Controller IP address', 'connection.ip', '', 'UDP 50200') +
       '<div style="display:flex;justify-content:flex-end"><button class="tb" data-a="findRuida"' + (ui.finding ? ' disabled' : '') + '>' + (ui.finding ? 'Searching…' : 'Find on network') + '</button></div>' : '') +
     (d.connection.mode === 'sim' ? num('Simulation speed', 'sim.speedup', '×', 'Jobs run this many times faster') : ''),
-  trotec ? 'Trotec classic controllers (Electronics 2000/2015) over USB. Close Ruby/JobDispatcher first: only one program can hold the port.' : 'Ruida controllers over Ethernet (UDP). Close LightBurn or RDWorks while Pathline Run is connected.'));
+  trotec ? 'Close Ruby / JobDispatcher first: only one program can use the port.' : 'Close LightBurn or RDWorks while Pathline Run is connected.'));
   if (isPlotter) {
     tabs.Machine.push(card('Tools', '<div class="row" style="grid-template-columns:52px minmax(0,1fr) 150px 44px"><span class="lbl">Slot</span><span class="lbl">Tool</span><span class="lbl">Lowered by</span><span></span></div>' + toolRows +
       num('Tool down time', 'timing.toolDown', 's') + num('Tool up time', 'timing.toolUp', 's'),
-    'Each tool is lowered by one output of the controller (the outputs a Ruida uses for laser tubes 1–4). Pathline\'s processes name the slot, for example "T2 · V-cut 45°".'));
+    'Each tool is lowered by one controller output (a Ruida\'s laser tube outputs 1–4). Pathline\'s processes name the slot, e.g. "T2 · V-cut 45°".'));
   } else {
     tabs.Machine.push(card('Laser source', text('Type', 'source') + num('Rated power', 'power', 'W') + text('Lens', 'lens') + num('Minimum power', 'minPower', '%') +
       tog('Air assist', 'f.air') + tog('Lid interlock', 'f.interlock')));
@@ -906,26 +957,25 @@ function setupView() {
   tabs['Work area'].push(card('Bed', ctl('Width', 'bed.0', 'mm') + ctl('Height', 'bed.1', 'mm') + ctl('Max speed', 'speed', 'mm/s', 'Used by Pathline\'s time estimate') + ctl('Acceleration', 'acc', 'mm/s²')));
   if (isPlotter) {
     tabs['Work area'].push(card('Conveyor and vacuum', tog('Conveyor', 'f.conveyor') + (d.f.conveyor ? num('Feed length', 'feedLen', 'mm', 'Material advanced per bed (U axis)') + num('Feed time', 'timing.feedSettle', 's', 'For Pathline\'s estimate') : '') + tog('Vacuum', 'f.vacuum'),
-      'Jobs over several beds feed the conveyor between beds. The Jog page has Conveyor (one feed length).'));
+      'Fed between the beds of a job that uses several.'));
   }
   if (trotec) {
     tabs.Controller.push(card('Trotec', num('Position unit', 'trotec.unit', 'mm') + num('Mechanical offset X', 'trotec.offset.0', 'mm') + num('Mechanical offset Y', 'trotec.offset.1', 'mm') +
       num('Travel speed', 'trotec.travelSpeed', 'mm/s') + num('Speed limit', 'trotec.maxSpeed', 'mm/s') + num('Engrave overscan', 'trotec.overscan', 'mm') +
       num('Power correction, cut', 'trotec.cutPowerCorrection', '%', 'Unless the process sets one') + num('Power correction, engrave', 'trotec.engravePowerCorrection', '%') +
       num('Laser source code', 'trotec.laserSource', '', '5 = CO2 (Q500 DC)') + num('Air assist output', 'trotec.airOutput'),
-    'From the factory calibration in the controller (TROTEC_PROTOCOL.md §0). Change only if your machine differs.'));
+    'Factory calibration. Change only if your machine differs.'));
     tabs.Controller.push(card('Travel between cuts', seg('Travel', 'trotec.travel', [['standard', 'Standard'], ['faster', 'Faster'], ['fastest', 'Fastest']]),
-      'How sharply the head starts and stops between cuts. Most moves between cuts are a few mm, so this matters far more than the travel speed. ' +
-      'Standard is what Ruby sends (500 mm/s², jerk 5000). Faster doubles the jerk, as Ruby itself uses for positioning: about 4 % off a job of many small parts (the X8 screens). ' +
-      'Fastest (1000 mm/s², jerk 20000, 1000 mm/s) is beyond what Ruby sends: about 10 % off. After changing it, check a print and cut job or the bed check still lines up.'));
+      'How sharply the head starts and stops between cuts. Standard is what Ruby sends; Faster takes about 4 % off a job of many small parts, Fastest about 10 %. ' +
+      'After changing it, check that print and cut still lines up.'));
   } else {
     tabs.Controller.push(card('Ruida', seg('Machine origin', 'ruida.origin', [['tl', 'Top left'], ['tr', 'Top right'], ['bl', 'Bottom left'], ['br', 'Bottom right']]) +
       num('Swizzle magic', 'ruida.magic', '', 'Set by the model (136 = 0x88 for most). Pathline Run also detects it from the controller\'s first reply.') +
       (S.info && S.info.cardId ? '<div class="row"><span>Connected controller</span><span class="mono">card 0x' + S.info.cardId.toString(16).toUpperCase() + ' · magic 0x' + S.info.magic.toString(16) + '</span></div>' : ''),
-    'Origin is the corner the head homes to. Pathline\'s top-left coordinates are mirrored to match.'));
+    'The corner the head homes to.'));
   }
-  tabs.Jobs.push(card('Job defaults', (isPlotter ? '' : seg('Registration marks without the camera', 'regMarks', [['refuse', 'Don\'t run'], ['ignore', 'Skip']])) + tog('Remove completed job from queue', 'removeDone') + text('File name prefix', 'prefix'),
-    isPlotter ? '' : 'With the head camera on (Setup → Camera), jobs with registration marks are read and corrected. Without it they either wait, or run without print-and-cut correction.'));
+  tabs.Jobs.push(card('Job defaults', (isPlotter ? '' : seg('Registration marks without the camera', 'regMarks', [['refuse', 'Don\'t run'], ['ignore', 'Skip']])) + tog('Remove completed job from queue', 'removeDone') + (isPlotter ? '' : tog('Return head to start after a job', 'returnHead')) + text('File name prefix', 'prefix'),
+    isPlotter ? '' : 'With the head camera on, registration marks are read and the job is lined up to them.'));
   if (trotec) {
     tabs.Camera = [];
     const v = d.vision || {};
@@ -941,19 +991,19 @@ function setupView() {
       (v.exposure === 'auto' ? ro('Exposure now', S.camera.exposure ? (S.camera.exposure / 1000).toFixed(1) + ' ms' : '—') : num('Exposure time', 'vision.exposure', 'µs')) +
       tog('Camera light (laser parameter 186)', 'vision.light') + num('Re-centre a mark further than', 'vision.tolerance', 'mm', 'From the middle of the picture') +
       ro('Camera', S.camera.info ? esc(S.camera.info.model + ' · ' + S.camera.info.serial) : 'not opened yet'),
-    'The Alvium on the head plugs into this computer by USB (not into the laser). It needs Allied Vision\'s Vimba X installed, and Ruby / JobDispatcher closed: only one program can use it.'));
+    'Plugs into this computer by USB, not the laser. Needs Allied Vision\'s Vimba X, with Ruby / JobDispatcher closed.'));
     const when = (t) => (t ? new Date(t).toLocaleString() : 'not yet');
     tabs.Camera.push(card('1 · Camera calibration', num('Checkerboard squares', 'vision.camBoard.square', 'mm', 'The small board, under the camera') +
       ro('Pixel size', (pixel * 1000).toFixed(2) + ' µm') + ro('Picture turned', turned.toFixed(2) + '°' + (ma * md - mb * mc < 0 ? ' (mirrored)' : '')) +
       ro('Lens bends lines', v.cameraLens !== undefined ? (v.cameraLens * 1000).toFixed(0) + ' µm at most' : '—') + ro('Calibrated', when(v.cameraAt)) +
       '<div style="display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end"><button class="btn-primary" data-a="camCalibrate"' + need + '>Calibrate camera</button></div>',
-    'Lay the ' + (get(d, 'vision.camBoard.square') || 10) + ' mm checkerboard flat, at any angle, and jog the head until the board fills the camera view. The squares give the pixel size, then the head moves a few mm along X and Y so it knows which way the picture is turned. The head goes back where it was.'));
+    'Lay the ' + (get(d, 'vision.camBoard.square') || 10) + ' mm checkerboard flat, at any angle, and jog the head until the board fills the camera view. The head moves a few mm, then goes back.'));
     const stage2 = !v.cameraAt ? ' disabled title="Calibrate the camera (stage 1) first"' : need;
     tabs.Camera.push(card('2 · Offset calibration (cut check)', num('Camera offset X', 'vision.offset.0', 'mm', 'Laser − camera') + num('Camera offset Y', 'vision.offset.1', 'mm') +
       num('Cut power', 'vision.mark.power', '%', 'For the check mark') + num('Cut speed', 'vision.mark.speed', 'mm/s') +
       ro('Last cut check', v.offsetCheck !== undefined && v.offsetCheck !== null ? (v.offsetCheck * 1000).toFixed(0) + ' µm off · ' + when(v.offsetAt) : 'not yet') +
       '<div style="display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end"><button class="btn-primary" data-a="camOffsetAsk"' + stage2 + '>Cut check: calibrate offset</button></div>',
-    'Jog the laser head over scrap card or board. The laser cuts a small 3 mm mark right there, the camera finds it and sets the offset, then looks again to check: the cut check says how far off it still is. The head goes back where it was.'));
+    'Jog the laser head over scrap card or board. The laser cuts a 3 mm mark there, and the camera finds it to set the offset and check it.'));
     const b = ui.board;
     const map = v.map;
     tabs.Camera.push(card('Checkerboard: bed accuracy', num('Square size', 'vision.board.square', 'mm') + num('Corners across', 'vision.board.across', '', 'Inner corners (squares − 1)') + num('Corners down', 'vision.board.down') +
@@ -964,7 +1014,7 @@ function setupView() {
       '<div style="display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end"><button class="tb" data-a="camBoard" data-v="check"' + need + '>Check bed</button><button class="btn-primary" data-a="camBoard" data-v="calibrate"' + need + '>Calibrate bed</button></div>' +
       (busy ? '<div class="warnbox">' + esc(S.status.message || busy) + '</div>' : '') +
       (b && b.points ? boardResult(b) : ''),
-    'Lay the checkerboard anywhere on the bed, at any angle, and jog the laser head over its top-left inner corner: the scan starts there, as an anchored job would, and the head comes back there. Check measures with the bed map on; Calibrate measures the machine as it is and saves a new map. The board\'s own position and angle are taken out: what\'s left is the machine. A board that isn\'t flat moves some corners: those are left out. Scale and squareness is the safe choice for a board that isn\'t flat; Every corner only for one that is.'));
+    'Lay the checkerboard on the bed at any angle and jog the laser head over its top-left inner corner. Check measures with the bed map on; Calibrate saves a new map. Use Every corner only with a board that is perfectly flat.'));
   }
 
   // the material settings Pathline Prepare keeps on this machine (GET /materials), read only:
@@ -976,15 +1026,15 @@ function setupView() {
     }
     const m = ui.mats;
     const list = m && m !== 'loading' && Array.isArray(m.materials) ? m.materials : [];
-    tabs.Materials = m === 'loading' ? [card('Materials', '<span class="lbl">Loading…</span>')]
+    tabs.Materials = m === 'loading' ? [card('Materials', '<span class="sr-only">Loading</span>' + [0, 1, 2].map(() => '<div class="row">' + sk('40%', '12px') + sk('70%', '12px') + '</div>').join(''))]
       : m && m.error ? [card('Materials', '<div class="warnbox">' + esc(m.error) + '</div>')]
-        : !list.length ? [card('Materials', '<span class="lbl">None kept yet. Pathline Prepare sends this machine\'s material settings when it connects, and whenever its material library is saved.</span>')]
+        : !list.length ? [card('Materials', '<span class="lbl">None yet. Pathline Prepare sends them when it connects.</span>')]
           : list.map((x) => card('<span style="display:inline-flex;align-items:center;gap:10px"><span aria-hidden="true" style="width:14px;height:14px;border-radius:4px;flex:none;box-shadow:inset 0 0 0 1px var(--line-strong);background:' + esc(x.sw || 'var(--sunken)') + '"></span>' + esc(x.name || 'Unnamed') + '</span>',
             '<div class="row"><span>Thickness</span><span class="mono">' + (x.t !== undefined && x.t !== '' ? esc(x.t) + ' mm' : '—') + '</span></div>' +
             '<div class="row"><span>Group</span><span>' + esc(x.g || '—') + '</span></div>' +
             '<div style="display:flex;flex-direction:column;gap:6px">' + procRows({ processes: x.processes || [] }) + '</div>',
             x.updatedAt ? 'Changed ' + new Date(x.updatedAt).toLocaleString() : ''));
-    if (list.length) tabs.Materials.unshift(card('Materials', '<span class="lbl">' + list.length + (list.length === 1 ? ' material' : ' materials') + ' made in Pathline Prepare for this machine. Any computer running Prepare that connects gets them. Change them in Prepare: here they\'re read only.</span>'));
+    if (list.length) tabs.Materials.unshift(card('Materials', '<span class="lbl">Made in Pathline Prepare. Change them there.</span>'));
   }
 
   const tab = tabs[ui.setTab] ? ui.setTab : 'Machine';
@@ -995,7 +1045,7 @@ function setupView() {
   return '<div class="view" style="padding:12px;display:flex;flex-direction:column;gap:12px">' +
     '<section class="card" style="padding:16px 18px;display:flex;flex-wrap:wrap;align-items:center;gap:14px"><span class="badge" style="height:28px;padding:0 9px;border-radius:6px' + (isPlotter ? ';background:var(--badge-plotter)' : '') + '">' + (isPlotter ? 'PLOTTER' : 'LASER') + '</span>' +
     (adding
-      ? '<div style="flex:1 1 280px;min-width:0;display:flex;flex-direction:column;gap:4px"><span style="font-size:17px;font-weight:600">Add a machine</span><span class="lbl">Name it, choose Trotec or Ruida and how it\'s connected (Machine tab), check the bed size (Work area), then Add machine.</span></div>' +
+      ? '<div style="flex:1 1 280px;min-width:0;display:flex;flex-direction:column;gap:4px"><span style="font-size:17px;font-weight:600">Add a machine</span><span class="lbl">Name it, choose the controller and connection, check the bed size under Work area, then Add machine.</span></div>' +
         readBtn + '<button class="btn-primary" data-a="save">Add machine</button></section>'
       : '<div style="flex:1 1 280px;min-width:0;display:flex;flex-direction:column;gap:4px"><span style="font-size:17px;font-weight:600">' + esc(d.name) + '</span><span class="lbl">' + (d.controller === 'ruida' ? 'Ruida' : 'Trotec') + ' · ' + esc(S.info.model || 'not connected') + (S.info.firmware ? ' · ' + esc(S.info.firmware) : '') + '</span></div>' +
         (dirty ? '<span class="tag warn">Unsaved changes</span><button class="tb" data-a="discard">Discard</button>' : '') +
@@ -1035,7 +1085,7 @@ function dialog() {
       '<div style="display:flex;align-items:center;gap:12px;padding:14px;border:1.5px dashed var(--line-hover);border-radius:10px;background:var(--surface-2)">' + ic(ICON.file, 26) +
       '<span style="flex:1;min-width:0;display:flex;flex-direction:column;line-height:1.3"><span style="font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(ui.dlg.name || 'No file chosen') + '</span><span class="lbl">Pathline job (.cjob) or job package (.json)</span></span>' +
       '<label class="tb" style="position:relative;cursor:pointer">Choose file<input type="file" accept=".cjob,.json" data-a="file" aria-label="Choose file" style="position:absolute;inset:0;opacity:0;cursor:pointer"></label></div>' +
-      '<span class="lbl">DXF, SVG and PDF are prepared in Pathline: set up the processes there, then Send or Save.</span>' +
+      '<span class="lbl">DXF, SVG and PDF: prepare them in Pathline first.</span>' +
       '<div style="display:flex;justify-content:flex-end;gap:8px"><button class="tb" data-a="close">Cancel</button><button class="btn-primary" data-a="importGo"' + (ui.dlg.data ? '' : ' disabled') + '>Add to queue</button></div></div></div>';
   }
   if (ui.dlg.kind === 'log') {
@@ -1059,6 +1109,22 @@ function dialog() {
       '<div style="display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap"><button class="tb" data-a="close">' + (first ? 'Cancel' : 'Keep ' + name) + '</button>' +
       '<button class="btn-primary" data-a="' + (first ? 'removeAsk2' : 'removeGo') + '"' + (busy ? ' disabled' : '') + '>' + (first ? 'Remove machine' : 'Yes, remove it') + '</button></div></div></div>';
   }
+  // Start refused: registration marks the camera can't reach. Stays up until closed (a passing
+  // message was missed), with which way to move the sheet in large type
+  if (ui.dlg.kind === 'reach') {
+    const d = ui.dlg.d;
+    const AR = { right: ICON.right, left: ICON.left, front: ICON.down, back: ICON.up };
+    const big = d.wide
+      ? '<div class="errbox" style="font-size:20px;font-weight:600">' + esc(d.title || 'The marks are too far apart for the camera') + '</div>'
+      : (d.moves || []).map((m) => '<div style="display:flex;align-items:center;gap:14px;padding:14px 16px;border-radius:12px;background:var(--warn-soft);color:var(--warn)">' + ic(AR[m.dir], 44) +
+        '<span style="font-size:26px;font-weight:600;line-height:1.2">Move the sheet ' + m.mm + ' mm to the ' + esc(m.dir) + '</span></div>').join('');
+    return '<div class="scrim"><div role="alertdialog" aria-label="Registration marks out of the camera\'s reach" class="dlg">' +
+      '<span class="h-sec" style="font-size:18px">' + esc(d.title || 'The camera can\'t reach the registration marks') + '</span>' + big +
+      '<span style="color:var(--text-2);line-height:1.5">' + (d.why || []).map(esc).join('<br>') + '</span>' +
+      '<span style="line-height:1.5">' + esc(d.wide || d.then) + '</span>' +
+      '<span class="lbl">' + esc(d.job || '') + '</span>' +
+      '<div style="display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap"><button class="tb" data-a="reachJog">Open Jog</button><button class="btn-primary" data-a="close">OK</button></div></div></div>';
+  }
   if (ui.dlg.kind === 'readback') {
     const r = ui.dlg.r;
     const s = r.suggest || {};
@@ -1079,7 +1145,7 @@ function dialog() {
     const l = ui.dlg.list;
     return '<div class="scrim"><div role="dialog" aria-label="Ruida controllers found" class="dlg" style="max-width:600px"><span class="h-sec" style="font-size:18px">Ruida controllers on the network</span>' +
       (l.length
-        ? '<div>' + l.map((f, i) => '<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--line-soft)"><span style="flex:1;min-width:0"><span class="mono">' + esc(f.ip) + '</span> <span class="lbl">' + (f.card ? 'card ' + esc(f.card) + ' · ' : '') + 'magic 0x' + f.magic.toString(16).toUpperCase() + (f.via ? ' · via ' + esc(f.via) : '') + '</span></span><button class="btn-primary" data-a="useFound" data-v="' + i + '">Use</button></div>').join('') + '</div>'
+        ? '<div>' + l.map((f, i) => '<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--line-soft)"><span style="flex:1;min-width:0"><span class="mono">' + esc(f.ip) + '</span> <span class="lbl">' + (f.card ? 'card ' + esc(f.card) + ' · ' : '') + 'magic 0x' + f.magic.toString(16).toUpperCase() + (f.via ? ' · via ' + esc(f.via) : '') + '</span></span><button class="tb sm" data-a="useFound" data-v="' + i + '">Use</button></div>').join('') + '</div>'
         : '<span class="lbl">No Ruida controller answered. Check it is switched on and cabled to this computer, that this computer\'s Ethernet has an address on the same network as the controller (Setup → Network), and that LightBurn, RDWorks and RDCutting are closed.</span>') +
       '<div style="display:flex;justify-content:flex-end;gap:8px"><button class="tb" data-a="close">Close</button></div></div></div>';
   }
@@ -1090,14 +1156,51 @@ function dialog() {
 }
 
 // ---------------------------------------------------------------- render + events
+// the screen before the first answer from the server: the queue's own panels, greyed
+const sk = (w, h, cls) => '<span class="skel' + (cls ? ' ' + cls : '') + '" style="width:' + w + (h ? ';height:' + h : '') + '"></span>';
+function loadingView() {
+  const col = (gap, inner, extra) => '<div style="display:flex;flex-direction:column;gap:' + gap + 'px' + (extra || '') + '">' + inner + '</div>';
+  const swRow = (w) => '<div style="display:flex;align-items:center;gap:12px;min-height:44px">' + sk('48px', '28px', 'ctl') + sk(w, '14px') + '</div>';
+  const procRow = (w) => '<div style="display:flex;align-items:center;gap:10px;min-height:34px;border-bottom:1px solid var(--line-soft)">' + sk('20px', '20px') + sk(w, '12px') + '<span style="flex:1"></span>' + sk('150px', '11px') + '</div>';
+  return '<div class="view fit qview" role="status" aria-live="polite"><span class="sr-only">Connecting to Pathline Run…</span>' +
+    '<aside class="card qlist" aria-hidden="true"><div style="display:flex;align-items:center;gap:8px;padding:14px 14px 10px">' + sk('64px', '16px') + '<span style="flex:1"></span>' + sk('92px', '40px', 'ctl') + '</div>' +
+    col(8, ['70%', '56%', '64%'].map((w) => '<div class="jobcard" style="flex-direction:column;gap:8px">' + sk('100%', '110px') + sk(w, '14px') + sk('46%', '10px') + '</div>').join(''), ';padding:0 12px 12px') + '</aside>' +
+    '<main class="card qmain" aria-hidden="true"><div class="qtop"><div class="qinfo">' + col(8, sk('62%', '26px') + sk('44%', '12px')) +
+    col(2, swRow('150px') + swRow('230px'), ';padding-bottom:8px;border-bottom:1px solid var(--line-soft)') + col(6, procRow('96px') + procRow('110px') + procRow('84px')) + '</div>' +
+    '<div class="qbed"><div class="viewport" style="flex:1;min-height:0;border:1px solid var(--line);border-radius:10px"></div></div></div>' +
+    '<div class="qrun">' + sk('64px', '64px', 'ctl') + sk('64px', '64px', 'ctl') + sk('110px', '64px', 'ctl') + col(8, sk('100%', '14px') + sk('36%', '12px'), ';flex:1 1 280px;min-width:0') + '</div></main></div>';
+}
+
+// dialogs, menus and toasts animate in on the render that opens them only (the screen is
+// redrawn every 0.7 s, and would replay it each time)
+function markOpened(headerOnly) {
+  const was = ui.opened || {};
+  const now = { nav: !!ui.navOpen, mach: !!ui.machOpen, dlg: headerOnly ? was.dlg : ui.dlg ? ui.dlg.kind : '', toast: headerOnly ? was.toast : ui.toast ? ui.toast.msg : '' };
+  const add = (sel) => { const el = $app.querySelector(sel); if (el) el.classList.add('in'); };
+  if (now.nav && !was.nav) add('[role="menu"].pop');
+  if (now.mach && !was.mach) add('[aria-label="Machine status"].pop');
+  if (now.dlg && now.dlg !== was.dlg) add('.scrim');
+  if (now.toast && now.toast !== was.toast) add('.toast');
+  ui.opened = now;
+}
+
 function render() {
   $app.dataset.theme = ui.dark ? 'dark' : 'light';
-  if (!S) { $app.innerHTML = header() + '<div class="view" style="display:flex;align-items:center;justify-content:center;color:var(--text-3)">Connecting to Pathline Run…</div>'; return; }
+  // looping animations (the busy dots) keep their phase across redraws: each starts as if at page load
+  $app.style.setProperty('--clock', -Math.round(performance.now()) + 'ms');
+  if (!S) {
+    const first = !ui.loadShown;
+    ui.loadShown = true;
+    $app.innerHTML = header() + loadingView();
+    // shown only if loading takes a moment, so a quick start doesn't flash it
+    if (first) { const v = $app.querySelector('.qview'); if (v) v.style.animation = 'plr-fade .24s ease-out .12s both'; }
+    return;
+  }
   // don't redraw the setup form under the operator's fingers while a field has focus
   // (only fields you type in or pick from: a switch or a choice button that keeps focus must still redraw)
   const ae = document.activeElement;
   const focused = ae && /^(INPUT|SELECT|TEXTAREA)$/.test(ae.tagName) && ae.dataset && (ae.dataset.f || ae.dataset.n);
-  if (ui.view === 'setup' && focused) { const h = $app.querySelector('header'); if (h) h.outerHTML = header(); return; }
+  if (ui.view === 'setup' && focused) { const h = $app.querySelector('header'); if (h) h.outerHTML = header(); markOpened(true); return; }
   // every part that scrolls keeps its place: the screen is redrawn every 0.7 s, and the job's
   // process list (a test grid has dozens) went back to the top each time, so it couldn't be scrolled
   const scrollers = '.view, [data-keep], .dlg, pre.log';
@@ -1107,9 +1210,14 @@ function render() {
   ui.drawn = ui.view;
   const v = ui.view === 'jog' ? jogView() : ui.view === 'history' ? historyView() : ui.view === 'setup' ? setupView() : queueView();
   const t = ui.toast;
+  // the artwork already drawn (artFill puts it back)
+  const old = new Map();
+  for (const g of $app.querySelectorAll('g[data-art]')) { if (!old.has(g.dataset.art)) old.set(g.dataset.art, []); old.get(g.dataset.art).push(g); }
   $app.innerHTML = header() + v + dialog() + (t ? '<div class="toast" role="status" style="display:flex;align-items:center;gap:14px">' + esc(t.msg) +
     (t.action ? '<button class="tb sm" data-a="toastAction">' + esc(t.action) + '</button>' : '') + '</div>' : '');
+  artFill(old);
   for (const el of $app.querySelectorAll(scrollers)) if (keyOf(el) in scroll) el.scrollTop = scroll[keyOf(el)];
+  markOpened(false);
   drawCam();
 }
 
@@ -1154,6 +1262,14 @@ const H = {
   down: act(async (id) => move(id, 1)),
   remove: act(async () => { if (ui.sel) await call('DELETE', API('/jobs/' + encodeURIComponent(ui.sel))); }),
   startPause: act(async () => {
+    try { await H.startRun(); } catch (e) {
+      // marks out of the camera's reach: a dialog that stays, not a passing message
+      if (e.detail && e.detail.kind === 'reach') { ui.dlg = { kind: 'reach', d: e.detail }; render(); return; }
+      throw e;
+    }
+  }),
+  // (startPause's work; not a button of its own)
+  startRun: async () => {
     const s = S.status.state;
     if (s === 'running') return call('POST', API('/pause'), {});
     if (s === 'paused') return call('POST', API('/resume'), {});
@@ -1174,7 +1290,7 @@ const H = {
     if (ui.sel && ids[0] !== ui.sel) await call('POST', API('/jobs/order'), { ids: [ui.sel].concat(ids.filter((i) => i !== ui.sel)) });
     const r = await call('POST', API('/start'), {});
     if (r.message) toast(r.message);
-  }),
+  },
   stop: act(async () => call('POST', API('/stop'), {})),
   frame: act(async () => {
     const id = running() ? S.status.job : ui.sel;
@@ -1357,7 +1473,8 @@ const H = {
   install: act(async () => { await call('POST', LOCAL('/update/install'), {}); ui.dlg = null; ui.toast = null; toast('Pathline Run is closing to install the update…', { ms: 20000 }); }),
   toastAction: (v, el) => { const a = ui.toast && ui.toast.onAction; ui.toast = null; if (a && H[a]) H[a](); else render(); },
   whatsNew: act(async () => { ui.navOpen = false; ui.dlg = { kind: 'changelog', title: 'What\'s new in Pathline Run', entries: await call('GET', LOCAL('/changelog')) }; }),
-  close: () => { ui.dlg = null; render(); }
+  close: () => { ui.dlg = null; render(); },
+  reachJog: () => { ui.dlg = null; H.go('jog'); }
 };
 
 async function move(id, dir) {

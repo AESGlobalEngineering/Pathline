@@ -3,11 +3,13 @@
 // package moves together (toolpath, shapes, registration marks, sheet).
 'use strict';
 
-// bounding box of what the machine does: cuts, engrave boxes, mark positions
-function box(pkg) {
+// bounding box of what the machine does: cuts, engrave boxes, mark positions (opts.marks false:
+// without the marks, which the camera only has to reach: they needn't be on the bed's cutting area)
+function box(pkg, opts = {}) {
   const b = [Infinity, Infinity, -Infinity, -Infinity];
   const see = (x, y) => { b[0] = Math.min(b[0], x); b[1] = Math.min(b[1], y); b[2] = Math.max(b[2], x); b[3] = Math.max(b[3], y); };
   for (const s of pkg.toolpath || []) {
+    if (opts.marks === false && s.type === 'inspect') continue;
     if (s.p) for (const [x, y] of s.p) see(x, y);
     if (s.box) { see(s.box[0], s.box[1]); see(s.box[2], s.box[3]); }
     if (s.at) see(s.at[0], s.at[1]);
@@ -53,16 +55,24 @@ function apply(pkg, anchor) {
   return out;
 }
 
-// throws (409) when the job, anchored at {x, y}, would leave the bed
+// How far a job's cuts reach past each edge of the bed (mm, 0 when inside), with their box:
+// { left, right, back, front, box }. The marks don't count (box: marks false)
+function overBed(pkg, bed) {
+  const b = box(pkg, { marks: false });
+  if (!b) return null;
+  const o = (v) => (v > 0.5 ? v : 0); // (half a mm, as moveCamera allows)
+  return { left: o(-b[0]), back: o(-b[1]), right: o(b[2] - bed[0]), front: o(b[3] - bed[1]), box: b };
+}
+
+// throws (409) when the job, anchored at {x, y}, would leave the bed; e.over: overBed's answer
 function check(pkg, at, bed) {
-  const b = box(pkg);
   const r = ref(pkg);
-  if (!b || !r) throw Object.assign(new Error('This job has nothing to place'), { code: 409 });
-  const w = b[2] - b[0], h = b[3] - b[1];
-  const x0 = at.x + b[0] - r[0], y0 = at.y + b[1] - r[1];
-  if (x0 < -0.01 || y0 < -0.01 || x0 + w > bed[0] + 0.5 || y0 + h > bed[1] + 0.5) {
-    throw Object.assign(new Error('Anchored at the head (X ' + at.x.toFixed(1) + ', Y ' + at.y.toFixed(1) + '), the job (' + w.toFixed(0) + ' × ' + h.toFixed(0) + ' mm) would leave the bed. Move the head ' + (x0 < 0 || y0 < 0 ? 'away from the back left' : 'towards the back left') + ' and try again.'), { code: 409 });
+  if (!box(pkg, { marks: false }) || !r) throw Object.assign(new Error('This job has nothing to place'), { code: 409 });
+  const ov = overBed(apply(pkg, at), bed);
+  if (ov.left || ov.right || ov.back || ov.front) {
+    const b = ov.box, w = b[2] - b[0], h = b[3] - b[1];
+    throw Object.assign(new Error('Anchored at the head (X ' + at.x.toFixed(1) + ', Y ' + at.y.toFixed(1) + '), the job (' + w.toFixed(0) + ' × ' + h.toFixed(0) + ' mm) would leave the bed. Move the head ' + (ov.left || ov.back ? 'away from the back left' : 'towards the back left') + ' and try again.'), { code: 409, over: ov });
   }
 }
 
-module.exports = { box, ref, shift, apply, check };
+module.exports = { box, ref, shift, apply, check, overBed };

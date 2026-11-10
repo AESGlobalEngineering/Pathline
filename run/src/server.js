@@ -479,7 +479,7 @@ function start(opts = {}) {
       if (!e.code || typeof e.code !== 'number') log('error ' + req.method + ' ' + p + ': ' + (e.stack || e.message));
       // what the screen was told when a camera task gave up, so the Diagnostics log shows it too
       else if (/\/camera\//.test(p)) log('camera: ' + e.message);
-      send(res, typeof e.code === 'number' ? e.code : 500, { error: e.message });
+      send(res, typeof e.code === 'number' ? e.code : 500, { error: e.message, ...(e.detail ? { detail: e.detail } : {}) });
     }
   });
 

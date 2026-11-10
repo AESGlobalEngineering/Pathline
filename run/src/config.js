@@ -44,6 +44,7 @@ const BASE = {
   origin: 'tl', units: 'mm', home: true, prefix: '',
   regMarks: 'refuse',            // 'refuse' or 'ignore' (run without print-and-cut correction)
   removeDone: true,              // completed jobs leave the queue for History
+  returnHead: true,              // after a completed job the head goes back to where it was at Start
   manual: [],                    // settings typed in Setup over the controller's own ('bed.0', 'speed' …)
   knifeHome: null,               // RDD6584: where the head homes and parks, controller mm (learnt)
   vision: { enabled: false },    // the Trotec's head camera (vision/vision.js DEFAULTS for the rest)
@@ -58,7 +59,7 @@ const BASE = {
 };
 
 // settings that belong to Pathline Run, not to the machine (kept when a machine is removed)
-const APP_PREFS = ['httpPort', 'regMarks', 'removeDone', 'prefix', 'sim'];
+const APP_PREFS = ['httpPort', 'regMarks', 'removeDone', 'returnHead', 'prefix', 'sim'];
 
 // the setup with the machine removed
 function withoutMachine(cfg) {
@@ -101,6 +102,23 @@ function save(dir, cfg) {
 // laser or plotter (a Trotec is always a laser)
 const machineType = (cfg) => (cfg.controller === 'ruida' && cfg.type === 'plotter' ? 'plotter' : 'laser');
 
+// Where the head may go with the beam off, [x0, y0, x1, y1] bed mm. A Trotec's own zero (where it
+// homes) is its factory offset behind and left of the bed's corner (14.8, 9.5 mm on the Q500):
+// jogging and the camera may use that strip; cutting stays on the bed. Others: the bed
+function travelBox(cfg) {
+  const [W, H] = cfg.bed;
+  if (cfg.controller !== 'trotec') return [0, 0, W, H];
+  const off = (cfg.trotec && cfg.trotec.offset) || [14.833125, 9.527625];
+  return [-Math.max(0, off[0]), -Math.max(0, off[1]), W, H];
+}
+
+// Where the head camera can read a mark, [x0, y0, x1, y1] bed mm: the laser (= camera + offset)
+// within its travel, the mark on the bed
+function markArea(offset, bed, travel) {
+  const [W, H] = bed, [ox, oy] = offset, t = travel || [0, 0, W, H];
+  return [Math.max(0, t[0] - ox), Math.max(0, t[1] - oy), Math.min(W, t[2] - ox), Math.min(H, t[3] - oy)];
+}
+
 // What Pathline sees in GET /machine
 function machineView(cfg) {
   const base = { bed: cfg.bed, speed: cfg.speed, acc: cfg.acc, origin: cfg.origin, units: cfg.units, home: cfg.home, prefix: cfg.prefix };
@@ -130,11 +148,15 @@ function machineView(cfg) {
   const v = cfg.vision || {};
   const cam = cfg.controller === 'trotec' && !!v.enabled;
   const off = v.offset || [41.437, 12.731];
+  // markArea: where registration marks must be for the camera to read them (bed mm, x0 y0 x1 y1);
+  // Pathline places marks inside it (it couldn't work it out from camX/camY: the head's travel
+  // past the bed isn't in the machine settings)
+  const area = cam ? markArea(off, cfg.bed, travelBox(cfg)).map((q) => +q.toFixed(1)) : null;
   return {
     ...base, source: cfg.source, power: cfg.power, lens: cfg.lens, minPower: cfg.minPower,
-    ...(cam ? { markType: 'Dot', camX: off[0].toFixed(2), camY: off[1].toFixed(2), calibrated: v.calibrated ? new Date(v.calibrated).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '' } : {}),
+    ...(cam ? { markType: 'Dot', camX: off[0].toFixed(2), camY: off[1].toFixed(2), markArea: area, calibrated: v.calibrated ? new Date(v.calibrated).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '' } : {}),
     f: { camera: cam, autofocus: false, rotary: false, air: !!cfg.f.air, pointer: !!cfg.f.pointer, pass: false, interlock: !!cfg.f.interlock, conveyor: false, vacuum: false }
   };
 }
 
-module.exports = { dataDir, defaults, load, save, merge, machineView, machineType, withoutMachine, PRESETS, PLOTTER_HEADS };
+module.exports = { dataDir, defaults, load, save, merge, machineView, machineType, withoutMachine, travelBox, markArea, PRESETS, PLOTTER_HEADS };

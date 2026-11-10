@@ -61,7 +61,7 @@ function check(pkg, cfg) {
       ? 'Registration marks are skipped: the job runs without print-and-cut correction'
       : cfg.controller === 'trotec' && cfg.vision && cfg.vision.enabled
         ? 'Uses registration marks: the head camera reads them before the job runs'
-        : 'Uses registration marks. The head camera is off, so it won\'t start unless the camera is turned on (Setup → Camera) or Setup → Job defaults → Registration marks is set to "Skip"');
+        : 'Uses registration marks, but the head camera is off. Turn it on in Setup → Camera, or set Registration marks to Skip in Setup → Jobs.');
   }
   const blocked = (pkg.checks || []).find((c) => c && c.block);
   if (blocked) throw bad('Pathline blocked this job: ' + blocked.l);

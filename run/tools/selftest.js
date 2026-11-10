@@ -198,6 +198,9 @@ console.log('Trotec job stream');
   ok(mv.travelAcc === 500 && mv.jerk === 5000, 'and the real travel acceleration and jerk, for Prepare 1.6.0 on (500 mm/s², 5000 mm/s³)', mv.travelAcc + ', ' + mv.jerk);
   const mvF = config.machineView({ ...cfg, configured: true, trotec: { ...cfg.trotec, travel: 'fastest' } });
   ok(mvF.travelSpeed === 1000 && mvF.travelAcc === 1000 && mvF.jerk === 20000, 'Fastest travel: Prepare is told 1000 mm/s, 1000 mm/s², 20000 mm/s³', mvF.travelSpeed + ', ' + mvF.travelAcc + ', ' + mvF.jerk);
+  ok(mv.markArea === undefined, 'camera off: no markArea');
+  const mvC = config.machineView({ ...cfg, configured: true, bed: [1300, 900], vision: { enabled: true, offset: [-41.735, -12.9854] } });
+  ok(JSON.stringify(mvC.markArea) === '[26.9,3.5,1300,900]', 'camera on: Pathline is told where marks can be read (the Q500: 26.9 mm from the left, 3.5 from the back)', JSON.stringify(mvC.markArea));
 }
 
 console.log('Ruida encoding');
@@ -595,6 +598,8 @@ async function serverTests() {
       const after = await jobOf(id);
       // (the example is a print and cut job: its switch starts on)
       ok(after.status === 'done' && !after.anchor && after.anchorAtStart === true, 'after the run the job keeps no position, the switch back to its default (on: print and cut)', JSON.stringify(after));
+      const home = (await call('GET', '/status')).data.pos;
+      ok(home && Math.abs(home.x - s0.pos.x) < 0.05 && Math.abs(home.y - s0.pos.y) < 0.05, 'after a completed job the head goes back to where it was at Start', JSON.stringify({ start: s0.pos, now: home }));
       await local('POST', '/jobs/' + id + '/anchor', { clear: true });
       const re = await local('POST', '/jobs/' + id + '/requeue', {});
       ok(re.status === 200 && !re.data.anchor && re.data.anchorAtStart === true, 'run again from History: no position kept, the switch at its default', JSON.stringify(re.data));
@@ -849,6 +854,63 @@ async function linkTests() {
 async function visionTests() {
   console.log('Head camera (simulated)');
   {
+    // camera reach, checked at Start: the X28 sheet (J0052), marks 1 and 3 at X 28 with the camera
+    // 41.7 mm right of the laser
+    const { reach, reachInfo, reachMessage } = require('../src/vision/vision');
+    const job = (pts) => ({ toolpath: pts.map((at, i) => ({ type: 'inspect', mark: i + 1, of: pts.length, at, d: 3 })) });
+    const off = [-41.735, -12.9854], bed = [1300, 900];
+    const x28 = reachMessage(reach(job([[28, 28], [1269.57, 28], [28, 844.354]]), off, bed), false);
+    ok(x28 === 'Move the sheet 20 mm to the right. Marks 1 and 3 are 28 mm from the left edge; the camera can only see from 42 mm. Then switch Anchor to toolhead on, put the laser (not the camera) over the top-left dot and press Start. Or move the marks in Prepare.',
+      'Start: marks too near the left edge for the camera: which way to move the sheet first, to the next 10 mm (14 → 20)', x28);
+    const anch = reachInfo(reach(job([[28, 28], [1269.57, 28], [28, 844.354]]), off, bed), true);
+    ok(anch.kind === 'reach' && anch.moves.length === 1 && anch.moves[0].dir === 'right' && anch.moves[0].mm === 20 && /put the laser \(not the camera\) back over the top-left dot and press Start/.test(anch.then),
+      'anchored: the move for the dialog, then the laser (not the camera) back over the dot', JSON.stringify(anch));
+    ok(reachMessage(reach(job([[42, 13], [1283.6, 13], [42, 829.4]]), off, bed), false) === null, 'marks 42 mm from the left, 13 mm from the back: all reachable');
+    const back = reachInfo(reach(job([[50, 5], [1200, 5], [50, 800]]), off, bed), false);
+    ok(back.moves.length === 1 && back.moves[0].dir === 'front' && back.moves[0].mm === 10 && /^Marks 1 and 2 are 5 mm from the back edge; the camera can only see from 13 mm\.$/.test(back.why[0]),
+      'too near the back edge: move it 10 mm to the front (8 needed)', JSON.stringify(back));
+    const both = reachInfo(reach(job([[30, 5], [1200, 5], [30, 800]]), off, bed), false);
+    ok(both.moves.map((m) => m.dir + ' ' + m.mm).join(', ') === 'right 20, front 10' && /^Move the sheet 20 mm to the right and 10 mm to the front\./.test(both.text), 'too near two edges: both moves', both.text);
+    const wide = reachInfo(reach(job([[20, 30], [1350, 30], [20, 800]]), off, bed), false);
+    ok(!wide.moves.length && /1330 mm apart across, but the camera can only reach 1300 mm\. Move the marks closer together in Prepare/.test(wide.wide), 'marks further apart than the camera reaches: no move offered', wide.text);
+    // past the bed's right end the camera still sees (the head goes right up to it): J0064 read its
+    // top-right mark at X 1322.9 on the 1300 mm bed
+    ok(reachMessage(reach(job([[81.5, 77.2], [1322.9, 81.1], [78.6, 893.5]]), off, bed), false) === null, 'a mark 23 mm past the bed\'s right end: the camera reaches it (J0064)');
+    const past = reachInfo(reach(job([[100, 50], [1360, 50], [100, 800]]), off, bed), false);
+    ok(past && /Mark 2 is 60 mm past the right edge; the camera can only see up to 41 mm past it\./.test(past.why[0]) && past.moves[0].dir === 'left' && past.moves[0].mm === 20, 'a mark beyond what the camera sees past the right edge: said so, move 20 mm left', past && past.text);
+    // print and cut whose cuts go past the bed, with the laser on the dot (J0065: the X28 sheet,
+    // dot at X 80.5, cuts to 1315): move the sheet, not the head; marks don't count towards fitting
+    const anchorM = require('../src/job/anchor');
+    const { fitInfo } = require('../src/vision/vision');
+    const pc = { toolpath: [{ type: 'inspect', mark: 1, of: 3, at: [43, 23] }, { type: 'inspect', mark: 2, of: 3, at: [1284.57, 23] }, { type: 'inspect', mark: 3, of: 3, at: [43, 839.35] },
+      { type: 'cut', process: 0, p: [[51.12, 31.16], [1277.67, 31.16], [1277.67, 831.16], [51.12, 831.16]] }] };
+    let ov = null; try { anchorM.check(pc, { x: 80.494, y: 78.297 }, bed); } catch (e) { ov = e.over; }
+    const fi = fitInfo(ov, bed, true);
+    ok(fi && fi.moves.length === 1 && fi.moves[0].dir === 'left' && fi.moves[0].mm === 20 && /^Move the sheet 20 mm to the left\. The cuts reach X 1315, 16 mm past the right end of the bed \(1300 mm\)\. Then put the laser \(not the camera\) back over the top-left dot/.test(fi.text),
+      'print and cut, laser on the dot, cuts past the bed: move the sheet 20 mm to the left', fi && fi.text);
+    let fits = true; try { anchorM.check(pc, { x: 60, y: 78.3 }, bed); } catch (e) { fits = false; }
+    ok(fits, 'moved 20 mm left (dot at X 60) it fits: the top-right mark 1302 is past the bed, but only the cuts count');
+    const big = fitInfo({ left: 5, right: 5, back: 0, front: 0, box: [-5, 0, 1305, 100] }, bed, true);
+    ok(big && !big.moves.length && /bigger than the bed/.test(big.wide), 'cuts past both ends: bigger than the bed, no move offered', big && big.text);
+    // a Trotec's head may go past the bed's corner to its own zero (factory offset 14.8, 9.5 mm),
+    // beam off: the camera then reaches 26.9 mm from the left and 3.5 mm from the back
+    const Machine = require('../src/machine');
+    const tm = Object.create(Machine.prototype);
+    tm.cfg = { controller: 'trotec', bed, trotec: { offset: [14.833125, 9.527625] } };
+    const tv = tm.travel();
+    ok(tv[0] === -14.833125 && tv[1] === -9.527625 && tv[2] === 1300 && tv[3] === 900, 'Trotec travel: the bed and the strip to the machine\'s zero', JSON.stringify(tv));
+    tm.st = { pos: { x: 100, y: 0 } };
+    ok(tm.jogRange('y')[0] === -9.527625 && tm.clampTravel(-50, -50).join() === '-14.833125,-9.527625', 'Trotec jog may go behind and left of the bed, never past the machine\'s zero');
+    const rm = Object.create(Machine.prototype); rm.cfg = { controller: 'ruida', bed: [900, 600] };
+    ok(rm.travel().join() === '0,0,900,600', 'other controllers: travel is the bed');
+    ok(reachMessage(reach(job([[28, 28], [1269.57, 28], [28, 844.354]]), off, bed, tv), false) === null, 'with the Trotec\'s travel the X28 sheet\'s marks (28 mm in) can be read');
+    const x13 = reachMessage(reach(job([[13, 13], [1254.57, 13], [13, 829.354]]), off, bed, tv), false);
+    ok(/^Move the sheet 20 mm to the right\. Marks 1 and 3 are 13 mm from the left edge; the camera can only see from 27 mm\./.test(x13), 'marks 13 mm in: still too near the left edge', x13);
+    const j21 = reachInfo(reach(job([[21.5, 51.5], [1263, 51.5], [21.5, 867.9]]), off, bed, tv), true);
+    ok(j21.moves[0].mm === 10, 'the X28 sheet anchored at X 21.5 (J0064\'s 2nd try): 6 mm short, so move it 10', JSON.stringify(j21.moves));
+    ok(reachMessage(reach(job([[30, 4], [1200, 4], [30, 800]]), off, bed, tv), false) === null, '4 mm from the back: readable with the travel behind the bed');
+  }
+  {
     // a checkerboard corner at an angle the board needn't be square: found, and its angle read
     const { SimCamera } = require('../src/vision/camera');
     const detect = require('../src/vision/detect');
@@ -956,6 +1018,7 @@ async function visionTests() {
   let out = '';
   srv.stdout.on('data', (d) => { out += d; });
   srv.stderr.on('data', (d) => { out += d; });
+  srv.on('exit', (code, sig) => { out += '\n[server ended: ' + code + ' ' + (sig || '') + ']'; });
   const call = async (m, r, b) => {
     const res = await fetch('http://127.0.0.1:' + port + '/api/' + r, { method: m, headers: { 'content-type': 'application/json' }, body: b ? JSON.stringify(b) : undefined });
     return { status: res.status, data: await res.json().catch(() => null) };
@@ -1058,6 +1121,17 @@ async function visionTests() {
     const w5 = await waitFor((x) => x.markWait || x.state === 'idle' || x.state === 'alarm');
     if (w5.markWait) await call('POST', 'v1/stop');
     ok(j5 && j5.anchorAtStart === true && w5.state === 'idle' && w5.progress === 1 && !w5.markWait, 'print and cut anchored at the head (on as it arrives): the marks found by themselves, the job ran', JSON.stringify({ atStart: j5 && j5.anchorAtStart, w5 }));
+    // the camera, not the laser, put over the top-left dot (J0064: every mark one camera offset
+    // off): the first mark is looked for one offset over, found, and the job runs without a hand jog
+    const q6 = await call('POST', 'v1/jobs', example);
+    const offV = (await call('GET', 'local/state')).data.config.vision.offset;
+    await jogTo(onSheet[0] + offV[0], onSheet[1] + offV[1]);
+    await call('POST', 'v1/start', { id: q6.data.id });
+    const w6 = await waitFor((x) => x.markWait || x.state === 'idle' || x.state === 'alarm');
+    if (w6.markWait) await call('POST', 'v1/stop');
+    const log6 = (await call('GET', 'local/log')).data || [];
+    ok(w6.state === 'idle' && w6.progress === 1 && !w6.markWait && log6.some((l) => /the camera, not the laser, was put over the dot/.test(l)),
+      'anchored with the camera over the dot in place of the laser: found one camera offset over, no hand jog, the job ran', JSON.stringify({ w6, start: [onSheet[0] + offV[0], onSheet[1] + offV[1]], last: log6.slice(-6) }));
     // a sheet that doesn't match the job (mark 3 printed 10 mm nearer than the job has it): the
     // marks are found, but they're not as far apart as the job's, so it stops before cutting
     const wrong = JSON.parse(JSON.stringify(example));
