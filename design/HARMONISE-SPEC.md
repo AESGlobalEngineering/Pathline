@@ -2,6 +2,8 @@
 
 Decided 28 Oct 2026. Applies to the four app pages in `src/ui/` and to the Pathline Run HMI prototype (`hmi/project/HMI.dc.html`). Read `design/DESIGN-BRIEF.md` first: its rules on bindings, aria labels and the owner's decisions still hold. **One owner decision changes:** the accent is now **Path red** (brand), not blue `#2457D6`.
 
+**Updated 9 Nov 2026 (red acts, ink selects):** Path red was the accent for everything, but red is also ACI 1 (the usual cut colour) and the error colour, so selected rows, toggles and sliders read as cut lines or warnings. Red is now `--action` and is used only for the logo and the controls that act: **Send to machine**, **Save**, `.btn-primary`, a dialog's main button and the send progress bar. `--accent` is now **ink** (near-black in light, near-white in dark) for selection, on/off state, focus, current tab, links, sliders, checkboxes and switches. The **Job override** tag is inverted ink (`--accent` with `--on-accent`) so it stands apart from the grey Material preset tag. On the bed, selection, origin, snap guides, the measure line and the Simulation playhead use `--ink`. A disabled primary button (Save with nothing to save) is neutral grey (`--sunken` / `--text-4`), not faded red, and turns red once there is something to act on.
+
 The tokens and shared components live in **`src/ui/theme.css`** (read it). Dialogs, toasts and the right-click menu are in `src/ui/fonts.css` and `src/ui/app.js` and are already done.
 
 ## 1. Brand
@@ -35,7 +37,8 @@ Light is default; dark applies when `<html data-theme="dark">`. `LRC.theme` (app
 | Secondary text | `--text-2` | `#3A414C` |
 | Muted text, labels, units | `--text-3` | `#5B6370` |
 | Faint text, placeholders | `--text-4` | `#8A919C` |
-| Accent fill (white text on it) | `--accent`, hover `--accent-hover` | `#2457D6`, `#1A43AB` |
+| Action fill (Send, Save, primary buttons; white text) | `--action`, hover `--action-hover`, text `--on-action` | Path red `#D62828` |
+| Accent fill: ink (selection, switches; `--on-accent` text) | `--accent`, hover `--accent-hover` | `#2457D6`, `#1A43AB` |
 | Accent text/icon/indicator on a surface | `--accent-fg` | `#2457D6` used as a text/icon colour |
 | Accent tint (selected rows, tags) | `--accent-soft` | `#EEF2FC`, `soft(accent, 0.9)` |
 | Focus ring | `--accent-ring` | `#DCE6FB` |

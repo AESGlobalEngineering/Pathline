@@ -146,7 +146,9 @@
       remove: (id) => { st.machines = st.machines.filter((m) => m.id !== id); save(); return wait(st.machines); },
       create: (type) => wait(upsert('machines', { ...clone(type === 'plotter' ? machines()[1] : machines()[0]), id: CC.uid('m'), name: type === 'plotter' ? 'New plotter' : 'New laser', ip: '', syncedAt: null })),
       duplicate: (id) => { const s = machine(id); return wait(upsert('machines', { ...clone(s), id: CC.uid('m'), name: s.name + ' copy', syncedAt: null })); },
-      placeholder: () => wait(NO_MACHINE)
+      placeholder: () => wait(NO_MACHINE),
+      // the app pushes machine updates (e.g. settings read back from the controller); none in the preview
+      onUpdated: () => {}
     },
     materials: {
       list: () => wait(st.materials),
@@ -156,7 +158,8 @@
       create: (type) => wait(upsert('materials', mat(CC.uid('mat'), 'Other', 'New material', 3, '#E1E4E8', [type || 'laser'], ''))),
       duplicate: (id) => { const s = st.materials.find((m) => m.id === id); return wait(upsert('materials', { ...clone(s), id: CC.uid('mat'), name: s.name + ' copy', locked: false })); },
       exportLib: () => wait('C:\\Jobs\\materials.json'),
-      importLib: () => { toast('Imports a material library file'); return wait(null); }
+      importLib: () => { toast('Imports a material library file'); return wait(null); },
+      onUpdated: () => {}
     },
     job: {
       current: () => wait(st.job),
