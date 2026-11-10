@@ -2149,8 +2149,8 @@ class Component extends DCLogic {
     // ---- canvas
     const canvasEl = React.createElement(LRC.JobCanvas, {
       job, machine, sel: selIds, tool: S.tool, accent, snap: S.snap, drawAci: this.drawAci(),
-      // print and cut: where the head camera can reach the registration marks
-      reach: isLaser && job.regMode && job.regMode !== 'off' ? CC.camReach(machine) : null,
+      // camera machine: where registration marks can go (shown fainter while they're off)
+      reach: isLaser ? CC.camReach(machine) : null, reachOn: isLaser && !!job.regMode && job.regMode !== 'off',
       canvasRef: (c) => { this.canvas = c; },
       onSelect: (sel) => this.setState({ sel }),
       onCommit: (j, opts, sel) => { this.commit(j, opts, sel); if (S.tool !== 'select' && S.tool !== 'measure') this.setState({ tool: 'select' }); },
@@ -2327,13 +2327,19 @@ class Component extends DCLogic {
         { key: 'order', label: 'Cut order', type: 'seg', value: co.order, options: [{ value: 'process', label: 'By process' }, { value: 'speed', label: 'Fastest' }, { value: 'ordered', label: 'Ordered' }] },
         { key: 'inside', label: 'Cut inside shapes first', type: 'seg', value: co.inside, options: [{ value: 'part', label: 'Per part' }, { value: 'all', label: 'All insides first' }, { value: 'off', label: 'Off' }] },
         // the whole job, once and then again (not each process's own passes)
-        { key: 'repeat', label: 'Run the whole job', value: String(j.repeat || 1), unit: '×', type: 'number' }
+        { key: 'repeat', label: 'Run the whole job', value: String(j.repeat || 1), unit: '×', type: 'number' },
+        // how far from a corner a closed cut starts and finishes (0: may start on the corner)
+        { key: 'startClear', label: 'Start/stop gap from corners', value: String(Number.isFinite(Number(j.startClear)) && j.startClear !== null && j.startClear !== undefined ? Number(j.startClear) : CC.START_CLEAR), unit: 'mm', type: 'number' }
       ],
       buttons: [{ label: 'Cancel', value: null }, { label: 'Save', value: 'ok', primary: true }]
     });
     if (!r) return;
     const repeat = Math.max(1, Math.min(50, Math.round(r.values.repeat || 1)));
-    const next = { ...j, name: r.values.name || j.name, notes: r.values.notes, cutOrder: { order: r.values.order, inside: r.values.inside }, repeat };
+    const gap = Number(r.values.startClear);
+    const startClear = Number.isFinite(gap) ? Math.max(0, Math.min(20, Math.round(gap * 100) / 100)) : CC.START_CLEAR;
+    const next = { ...j, name: r.values.name || j.name, notes: r.values.notes, cutOrder: { order: r.values.order, inside: r.values.inside }, repeat, startClear };
+    // new jobs start with the gap last chosen
+    window.api.settings.set({ startClear }).catch(() => {});
     delete next.optimise;
     this.commit(next, { record: true });
   }

@@ -131,6 +131,7 @@ function jobSheet(job, machine, material, est) {
   if (isLaser) line('Reg marks: ' + ({ off: 'Off', pos: 'Position & rotation (2 marks)', linear: 'Full linear (3 marks)', nonlinear: 'Non-linear (3 marks)' }[job.regMode || 'off']) + (job.regMode && job.regMode !== 'off' ? ' · ' + regMarks(job, machine).length + ' in job' : ''));
   const co = CC.cutOrderOf(job);
   line('Cut order: ' + { process: 'by process (list order)', speed: 'fastest', ordered: 'ordered (marks, engraving, cutting)' }[co.order] + ' · inside shapes ' + { part: 'first, part by part', all: 'all first', off: 'not prioritised' }[co.inside]);
+  if (isLaser) { const g = Number.isFinite(Number(job.startClear)) && job.startClear !== null && job.startClear !== undefined ? Number(job.startClear) : CC.START_CLEAR; line('Start/stop: ' + g + ' mm from corners' + (g === 0 ? ' (may start on a corner)' : '')); }
   if ((Number(job.repeat) || 1) > 1) line('Repeat:    the whole job ' + est.repeats + ' times (all of it once, then again)');
   if (!isLaser) line('Beds:      ' + est.beds);
   line('');

@@ -189,7 +189,11 @@ The operator prints artwork with marks, puts the sheet on the bed, and the camer
 - `mode: "nonlinear"` (3 marks): **non-linear**. The intent is to correct uneven distortion as well. The method is the HMI's choice (§11).
 - Apply the transform to every coordinate of every later step (paths, boxes, gaps). Pathline never sends more marks than the mode uses (such jobs are blocked). If there are fewer marks than the mode needs, Pathline only warns, so handle it: refuse to start, or fall back.
 - Machine settings that matter: `markType` (Dot), `markD`, `camX`/`camY` (camera offset from the beam), `calibrated` (date text), and `markTime` (seconds to read one mark, used by Pathline's estimate, default 1.5).
-- **Camera reach (from Pathline Prepare 1.6.7):** Prepare uses `camX`/`camY` and `bed` to keep marks where the camera can read them. A mark at (x, y) is read with the laser at (x + camX, y + camY), so marks must lie in x max(0, −camX)…min(W, W − camX) and y max(0, −camY)…min(H, H − camY). Prepare keeps them a further 2 mm inside. If a mark is outside, Send is blocked with the mark and edge named, and one click moves the whole job (marks and artwork together) into reach. The unreachable band is drawn on the bed while registration marks are on. Without `camX`/`camY` (or with `f.camera` false) nothing is checked.
+- **Where marks can go (`markArea`, from Pathline Prepare 1.6.8):**
+  - Run sends `markArea: [x0, y0, x1, y1]` (bed mm, origin top-left, Y down) in GET /machine when the camera is on: the area the camera can read a mark in, from the camera offset and how far the head can travel. The Q500 sends [26.9, 3.5, 1300, 900].
+  - Prepare keeps every mark centre 2 mm inside it. A mark outside blocks Send, naming the mark and the edge, and one click moves the whole job (marks and artwork together) into place. Marks further apart than `markArea` allows are reported as too big for print and cut on this machine. Parts aren't limited: they may go right up to the bed edge.
+  - On a camera machine the strips outside `markArea` are shaded on the bed and labelled "Registration marks can't go here".
+  - Without `markArea` (camera off, older Run) nothing is checked. Prepare doesn't work the area out from `camX`/`camY`.
 
 ## 5. Machine settings (`GET /machine`)
 

@@ -103,6 +103,8 @@ function newJob(machineId) {
     regMode: 'off',
     processes: CC.withPresets(null, presetsFor(mat, m)).map((p) => ({ ...p, src: 'preset' })),
     entities: [], beds: 1, cutOrder: { ...CC.CUT_ORDER_DEFAULT },
+    // start/stop gap from corners: the last one chosen in Job settings
+    startClear: Number.isFinite(Number(settings.startClear)) && settings.startClear !== null ? Number(settings.startClear) : CC.START_CLEAR,
     createdAt: new Date().toISOString()
   };
 }

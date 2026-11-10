@@ -1403,15 +1403,24 @@
         const dsh = this.state.drag && this.state.drag.kind === 'sheet' ? this.state.drag : null;
         kids.push(h('rect', { key: 's', x: x + (dsh ? dsh.x : sh.x), y: dsh ? dsh.y : sh.y, width: sh.w, height: sh.h, strokeWidth: 1.2, vectorEffect: 'non-scaling-stroke', style: { fill: 'var(--sheet)', stroke: 'var(--sheet-line)', filter: 'drop-shadow(0 2px 4px rgba(21,24,30,0.10))' } }));
       }
-      // print and cut: where the head camera can't reach a registration mark
-      // (props.reach from CC.camReach), tinted, with a dashed edge
+      // camera machine: the strips where registration marks can't go (outside
+      // the machine's markArea, props.reach from CC.camReach), tinted with a
+      // dashed edge and labelled; cutting isn't limited there. Fainter while
+      // registration marks are off (props.reachOn).
       const R = this.props.reach;
       if (R) {
-        const K = R.keep;
+        const K = R.keep, on = !!this.props.reachOn;
+        const tip = 'Registration marks can\'t go here: the camera can\'t read them (cutting isn\'t limited)';
         const bands = [[0, 0, K.x0, bh], [K.x1, 0, bw - K.x1, bh], [K.x0, 0, K.x1 - K.x0, K.y0], [K.x0, K.y1, K.x1 - K.x0, bh - K.y1]].filter((b) => b[2] > 0.01 && b[3] > 0.01);
-        bands.forEach(([bx, by, w, hh], i) => kids.push(h('rect', { key: 'rb' + i, x: x + bx, y: by, width: w, height: hh, style: { fill: 'var(--warn-soft)', opacity: 0.75, pointerEvents: 'none' } })));
-        kids.push(h('rect', { key: 'rk', x: x + K.x0, y: K.y0, width: K.x1 - K.x0, height: K.y1 - K.y0, fill: 'none', strokeWidth: 1, strokeDasharray: '5 4', vectorEffect: 'non-scaling-stroke', style: { stroke: 'var(--warn)', pointerEvents: 'none' } },
-          h('title', null, 'Registration marks must be inside this line: the camera beside the beam can\'t reach outside it')));
+        bands.forEach(([bx, by, w, hh], i) => kids.push(h('rect', { key: 'rb' + i, x: x + bx, y: by, width: w, height: hh, style: { fill: 'var(--warn-soft)', opacity: on ? 0.75 : 0.4 } }, h('title', null, tip))));
+        kids.push(h('rect', { key: 'rk', x: x + K.x0, y: K.y0, width: K.x1 - K.x0, height: K.y1 - K.y0, fill: 'none', strokeWidth: 1, strokeDasharray: '5 4', vectorEffect: 'non-scaling-stroke', style: { stroke: 'var(--warn)', opacity: on ? 1 : 0.5, pointerEvents: 'none' } }));
+        // the label goes in the widest strip, along it, when there's room for it
+        const big = bands.slice().sort((a, b) => Math.min(b[2], b[3]) - Math.min(a[2], a[3]))[0];
+        const fs = 11 / v.s;
+        if (big && Math.min(big[2], big[3]) > fs * 1.6) {
+          const tall = big[3] > big[2], cx = x + big[0] + big[2] / 2, cy = big[1] + big[3] / 2;
+          kids.push(h('text', { key: 'rl', x: cx, y: cy, fontSize: fs, textAnchor: 'middle', dominantBaseline: 'central', transform: tall ? 'rotate(-90 ' + cx + ' ' + cy + ')' : undefined, fontFamily: 'IBM Plex Sans, sans-serif', style: { fill: 'var(--warn)', opacity: on ? 1 : 0.6, pointerEvents: 'none' } }, 'Registration marks can\'t go here'));
+        }
       }
       if (this.isPlot()) {
         const now = k === 0;

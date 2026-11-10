@@ -152,39 +152,42 @@ async function main() {
       const seq = ops.map((o) => o.ent + o.round).join(' ');
       ok(seq === 'a1 b1 l1 a2 b2 a3 b3', 'repeat runs the whole job, then again; once-only processes once (' + seq + ')');
     }
-    // print and cut: registration marks must be where the head camera (beside the beam) can reach them
+    // print and cut: registration marks must be inside the machine's markArea (where Run's camera can read them)
     {
       const dot = (id, x, y) => ({ id, aci: 5, paths: [{ p: CC.shapes.ellipse(x, y, 2.5, 2.5), c: true }] });
-      const art = { id: 'art', aci: 1, paths: [{ p: CC.shapes.rect(60, 60, 300, 200, 0), c: true }] };
       const procs = [{ name: 'Cut', proc: 'Cut', power: 80, speed: 20, f: 5000, passes: 1, out: true, aci: [1] }, { ...CC.regProcess(), aci: [5] }];
-      const pc = (marks) => ({ ...pj, regMode: 'nonlinear', entities: [art].concat(marks), processes: procs });
-      const cam = (camX, camY, extra) => ({ id: 'q', type: 'laser', info: { bed: [1300, 900], camX: String(camX), camY: String(camY), f: { camera: true }, ...(extra || {}) } });
-      const q500 = cam(-41.74, -12.99);
-      // the owner's Q500: camera left of and behind the beam, so marks need x ≥ 41.74 + 2, y ≥ 12.99 + 2
+      const pc = (marks, art) => ({ ...pj, regMode: 'nonlinear', entities: [art || { id: 'art', aci: 1, paths: [{ p: CC.shapes.rect(60, 60, 300, 200, 0), c: true }] }].concat(marks), processes: procs });
+      const mach = (area, extra) => ({ id: 'q', type: 'laser', info: { bed: [1300, 900], markArea: area, camX: '-41.74', camY: '-12.99', f: { camera: true }, ...(extra || {}) } });
+      // the owner's Q500 sends [26.9, 3.5, 1300, 900]: marks at x ≥ 28.9, y ≥ 5.5 (2 mm inside it)
+      const q500 = mach([26.9, 3.5, 1300, 900]);
       const R = CC.camReach(q500);
-      ok(Math.abs(R.keep.x0 - 43.74) < 1e-9 && Math.abs(R.keep.y0 - 14.99) < 1e-9 && R.keep.x1 === 1298 && R.keep.y1 === 898, 'Q500 camera reach: marks in x 43.74–1298, y 14.99–898');
-      const x28 = pc([dot('m1', 28, 28), dot('m2', 1269.57, 28), dot('m3', 28, 844.35)]);
+      ok(Math.abs(R.keep.x0 - 28.9) < 1e-9 && Math.abs(R.keep.y0 - 5.5) < 1e-9 && R.keep.x1 === 1298 && R.keep.y1 === 898, 'Q500 markArea: marks kept in x 28.9–1298, y 5.5–898 (not worked out from camX/camY)');
+      const x28 = pc([dot('m1', 13, 13), dot('m2', 1269.57, 13), dot('m3', 13, 844.35)]);
       const far = CC.marksOutOfReach(x28, q500);
-      ok(far.length === 2 && far.every((f) => f.edge === 'left' && f.from === 28 && f.see === 41.7), 'the X28 job: marks 1 and 3 are 28 mm from the left edge, the camera sees from 41.7 mm');
+      ok(far.length === 2 && far.every((f) => f.edge === 'left' && f.from === 13 && f.see === 26.9), 'the X28 job: marks 1 and 3 are 13 mm from the left edge, the camera sees from 26.9 mm');
       const chk = CC.checkJob(x28, q500).find((c) => c.reach);
-      ok(chk && chk.block && /Mark 1 is 28 mm from the left edge/.test(chk.l), 'out-of-reach marks block Send and say which mark and edge (' + (chk && chk.l) + ')');
+      ok(chk && chk.block && /Mark 1 is 13 mm from the left edge; this laser's camera can only see from 26.9 mm/.test(chk.l), 'out-of-reach marks block Send and name the mark and the edge (' + (chk && chk.l) + ')');
       const sh = CC.reachShift(x28, q500);
       const moved = { ...x28, entities: x28.entities.map((e) => CC.translate(e, sh.dx, sh.dy)) };
-      ok(sh.dx > 15 && sh.dx < 16.5 && sh.dy === 0 && !CC.marksOutOfReach(moved, q500).length && !CC.checkJob(moved, q500).some((c) => c.block), 'moving the whole job ' + sh.dx + ' mm right brings every mark into reach');
-      // camera on the other side (positive offsets): the limits are at the right and front edges instead
-      const other = cam(35, 20);
-      const RO = CC.camReach(other);
-      ok(RO.keep.x0 === 2 && RO.keep.x1 === 1300 - 35 - 2 && RO.keep.y1 === 900 - 20 - 2, 'positive offsets: marks kept 37 mm from the right and 22 mm from the front');
-      const edges = CC.marksOutOfReach(pc([dot('a', 1290, 400), dot('b', 600, 890), dot('c', 600, 400)]), other).map((f) => f.edge).sort().join(',');
-      ok(edges === 'front,right', 'positive offsets: marks near the right and front edges are flagged (' + edges + ')');
-      const sh2 = CC.reachShift(pc([dot('a', 1290, 400), dot('b', 600, 890), dot('c', 600, 400)]), other);
-      ok(sh2.dx < 0 && sh2.dy < 0, 'positive offsets: the job moves left and back (' + sh2.dx + ', ' + sh2.dy + ')');
-      // marks further apart than the camera can reach: no move can work
-      const wide = pc([dot('m1', 5, 100), dot('m2', 1295, 100), dot('m3', 5, 500)]);
-      const ws = CC.reachShift(wide, q500), wc = CC.checkJob(wide, q500).find((c) => c.block && /too wide/.test(c.l));
-      ok(ws.tooWide === 'x' && wc, 'marks 1290 mm apart: too wide for print and cut with this camera (' + (wc && wc.l) + ')');
-      // nothing changes without a camera offset (camera off, older Run) or on a plotter
-      ok(!CC.camReach(cam(-41.74, -12.99, { f: { camera: false } })) && !CC.camReach({ type: 'laser', info: { bed: [1300, 900] } }) && !CC.camReach({ type: 'plotter', info: { camX: '-40', camY: '-10' } }), 'no camera offset, camera off or a plotter: marks are not checked');
+      const mk = CC.regMarks(moved, q500);
+      ok(mk.every((m) => m.x >= 28.9 - 1e-6 && m.y >= 5.5 - 1e-6) && !CC.checkJob(moved, q500).some((c) => c.block), 'moving the job ' + sh.dx + ' mm right puts every mark at x ≥ 28.9, y ≥ 5.5 and nothing blocks Send');
+      // each edge: a mark too near it is flagged, and the job moves away from it
+      const area = mach([40, 30, 1260, 870]);
+      const edgeOf = (x, y) => CC.marksOutOfReach(pc([dot('a', x, y), dot('b', 650, 450), dot('c', 600, 400)]), area).map((f) => f.edge).join();
+      ok(edgeOf(35, 450) === 'left' && edgeOf(1262, 450) === 'right' && edgeOf(650, 20) === 'back' && edgeOf(650, 880) === 'front', 'marks too near each edge are flagged with that edge');
+      const away = (x, y) => CC.reachShift(pc([dot('a', x, y), dot('b', 650, 450), dot('c', 600, 400)]), area);
+      ok(away(35, 450).dx > 0 && away(1262, 450).dx < 0 && away(650, 20).dy > 0 && away(650, 880).dy < 0, 'the job moves away from whichever edge a mark is too near');
+      // parts may sit outside the marks, right up to the bed edge: only the marks are limited
+      const edgeArt = { id: 'art', aci: 1, paths: [{ p: CC.shapes.rect(0, 0, 1300, 120, 0), c: true }] };
+      const inside = pc([dot('m1', 40, 200), dot('m2', 1200, 200), dot('m3', 40, 700)], edgeArt);
+      ok(!CC.marksOutOfReach(inside, q500).length && !CC.checkJob(inside, q500).some((c) => c.block), 'parts right up to the bed edge are fine when the marks are inside markArea');
+      // marks further apart than markArea: no placement works
+      const big = pc([dot('m1', 2, 100), dot('m2', 1299, 100), dot('m3', 2, 500)]);
+      const bs = CC.reachShift(big, q500), bc = CC.checkJob(big, q500).find((c) => c.block && /too big for print and cut/.test(c.l));
+      ok(bs.tooWide === 'x' && bc, 'marks further apart than markArea: the job is too big for print and cut on this machine (' + (bc && bc.l) + ')');
+      // no markArea (camera off, older Run, even with camX/camY), camera off, or a plotter: nothing is checked
+      ok(!CC.camReach(mach(undefined)) && !CC.camReach(mach([26.9, 3.5, 1300, 900], { f: { camera: false } })) && !CC.camReach({ type: 'plotter', info: { markArea: [10, 10, 100, 100] } }), 'no markArea, camera off or a plotter: marks are not checked');
+      ok(!CC.marksOutOfReach(x28, mach(undefined)).length && !CC.checkJob(x28, mach(undefined)).some((c) => c.reach || /too big/.test(c.l)), 'without markArea the X28 marks pass as before');
       ok(!CC.marksOutOfReach({ ...x28, regMode: 'off' }, q500).length, 'registration marks off: nothing is checked');
     }
     // same-size parts touching side by side are never "inside" each other (a first point on the shared
@@ -235,6 +238,15 @@ async function main() {
       const onCorner = ops.filter((o) => corners.some((c) => c.some((v) => Math.hypot(v[0] - o.path.p[0][0], v[1] - o.path.p[0][1]) < 0.05)));
       ok(ops.length === 3 && !onCorner.length, 'squares start along an edge, not on a corner (' + ops.map((o) => o.path.p[0].map((v) => v.toFixed(1)).join(',')).join(' · ') + ')');
       ok(ops.every((o) => Math.abs(CC.polyLen(o.path.p, true) - 120) < 0.01), 'starting along an edge keeps the whole outline (120 mm each)');
+    }
+    // the start/stop gap from corners is a job setting (Job settings), down to 0
+    {
+      const sq = [{ id: 'q', aci: 1, paths: [{ p: CC.shapes.rect(40, 40, 30, 30, 0), c: true }] }];
+      const startOf = (gap) => CC.estimate({ ...pj, regMode: 'off', repeat: 1, entities: sq, cutOrder: { order: 'speed', inside: 'off' }, ...(gap === undefined ? {} : { startClear: gap }) }, laser, { timeline: true }).timeline.find((o) => o.kind === 'op').path.p[0];
+      const toCorner = (q) => Math.min(...sq[0].paths[0].p.map((v) => Math.hypot(v[0] - q[0], v[1] - q[1])));
+      ok(Math.abs(toCorner(startOf()) - CC.START_CLEAR) < 1e-6, 'default start/stop gap ' + CC.START_CLEAR + ' mm from the corner');
+      ok(Math.abs(toCorner(startOf(0.5)) - 0.5) < 1e-6, 'a job gap of 0.5 mm starts 0.5 mm from the corner (' + toCorner(startOf(0.5)).toFixed(3) + ')');
+      ok(toCorner(startOf(0)) < 1e-6, 'a gap of 0 may start right on the corner (' + startOf(0).join(',') + ')');
     }
     // overlapping lines are cut once
     {

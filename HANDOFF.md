@@ -15,6 +15,12 @@ Latest round (28 Oct, final):
 - **Dark mode bed is grey** (`--bed`, `--sheet`, `--bed-grid*` in theme.css). **ACI 7 shows as white in dark mode** (black in light), as in CAD, and so do the marks drawn on the bed (registration marks, engrave hatching, arrows, start points): see the `--aci7*` and `--ink` tokens, and `LRC.aci.hex/fg/stroke` in app.js. Exports (DXF/SVG/PDF) still use real black.
 - **Sample machines and materials from earlier builds are removed on first start** (main.js, tracked by `settings.samplesRemoved`). This is by exact id (trotec, flatbed, laser2, acr-print-3 … brass-1); anything the operator created stays.
 
+Version 1.6.8 (10 Nov):
+- **`camReach` uses the machine's `markArea`** (`[x0, y0, x1, y1]` from Run's GET /machine; the Q500 sends [26.9, 3.5, 1300, 900]). Run works it out from the camera offset and the head's travel, which Prepare can't know, so `camX`/`camY` are no longer used for it. Without `markArea` (or with the camera off, or on a plotter) it returns null and nothing is checked. `keep` is 2 mm inside it.
+  - The "too wide" check now says the job "is too big for print and cut on this machine".
+  - The bed band shows on any camera machine (`reach`), fainter while registration marks are off (`reachOn`). It is labelled "Registration marks can't go here" in the widest strip when there's room, and in a tooltip.
+- **Start/stop gap** (owner's request): `job.startClear` in mm, default `START_CLEAR` (0.1), set in Job settings and clamped to 0–20. `startPoints(p, clear)` adds corners as candidates when it is 0. It is passed through `orderPaths` → `refineStarts` / `bestStarts` as `opts.startClear`. `newJob` takes `settings.startClear` (saved from Job settings), and the job sheet prints "Start/stop: … mm from corners".
+
 Version 1.6.7 (10 Nov):
 - **Registration marks within the head camera's reach** (brief from the Pathline Run session; the X28 job had marks at 28 mm from the left on a Q500 whose camera sits 41.74 mm from the beam). In core.js:
   - `camReach(machine)` returns `{ see, keep, W, H, camX, camY }` from `info.camX`/`camY` (strings) and `bed`; `keep` is `see` with `REACH_MARGIN` (2 mm). It is null for plotters, `f.camera === false`, or a missing offset.

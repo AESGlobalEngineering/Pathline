@@ -5,6 +5,16 @@
 
 module.exports = [
   {
+    version: '1.6.8', date: '10 Nov 2026',
+    added: [
+      'Job settings → Start/stop gap from corners: how far from a corner a closed cut starts and finishes, down to 0 (which may start on the corner). New jobs start with the last one chosen.',
+      'On a laser with a head camera, the strips where registration marks can\'t go are shaded on the bed (cutting isn\'t limited there).'
+    ],
+    fixed: [
+      'Print and cut: where marks can go now comes from the machine (Pathline Run\'s markArea, the Q500: x ≥ 26.9, y ≥ 3.5 mm), not from the camera offset alone, which put the limit at 41.7 mm. Marks are kept 2 mm inside it; marks further apart than it allows are reported as too big for print and cut on this machine.'
+    ]
+  },
+  {
     version: '1.6.7', date: '10 Nov 2026',
     added: [
       'Print and cut: registration marks are checked against where the laser\'s head camera can reach (from the camera offset the machine reports). A mark out of reach is named with its edge and blocks Send; click the warning to move the whole job, marks and artwork together, just far enough. Marks further apart than the camera can reach are reported as too wide. While registration marks are on, the band the camera can\'t reach is shown on the bed.'

@@ -832,9 +832,9 @@
     // every move is expensive: the start points are chosen together for the
     // whole run (bestStarts), then the order within each group (a nesting
     // layer or one part's layer) is improved with them, and again
-    list = refineStarts(list, start, opts.order || 'file', cost);
+    list = refineStarts(list, start, opts.order || 'file', cost, opts.startClear);
     list = twoOptGroups(list, start, cost, opts.budget == null ? 80 : opts.budget);
-    return bestStarts(list, start, cost);
+    return bestStarts(list, start, cost, opts.startClear);
   }
   const routeCost = (list, start, cost) => {
     let s = 0, at = start;
@@ -847,13 +847,13 @@
   // either way round. Dynamic programming over the run finds the combination
   // with the least travel for this order (a choice for one path changes the
   // hops on both sides of it, so choosing one at a time falls short).
-  function bestStarts(list, start, cost) {
+  function bestStarts(list, start, cost, clear) {
     const n = list.length;
     if (!n) return list;
     const opts = list.map((it) => {
       const p = it.path.p;
       if (it.path.c && p.length > 2) {
-        let s = startPoints(p);
+        let s = startPoints(p, clear);
         // very finely drawn shapes: every few candidates is plenty
         if (s.length > 16) { const k = Math.ceil(s.length / 16); s = s.filter((_, i) => i % k === 0); }
         return s.map((st) => { const q = pointOn(p, st); return { in: q, out: q, make: () => ({ ...it, path: { ...it.path, p: rotateTo(p, st) } }) }; });
@@ -974,8 +974,13 @@
   // a millimetre of a corner at cutting speeds), or a vertex where the path
   // hardly turns (on a curve). Only a shape with neither (tiny) starts on a
   // corner. Each start is { v, t }: t along the segment from vertex v.
-  const START_CLEAR = 0.1; // mm between a start and the nearest corner
-  function startPoints(p) {
+  // mm between a start and the nearest corner by default; a job can set its
+  // own (job.startClear, Job settings → Start/stop gap), down to 0, which also
+  // allows starting right on a corner
+  const START_CLEAR = 0.1;
+  const startClearOf = (job) => { const v = Number(job && job.startClear); return Number.isFinite(v) && v >= 0 ? v : START_CLEAR; };
+  function startPoints(p, clear) {
+    clear = clear == null ? START_CLEAR : clear;
     const n = p.length, out = [];
     for (let v = 0; v < n; v++) {
       const a = p[(v + n - 1) % n], b = p[v], c = p[(v + 1) % n];
@@ -983,9 +988,11 @@
       const lu = Math.hypot(ux, uy), lw = Math.hypot(wx, wy);
       // a vertex on a curve: the direction changes by less than 20°
       if (lu > 1e-9 && lw > 1e-9 && (ux * wx + uy * wy) / (lu * lw) > Math.cos(Math.PI / 9)) out.push({ v, t: 0 });
-      if (lw >= 3 * START_CLEAR) {
-        const m = START_CLEAR / lw;
-        for (const t of [m, 0.5, 1 - m]) out.push({ v, t });
+      // a gap of 0: the corners themselves are starts too
+      if (clear <= 0) out.push({ v, t: 0 });
+      if (lw >= 3 * clear && lw > 1e-9) {
+        const m = clear / lw;
+        for (const t of clear > 0 ? [m, 0.5, 1 - m] : [0.5]) out.push({ v, t });
       }
     }
     return out.length ? out : p.map((_, v) => ({ v, t: 0 }));
@@ -997,12 +1004,12 @@
   // the closed path p starting (and ending) at start s
   const rotateTo = (p, s) => (s.t ? [pointOn(p, s)].concat(p.slice(s.v + 1), p.slice(0, s.v + 1)) : p.slice(s.v).concat(p.slice(0, s.v)));
 
-  function refineStarts(list, start, order, cost) {
+  function refineStarts(list, start, order, cost, clear) {
     // the travel time of a hop (default: its length)
     const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
     const d = cost ? (a, b) => cost(dist(a, b)) : dist;
     // the start candidates of each closed path, worked out once (from its first shape)
-    const cands = list.map((it) => (it.path.c && it.path.p.length > 2 ? { p: it.path.p, s: startPoints(it.path.p) } : null));
+    const cands = list.map((it) => (it.path.c && it.path.p.length > 2 ? { p: it.path.p, s: startPoints(it.path.p, clear) } : null));
     for (let sweep = 0; sweep < 2; sweep++) {
       let prev = start;
       for (let i = 0; i < list.length; i++) {
@@ -1535,7 +1542,7 @@
         }));
         ordered = orderPaths(items, {
           nest: isLaser ? proc.proc === 'Cut' : /Knife/.test(proc.tool || ''),
-          inside: cut.inside, order: 'speed', start: at, cost: opts.routeCost || routeCost, budget: opts.quick ? 0 : opts.routeBudget || 150
+          inside: cut.inside, order: 'speed', start: at, cost: opts.routeCost || routeCost, budget: opts.quick ? 0 : opts.routeBudget || 150, startClear: startClearOf(job)
         });
         cache.set(key, ordered);
       }
@@ -1902,25 +1909,26 @@
       return { id: e.id, x: (b.x0 + b.x1) / 2, y: (b.y0 + b.y1) / 2, d: Math.max(b.x1 - b.x0, b.y1 - b.y0) };
     });
   }
-  // Where the head camera can read a mark. Pathline Run reads a mark at (x, y)
-  // with the laser at (x + camX, y + camY), and the laser has to stay on the
-  // bed, so a mark must lie in x max(0, −camX)…min(W, W − camX) and
-  // y max(0, −camY)…min(H, H − camY), kept REACH_MARGIN in from those limits
-  // (Run re-centres on each mark and looks for later ones where the first
-  // predict them). null for a plotter, a camera switched off, or a machine
-  // that doesn't report the offset (older Run): nothing is checked then.
+  // Where the head camera can read a registration mark: the machine's
+  // markArea [x0, y0, x1, y1] (bed mm, from Pathline Run's GET /machine; Run
+  // works it out from the camera offset and how far the head can travel, which
+  // Prepare doesn't know). Marks are kept REACH_MARGIN inside it, mark centre,
+  // since Run re-centres on each mark and looks for later ones where the first
+  // predict them. Only the marks are limited: parts may go right up to the bed
+  // edge. null for a plotter, a camera switched off, or no markArea (older
+  // Run): nothing is checked then.
   const REACH_MARGIN = 2;
   function camReach(machine) {
     if (!machine || machine.type === 'plotter') return null;
     const info = machine.info || {};
     if (info.f && info.f.camera === false) return null;
-    const cx = parseFloat(info.camX), cy = parseFloat(info.camY);
-    if (!Number.isFinite(cx) || !Number.isFinite(cy)) return null;
+    const a = Array.isArray(info.markArea) ? info.markArea.map(Number) : null;
+    if (!a || a.length !== 4 || !a.every(Number.isFinite) || a[2] <= a[0] || a[3] <= a[1]) return null;
     const [W, H] = bedOf(machine);
-    // what the camera can see, and the area marks are kept in
-    const see = { x0: Math.max(0, -cx), x1: Math.min(W, W - cx), y0: Math.max(0, -cy), y1: Math.min(H, H - cy) };
+    // what the camera can see (on the bed), and the area marks are kept in
+    const see = { x0: Math.max(0, a[0]), y0: Math.max(0, a[1]), x1: Math.min(W, a[2]), y1: Math.min(H, a[3]) };
     const keep = { x0: see.x0 + REACH_MARGIN, x1: see.x1 - REACH_MARGIN, y0: see.y0 + REACH_MARGIN, y1: see.y1 - REACH_MARGIN };
-    return { see, keep, W, H, camX: cx, camY: cy };
+    return { see, keep, W, H };
   }
   const round1 = (v) => Math.round(v * 10) / 10;
   // a move rounded away from zero to 0.1 mm, so it never falls just short
@@ -2041,7 +2049,7 @@
           const f = far[0];
           const more = far.length > 1 ? ' (and ' + (far.length - 1) + ' more)' : '';
           out.push(sh.tooWide
-            ? { ok: false, block: true, l: 'Registration marks are ' + sh.span + ' mm apart ' + (sh.tooWide === 'x' ? 'across' : 'front to back') + '; this laser\'s camera can only reach ' + sh.reach + ' mm — too wide for print and cut on this laser' }
+            ? { ok: false, block: true, l: 'Registration marks are ' + sh.span + ' mm apart ' + (sh.tooWide === 'x' ? 'across' : 'front to back') + '; the camera can only read marks across ' + sh.reach + ' mm — the job is too big for print and cut on this machine' }
             : { ok: false, block: true, reach: true, l: 'Mark ' + f.n + ' is ' + f.from + ' mm from the ' + f.edge + ' edge; this laser\'s camera can only see from ' + f.see + ' mm' + more + ' — click to move the job into reach' });
         }
       }
@@ -2055,7 +2063,7 @@
     mapEntity, translate, scaleAbout, rotateAbout, polyLen, polyArea, pointInPoly, distToEntity, isClosedPts, cleanPath, shapes,
     processOrder, processOfAci, toolSlot, toolRank, polyTime, travelTime, rasterSpans, orderPaths,
     estimate, headAt, fmtDuration, fmtLen, fmtArea, checkJob, regMarks, regMarkAci, camReach, marksOutOfReach, reachShift, regProcess, withPresets, ensureRegProcess, isRegProc, REG_PROC, REG_NEEDED,
-    cutOrderOf, CUT_ORDER_DEFAULT, commonLines, bedOf, bedCount, defaultPresets, DEFAULTS,
+    cutOrderOf, CUT_ORDER_DEFAULT, START_CLEAR, commonLines, bedOf, bedCount, defaultPresets, DEFAULTS,
     rasterIslands, engraveScan, ENGRAVE_DIRS, DPI_STEPS, starterPresets, nestRects, THERMAL, thermalKey, thermalOf, colourOf, absorptionOf, thermalSim, metalPresets, presetsFor
   };
 });
