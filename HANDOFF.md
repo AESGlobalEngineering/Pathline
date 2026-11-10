@@ -15,6 +15,9 @@ Latest round (28 Oct, final):
 - **Dark mode bed is grey** (`--bed`, `--sheet`, `--bed-grid*` in theme.css). **ACI 7 shows as white in dark mode** (black in light), as in CAD, and so do the marks drawn on the bed (registration marks, engrave hatching, arrows, start points): see the `--aci7*` and `--ink` tokens, and `LRC.aci.hex/fg/stroke` in app.js. Exports (DXF/SVG/PDF) still use real black.
 - **Sample machines and materials from earlier builds are removed on first start** (main.js, tracked by `settings.samplesRemoved`). This is by exact id (trotec, flatbed, laser2, acr-print-3 … brass-1); anything the operator created stays.
 
+Version 1.6.10 (10 Nov):
+- Release of the muted teal accent (`--accent` #3D6C71 light / #83B5B9 dark, commit db0cbc1; see design/HARMONISE-SPEC.md). No other changes. Segmented controls (`.seg`) stay neutral and bed markers stay `--ink`, as the spec says.
+
 Version 1.6.9 (10 Nov):
 - **Registration marks are always read top left, bottom left, top right** (owner's rule; any others after, nearest next). `markOrder(list, home)` no longer searches for the least travel or an end point; both callers (the part-by-part plan and `estimateIn`) start the cutting from the last mark, so the top right. Run follows the `inspect` steps as sent (HMI-BRIEF §4.6 updated).
 - Checked the owner's full-bed X28 job (1322 cuts, All insides, Q500: 2000 mm/s, 352 mm/s², jerk 10000): travel 25.5 m / 475 s → 22.9 m / 470 s. The hole route has settled (more search time changes nothing).

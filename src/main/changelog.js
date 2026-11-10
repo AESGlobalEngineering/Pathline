@@ -5,6 +5,13 @@
 
 module.exports = [
   {
+    version: '1.6.10', date: '10 Nov 2026',
+    added: [
+      'A muted teal accent for what\'s selected or switched on: tabs, switches, sliders, checkboxes, the open process, progress and the play button. Red is kept for the buttons that act (Send to machine, Save, a dialog\'s main button), and marks on the bed stay black or white so they can\'t be mistaken for a drawing colour.'
+    ],
+    fixed: []
+  },
+  {
     version: '1.6.9', date: '10 Nov 2026',
     added: [],
     fixed: [
