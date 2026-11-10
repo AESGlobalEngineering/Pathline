@@ -101,6 +101,49 @@ function start(opts = {}) {
   } : {};
   const machine = new Machine(cfg, store, log, { vision: simVision });
 
+  // The screen's head drawing, fitted to the jobs this machine has run (follow-fit.js, in a
+  // worker after each Trotec run): when each reported position was true, and the route's timing.
+  // Kept in data/follow.json: { learnt: what's in use, last: the latest fit, used or not }
+  const FOLLOW_FILE = path.join(DATA, 'follow.json');
+  let followState = {};
+  try { followState = JSON.parse(fs.readFileSync(FOLLOW_FILE, 'utf8')) || {}; } catch (e) { /* none yet */ }
+  machine.learnt = followState.learnt || null;
+  let fitting = null;
+  const trotecMotion = () => ({ ...require('./ctrl/trotec/motion').travelLimits(cfg, require('./ctrl/trotec/compile').PLANNER.Standard, (cfg.trotec && cfg.trotec.travelSpeed) || 700), cut: require('./ctrl/trotec/compile').cutProfile(require('./ctrl/trotec/compile').PLANNER.Standard) });
+  function fitFollow(why) {
+    if (fitting || cfg.controller !== 'trotec' || opts.sim) return fitting;
+    const { Worker } = require('worker_threads');
+    const L = followState.learnt || {};
+    fitting = new Promise((resolve) => {
+      let w;
+      try {
+        w = new Worker(path.join(__dirname, 'follow-worker.js'), { workerData: { dataDir: DATA, current: { stamp: L.stamp, travel: L.travel, cut: L.cut }, cfg, motion: trotecMotion() } });
+      } catch (e) { log('follow fit: not started (' + e.message + ')'); fitting = null; return resolve(null); }
+      log('follow fit: started (' + why + ')');
+      w.on('message', (m) => {
+        if (m.log) log(m.log);
+        if (m.error) log('follow fit: ' + m.error);
+        if (!m.result) return;
+        const r = m.result;
+        const learnt = { ...(followState.learnt || {}) };
+        if (r.stampUse) learnt.stamp = r.stamp;
+        if (r.use) Object.assign(learnt, { travel: r.travel, cut: r.cut, score: r.after, runs: r.runs });
+        if (r.stampUse || r.use) {
+          learnt.at = r.at;
+          machine.learnt = learnt;
+          if (machine.link) machine.link.stamp = learnt.stamp || null;
+        }
+        followState = { learnt: r.stampUse || r.use ? learnt : followState.learnt || null, last: r };
+        try { fs.writeFileSync(FOLLOW_FILE, JSON.stringify(followState, null, 2)); } catch (e) { log('follow fit: not saved (' + e.message + ')'); }
+      });
+      const done = () => { fitting = null; resolve(followState); };
+      w.on('error', (e) => { log('follow fit: ' + e.message); done(); });
+      w.on('exit', done);
+    });
+    return fitting;
+  }
+  machine.onRunSaved = (job) => { setTimeout(() => fitFollow('after ' + job.name), 5000); };
+
   // settings the machine finds out for itself: saved like Setup's, without a restart
   async function learnt(patch, why) {
     const next = config.merge(cfg, patch);
@@ -261,9 +304,17 @@ function start(opts = {}) {
       camera: { open: !!machine.vision.camera, info: machine.vision.camera ? machine.vision.camera.info || null : null, busy: machine.camBusy || null, exposure: machine.vision.exposureNow(), defaults: VisionDefaults },
       jobs: store.jobs.filter((j) => !j.hidden), history: store.history.slice(0, 100), controllers: Object.keys(CONTROLLERS),
       // how the Trotec travels between cuts (the screen times the running job's route with it)
-      // and along the cuts (slower round curves and corners), as its estimate times them
-      motion: cfg.controller === 'trotec' ? { ...require('./ctrl/trotec/motion').travelLimits(cfg, require('./ctrl/trotec/compile').PLANNER.Standard, (cfg.trotec && cfg.trotec.travelSpeed) || 700), cut: require('./ctrl/trotec/compile').cutProfile(require('./ctrl/trotec/compile').PLANNER.Standard) } : null
+      // and along the cuts (slower round curves and corners), as its estimate times them; follow:
+      // the route's timing for drawing the head, as fitted to the jobs run (follow-fit.js)
+      motion: cfg.controller === 'trotec' ? { ...trotecMotion(), follow: machine.learnt && machine.learnt.travel ? { travel: machine.learnt.travel, cut: machine.learnt.cut } : undefined } : null
     }),
+    // how the head drawing is fitted: what's in use, and the latest fit
+    'GET /follow': () => ({ ...followState, fitting: !!fitting }),
+    'POST /follow/fit': async (b, req) => {
+      if (!isLocalReq(req)) throw err(403, 'Only on the machine\'s own screen');
+      if (cfg.controller !== 'trotec') throw err(409, 'Fitted for Trotec lasers only');
+      return (await fitFollow('asked for')) || followState;
+    },
     'GET /log': () => logLines,
     'GET /ports': async () => {
       try {

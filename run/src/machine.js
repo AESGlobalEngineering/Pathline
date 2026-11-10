@@ -46,6 +46,8 @@ class Machine {
     this.ctrl = null; // the controller's settings: read again once connected
     const link = makeLink(this.cfg, this.log);
     this.link = link;
+    // when each reported position was true, as fitted to the jobs run (follow-fit.js)
+    link.stamp = (this.learnt && this.learnt.stamp) || null;
     // status the link reads on its own (e.g. while a Trotec's buffer is full during a job)
     link.onPoll = (p) => { if (this.link === link) { this.apply(p); if (this.onPos) this.onPos(p); } };
     // where an RDD6584's head homes and parks: the server keeps it in the setup
@@ -543,10 +545,15 @@ class Machine {
     Object.assign(this.st, { state: 'running', job: job.id, progress: 0, message: prepare ? 'Reading registration marks' : 'Running ' + job.name });
     let total = 1;
     let doneSec = 0;
-    const timeline = []; // [ms since the stream started, x, y, marker, state, 'p' for a status check while the buffer was full]
+    // [ms since the stream started, x, y, marker, state, 'p' for a status check while the buffer
+    // was full, and (Trotec) ms when the asking packet went out, the reply's kind ('ok', 'full'),
+    // the packet's data bytes, ms when the reply came in]: the last four let follow-fit.js find
+    // when the laser really read each position
+    const timeline = [];
     let since = Date.now();
+    const rel = (v) => (Number.isFinite(v) ? v - since : null);
     const record = (p, how) => {
-      if (timeline.length < 20000) timeline.push([(p.at || Date.now()) - since, p.pos ? p.pos.x : null, p.pos ? p.pos.y : null, p.marker === undefined ? null : p.marker, p.state, how]);
+      if (timeline.length < 20000) timeline.push([(p.at || Date.now()) - since, p.pos ? p.pos.x : null, p.pos ? p.pos.y : null, p.marker === undefined ? null : p.marker, p.state, how, rel(p.sent), p.kind || null, Number.isFinite(p.len) ? p.len : null, rel(p.rx)]);
     };
     this.onPos = (p) => record(p, 'p');
     const setProgress = (sec) => {
@@ -661,6 +668,8 @@ class Machine {
       }
       this.store.finish(job, result, startedAt, this.cfg.removeDone);
       if (timeline.length && this.store.saveRun) this.store.saveRun(job, { startedAt, result, estimate: program ? program.seconds : null, steps: program ? program.segments.filter((s) => s.kind === 'stream').flatMap((s) => s.steps) : [], timeline });
+      // a run saved: the server fits the screen's head drawing to it (follow-fit.js)
+      if (timeline.length && this.onRunSaved) { try { this.onRunSaved(job, result); } catch (e) { /* never stops the run ending */ } }
       this.run = null;
       this.onPos = null;
       this.st.job = null;

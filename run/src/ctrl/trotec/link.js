@@ -198,6 +198,9 @@ class TrotecLink {
     let crcErrors = 0;
     for (;;) {
       this.write(packet(id, imm, data));
+      // when this packet went out: the laser read the head position somewhere between this and
+      // its reply arriving (kept with each position, so the screen's timing can be fitted to it)
+      const sentAt = Date.now();
       let got;
       try {
         got = await this.waitFor(() => {
@@ -225,7 +228,7 @@ class TrotecLink {
             this.fault = { at: Date.now(), text: why };
           }
         }
-        r.at = Date.now();
+        this.stamped(r, sentAt, 'ok', data.length);
         if (r.status) this.lastReply = r;
         return r;
       }
@@ -236,7 +239,7 @@ class TrotecLink {
         // position as fresh as any, without waiting for room
         const fresh = parseReply(got);
         if (fresh.status && fresh.xy) {
-          fresh.at = Date.now();
+          this.stamped(fresh, sentAt, 'full', data.length);
           this.lastReply = fresh;
           if (opts.poll) return fresh;
           if (this.onPoll && !opts.urgent) this.onPoll(this.view(fresh));
@@ -272,11 +275,24 @@ class TrotecLink {
     }
   }
 
+  // A reply's times: sent (the packet out), rx (the reply in), and at, when the head was where it
+  // says. Replies came back with ±80 ms of scatter (three reports in a row on a straight cut at a
+  // steady speed), so `at` is taken from sent and rx as fitted to the jobs run (this.stamp, learnt
+  // by follow-fit.js: at = sent + k·(rx − sent) + c, per kind of reply); the reply's arrival
+  // until it has been fitted
+  stamped(r, sent, kind, len) {
+    const rx = Date.now();
+    const s = this.stamp && (this.stamp[kind] || this.stamp.all);
+    r.sent = sent; r.rx = rx; r.kind = kind; r.len = len;
+    r.at = s ? Math.min(rx, Math.round(sent + s.k * (rx - sent) + (s.c || 0))) : rx;
+    return r;
+  }
+
   view(r) {
     const s = r.status || {};
     const pos = r.xy ? this.U.toMm(r.xy[0], r.xy[1]) : [NaN, NaN];
     const state = s.name === 'busy' ? 'busy' : s.name === 'pause' || s.name === 'hardwarePause' ? 'paused' : s.name === 'service' ? 'alarm' : 'idle';
-    return { state, pos: { x: +pos[0].toFixed(3), y: +pos[1].toFixed(3), z: 0 }, interlock: !!s.interlock, marker: r.marker, raw: s.raw, at: r.at };
+    return { state, pos: { x: +pos[0].toFixed(3), y: +pos[1].toFixed(3), z: 0 }, interlock: !!s.interlock, marker: r.marker, raw: s.raw, at: r.at, sent: r.sent, rx: r.rx, kind: r.kind, len: r.len };
   }
 
   async poll() { return this.view(await this.exchange(POLL, null, { poll: true })); }

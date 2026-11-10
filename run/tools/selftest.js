@@ -1215,7 +1215,63 @@ async function discoveryTests() {
   ok(/^run-[0-9a-f]{8}$/.test(ids[0] || '') && ids[0] === ids[1], 'GET /info has a stable id (' + ids[0] + ', the same after a restart)', JSON.stringify(ids));
 }
 
-jogTests().then(linkTests).then(serverTests).then(discoveryTests).then(materialsTests).then(visionTests).then(() => {
+// ---------------------------------------------------------------- the head drawing, fitted to jobs run
+// Synthetic runs from a known "real" machine: positions sampled at their true time, reported with
+// a scattered delay. The fitter has to find when the laser read them, and the travel timing.
+async function followFitTests() {
+  console.log('Head drawing fitted to the jobs run');
+  const F = require('../ui/follow');
+  const ff = require('../src/follow-fit');
+  // a job of 30 strips 120 × 15 mm at 30 mm/s, spread over the bed, each a little different
+  // (long straight sides for the stamp)
+  const strip = (x, y, w) => [[x, y], [x + w, y], [x + w, y + 15], [x, y + 15]];
+  const pkg = {
+    format: 'lrc-job-package', version: 1, job: { name: 'strips' }, machine: { type: 'laser' },
+    processes: [{ index: 0, name: 'Cut', proc: 'Cut', power: 45, speed: 30, f: 5000, passes: 1 }],
+    toolpath: Array.from({ length: 30 }, (_, k) => ({ type: 'cut', process: 0, closed: true, p: strip(40 + (k % 3) * 220 + (k * 7) % 30, 40 + Math.floor(k / 3) * 45, 100 + (k * 13) % 40) }))
+  };
+  const motion = { a: 500, j: 10000, v: 700, cut: { arc: 1000, corner: 20, acc: 2000 } };
+  // the "real" machine: travel quicker than the default profile, the reads 30 % of the way from
+  // asking to the reply
+  const truth = { travel: { a: 1000, j: 30000, v: 1000 }, cut: { ...F.TROTEC.cut } };
+  const route = F.routeOf(pkg, F.motionFor({ ...motion, follow: truth }, {}));
+  let seed = 7;
+  const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+  const mkRun = (id) => {
+    const tl = [];
+    let sent = 0;
+    while (sent < route.end * 1000) {
+      const lat = 20 + rnd() * 180, read = sent + 0.3 * lat, rx = sent + lat;
+      const at = F.routeAt(route, read / 1000), g = route.segs[at.k];
+      // the marker as the Trotec shows it: part i's (i done before it) once the head is at its start
+      const m = g.kind === 'travel' ? g.step - 1 : g.step;
+      tl.push([rx, at.p[0], at.p[1], m > 0 ? m : null, 'busy', '', sent, rnd() < 0.7 ? 'ok' : 'full', 0, rx]);
+      sent = rx + 150 + rnd() * 300;
+    }
+    return { id, result: 'Completed', estimate: route.end, steps: pkg.toolpath.map((s, i) => ({ i, marker: i + 1, seconds: route.end / pkg.toolpath.length })), timeline: tl };
+  };
+  const data = fs.mkdtempSync(path.join(os.tmpdir(), 'pathline-follow-'));
+  fs.mkdirSync(path.join(data, 'runs'));
+  for (const id of ['J0001', 'J0002']) {
+    fs.mkdirSync(path.join(data, 'jobs', id), { recursive: true });
+    fs.writeFileSync(path.join(data, 'jobs', id, 'package.json'), JSON.stringify(pkg));
+    fs.writeFileSync(path.join(data, 'runs', id + '-x.json'), JSON.stringify(mkRun(id)));
+  }
+  const ks = ff.fitStampK(ff.loadRuns(data));
+  ok(ks && ks.ok && Math.abs(ks.ok.k - 0.3) <= 0.1, 'when the laser read each position: found between asking and the reply (k ' + (ks && ks.ok ? ks.ok.k : '?') + ', truth 0.3)', JSON.stringify(ks));
+  const r = ff.fit(data, {}, { motion, cfg: {}, steps: [1.6, 1.25] });
+  ok(r.use && r.after.median < r.before.median && r.travel.a > F.TROTEC.travel.a * 0.3, 'the route\'s timing fitted to the runs: drawn head ' + (r.after ? r.after.median : '?') + ' mm from the reports, was ' + (r.before ? r.before.median : '?') + ' mm', JSON.stringify({ use: r.use, before: r.before, after: r.after, travel: r.travel }));
+  // fitted to its own truth: nothing much left to win, so it isn't changed
+  const r2 = ff.fit(data, { stamp: r.stamp, travel: truth.travel, cut: truth.cut }, { motion, cfg: {}, steps: [1.25] });
+  ok(!r2.use, 'already right: the fit keeps what\'s in use', JSON.stringify({ before: r2.before, after: r2.after }));
+  // the link applies a fitted stamp
+  const L = new (require('../src/ctrl/trotec/link'))(config.defaults('trotec'), () => {});
+  L.stamp = { ok: { k: 0.5, c: 0 } };
+  const rr = L.stamped({}, Date.now() - 100, 'ok', 0);
+  ok(Math.abs(rr.rx - rr.sent - 100) < 20 && Math.abs(rr.at - (rr.sent + 0.5 * (rr.rx - rr.sent))) < 1.01, 'the link times each position as fitted (half way from asking to the reply)', JSON.stringify(rr));
+}
+
+jogTests().then(linkTests).then(serverTests).then(discoveryTests).then(followFitTests).then(materialsTests).then(visionTests).then(() => {
   console.log(failed ? '\n' + failed + ' FAILED' : '\nAll passed');
   process.exit(failed ? 1 : 0);
 });
