@@ -548,7 +548,7 @@ class Machine {
     const startedAt = new Date().toISOString();
     // placement: where the job was put (anchored at the head; print and cut adds its marks), kept
     // with the run so the follow fit replays the job exactly where it was cut
-    this.run = { job, program, ctl, z: z || null, placement: { anchor: job.anchor ? { x: job.anchor.x, y: job.anchor.y } : null } };
+    this.run = { job, program, ctl, startedAt, z: z || null, placement: { anchor: job.anchor ? { x: job.anchor.x, y: job.anchor.y } : null } };
     const runRef = this.run;
     job.status = 'running';
     job.progress = 0;

@@ -240,6 +240,8 @@ function start(opts = {}) {
   });
   // announced on the network (once listening): Prepare finds the machine without an IP address
   let discovery = null;
+  // what watchers read (GET /api/v1/monitor, /api/v1/events)
+  const monitor = require('./monitor').createMonitor({ machine, store, dataDir: DATA, info: () => ({ id: deviceId, ...infoView() }) });
 
   // what Pathline is told while no machine has been added
   const needMachine =() => { if (!cfg.configured) throw err(409, 'No machine is set up in Pathline Run yet. Add one on its screen: Setup → Add machine.'); };
@@ -260,6 +262,9 @@ function start(opts = {}) {
   // ---------------------------------------------------------------- Pathline protocol
   const api = {
     'GET /info': () => (needMachine(), { id: deviceId, ...infoView(), firmware: machine.info.firmware || '', bed: cfg.bed }),
+    // for watchers (Pathline Monitor): state and when it began, waits, the job, queue and today's
+    // finished jobs, read only (monitor.js). Answers with no machine set up too (state idle, link offline)
+    'GET /monitor': () => monitor.view(),
     'GET /machine': () => (needMachine(), config.machineView(cfg)),
     'GET /status': () => machine.status(),
     'GET /jobs': () => jobsView(),
@@ -526,6 +531,8 @@ function start(opts = {}) {
     const url = new URL(req.url, 'http://x');
     const p = url.pathname;
     try {
+      // watchers (Pathline Monitor): the same answer as GET /api/v1/monitor, as it changes
+      if (req.method === 'GET' && p === '/api/v1/events') return monitor.stream(req, res);
       if (p.startsWith('/api/v1/') || p.startsWith('/api/local/')) {
         const isLocal = p.startsWith('/api/local/');
         const route = req.method + ' ' + p.replace(/^\/api\/(v1|local)/, '');
@@ -630,6 +637,7 @@ function start(opts = {}) {
         close: async () => {
           try { if (discovery) await discovery.close(); } catch (e) { /* closing anyway */ }
           try { await machine.zaxis.close(); } catch (e) { /* closing anyway */ }
+          try { monitor.close(); } catch (e) { /* closing anyway */ }
           try { await machine.stop(); } catch (e) { /* closing anyway */ }
           try { if (machine.link) await machine.link.close(); } catch (e) { /* closing anyway */ }
           server.close();

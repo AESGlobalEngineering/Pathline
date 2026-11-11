@@ -99,3 +99,23 @@ A server-sent event stream: the same object as `/api/v1/monitor` whenever someth
 
 - Release Run as usual: bump `run/package.json`, add to `run/src/changelog.js`, then commit and push to `main`.
 - In the commit message, say which Run version has `/api/v1/monitor` and the discovery `id`, so Monitor can switch over to it.
+
+## Done in Pathline Run 0.7.12
+
+All three parts:
+
+- **Discovery:** the `id` in `GET /api/v1/info`, and the mDNS announcement. See RUN-DISCOVERY-BRIEF.md. The installer's firewall rules are on private networks only.
+- **`GET /api/v1/monitor`** (`run/src/monitor.js`), with the fields and shape above. Some details:
+  - `since` and `interlockSince` are kept in Run's data folder (`monitor.json`) across a restart, while the state is still the same.
+  - `job.remaining` is `job.seconds × (1 − progress)`. `seconds` is Run's own estimate as converted for the machine. `progress` comes from the parts the laser reports done, ignoring the previous job's last marker.
+  - `job.beds` is `[bed, of]`, taken from the job's feed steps against its progress.
+  - `queue[].autoStart` is true for the jobs left in a Queue → Select run.
+  - `today` is Run's history since local midnight.
+  - With no machine set up, it still answers: `link` is `offline`.
+- **`GET /api/v1/events`:**
+  - It sends the same object straight away, then whenever it changes; while only a job's `elapsed` and `remaining` move, at most once a second.
+  - It sends `event: finished` with the `today` entry, once per job.
+  - A comment line goes every 25 s.
+- **Documented** in PROTOCOL.md under *Watching*.
+- **Self-test** (`run/tools/selftest.js`, "Watchers"): `remaining` while a job runs, the finished job once in `today` and one `finished` event, `markWait.since`, `interlockSince`, hidden jobs left out of `queue`, and `autoStart`.
+- `/api/local/state` is unchanged.

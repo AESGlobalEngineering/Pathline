@@ -17,6 +17,38 @@ This is how **Pathline** talks to the device that runs the machine (the HMI / co
 | GET | `/jobs` | The machine's queue, in run order: `[{ id, name, status: "queued" \| "running" \| "done" \| "stopped", progress: 0–1, seconds, receivedAt, finishedAt }]`. The app's Queue tab shows this list, polled every 3 s. |
 | DELETE | `/jobs/{id}` | Remove a job that hasn't started (`409` if it is running) |
 | POST | `/jobs/order` | `{ ids: [...] }`: new order for the waiting jobs |
+| GET | `/monitor` | Everything a watcher needs in one small, read-only answer. See *Watching* below. |
+| GET | `/events` | The same as `/monitor`, as a server-sent event stream. See *Watching* below. |
+
+## Watching (`GET /monitor`, `GET /events`)
+
+For watchers that only read, such as Pathline Monitor, the workshop's phone app (hmi/RUN-MONITOR-BRIEF.md). These are additions to protocol 1, which stays 1. A device that has them answers `GET /monitor` with a few KB and `cache-control: no-store`; one without them answers 404, and a watcher then falls back on `/status` and `/jobs`. Neither changes anything on the machine. Pathline Run has them from 0.7.12.
+
+```json
+{
+  "id": "run-3f9c2a71", "name": "Laser A", "type": "laser", "ctrl": "Trotec", "model": "Speedy 400", "app": "Pathline Run 0.7.12",
+  "link": "online", "state": "running", "since": "2026-11-11T09:41:07.000Z", "message": "Running Coasters",
+  "interlock": false, "interlockSince": null,
+  "markWait": null,
+  "job": { "id": "J0031", "name": "Coasters", "material": "Birch ply 3 mm", "seconds": 612, "progress": 0.43, "elapsed": 261, "remaining": 349, "startedAt": "2026-11-11T09:41:07.000Z", "beds": null },
+  "queue": [ { "id": "J0032", "name": "Name badges", "material": "Birch ply 3 mm", "seconds": 1080, "autoStart": false } ],
+  "today": [ { "id": "J0030", "name": "Keyrings", "material": "Cast acrylic 3 mm", "seconds": 742, "result": "Completed", "startedAt": "2026-11-11T09:20:01.000Z", "finishedAt": "2026-11-11T09:32:23.000Z" } ]
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `id`, `name`, `type`, `ctrl`, `model`, `app` | As `GET /info` |
+| `link` | `online`, `connecting` or `offline`: whether the device reaches the machine itself |
+| `state`, `since` | As `/status` `state` (`idle`, `running`, `paused`, `framing`, `alarm`), and when it last changed (kept across a restart of the device when it can be) |
+| `message` | As `/status` `message`; the alarm's text in `alarm` |
+| `interlock`, `interlockSince` | Lid open, and since when |
+| `markWait` | Print and cut waiting for a registration mark to be found by hand: `{ mark, of, since }`, else `null` |
+| `job` | The job running (or paused, or reading its marks), else `null`. `seconds` is the device's own estimate; `progress` 0–1; `elapsed` and `remaining` in seconds are the device's own figures; `beds` is `[bed, of]` on a plotter job over several beds, else `null` |
+| `queue` | The queued jobs in run order, without the hidden ones. `autoStart: true` when the device starts the job by itself when the one before finishes (a plotter's Select run), else `false` |
+| `today` | Jobs finished or stopped since local midnight, newest first, at most 50. `result` is `Completed` or `Stopped`. Each keeps its `id` and `finishedAt` exactly, so a watcher sees a job finish once |
+
+`GET /events` (`text/event-stream`) sends the same object as a `data:` line straight away, then again whenever anything in it changes: at most once a second while only a job's `elapsed` and `remaining` move. When a job finishes it also sends `event: finished` with that job's `today` entry. A comment line every 25 s keeps the connection open.
 
 ## Send a job
 

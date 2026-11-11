@@ -87,7 +87,7 @@ Add both as inbound rules in the NSIS installer (`netsh advfirewall firewall add
 - [x] The installer opens TCP and UDP 5353 inbound for Run.
 - [ ] Prepare lists the machine with `via` including `announce`, and follows it to a new IP address.
 
-## Done in Pathline Run 0.7.11
+## Done in Pathline Run 0.7.12
 
 - **`id`:** `run-` plus 8 hex digits, made the first time Run starts and kept in `app.json` in Run's data folder, beside the app's own state rather than the machine's setup. Setup and Remove machine can't change it. A fresh data folder gets a new one.
 - **Responder:** `run/src/discovery.js`, on Node's own `dgram` with no extra modules.
@@ -95,5 +95,5 @@ Add both as inbound rules in the NSIS installer (`netsh advfirewall firewall add
   - The A records list the address on the asker's network first.
   - It announces twice, 1 s apart, on start-up, and again when the name, port or an address changes. It checks every 10 s and also when Setup is saved, and says goodbye with TTL 0 on quit.
   - It stays quiet until a machine is set up. A simulated machine (`--sim`) doesn't announce unless it's started with `--announce`.
-- **Firewall:** `run/build/installer.nsh` adds "Pathline Run", TCP for the program on any port so a changed HTTP port still works, and "Pathline Run (discovery)", UDP 5353. The uninstaller removes both. The rules need the installer to run elevated (an install for all users). A per-user install, or the portable exe, relies on Windows' own "allow this app" prompt.
+- **Firewall:** `run/build/installer.nsh` adds "Pathline Run", TCP for the program on any port so a changed HTTP port still works, and "Pathline Run (discovery)", UDP 5353. Both are on private networks only, as RUN-MONITOR-BRIEF.md asks. The uninstaller removes both. The rules need the installer to run elevated (an install for all users). A per-user install, or the portable exe, relies on Windows' own "allow this app" prompt.
 - **Self-test:** `run/tools/selftest.js` → "Found on the network". It checks that Prepare's own `browse()`, run against Run's responder, gets the `id`, name, port and type, and that a rename keeps the `id`. It also checks that `/info`'s `id` stays the same across restarts.

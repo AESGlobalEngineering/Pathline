@@ -1164,6 +1164,70 @@ async function visionTests() {
 // ---------------------------------------------------------------- found on the network
 // Run's mDNS answers, as Pathline Prepare asks for them (its own discover.js when it's in this
 // repo): a question from an ordinary port is answered straight back, with id, name, port, IP
+// ---------------------------------------------------------------- watchers: GET /api/v1/monitor, /events
+async function monitorTests() {
+  console.log('Watchers (GET /api/v1/monitor, /api/v1/events)');
+  // the answer from a stand-in machine and queue
+  const { createMonitor } = require('../src/monitor');
+  const dataM = fs.mkdtempSync(path.join(os.tmpdir(), 'pathline-mon-'));
+  const machine = { st: { state: 'idle', link: 'online', interlock: false, progress: 0, message: 'Ready', job: null, markWait: null }, run: null, batch: [] };
+  const store = { jobs: [{ id: 'J1', name: 'One', status: 'queued', seconds: 100 }, { id: 'J2', name: 'Two', status: 'queued', hidden: true }, { id: 'J3', name: 'Three', status: 'queued', seconds: 50 }], history: [], pkg: () => ({}) };
+  const mon = createMonitor({ machine, store, dataDir: dataM, info: () => ({ id: 'run-00000001', name: 'Test', type: 'laser', ctrl: 'Trotec', model: 'Q', app: 'Pathline Run x' }) });
+  let v = mon.view();
+  ok(v.queue.map((j) => j.id).join() === 'J1,J3' && v.job === null && v.state === 'idle' && v.since && v.markWait === null, 'monitor: hidden jobs are left out of the queue, nothing running', JSON.stringify(v.queue));
+  machine.batch = ['J3'];
+  ok(mon.view().queue.find((j) => j.id === 'J3').autoStart === true && mon.view().queue.find((j) => j.id === 'J1').autoStart === false, 'monitor: a job Run starts by itself after the one before is autoStart');
+  const before = v.since;
+  await new Promise((r) => setTimeout(r, 20));
+  Object.assign(machine.st, { state: 'running', job: 'J1', progress: 0.4, message: 'Running One' });
+  machine.run = { job: store.jobs[0], startedAt: new Date(Date.now() - 30000).toISOString() };
+  mon.tick();
+  v = mon.view();
+  ok(v.job && v.job.remaining === 60 && Math.abs(v.job.elapsed - 30) <= 1 && v.since !== before, 'monitor: a running job shows remaining (60 s of 100 at 40 %) and elapsed, and since moved', JSON.stringify(v.job));
+  machine.st.markWait = { mark: 2, of: 3 };
+  mon.tick();
+  v = mon.view();
+  ok(v.markWait && v.markWait.mark === 2 && v.markWait.of === 3 && v.markWait.since, 'monitor: markWait carries since', JSON.stringify(v.markWait));
+  machine.st.markWait = null;
+  machine.st.interlock = true;
+  mon.tick();
+  ok(mon.view().interlock && mon.view().interlockSince, 'monitor: lid open, with interlockSince');
+  mon.close();
+
+  // the real thing: a simulated machine runs a job; it shows while it runs, and finishes once
+  const data = fs.mkdtempSync(path.join(os.tmpdir(), 'pathline-run-'));
+  fs.writeFileSync(path.join(data, 'config.json'), JSON.stringify({ controller: 'trotec', regMarks: 'ignore', bed: [813, 508], sim: { speedup: 120 } }));
+  const port = 19370 + Math.floor(Math.random() * 300);
+  const srv = spawn(process.execPath, [path.join(__dirname, '..', 'src', 'server.js'), '--sim', '--port', String(port), '--data', data], { stdio: ['ignore', 'pipe', 'pipe'] });
+  const base = 'http://127.0.0.1:' + port + '/api/v1';
+  const get = async (r) => { const res = await fetch(base + r); return { res, j: await res.json() }; };
+  let events = '', ac;
+  try {
+    for (let i = 0; i < 60; i++) { try { await get('/info'); break; } catch (e) { await new Promise((r) => setTimeout(r, 100)); } }
+    const m0 = await get('/monitor');
+    ok(m0.res.status === 200 && m0.res.headers.get('cache-control') === 'no-store' && /^run-[0-9a-f]{8}$/.test(m0.j.id) && m0.j.link === 'online' && m0.j.state === 'idle' && Array.isArray(m0.j.today) && JSON.stringify(m0.j).length < 8000, 'GET /monitor: small, no-store, with the machine id', JSON.stringify(m0.j).length + ' bytes');
+    // the event stream, listened to while the job runs
+    ac = new AbortController();
+    const es = await fetch(base + '/events', { signal: ac.signal });
+    ok(es.headers.get('content-type').startsWith('text/event-stream'), 'GET /events: a server-sent event stream');
+    (async () => { const rd = es.body.getReader(); const dec = new TextDecoder(); try { for (;;) { const { value, done } = await rd.read(); if (done) break; events += dec.decode(value); } } catch (e) { /* aborted */ } })();
+    const q = await (await fetch(base + '/jobs', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(example) })).json();
+    await fetch(base + '/start', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: q.id }) });
+    await new Promise((r) => setTimeout(r, 700));
+    const m1 = (await get('/monitor')).j;
+    ok(m1.state === 'running' && m1.job && m1.job.id === q.id && Number.isFinite(m1.job.remaining) && m1.job.remaining > 0 && m1.job.startedAt, 'GET /monitor while it runs: the job with remaining ' + (m1.job && m1.job.remaining) + ' s', JSON.stringify(m1.job));
+    let m2;
+    for (let i = 0; i < 80; i++) { await new Promise((r) => setTimeout(r, 250)); m2 = (await get('/monitor')).j; if (m2.state === 'idle' && m2.today.length) break; }
+    await new Promise((r) => setTimeout(r, 600));
+    const m3 = (await get('/monitor')).j;
+    ok(m2.today.filter((x) => x.id === q.id).length === 1 && m2.today[0].result === 'Completed' && m3.today[0].finishedAt === m2.today[0].finishedAt && m2.job === null, 'GET /monitor after: the job once in today, finishedAt unchanged', JSON.stringify(m2.today));
+    ok((events.match(/event: finished/g) || []).length === 1 && events.includes('"id":"' + q.id + '"'), 'GET /events: one "finished" event for the job', (events.match(/event: finished/g) || []).length + ' finished events');
+  } finally {
+    if (ac) ac.abort();
+    srv.kill();
+  }
+}
+
 async function discoveryTests() {
   console.log('Found on the network (mDNS)');
   const disc = require('../src/discovery');
@@ -1341,7 +1405,7 @@ async function zaxisTests() {
   ok(zf.state === 'up', 'paused or stopped: the nozzle goes up');
 }
 
-jogTests().then(linkTests).then(serverTests).then(discoveryTests).then(followFitTests).then(zaxisTests).then(materialsTests).then(visionTests).then(() => {
+jogTests().then(linkTests).then(serverTests).then(monitorTests).then(discoveryTests).then(followFitTests).then(zaxisTests).then(materialsTests).then(visionTests).then(() => {
   console.log(failed ? '\n' + failed + ' FAILED' : '\nAll passed');
   process.exit(failed ? 1 : 0);
 });
