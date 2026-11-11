@@ -507,6 +507,8 @@ class Machine {
       this.execute(job, null, async (ctl, status) => {
         const r = await this.vision.readMarks(pkg, ctl, status, { anchored: !!job.anchor });
         this.st.marks = r.found;
+        // kept with the run: where the marks were expected and found (follow-fit.js rebuilds the job as cut)
+        if (this.run && this.run.job === job) this.run.placement = { ...(this.run.placement || {}), marks: { expected: r.expected, found: r.found, type: r.info && r.info.type } };
         // the job as moved onto the marks: the screen follows the head along this one (the
         // package as sent sat ~150 mm away on the X8 sheet: no position fitted it, the head jumped)
         const placed = Vision.corrected(pkg, r.f);
@@ -544,7 +546,10 @@ class Machine {
   execute(job, program, prepare, back, z) {
     const ctl = { aborted: false, paused: false };
     const startedAt = new Date().toISOString();
-    this.run = { job, program, ctl, z: z || null };
+    // placement: where the job was put (anchored at the head; print and cut adds its marks), kept
+    // with the run so the follow fit replays the job exactly where it was cut
+    this.run = { job, program, ctl, z: z || null, placement: { anchor: job.anchor ? { x: job.anchor.x, y: job.anchor.y } : null } };
+    const runRef = this.run;
     job.status = 'running';
     job.progress = 0;
     this.store.flush();
@@ -692,7 +697,7 @@ class Machine {
         } catch (e) { this.log('return to start: ' + e.message); }
       }
       this.store.finish(job, result, startedAt, this.cfg.removeDone);
-      if (timeline.length && this.store.saveRun) this.store.saveRun(job, { startedAt, result, estimate: program ? program.seconds : null, steps: program ? program.segments.filter((s) => s.kind === 'stream').flatMap((s) => s.steps) : [], timeline, ...(zRun ? { z: { dry: zRun.dry, log: zRun.log.map((e) => [e[0] - since, e[1], e[2], e[3]]) } } : {}) });
+      if (timeline.length && this.store.saveRun) this.store.saveRun(job, { startedAt, result, estimate: program ? program.seconds : null, steps: program ? program.segments.filter((s) => s.kind === 'stream').flatMap((s) => s.steps) : [], timeline, placement: runRef.placement, ...(zRun ? { z: { dry: zRun.dry, log: zRun.log.map((e) => [e[0] - since, e[1], e[2], e[3]]) } } : {}) });
       // a run saved: the server fits the screen's head drawing to it (follow-fit.js)
       if (timeline.length && this.onRunSaved) { try { this.onRunSaved(job, result); } catch (e) { /* never stops the run ending */ } }
       this.run = null;

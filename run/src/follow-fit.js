@@ -32,16 +32,23 @@ function loadRuns(dataDir, opts = {}) {
   const dir = path.join(dataDir, 'runs');
   let files = [];
   try { files = fs.readdirSync(dir).filter((n) => n.endsWith('.json')).sort(); } catch (e) { return []; }
+  // the latest runs, until there are enough positions (opts.reports, 12000) or opts.max runs (16):
+  // the latest 8 alone were short test and calibration grids (3100 positions), and fitted the
+  // drawing to them, not to the jobs
   const out = [];
+  let reports = 0;
   for (const f of files.reverse()) {
-    if (out.length >= (opts.max || 8)) break;
+    if (out.length >= (opts.max || 16) || reports >= (opts.reports || 12000)) break;
     let run, pkg;
     try { run = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')); } catch (e) { continue; }
     const busy = (run.timeline || []).filter((t) => t[4] === 'busy' && t[1] != null).length;
-    if (busy < (opts.minReports || 150)) continue;
+    // (60 reports: the 87 s calibration of fast cuts had ~170)
+    if (busy < (opts.minReports || 60)) continue;
     try { pkg = JSON.parse(fs.readFileSync(path.join(dataDir, 'jobs', run.id, 'package.json'), 'utf8')); } catch (e) { continue; }
-    if (!(pkg.toolpath || []).some((s) => Array.isArray(s.p) && s.p.length > 1)) continue;
+    // something the route follows: cut paths, or engraving (drawn along its lines as sent)
+    if (!(pkg.toolpath || []).some((s) => (Array.isArray(s.p) && s.p.length > 1) || s.type === 'engrave')) continue;
     out.push({ run, pkg, file: f });
+    reports += busy;
   }
   return out.reverse();
 }
@@ -60,10 +67,31 @@ function retimed(run, stamp) {
 }
 
 // ---------------------------------------------------------------- the job on the bed
-// Where the job really was: an affine fit of each step's start to where its marker first
-// showed, then refined on the reports (a print and cut job is moved onto its marks; this finds
-// it without the marks)
+// Where the job really was. A run saved since 11 Nov keeps it (run.placement: the anchor at the
+// head, and for print and cut the marks expected and found), and the job is rebuilt as it was
+// cut. Older runs: an affine fit of each step's start to where its marker first showed, refined
+// on the reports (on the test grid that was a few mm out at its far end)
+function savedPlacement(run, pkg0) {
+  const pl = run.placement;
+  if (!pl) return null;
+  let pkg = require('./job/anchor').apply(pkg0, pl.anchor || null);
+  if (pl.marks && pl.marks.expected && pl.marks.found) {
+    const fit = require('./vision/fit');
+    const f = fit.fit(pl.marks.expected, pl.marks.found, pl.marks.type || fit.typeFor(undefined, pl.marks.expected.length));
+    pkg = fit.transformPkg({ ...pkg, toolpath: (pkg.toolpath || []).filter((s) => s.type !== 'inspect') }, f);
+    if (pkg0.rows) pkg.rows = Object.fromEntries(Object.entries(pkg0.rows).map(([i, r]) => { const a = f([r.xs, r.y0]), b = f([r.xe, r.y1]); return [i, { ...r, xs: a[0], y0: a[1], xe: b[0], y1: b[1] }]; }));
+  } else if (pkg0.rows && pl.anchor) {
+    // the rows move with the anchor: by the shift of the first point that has one
+    const s0 = (pkg0.toolpath || []).findIndex((s) => Array.isArray(s.p) && s.p.length);
+    const dx = s0 >= 0 ? pkg.toolpath[s0].p[0][0] - pkg0.toolpath[s0].p[0][0] : 0, dy = s0 >= 0 ? pkg.toolpath[s0].p[0][1] - pkg0.toolpath[s0].p[0][1] : 0;
+    pkg.rows = Object.fromEntries(Object.entries(pkg0.rows).map(([i, r]) => [i, { ...r, xs: r.xs + dx, xe: r.xe + dx, y0: r.y0 + dy, y1: r.y1 + dy }]));
+  }
+  return pkg;
+}
+
 function placement(run, pkg0, M) {
+  const saved = savedPlacement(run, pkg0);
+  if (saved) return saved;
   const tl = run.timeline.filter((t) => t[1] != null);
   const tp = pkg0.toolpath;
   const cutIdx = tp.map((s, i) => (s.type === 'inspect' ? -1 : i)).filter((i) => i >= 0);
@@ -203,7 +231,8 @@ function tripleSpread(runs, kind, k) {
       res.push(tb - (ta + (lab / (lab + lbc)) * (tc - ta)));
     }
   }
-  return res.length >= 40 ? { n: res.length, spread: q(res, 0.9) - q(res, 0.1) } : null;
+  // (300 at least: 115 from calibration grids gave 455 ms of scatter, and a different answer)
+  return res.length >= 300 ? { n: res.length, spread: q(res, 0.9) - q(res, 0.1) } : null;
 }
 
 function fitStampK(runs) {

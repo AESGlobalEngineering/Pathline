@@ -47,8 +47,10 @@
       let th = Math.abs(dir[k] - dir[k - 1]) % (2 * Math.PI);
       if (th > Math.PI) th = 2 * Math.PI - th;
       if (th < 1e-3) continue;
-      const sh = Math.sin(th / 2);
-      const lim = th <= (16 * Math.PI) / 180 ? Math.sqrt((prof.arc * Math.min(L[k], L[k - 1])) / th) : sh >= 0.9999 ? 0 : Math.sqrt((prof.corner * sh) / (1 - sh));
+      // a corner: junction deviation, v² = corner · c / (1 − c), c = cos(φ/2) for a turn of φ
+      // (compile.js runTime; it was sin(φ/2), too fast round sharp turns)
+      const c = Math.cos(th / 2);
+      const lim = th <= (16 * Math.PI) / 180 ? Math.sqrt((prof.arc * Math.min(L[k], L[k - 1])) / th) : c <= 1e-4 ? 0 : Math.sqrt((prof.corner * c) / (1 - c));
       vj[k] = Math.min(v, lim);
     }
     const a = prof.acc;

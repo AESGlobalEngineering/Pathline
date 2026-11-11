@@ -21,10 +21,12 @@ const COMMIT_EVERY = 200;
 const CUT = { arc: 1000, acc: 2000 };
 const MARK_SEC = 4;
 // Engraving: each line is one move across the box and its overscan at the engraving speed, and
-// the head stops and turns at each end: 2·v/acc, 0.08 s at 300 mm/s. Fitted on J0068's labels
-// (45 lines at 300 mm/s: 8.5 s for an 11 mm label, 18.4 s for 76 mm; this gives 8.3 and 18.0 s).
-// Pathline Prepare's own time for them was 80–88 s, and the screen drew the head 10× too slow.
-const ENGRAVE = { acc: 7500 };
+// the head turns at each end in turn0 + turnPerV · v seconds: measured on the calibration bars
+// (J0076, 100–600 mm/s, 47 lines each) and J0068's labels (300 mm/s): 0.064 s a line at 100 mm/s,
+// 0.087 at 300, 0.113 at 600. Pathline Prepare's own time for J0068's labels was 80–88 s for 8.5,
+// and the screen drew the head 10× too slow. (2·v/7500, fitted at 300 mm/s alone, ran 26–38 %
+// long at 600 mm/s and short at 100.)
+const ENGRAVE = { turn0: 0.0578, turnPerV: 9.44e-5 };
 
 // The lines one engraving step is sent as: { pitch, lines, xs, xe (mm, the row with its
 // overscan), v, secPerLine }
@@ -36,9 +38,18 @@ function engraveLines(step, S) {
   const os = S.overscan + (p.overshoot || 0);
   const xs = Math.max(0, step.box[0] - os), xe = Math.min(S.bed[0], step.box[2] + os);
   const v = Math.min(p.speed, S.max);
-  return { pitch, lines, xs, xe, v, secPerLine: (xe - xs) / v + (2 * v) / ENGRAVE.acc };
+  return { pitch, lines, xs, xe, v, secPerLine: (xe - xs) / v + ENGRAVE.turn0 + ENGRAVE.turnPerV * v };
 }
-const cutProfile = (P) => ({ arc: CUT.arc, corner: P ? P[2] : 20, acc: CUT.acc });
+// (cfg.trotec.cutModel overrides any of them: for fitting and trying values)
+const cutProfile = (P, cfg) => ({ arc: CUT.arc, corner: P ? P[2] : 20, acc: CUT.acc, ...((cfg && cfg.trotec && cfg.trotec.cutModel) || {}) });
+
+// Travel between cuts, as it takes time: the head accelerates about 4× harder than the
+// planner's travel setting says, and each move costs 0.03 s more (stopping, the beam off and on).
+// Fitted on 18 runs (11–12 Nov: the jobs, and calibration hops of 20–600 mm, J0073): the planner
+// values ran 18–34 % long on 200–600 mm moves, and faster travel alone made the jobs of many
+// short moves 2 % short. Only the timing: what's sent to the laser is the planner's.
+// (cfg.trotec.travelModel overrides any of a, j, v, h: for fitting and trying values)
+const travelTiming = (T, cfg) => ({ ...T, a: T.a * 4, h: 0.03, ...((cfg && cfg.trotec && cfg.trotec.travelModel) || {}) });
 
 // Seconds along one cut run at speed v: moves are fitArcs pieces ({ to } lines, { c, r, sweep,
 // to } arcs), from run[0]
@@ -57,13 +68,17 @@ function runTime(start, moves, v, prof) {
     at = m.to;
   }
   if (!pc.length) return 0;
-  // the speed at each join: the slower piece's, and the corner's
+  // the speed at each join: the slower piece's, and the corner's. Junction deviation: with the
+  // direction turning by φ, v² = corner · c / (1 − c), c = cos(φ/2) (straight on: no limit; a full
+  // reversal: a stop). This was sin(φ/2), the same at 90° but a near stop at every slight bend of a
+  // curve and too fast round sharp ones: circles and small shapes ran 9–11 % long on the
+  // calibration grid (J0071)
   const vj = new Array(pc.length + 1).fill(0);
   for (let i = 1; i < pc.length; i++) {
     let th = Math.abs(pc[i].d0 - pc[i - 1].d1) % (2 * Math.PI);
     if (th > Math.PI) th = 2 * Math.PI - th;
-    const sh = Math.sin(th / 2);
-    const lim = th < 1e-3 ? Infinity : sh >= 0.9999 ? 0 : Math.sqrt((prof.corner * sh) / (1 - sh));
+    const c = Math.cos(th / 2);
+    const lim = th < 1e-3 ? Infinity : c <= 1e-4 ? 0 : c >= 0.9999 ? Infinity : Math.sqrt((prof.corner * c) / (1 - c));
     vj[i] = Math.min(pc[i].cap, pc[i - 1].cap, lim);
   }
   // as fast as it can get there, and still slow down in time
@@ -227,10 +242,12 @@ function compile(plan, cfg) {
     const P = PLANNER[st.planner];
     // travel between cuts: the planner set's idle limits, or a faster profile (motion.js)
     const T = travelLimits(cfg, P, S.travel);
+    // the travel's timing (what's sent stays T)
+    const Tt = travelTiming(T, cfg);
     let travelSec = 0;
     let cutSec = 0;
     const speed = Math.min(p.speed, S.max);
-    const prof = cutProfile(P);
+    const prof = cutProfile(P, cfg);
     for (const run of step.runs) {
       // travel with the beam off
       out(TT.selectPowerLevel(0), TT.commit());
@@ -239,7 +256,7 @@ function compile(plan, cfg) {
       st.vel = null;
       velocity(U.v(T.v));
       out(TT.moveXY(U.x(run[0][0]), U.y(run[0][1])), TT.commit());
-      travelSec += moveTime(Math.hypot(run[0][0] - head[0], run[0][1] - head[1]), Math.min(T.v, S.max), T.a, T.j);
+      travelSec += moveTime(Math.hypot(run[0][0] - head[0], run[0][1] - head[1]), Math.min(Tt.v, S.max), Tt.a, Tt.j) + (Tt.h || 0);
       head = run[run.length - 1];
       if (T.j !== P[7]) out(TT.setParam64(KEY.MaxTangentialJerk, P[7]), TT.commit());
       out(TT.setParam64(KEY.MaxTangentialAcc, P[6]), TT.commit());
@@ -290,10 +307,10 @@ function compile(plan, cfg) {
     });
     if (!lines.length) { warnings.push('Step ' + (step.i + 1) + ' (' + p.name + '): nothing to engrave'); return 0; }
     // the time: travel to the first line, then each line across and back (engraveLines)
-    const T = travelLimits(cfg, PLANNER[st.planner] || PLANNER.Standard, S.travel);
+    const T = travelTiming(travelLimits(cfg, PLANNER[st.planner] || PLANNER.Standard, S.travel), cfg);
     // (the first line always goes left to right)
     const first = [xs, lines[0].y];
-    const travel = moveTime(Math.hypot(first[0] - head[0], first[1] - head[1]), Math.min(T.v, S.max), T.a, T.j);
+    const travel = moveTime(Math.hypot(first[0] - head[0], first[1] - head[1]), Math.min(T.v, S.max), T.a, T.j) + (T.h || 0);
     const last = lines[lines.length - 1];
     head = [!step.bidi || (lines.length - 1) % 2 === 0 ? xe : xs, last.y];
     return travel + lines.length * E.secPerLine;
