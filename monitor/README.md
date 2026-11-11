@@ -40,7 +40,7 @@ On a PC or Raspberry Pi that's always on, on the same network as the machines:
 
 | For | Download | Then |
 |---|---|---|
-| **Windows PC** | **[⬇ Pathline-Monitor-Windows.zip](https://github.com/AESGlobalEngineering/Pathline/releases/download/pathlinemonitor/Pathline-Monitor-Windows.zip)** | Unzip it, then double-click **Start Pathline Monitor.cmd** and leave its window open. Node.js is inside: nothing else to install |
+| **Windows PC** | **[⬇ Pathline-Monitor-Windows.zip](https://github.com/AESGlobalEngineering/Pathline/releases/download/pathlinemonitor/Pathline-Monitor-Windows.zip)** | Right-click it, **Extract All**, then double-click **Start Pathline Monitor.cmd** in the folder it makes, and leave its window open. Node.js is inside: nothing else to install |
 | **Raspberry Pi**, Linux or Mac | [Pathline-Monitor.zip](https://github.com/AESGlobalEngineering/Pathline/releases/download/pathlinemonitor/Pathline-Monitor.zip) | Unzip it, then `sh start.sh` (needs Node.js 18 or newer: `sudo apt install nodejs`) |
 
 To update the hub, unzip a newer download over the old folder: `monitor/data` (the machines it found, phones' choices, alerts) and `monitor/config.json` are kept. Phones get the new app the next time they open it.

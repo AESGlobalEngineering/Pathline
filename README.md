@@ -47,7 +47,7 @@ Updates work as in Pathline: it checks when it opens and every minute, then asks
 
 | For | Download | Then |
 |---|---|---|
-| **Windows PC** | **[⬇ Pathline-Monitor-Windows.zip](https://github.com/AESGlobalEngineering/Pathline/releases/download/pathlinemonitor/Pathline-Monitor-Windows.zip)** | Unzip it, then double-click **Start Pathline Monitor.cmd** and leave its window open. Node.js is inside: nothing else to install |
+| **Windows PC** | **[⬇ Pathline-Monitor-Windows.zip](https://github.com/AESGlobalEngineering/Pathline/releases/download/pathlinemonitor/Pathline-Monitor-Windows.zip)** | Right-click it, **Extract All**, then double-click **Start Pathline Monitor.cmd** in the folder it makes, and leave its window open. Node.js is inside: nothing else to install |
 | **Raspberry Pi**, Linux or Mac | [Pathline-Monitor.zip](https://github.com/AESGlobalEngineering/Pathline/releases/download/pathlinemonitor/Pathline-Monitor.zip) | Unzip it, then `sh start.sh` (needs Node.js 18 or newer: `sudo apt install nodejs`) |
 
 **2. On each phone.** On that PC, open `http://localhost:8480`: it shows a QR code. Scan it with the phone's camera, on the workshop Wi-Fi (or type the address the hub's window prints, such as `http://192.168.1.20:8480`). Then add it to the Home Screen, and it opens full screen like an app:
