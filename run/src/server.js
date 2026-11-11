@@ -142,7 +142,80 @@ function start(opts = {}) {
     });
     return fitting;
   }
-  machine.onRunSaved = (job) => { setTimeout(() => fitFollow('after ' + job.name), 5000); };
+  machine.onRunSaved = (job, result) => {
+    setTimeout(() => fitFollow('after ' + job.name), 5000);
+    // a test grid cut: the head camera checks it as soon as the machine is free (vision/grid.js)
+    if (result === 'Completed' && cfg.vision && cfg.vision.enabled) {
+      let grid = null;
+      try { grid = gridOf(job.id); } catch (e) { /* not one */ }
+      if (grid) whenFree(() => checkGrid(job.id).catch((e) => log('test grid: ' + e.message)));
+    }
+  };
+
+  // ---- Automatic power and speed calibration: Pathline Prepare's test grid, checked by the head
+  // camera once it's cut; the pick saved into the material's cut setting on the operator's word
+  const GRIDS = path.join(DATA, 'grids');
+  let gridState = null; // { job, name, state: 'checking' | 'done' | 'failed', at, best, confident, error }
+  const gridOf = (id) => require('./vision/grid').detect(store.runPkg(id));
+  const gridResult = (id) => { try { return JSON.parse(fs.readFileSync(path.join(GRIDS, id + '.json'), 'utf8')); } catch (e) { return null; } };
+  function whenFree(fn) {
+    let n = 0;
+    const t = setInterval(() => { if (!machine.run && !machine.busy() && machine.st.state === 'idle') { clearInterval(t); fn(); } else if (++n > 240) clearInterval(t); }, 500);
+  }
+  async function checkGrid(id) {
+    const job = store.get(id) || store.history.find((h) => h.id === id);
+    if (!job) throw err(404, 'No such job');
+    const grid = gridOf(id);
+    if (!grid) throw err(409, '"' + job.name + '" isn\'t a power and speed test grid');
+    if (!cfg.vision || !cfg.vision.enabled) throw err(409, 'Turn the head camera on to check a test grid (Setup → Camera)');
+    gridState = { job: id, name: job.name, state: 'checking', at: new Date().toISOString() };
+    log('test grid: checking ' + job.name + ' (' + grid.squares.length + ' squares) with the head camera');
+    try {
+      // simulated: the cuts as a material takes them (through from sim.cutThreshold W·s/mm-ish: power ÷ speed)
+      if (opts.sim) {
+        const cam = await machine.vision.cam();
+        if (cam.laserCut && !(cam.gridCut || (cam.gridCut = new Set())).has(id)) {
+          cam.gridCut.add(id);
+          cam.scene.sheet = 150;
+          const th = Number((cfg.sim || {}).cutThreshold) || 1;
+          for (const s of grid.squares) cam.laserCut(s.p, s.power / s.speed >= th);
+        }
+      }
+      const r = await machine.cameraTask('Checking the test grid', (ctl, say) => require('./vision/grid').inspect(machine.vision, grid, ctl, say));
+      r.job = { id, name: job.name };
+      fs.mkdirSync(GRIDS, { recursive: true });
+      fs.writeFileSync(path.join(GRIDS, id + '.json'), JSON.stringify(r));
+      gridState = { job: id, name: job.name, state: 'done', at: r.at, best: r.best, confident: r.confident };
+      const n = r.squares.filter((s) => s.through).length;
+      log('test grid: ' + job.name + ': ' + n + ' of ' + r.squares.length + ' cut through (by ' + r.measure + ', separation ' + r.separation + (r.confident ? '' : ', not sure') + ')' + (r.best ? '; best ' + r.best.power + ' % at ' + r.best.speed + ' mm/s' : '') + ': ' + r.why);
+      return r;
+    } catch (e) {
+      gridState = { job: id, name: job.name, state: 'failed', at: new Date().toISOString(), error: e.message };
+      throw e;
+    }
+  }
+  // the pick into the material's cut process (materials.js: the list Prepare keeps on the machine;
+  // a newer updatedAt is what Prepare takes back)
+  function saveGrid(id, b) {
+    const r = gridResult(id);
+    if (!r || !r.best) throw err(409, 'There\'s no setting to save from that test grid');
+    const doc = materials.parse(DATA);
+    const mat = (doc.materials || []).find((x) => (r.material.id && x.id === r.material.id) || (!r.material.id && x.name === r.material.name));
+    if (!mat) throw err(409, 'This machine has no "' + r.material.name + '" in its materials yet: Pathline Prepare sends them when it connects. Set ' + r.best.power + ' % at ' + r.best.speed + ' mm/s in Prepare by hand this time.');
+    const procs = Array.isArray(mat.processes) ? mat.processes : [];
+    const cuts = procs.map((p, k) => [p, k]).filter(([p]) => p.proc === 'Cut');
+    const k = Number.isInteger(b && b.process) ? b.process : cuts.length ? cuts[0][1] : -1;
+    if (k < 0 || !procs[k]) throw err(409, '"' + mat.name + '" has no cut process to put the setting in');
+    const before = { power: procs[k].power, speed: procs[k].speed };
+    procs[k] = { ...procs[k], power: r.best.power, speed: r.best.speed };
+    mat.processes = procs;
+    mat.updatedAt = new Date().toISOString();
+    materials.write(DATA, JSON.stringify(doc));
+    log('test grid: ' + mat.name + ', ' + (procs[k].name || 'cut') + ': ' + before.power + ' % at ' + before.speed + ' mm/s → ' + r.best.power + ' % at ' + r.best.speed + ' mm/s (Pathline Prepare takes it on its next sync)');
+    r.saved = { at: mat.updatedAt, material: mat.name, process: procs[k].name || 'Cut', before };
+    fs.writeFileSync(path.join(GRIDS, id + '.json'), JSON.stringify(r));
+    return r.saved;
+  }
 
   // The head Z axis (zaxis/): the nozzle kept focused on the sheet as it lies, from a height map
   // the ultrasonic sensor scans. Followed along the route the screen draws (motion as fitted).
@@ -344,6 +417,8 @@ function start(opts = {}) {
     'GET /state': (b, req) => ({
       app: pkgJson.version, update: updates.status(), here: isLocalReq(req), config: cfg, status: machine.status(), info: machine.info, ruidaModels: ruidaModels.MODELS,
       fromController: machine.ctrl || null,
+      // a test grid's camera check: the screen opens its results when one is done
+      grid: gridState,
       // the head Z axis: on, its state, and the sheet's height map (drawn on the bed)
       zaxis: { enabled: machine.zaxis.enabled(), state: machine.zaxis.state, fault: machine.zaxis.fault || null, following: machine.zaxis.run ? machine.zaxis.run.zf.state : null, mesh: machine.zaxis.meshView(), settings: { ...ZDefaults, ...(cfg.zaxis || {}) } },
       camera: { open: !!machine.vision.camera, info: machine.vision.camera ? machine.vision.camera.info || null : null, busy: machine.camBusy || null, exposure: machine.vision.exposureNow(), defaults: VisionDefaults },
@@ -353,6 +428,10 @@ function start(opts = {}) {
       // the route's timing for drawing the head, as fitted to the jobs run (follow-fit.js)
       motion: cfg.controller === 'trotec' ? { ...trotecMotion(), follow: machine.learnt && machine.learnt.travel ? { travel: machine.learnt.travel, cut: machine.learnt.cut } : undefined } : null
     }),
+    // ---- test grids (vision/grid.js): the latest check, a check by hand, the pick saved
+    'GET /grid': () => ({ state: gridState, result: gridState ? gridResult(gridState.job) : null }),
+    'POST /grid/check': async (b) => checkGrid(b && b.id),
+    'POST /grid/save': (b) => saveGrid(b && b.id, b || {}),
     // ---- the head Z axis (zaxis/): the screen's Z axis card, Jog's Z buttons, Queue → Scan
     'GET /zaxis': async () => ({ ...(await machine.zaxis.status()), settings: { ...ZDefaults, ...(cfg.zaxis || {}) }, mesh: machine.zaxis.meshView() }),
     'POST /zaxis/connect': async () => { await machine.zaxis.connect(); return machine.zaxis.status(); },
@@ -614,6 +693,11 @@ function start(opts = {}) {
     }
   });
 
+  // an idle kept-alive connection is closed after 30 s, not Node's 5 s: closed just as a client
+  // (Prepare, Monitor's 2 s look) reused it, the request failed with ECONNRESET, most often right
+  // after the server had been busy with the camera
+  server.keepAliveTimeout = 30000;
+  server.headersTimeout = 31000;
   return new Promise((resolve, reject) => {
     server.once('error', (e) => reject(e.code === 'EADDRINUSE' ? new Error('Port ' + PORT + ' is in use. Is Pathline Run (or the emulator) already running?') : e));
     server.listen(PORT, () => {

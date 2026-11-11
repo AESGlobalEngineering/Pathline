@@ -69,6 +69,14 @@ async function refresh() {
     if (S && ui.draft && JSON.stringify(ui.draft) === JSON.stringify(S.config) && JSON.stringify(next.config) !== JSON.stringify(S.config)) ui.draft = null;
     S = next;
     S.offline = false;
+    // a test grid's camera check finished (since this screen opened): show its results once
+    const gs = S.grid;
+    if (ui.gridSeen === undefined) ui.gridSeen = gs ? gs.at : null;
+    else if (gs && gs.at !== ui.gridSeen && (gs.state === 'done' || gs.state === 'failed')) {
+      ui.gridSeen = gs.at;
+      if (gs.state === 'failed') toast('Test grid check: ' + gs.error, { ms: 8000 });
+      else if (!ui.dlg) call('GET', LOCAL('/grid')).then((g) => { if (g.result && !ui.dlg) { ui.dlg = { kind: 'grid', r: g.result }; render(); } }).catch(() => {});
+    }
     // a job anchored (at Start) or put back (after its run): show it where it now sits
     for (const j of S.jobs) {
       const p = ui.pkgs[j.id];
@@ -911,6 +919,11 @@ function setupView() {
     'Jog the laser head over scrap card or board. The laser cuts a 3 mm mark there, and the camera finds it to set the offset and check it.'));
     const b = ui.board;
     const map = v.map;
+    tabs.Camera.push(card('Power and speed from a test grid',
+      '<span style="line-height:1.5">Run a power × speed test grid from Pathline Prepare (Materials → Test grid) on the material. Once it\'s cut, the head camera looks at every square, works out which cut through, and picks the fastest speed that did, one power step above the lowest that did. Save puts it into the material\'s cut setting, and Pathline Prepare takes it on its next sync.</span>' +
+      (S.grid ? '<div class="row"><span>Last check</span><span>' + esc(S.grid.name || '') + ' · ' + (S.grid.state === 'done' ? (S.grid.best ? S.grid.best.power + ' % at ' + S.grid.best.speed + ' mm/s' : 'no setting found') : esc(S.grid.state)) + '</span></div>' : '') +
+      '<div style="display:flex;justify-content:flex-end"><button class="tb" data-a="gridShow"' + (S.grid ? '' : ' disabled') + '>Show results</button></div>',
+    'Needs the camera calibrated (stages 1 and 2). The check runs by itself after a test grid completes.'));
     tabs.Camera.push(card('Checkerboard: bed accuracy', num('Square size', 'vision.board.square', 'mm') + num('Corners across', 'vision.board.across', '', 'Inner corners (squares − 1)') + num('Corners down', 'vision.board.down') +
       num('Measure every', 'vision.board.every', '', '1 = every corner; 2, 3… for a quicker check') +
       seg('Correction', 'vision.board.model', [['linear', 'Scale and squareness'], ['smooth', 'Smooth'], ['full', 'Every corner']]) +
@@ -1019,6 +1032,49 @@ function boardResult(b) {
     '<svg viewBox="' + [-20, -20, W + 40, H + 40].join(' ') + '" style="width:100%;aspect-ratio:' + (W + 40) + '/' + (H + 40) + ';background:var(--sunken);border-radius:8px" aria-label="Error at each corner, 200 times life size"><rect x="0" y="0" width="' + W + '" height="' + H + '" fill="var(--bed)" stroke="var(--bed-line)" vector-effect="non-scaling-stroke"/>' + arrows + '</svg>';
 }
 
+// A test grid's camera check (vision/grid.js): every square's picture, in a power × speed table,
+// ticked where it cut through, the setting picked ringed, and Save to put it into the material
+function gridImg(t) {
+  ui.gridImgs = ui.gridImgs || new Map();
+  if (ui.gridImgs.has(t.data)) return ui.gridImgs.get(t.data);
+  const bin = atob(t.data), cv = document.createElement('canvas');
+  cv.width = t.w; cv.height = t.h;
+  const cx = cv.getContext('2d'), im = cx.createImageData(t.w, t.h);
+  for (let i = 0; i < bin.length; i++) { const v = bin.charCodeAt(i); im.data[i * 4] = im.data[i * 4 + 1] = im.data[i * 4 + 2] = v; im.data[i * 4 + 3] = 255; }
+  cx.putImageData(im, 0, 0);
+  const url = cv.toDataURL('image/png');
+  if (ui.gridImgs.size > 200) ui.gridImgs.clear();
+  ui.gridImgs.set(t.data, url);
+  return url;
+}
+function gridWindow(r) {
+  if (!r) return '';
+  const best = r.best;
+  const cell = (p, v) => {
+    const s = r.squares.find((x) => x.power === p && x.speed === v);
+    if (!s) return '<td></td>';
+    const isBest = best && best.power === p && best.speed === v;
+    const col = s.through === true ? 'var(--ok-dot)' : s.through === false ? 'var(--line-strong)' : 'var(--warn-dot)';
+    return '<td style="padding:3px;text-align:center"><div style="position:relative;display:inline-block;border-radius:6px;box-shadow:0 0 0 ' + (isBest ? '4px var(--accent)' : '2px ' + col) + '">' +
+      (s.thumb ? '<img src="' + gridImg(s.thumb) + '" width="64" height="64" alt="' + p + ' % at ' + v + ' mm/s" style="display:block;border-radius:6px">' : '<div style="width:64px;height:64px"></div>') +
+      '<span style="position:absolute;right:2px;bottom:2px;font-size:13px;font-weight:700;padding:0 4px;border-radius:4px;background:var(--surface);color:' + col + '">' + (s.through === true ? '✓' : s.through === false ? '✗' : '?') + '</span></div></td>';
+  };
+  const table = '<div style="overflow:auto;max-height:52vh"><table style="border-collapse:collapse;font-size:13px"><thead><tr><th class="lbl" style="text-align:left;padding:4px">mm/s ↓ · power →</th>' + r.powers.map((p) => '<th class="mono" style="padding:4px">' + p + ' %</th>').join('') + '</tr></thead><tbody>' +
+    r.speeds.map((v) => '<tr><th class="mono" style="padding:4px;text-align:right">' + v + '</th>' + r.powers.map((p) => cell(p, v)).join('') + '</tr>').join('') + '</tbody></table></div>';
+  const mat = (r.material && r.material.name ? r.material.name + (r.material.thickness ? ' ' + r.material.thickness + ' mm' : '') : 'the material');
+  const n = r.squares.filter((s) => s.through).length;
+  return '<div class="scrim"><div role="dialog" aria-label="Test grid results" class="dlg wide">' +
+    '<span class="h-sec" style="font-size:18px">Test grid: ' + esc(mat) + '</span>' +
+    (best ? '<div style="display:flex;align-items:center;gap:14px;padding:12px 16px;border-radius:12px;background:var(--accent-soft)"><span style="font-size:24px;font-weight:600">' + best.power + ' % · ' + best.speed + ' mm/s</span><span class="lbl">' + n + ' of ' + r.squares.length + ' squares cut through</span></div>' : '') +
+    '<span style="line-height:1.5">' + esc(r.why || '') + '</span>' +
+    (r.confident ? '' : '<div class="warnbox">The camera isn\'t sure about this grid (the squares don\'t separate cleanly). Check the pictures before saving.</div>') +
+    table +
+    (r.saved ? '<span class="lbl">Saved to ' + esc(r.saved.material) + ', ' + esc(r.saved.process) + ' (was ' + r.saved.before.power + ' % at ' + r.saved.before.speed + ' mm/s), ' + new Date(r.saved.at).toLocaleString() + '. Pathline Prepare takes it on its next sync.</span>' : '') +
+    '<span class="lbl">' + esc(r.job ? r.job.name : '') + ' · checked ' + new Date(r.at).toLocaleString() + ' · by ' + esc(r.measure || '—') + '</span>' +
+    '<div style="display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap"><button class="tb" data-a="gridCheck"' + (running() ? ' disabled' : '') + '>Check again</button><button class="tb" data-a="close">Close</button>' +
+    (best ? '<button class="btn-primary" data-a="gridSave">' + (r.saved ? 'Saved' : 'Save ' + best.power + ' % · ' + best.speed + ' mm/s to ' + esc(mat)) + '</button>' : '') + '</div></div></div>';
+}
+
 // ---------------------------------------------------------------- dialogs
 function dialog() {
   if (!ui.dlg) return '';
@@ -1091,6 +1147,7 @@ function dialog() {
         : '<span class="lbl">No Ruida controller answered. Check it is switched on and cabled to this computer, that this computer\'s Ethernet has an address on the same network as the controller (Setup → Network), and that LightBurn, RDWorks and RDCutting are closed.</span>') +
       '<div style="display:flex;justify-content:flex-end;gap:8px"><button class="tb" data-a="close">Close</button></div></div></div>';
   }
+  if (ui.dlg.kind === 'grid') return gridWindow(ui.dlg.r);
   if (ui.dlg.kind === 'update') return updateWindow();
   if (ui.dlg.kind === 'changelog') return changelogWindow(ui.dlg.entries, ui.dlg.title);
   if (ui.dlg.kind === 'message') return messageWindow(ui.dlg.title, ui.dlg.msg);
@@ -1274,6 +1331,21 @@ const H = {
     toast('Scanning the sheet\'s height under the job: the head moves over it with the nozzle up…', { ms: 6000 });
     const m = await call('POST', LOCAL('/zaxis/scan'), { id });
     toast('Sheet scanned: ' + m.nx + ' × ' + m.ny + ' points, ' + m.min.toFixed(1) + ' to +' + m.max.toFixed(1) + ' mm, steepest ' + (m.slope * 100).toFixed(1) + ' %' + (m.dropped ? ' (' + m.dropped + ' readings dropped)' : ''), { ms: 8000 });
+  }),
+  // a test grid's results (vision/grid.js)
+  gridShow: act(async () => { const g = await call('GET', LOCAL('/grid')); if (!g.result) throw new Error('No test grid has been checked yet'); ui.dlg = { kind: 'grid', r: g.result }; }),
+  gridCheck: act(async () => {
+    const id = ui.dlg && ui.dlg.r && ui.dlg.r.job ? ui.dlg.r.job.id : null;
+    toast('Checking the test grid with the head camera…', { ms: 6000 });
+    const r = await call('POST', LOCAL('/grid/check'), { id });
+    ui.dlg = { kind: 'grid', r };
+  }),
+  gridSave: act(async () => {
+    const r = ui.dlg && ui.dlg.r;
+    if (!r || !r.best || r.saved) return;
+    const s = await call('POST', LOCAL('/grid/save'), { id: r.job.id });
+    toast('Saved ' + r.best.power + ' % at ' + r.best.speed + ' mm/s to ' + s.material + ' (' + s.process + '). Pathline Prepare takes it on its next sync.', { ms: 8000 });
+    ui.dlg = { kind: 'grid', r: (await call('GET', LOCAL('/grid'))).result || { ...r, saved: s } };
   }),
   camCalibrate: act(async () => {
     const r = await call('POST', LOCAL('/camera/calibrate'), {});

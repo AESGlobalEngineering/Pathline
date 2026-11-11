@@ -20,6 +20,20 @@ const validate = require('../src/job/validate');
 const trotec = require('../src/ctrl/trotec/compile');
 const ruida = require('../src/ctrl/ruida/compile');
 
+// a request whose kept-alive connection the server closed as it was sent (ECONNRESET) is tried
+// once more: that's the connection, not what's being tested
+{
+  const raw = globalThis.fetch;
+  globalThis.fetch = async (url, opts) => {
+    try { return await raw(url, opts); } catch (e) {
+      const code = e && e.cause && e.cause.code;
+      if (code !== 'ECONNRESET' && code !== 'UND_ERR_SOCKET') throw e;
+      await new Promise((r) => setTimeout(r, 200));
+      return raw(url, opts);
+    }
+  };
+}
+
 let failed = 0;
 const ok = (cond, msg, detail) => {
   console.log((cond ? '  ok    ' : '  FAIL  ') + msg + (!cond && detail !== undefined ? '\n          ' + detail : ''));
@@ -1164,6 +1178,67 @@ async function visionTests() {
 // ---------------------------------------------------------------- found on the network
 // Run's mDNS answers, as Pathline Prepare asks for them (its own discover.js when it's in this
 // repo): a question from an ordinary port is answered straight back, with id, name, port, IP
+// ---------------------------------------------------------------- test grid: power and speed by camera
+async function gridTests() {
+  console.log('Test grid checked by the head camera (power and speed)');
+  const G = require('../src/vision/grid');
+  const powers = [30, 35, 40, 45, 50], speeds = [15, 20, 25, 30, 35, 40];
+  const mk = (truth) => {
+    const processes = [], toolpath = [];
+    speeds.forEach((v, r) => powers.forEach((p, c) => { const k = processes.length; processes.push({ index: k, name: p + ' % · ' + v + ' mm/s', proc: 'Cut', power: p, speed: v }); const x = 90 + c * 14, y = 70 + r * 14; toolpath.push({ type: 'cut', process: k, closed: true, p: [[x, y], [x + 8, y], [x + 8, y + 8], [x, y + 8]] }); }));
+    processes.push({ index: 99, name: 'Grid labels', proc: 'Engrave', power: 15, speed: 300, f: 300, passes: 1 });
+    return { pkg: { processes, toolpath, material: { id: 'm1', name: 'Clear', thickness: 3 }, job: { name: 'Test grid · Clear 3 mm · Cut' } }, truth };
+  };
+  const { pkg } = mk();
+  const grid = G.detect(pkg);
+  ok(grid && grid.squares.length === 30 && grid.powers.join() === powers.join() && grid.speeds.join() === speeds.join(), 'a Prepare test grid is recognised (30 squares, 5 powers × 6 speeds, labels left out)');
+  ok(G.detect({ processes: [{ index: 0, name: 'Cut', proc: 'Cut', power: 60, speed: 20 }], toolpath: [{ type: 'cut', process: 0, p: [[0, 0], [10, 0], [10, 10]] }] }) === null, 'an ordinary job isn\'t taken for a test grid');
+  // measures as the camera might give them: through where power/speed ≥ 1.4, noise, and one square
+  // read badly (a bridge left uncut: its line looks like an uncut one)
+  let seed = 5;
+  const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647 - 0.5; };
+  const truth = grid.squares.map((s) => s.power / s.speed >= 1.4);
+  const m = grid.squares.map((s, k) => ({ line: (truth[k] ? -0.3 : 0.25) + rnd() * 0.12, weakest: rnd(), strongest: rnd(), inside: rnd() * 0.05 }));
+  const odd = grid.squares.findIndex((s, k) => truth[k] && s.power === 50 && s.speed === 20);
+  m[odd].line = 0.25;
+  const c = G.classify(grid, m);
+  const wrong = c.through.filter((v, k) => v !== truth[k]).length;
+  ok(wrong === 0 && c.confident && c.measure === 'line', 'noisy measures, darker or lighter unknown: every square right, the badly read one put right by the grid', JSON.stringify({ wrong, measure: c.measure, sep: c.separation }));
+  const pick = G.choose(grid, c.through);
+  // through at 1.4: at 30 mm/s 45 % (1.5) and 50 % ; at 35 mm/s 50 % (1.43); none at 40
+  ok(pick.best && pick.best.speed === 35 && pick.best.power === 50 && /35 mm\/s/.test(pick.why), 'the pick: the fastest speed that cut through (35 mm/s at 50 %, the only one there)', JSON.stringify(pick));
+  const all = G.choose(grid, grid.squares.map(() => true));
+  ok(all.best && all.best.speed === 40 && all.best.power === 35 && /Every square/.test(all.why), 'every square through: the fastest at one step above the lowest, and a note that the grid may not reach the limit', JSON.stringify(all));
+  ok(G.choose(grid, grid.squares.map(() => false)).best === null, 'none through: no setting, and why');
+  // a measure that doesn't follow power and speed at all: not trusted
+  const flat = G.classify(grid, grid.squares.map(() => ({ line: rnd() * 0.01, weakest: rnd() * 0.01, strongest: rnd() * 0.01, inside: rnd() * 0.01 })));
+  ok(!flat.confident, 'measures that don\'t follow the energy aren\'t trusted', JSON.stringify({ confident: flat.confident, measure: flat.measure }));
+
+  // the whole thing on a simulated machine and camera: cut, checked by itself, saved into the material
+  const data = fs.mkdtempSync(path.join(os.tmpdir(), 'pathline-grid-'));
+  fs.writeFileSync(path.join(data, 'config.json'), JSON.stringify({ configured: true, name: 'Sim laser', connection: { mode: 'sim' }, controller: 'trotec', regMarks: 'ignore', bed: [813, 508], sim: { speedup: 80, cutThreshold: 1.4 }, vision: { enabled: true, source: 'sim', offset: [41.2, 12.9], matrix: [0, -0.08, 0.08, 0] } }));
+  fs.writeFileSync(path.join(data, 'materials.json'), JSON.stringify({ format: 'pathline-materials', version: 1, materials: [{ id: 'm1', name: 'Clear', t: 3, updatedAt: '2026-11-01T00:00:00.000Z', processes: [{ name: 'Engrave', proc: 'Engrave', power: 20, speed: 300 }, { name: 'Cut', proc: 'Cut', power: 60, speed: 15 }] }] }));
+  const port = 19100 + Math.floor(Math.random() * 200);
+  const srv = spawn(process.execPath, [path.join(__dirname, '..', 'src', 'server.js'), '--sim', '--port', String(port), '--data', data], { stdio: ['ignore', 'pipe', 'pipe'] });
+  const base = 'http://127.0.0.1:' + port + '/api';
+  const call = async (meth, r, b) => { const res = await fetch(base + r, { method: meth, headers: { 'content-type': 'application/json' }, body: b ? JSON.stringify(b) : undefined }); return { s: res.status, j: await res.json().catch(() => null) }; };
+  try {
+    for (let i = 0; i < 60; i++) { try { await call('GET', '/v1/info'); break; } catch (e) { await new Promise((r) => setTimeout(r, 100)); } }
+    const qr = await call('POST', '/v1/jobs', { format: 'lrc-job-package', version: 1, machine: { type: 'laser' }, entities: [], ...mk().pkg });
+    if (qr.s !== 200) throw new Error('the test grid wasn\'t taken: ' + JSON.stringify(qr.j));
+    const q = qr.j;
+    await call('POST', '/v1/start', { id: q.id });
+    let g;
+    for (let i = 0; i < 240; i++) { await new Promise((r) => setTimeout(r, 500)); g = (await call('GET', '/local/grid')).j; if (g.state && (g.state.state === 'done' || g.state.state === 'failed')) break; }
+    const r = g && g.result;
+    const wrongSim = r ? r.squares.filter((s) => s.through !== s.power / s.speed >= 1.4).length : -1;
+    ok(r && wrongSim === 0 && r.confident && r.best && r.best.power === 50 && r.best.speed === 35 && r.squares.every((s) => s.thumb && s.thumb.w === 96), 'simulated: cut, then checked by the camera by itself: every square right, 50 % at 35 mm/s, a picture of each', JSON.stringify(g && g.state));
+    const sv = await call('POST', '/local/grid/save', { id: q.id });
+    const mat = JSON.parse(fs.readFileSync(path.join(data, 'materials.json'), 'utf8')).materials[0];
+    ok(sv.s === 200 && mat.processes[1].power === 50 && mat.processes[1].speed === 35 && mat.processes[0].power === 20 && mat.updatedAt > '2026-11-01', 'Save: the material\'s cut setting becomes 50 % at 35 mm/s (the engrave one untouched), marked newer for Prepare', JSON.stringify(mat));
+  } finally { srv.kill(); }
+}
+
 // ---------------------------------------------------------------- watchers: GET /api/v1/monitor, /events
 async function monitorTests() {
   console.log('Watchers (GET /api/v1/monitor, /api/v1/events)');
@@ -1405,7 +1480,7 @@ async function zaxisTests() {
   ok(zf.state === 'up', 'paused or stopped: the nozzle goes up');
 }
 
-jogTests().then(linkTests).then(serverTests).then(monitorTests).then(discoveryTests).then(followFitTests).then(zaxisTests).then(materialsTests).then(visionTests).then(() => {
+jogTests().then(linkTests).then(serverTests).then(monitorTests).then(gridTests).then(discoveryTests).then(followFitTests).then(zaxisTests).then(materialsTests).then(visionTests).then(() => {
   console.log(failed ? '\n' + failed + ' FAILED' : '\nAll passed');
   process.exit(failed ? 1 : 0);
 });
