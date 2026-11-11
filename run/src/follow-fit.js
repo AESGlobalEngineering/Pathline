@@ -63,7 +63,8 @@ function timeOf(t, stamp) {
 
 // The run's timeline with each position at its fitted time (busy reports in time order)
 function retimed(run, stamp) {
-  return run.timeline.filter((t) => t[1] != null).map((t) => [timeOf(t, stamp), t[1], t[2], t[3], t[4]]).sort((a, b) => a[0] - b[0]);
+  // [time, x, y, marker, state, the reply's round trip (ms, when logged)]
+  return run.timeline.filter((t) => t[1] != null).map((t) => [timeOf(t, stamp), t[1], t[2], t[3], t[4], Number.isFinite(t[6]) && Number.isFinite(t[9]) ? t[9] - t[6] : null]).sort((a, b) => a[0] - b[0]);
 }
 
 // ---------------------------------------------------------------- the job on the bed
@@ -183,7 +184,9 @@ function replay(run, pkg, M, stamp, opts = {}) {
     }
     if (clock >= nextPoll) {
       nextPoll += poll;
-      const j = ti - 1;
+      // (opts.feed: which reports the screen is given; every report is still measured against)
+      let j = ti - 1;
+      if (opts.feed) while (j >= 0 && !opts.feed(tl[j])) j--;
       if (j >= 0) {
         const r = tl[j];
         F.place(follow, { job: run.id, pos: { x: r[1], y: r[2] }, posAge: clock - r[0] + bias, progress: prog, marker: mark ? mark.m : undefined }, pkg, clock, M);

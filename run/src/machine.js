@@ -647,16 +647,21 @@ class Machine {
           };
           await this.link.send(seg, { ...ctl, get aborted() { return ctl.aborted; }, onReply: follow });
           const sentAt = Date.now();
-          let idle = 0;
+          let idle = 0, idleSince = null;
+          // the wait between status checks (cfg.trotec.pollMs, 300 ms; a test setting): the laser
+          // answers a check in 20–500 ms while it works, 1 ms when idle
+          const pv = this.cfg.trotec && this.cfg.trotec.pollMs;
+          const pollMs = typeof pv === 'number' && pv >= 0 ? pv : 300;
           while (!ctl.aborted) {
-            await sleep(300);
+            await sleep(pollMs);
             const p = await this.link.poll();
             follow(p);
             if (p.state === 'paused') this.st.state = 'paused';
             else if (this.st.state === 'paused' && !ctl.paused) this.st.state = 'running';
             idle = p.state === 'idle' ? idle + 1 : 0;
-            // done once idle twice in a row, after it was seen busy (or a moment has passed)
-            if (idle >= 2 && (sawBusy || Date.now() - sentAt > 3000)) break;
+            idleSince = p.state === 'idle' ? idleSince || Date.now() : null;
+            // done once idle twice in a row and for 0.6 s, after it was seen busy (or a moment has passed)
+            if (idle >= 2 && Date.now() - idleSince >= 600 && (sawBusy || Date.now() - sentAt > 3000)) break;
           }
           thrownAway();
           // idle before the last part was reported done: the laser ended the job itself (J0055 went
