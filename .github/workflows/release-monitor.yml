@@ -1,0 +1,105 @@
+# Builds the Pathline Monitor download (monitor/) into one release, tag "pathlinemonitor",
+# titled "Pathline Monitor <version>":
+#   - Pathline-Monitor-Windows.zip: with Node.js inside, so a Windows PC needs nothing installed
+#     (double-click "Start Pathline Monitor.cmd")
+#   - Pathline-Monitor.zip: for a Raspberry Pi, Linux or a Mac with Node.js 18 or newer (sh start.sh)
+#   - the same two with the version in the name
+# Each new version replaces the previous one's files. The release is never marked as the
+# repository's "latest": that one belongs to Pathline, whose updater reads it.
+#
+# - Pushing to main releases automatically when monitor/package.json has a version that isn't in
+#   the pathlinemonitor release yet (bump the version, push, done).
+# - Actions → Release Pathline Monitor → Run workflow rebuilds the current version.
+name: Release Pathline Monitor
+
+on:
+  push:
+    branches: [main]
+    paths: ['monitor/**', 'src/main/discover.js', '.github/workflows/release-monitor.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      build: ${{ steps.v.outputs.build }}
+    steps:
+      - uses: actions/checkout@v5
+      - id: v
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          V=$(node -p "require('./monitor/package.json').version")
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          HAVE=$(gh release view pathlinemonitor --json assets --jq '.assets[].name' 2>/dev/null || true)
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] || ! echo "$HAVE" | grep -qxF "Pathline-Monitor-$V.zip"; then echo "build=true" >> "$GITHUB_OUTPUT"; else echo "build=false" >> "$GITHUB_OUTPUT"; fi
+
+  build:
+    needs: check
+    if: needs.check.outputs.build == 'true'
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: monitor
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - run: npm ci --no-audit --no-fund --omit=dev
+      - run: npm test
+      - name: Zip
+        shell: pwsh
+        env:
+          V: ${{ needs.check.outputs.version }}
+        run: |
+          New-Item -ItemType Directory -Force out | Out-Null
+          # with Node.js (this runner's own node.exe), for Windows
+          node tools/package.js --node (Get-Command node).Source
+          Compress-Archive -Path dist/Pathline-Monitor -DestinationPath "out/Pathline-Monitor-Windows-$env:V.zip"
+          # without, for a Pi, Linux or a Mac with Node.js installed
+          node tools/package.js
+          Compress-Archive -Path dist/Pathline-Monitor -DestinationPath "out/Pathline-Monitor-$env:V.zip"
+          Get-ChildItem out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: monitor
+          path: monitor/out/*.zip
+
+  publish:
+    needs: [check, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: monitor
+          path: files
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          V: ${{ needs.check.outputs.version }}
+        run: |
+          retry() { for i in 1 2 3 4 5; do "$@" && return 0; echo "::warning::try $i failed: $*"; sleep $((i * 10)); done; return 1; }
+          cd files
+          cp "Pathline-Monitor-Windows-$V.zip" Pathline-Monitor-Windows.zip
+          cp "Pathline-Monitor-$V.zip" Pathline-Monitor.zip
+          ls -l
+          NOTES="Pathline Monitor $V: every Pathline Run machine's progress and queue on the phones on your workshop network, with alerts.
+          Windows: unzip Pathline-Monitor-Windows.zip and double-click Start Pathline Monitor.cmd (Node.js is inside).
+          Raspberry Pi, Linux or Mac: unzip Pathline-Monitor.zip and run sh start.sh (needs Node.js 18 or newer).
+          To update, unzip the newer one over the old folder: your machines and alerts are kept."
+          if ! gh release view pathlinemonitor > /dev/null 2>&1; then
+            retry gh release create pathlinemonitor --target "$GITHUB_SHA" --title "Pathline Monitor $V" --latest=false --notes "$NOTES"
+          fi
+          for f in *.zip; do retry gh release upload pathlinemonitor "$f" --clobber; done
+          # drop the previous version's files
+          KEEP=$(ls *.zip)
+          for a in $(gh release view pathlinemonitor --json assets --jq '.assets[].name'); do
+            echo "$KEEP" | grep -qxF "$a" || retry gh release delete-asset pathlinemonitor "$a" -y
+          done
+          retry gh release edit pathlinemonitor --title "Pathline Monitor $V" --latest=false --notes "$NOTES"

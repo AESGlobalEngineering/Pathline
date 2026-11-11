@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Set up Pathline Monitor</title>
+<meta name="theme-color" content="#FFFFFF" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#17181B" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="style.css">
+<style>
+  /* the setup page: one column of numbered steps, each with its one button */
+  .setup .main{padding-block:16px 32px;gap:14px}
+  .setup h1.big{margin:4px 0 0;font-size:22px;font-weight:600;line-height:1.25;text-wrap:balance}
+  .setup .lead{margin:0;color:var(--text-2);line-height:1.5}
+  .stp{display:flex;gap:12px;padding:14px;background:var(--surface);border:1px solid var(--line);border-radius:14px}
+  .stp > .ord{width:28px;height:28px;border-radius:8px;background:var(--sunken);display:inline-flex;align-items:center;justify-content:center;font:500 13px var(--mono);color:var(--text-2);flex:none}
+  .stp.ok > .ord{background:var(--ok-soft);color:var(--ok)}
+  .stp .body{flex:1;min-width:0;display:flex;flex-direction:column;gap:8px}
+  .stp .t{font-weight:600}
+  .stp .s{font-size:14px;color:var(--text-2);line-height:1.45}
+  .stp .acts{display:flex;gap:8px;flex-wrap:wrap}
+  .stp a.btn-primary,.stp a.tb{text-decoration:none;color:inherit}
+  .stp a.btn-primary{color:var(--on-action)}
+  .path{font-size:13px;color:var(--text-2);background:var(--sunken);border-radius:8px;padding:8px 10px;line-height:1.5}
+  .path b{color:var(--text)}
+  .status{display:flex;align-items:center;gap:8px;font-size:14px}
+  .status::before{content:'';width:9px;height:9px;border-radius:50%;background:var(--idle-dot)}
+  .status.ok{color:var(--ok)}.status.ok::before{background:var(--ok-dot)}
+  .seg.os{align-self:flex-start}
+  .seg.os button{font-family:var(--font)}
+</style>
+</head>
+<body class="setup">
+<div class="app" id="app">
+  <header class="bar"><img class="mark" src="icon.svg" alt=""><div class="grow"><h1>Pathline Monitor</h1><div class="sub">Set up this phone</div></div></header>
+  <main class="main" id="main"></main>
+</div>
+<script>
+'use strict';
+// Gets the full app onto a phone: trust the workshop certificate once, open the https address,
+// add it to the Home Screen, turn on notifications. Live: step 3 turns green as soon as the
+// phone trusts the certificate (it can then reach /api/ping over https).
+const esc = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const ua = navigator.userAgent;
+let os = /iP(hone|ad|od)/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1) ? 'ios' : /Android/i.test(ua) ? 'android' : 'ios';
+let info = null;
+let trusted = false;
+const host = location.hostname;
+const appUrl = () => (info && info.httpsPort ? 'https://' + host + ':' + info.httpsPort + '/' : null);
+
+function step(n, ok, title, body) {
+  return '<section class="stp' + (ok ? ' ok' : '') + '"><span class="ord">' + (ok ? '✓' : n) + '</span><div class="body"><span class="t">' + title + '</span>' + body + '</div></section>';
+}
+function render() {
+  const main = document.getElementById('main');
+  if (!info) { main.innerHTML = '<p class="lead">Loading…</p>'; return; }
+  if (!info.httpsPort) {
+    main.innerHTML = '<h1 class="big">Pathline Monitor</h1><p class="lead">This Monitor hub has https turned off, so it works as a web page: open it and add it to the Home Screen. Alerts show while it\'s open.</p><a class="btn-primary" href="/">Open Pathline Monitor</a>';
+    return;
+  }
+  if (host === 'localhost' || host === '127.0.0.1') {
+    main.innerHTML = '<h1 class="big">Open this on the phone</h1><p class="lead">This page is for the phone. On this PC, open <a href="/">Pathline Monitor</a> and scan its QR code with the phone\'s camera.</p>';
+    return;
+  }
+  const own = info.own;
+  const ios = os === 'ios';
+  const s1 = own ? step(1, trusted, 'Get the workshop certificate',
+    '<span class="s">It lets this phone open Pathline Monitor securely on the workshop network. It can only vouch for addresses on private networks, nothing on the internet.</span>' +
+    '<span class="acts"><a class="btn-primary" href="' + (ios ? '/workshop.mobileconfig' : '/workshop-ca.crt') + '">Download</a></span>' +
+    (ios ? '<span class="s">Safari asks to download a configuration profile: tap <b>Allow</b>.</span>' : '<span class="s">It saves as <b>pathline-monitor-workshop.crt</b> in Downloads.</span>'))
+    : step(1, trusted, 'The certificate', '<span class="s">This hub uses a certificate from your IT department. If the phone is managed by IT it may trust it already.</span>');
+  const s2 = own ? step(2, trusted, ios ? 'Install it, then trust it' : 'Install it',
+    ios ? '<div class="path"><b>Settings</b> → <b>Profile Downloaded</b> → <b>Install</b> (enter the passcode, Install again)</div>' +
+      '<div class="path">Then <b>Settings</b> → <b>General</b> → <b>About</b> → <b>Certificate Trust Settings</b> → turn on <b>Pathline Monitor workshop</b></div>' +
+      '<span class="s">If Profile Downloaded isn\'t at the top of Settings: General → VPN & Device Management.</span>'
+      : '<div class="path"><b>Settings</b> → <b>Security &amp; privacy</b> → <b>More security settings</b> → <b>Encryption &amp; credentials</b> → <b>Install a certificate</b> → <b>CA certificate</b> → <b>Install anyway</b>, then pick the file</div>' +
+      '<span class="s">The names differ a little between phones: search Settings for <b>CA certificate</b>.</span>') : '';
+  const s3 = step(own ? 3 : 2, trusted, 'Open Pathline Monitor',
+    '<span class="status' + (trusted ? ' ok' : '') + '">' + (trusted ? 'This phone trusts the workshop' : 'Waiting for the phone to trust the workshop…') + '</span>' +
+    '<span class="acts"><a class="' + (trusted ? 'btn-primary' : 'tb') + '" href="' + esc(appUrl()) + '">Open the app</a></span>');
+  const s4 = step(own ? 4 : 3, false, 'Keep it on the Home Screen',
+    ios ? '<span class="s">In the app, tap <b>Share</b>, then <b>Add to Home Screen</b>. Open it from the Home Screen from then on.</span>'
+      : '<span class="s">In the app, Chrome offers <b>Install app</b> (or menu → <b>Add to Home screen</b>).</span>');
+  const s5 = step(own ? 5 : 4, false, 'Turn on notifications', '<span class="s">In the app: <b>Settings</b> → <b>Turn on</b>, then <b>Send a test</b>. Alerts then arrive with the app closed.</span>' +
+    (ios ? '<span class="s">On iPhone this works from the Home Screen app (iOS 16.4 or newer).</span>' : ''));
+  main.innerHTML = '<h1 class="big">Put Pathline Monitor on this phone</h1><p class="lead">A few minutes, once. After that it\'s an app on the Home Screen: it opens without the network and sends alerts with the app closed.</p>' +
+    '<div class="seg os" role="radiogroup" aria-label="Phone"><button role="radio" aria-checked="' + ios + '" data-os="ios">iPhone</button><button role="radio" aria-checked="' + !ios + '" data-os="android">Android</button></div>' +
+    s1 + s2 + s3 + s4 + s5 +
+    '<p class="lead" style="font-size:13px">Or skip all this: <a href="/">open Pathline Monitor as a web page</a>. It works the same while it\'s open.</p>';
+}
+document.addEventListener('click', (e) => { const b = e.target.closest('[data-os]'); if (b) { os = b.dataset.os; render(); } });
+
+// does this phone trust the workshop yet? (an https request only succeeds once it does)
+async function check() {
+  if (!appUrl()) return;
+  try { const r = await fetch(appUrl() + 'api/ping', { cache: 'no-store' }); trusted = r.ok; } catch (e) { trusted = false; }
+  render();
+}
+fetch('/api/phone').then((r) => r.json()).then((v) => { info = v; render(); check(); setInterval(check, 3000); }).catch(() => { document.getElementById('main').innerHTML = '<p class="lead">Can\'t reach the Monitor hub.</p>'; });
+render();
+</script>
+</body>
+</html>
