@@ -172,6 +172,9 @@ function installSteps() {
 }
 function installCard() {
   if (standalone || onDesk() || store.get('installHide', false)) return '';
+  // the workshop network's plain http: the full app needs the workshop certificate first
+  if (!window.isSecureContext) return '<div class="list install"><div class="set"><img class="mark" src="icon.svg" alt="" style="width:36px;height:36px"><span class="body">Make it a full app on this phone<span class="s">On the Home Screen, opens without the network, alerts with the app closed</span></span><a class="btn-primary" href="setup" style="text-decoration:none">Set up</a></div>' +
+    '<div class="set"><span class="body"><span class="s">Or keep using it as a web page: it alerts while it\'s open</span></span><button class="tb" data-a="installHide">Not now</button></div></div>';
   return '<div class="list install"><div class="set"><img class="mark" src="icon.svg" alt="" style="width:36px;height:36px"><span class="body">Keep Pathline Monitor on your Home Screen<span class="s">It opens full screen, like an app, one tap away</span></span>' +
     (installPrompt ? '<button class="btn-primary" data-a="install">Install</button>' : '<button class="tb" data-a="howInstall">How</button>') + '</div>' +
     (ui.howInstall ? '<div class="hint">' + installSteps() + '<button class="tb" data-a="installHide" style="margin-top:8px">Done, hide this</button></div>' : '') + '</div>';
@@ -183,10 +186,10 @@ function deskCard() {
   if (!phone) { phone = {}; fetch('api/phone').then((r) => r.json()).then((v) => { phone = v; render(); }).catch(() => {}); }
   const url = phone.urls && phone.urls[0];
   return '<aside class="desk" aria-label="Get Pathline Monitor on a phone"><img src="icon.svg" alt="" width="48" height="48"><h2>Pathline Monitor is for your phone</h2>' +
-    '<p>Scan this with the phone\'s camera, on the workshop Wi-Fi, then add it to the Home Screen.</p>' +
+    '<p>Scan this with the phone\'s camera, on the workshop Wi-Fi. It walks you through putting the app on the phone.</p>' +
     (phone.qr ? '<div class="qr">' + phone.qr + '</div>' : '<div class="qr empty">' + (phone.urls ? 'This PC has no network address' : '') + '</div>') +
-    (url ? '<p class="url mono">' + esc(url.replace(/\/$/, '')) + '</p>' : '') +
-    '<p class="small"><b>iPhone</b>: Share, then Add to Home Screen.<br><b>Android</b>: menu, then Add to Home screen.</p></aside>';
+    (url ? '<p class="url mono">' + esc(url + 'setup') + '</p>' : '') +
+    '<p class="small">Each phone trusts the workshop\'s own certificate once, then Pathline Monitor is an app on its Home Screen, with alerts even when it\'s closed.</p></aside>';
 }
 const canPush = window.isSecureContext && 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
 
@@ -195,7 +198,7 @@ function phoneCard() {
   const sound = '<div class="set"><span class="body">Sound while the app is open<span class="s">A short tone and a buzz with each alert</span></span><button role="switch" class="sw" aria-checked="' + (p.sound !== false) + '" aria-label="Sound while the app is open" data-a="pref" data-v="sound"></button></div>';
   const test = '<div class="set"><span class="body">Try an alert<span class="s">Shows one here, with the sound</span></span><button class="tb" data-a="testLocal">Try it</button></div>';
   // the workshop network: alerts reach the phone while the app is open
-  if (!window.isSecureContext) return '<div class="hint"><b>Alerts show here while Pathline Monitor is open.</b> Keep it open on the phone you carry around the workshop. For alerts with the app closed, the Monitor needs a certificate the phones trust (see the README).</div>' + sound + test;
+  if (!window.isSecureContext) return '<div class="set"><span class="body">Alerts show here while Pathline Monitor is open<span class="s">For alerts with the app closed, put the full app on this phone (a few minutes, once)</span></span><a class="btn-primary" href="setup" style="text-decoration:none">Set up</a></div>' + sound + test;
   if (isIOS && !standalone) return '<div class="hint"><b>Add Pathline Monitor to your Home Screen first.</b> On iPhone, notifications only work from the Home Screen app: tap Share, then Add to Home Screen, and open Pathline Monitor from there.</div>';
   if (!canPush) return '<div class="hint"><b>This browser can\'t show notifications.</b> Use Safari on iPhone, or Chrome on Android.</div>';
   if (Notification.permission === 'denied') return '<div class="hint"><b>Notifications are blocked for Pathline Monitor.</b> Allow them in the phone\'s settings for this app, then come back here.</div>';
@@ -210,7 +213,7 @@ function prefsView() {
   const M = S ? S.machines : [];
   return bar('<h1>Settings</h1><div class="sub">Alerts on this phone</div>', '') +
     '<main class="main"><section class="sec"><div class="sec-h">This phone</div><div class="list">' + phoneCard() + '</div>' +
-    (!standalone && !onDesk() ? '<div class="list"><div class="set"><span class="body">Add to Home Screen<span class="s">Opens full screen, like an app</span></span>' + (installPrompt ? '<button class="btn-primary" data-a="install">Install</button>' : '<button class="tb" data-a="howInstall">How</button>') + '</div>' + (ui.howInstall ? '<div class="hint">' + installSteps() + '</div>' : '') + '</div>' : '') + '</section>' +
+    (!standalone && !onDesk() && window.isSecureContext ? '<div class="list"><div class="set"><span class="body">Add to Home Screen<span class="s">Opens full screen, like an app</span></span>' + (installPrompt ? '<button class="btn-primary" data-a="install">Install</button>' : '<button class="tb" data-a="howInstall">How</button>') + '</div>' + (ui.howInstall ? '<div class="hint">' + installSteps() + '</div>' : '') + '</div>' : '') + '</section>' +
     '<section class="sec"><div class="sec-h">Notify me when</div><div class="list">' +
     sw('done', 'A job finishes', 'With how long it took and what\'s queued next') +
     sw('queue', 'A queue runs out', 'The machine has nothing left to do') +

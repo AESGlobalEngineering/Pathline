@@ -2,15 +2,17 @@
 // Pathline Monitor: watches every Pathline Run machine on the workshop network, keeps the
 // alerts, and serves the phone app (app/) on the local network.
 //
-//   node server.js [--config config.json] [--port 8480] [--data data]
+//   node server.js [--config config.json] [--port 8480] [--https-port 8443] [--data data]
 //
 // Machines are found on the network the way Pathline Prepare finds them (src/main/discover.js:
 // Run's mDNS announcement and a scan of this computer's networks for port 8470), and kept in
 // data/found.json. config.json is optional:
-//   { "port": 8480, "find": true, "machines": [{ "name": "Laser A", "host": "192.168.1.40" }],
-//     "tls": { "cert": "cert.pem", "key": "key.pem" } }
-// Over plain http the app shows alerts while it's open (banner and sound). Alerts with the
-// app closed (Web Push) need an https address the phones trust: "tls" (README.md).
+//   { "port": 8480, "httpsPort": 8443, "find": true, "machines": [{ "name": "Laser A", "host": "192.168.1.40" }],
+//     "tls": { "cert": "cert.pem", "key": "key.pem" }, "https": true }
+// Two addresses: http on 8480 (any phone, and the setup page) and https on 8443, the full app
+// (installable, offline, notifications with the app closed). The https certificate is the
+// workshop's own (lib/certs.js), made here; each phone trusts it once from the setup page.
+// "tls" uses a certificate from IT instead; "https": false turns https off.
 'use strict';
 
 const fs = require('fs');
@@ -28,11 +30,36 @@ const confPath = path.resolve(arg('config', path.join(__dirname, 'config.json'))
 const conf = fs.existsSync(confPath) ? JSON.parse(fs.readFileSync(confPath, 'utf8')) : {};
 const DATA = path.resolve(path.dirname(confPath), arg('data', conf.data || 'data'));
 const PORT = Number(arg('port', conf.port || 8480));
+const HTTPS_PORT = Number(arg('https-port', conf.httpsPort || 8443));
 fs.mkdirSync(DATA, { recursive: true });
 const log = (s) => console.log(new Date().toTimeString().slice(0, 8) + '  ' + s);
 
-const tls = conf.tls && conf.tls.cert && conf.tls.key
-  ? { cert: fs.readFileSync(path.resolve(path.dirname(confPath), conf.tls.cert)), key: fs.readFileSync(path.resolve(path.dirname(confPath), conf.tls.key)) } : null;
+
+// this computer's own addresses, for phones to open
+// (virtual adapters last: Hyper-V, WSL, VirtualBox, VPNs, so the first is usually the Wi-Fi or Ethernet one)
+const addresses = () => {
+  const out = [];
+  for (const [name, list] of Object.entries(require('os').networkInterfaces())) {
+    for (const a of list || []) {
+      if (!(a.family === 'IPv4' || a.family === 4) || a.internal || /^169\.254\./.test(a.address)) continue;
+      out.push({ ip: a.address, virtual: /vethernet|virtual|vmware|vbox|hyper-v|wsl|docker|tailscale|zerotier|vpn|loopback/i.test(name) });
+    }
+  }
+  return out.sort((a, b) => a.virtual - b.virtual).map((a) => a.ip);
+};
+
+// https: a certificate from IT ("tls"), else the workshop's own (made or renewed here)
+const certs = require('./lib/certs');
+let ca = null;
+function loadTls() {
+  if (conf.tls && conf.tls.cert && conf.tls.key) return { cert: fs.readFileSync(path.resolve(path.dirname(confPath), conf.tls.cert)), key: fs.readFileSync(path.resolve(path.dirname(confPath), conf.tls.key)) };
+  if (conf.https === false) return null;
+  const c = certs.ensure(DATA, addresses(), log);
+  ca = c.ca;
+  return { cert: c.cert, key: c.key };
+}
+let tls = null;
+try { tls = loadTls(); } catch (e) { log('https unavailable: ' + e.message); }
 
 // ---------------------------------------------------------------- kept on disk
 const file = (n) => path.join(DATA, n);
@@ -130,19 +157,8 @@ function findMachines() {
 }
 setInterval(findMachines, 10 * 60 * 1000);
 
-// this computer's own addresses, for phones to open
-// (virtual adapters last: Hyper-V, WSL, VirtualBox, VPNs, so the first is usually the Wi-Fi or Ethernet one)
-const addresses = () => {
-  const out = [];
-  for (const [name, list] of Object.entries(require('os').networkInterfaces())) {
-    for (const a of list || []) {
-      if (!(a.family === 'IPv4' || a.family === 4) || a.internal || /^169\.254\./.test(a.address)) continue;
-      out.push({ ip: a.address, virtual: /vethernet|virtual|vmware|vbox|hyper-v|wsl|docker|tailscale|zerotier|vpn|loopback/i.test(name) });
-    }
-  }
-  return out.sort((a, b) => a.virtual - b.virtual).map((a) => a.ip);
-};
-const phoneUrls = () => addresses().map((ip) => (tls ? 'https' : 'http') + '://' + ip + ':' + PORT + '/');
+const phoneUrls = () => addresses().map((ip) => 'http://' + ip + ':' + PORT + '/');
+const appUrls = () => (tls ? addresses().filter((ip) => !ca || certs.isPrivate(ip)).map((ip) => 'https://' + ip + ':' + HTTPS_PORT + '/') : []);
 // the address phones open, and the same as a QR code for a phone's camera
 const qrcode = require('qrcode-generator');
 function qrSvg(text) {
@@ -179,7 +195,13 @@ async function handle(req, res) {
       return;
     }
     if (p === '/api/push-key') return send(res, 200, { key: vapid.publicKey });
-    if (p === '/api/phone') { const urls = phoneUrls(); return send(res, 200, { urls, qr: urls[0] ? qrSvg(urls[0]) : null }); }
+    // the addresses phones open; the QR code is the setup page (it walks a phone through the rest)
+    if (p === '/api/phone') { const urls = phoneUrls(); return send(res, 200, { urls, app: appUrls(), httpsPort: tls ? HTTPS_PORT : null, own: !!ca, qr: urls[0] ? qrSvg(urls[0] + 'setup') : null }); }
+    // reached over https by the setup page (which is on http): only answers if the phone trusts us
+    if (p === '/api/ping') { res.writeHead(200, { 'content-type': 'application/json', 'access-control-allow-origin': '*', 'cache-control': 'no-store' }); return res.end('{"ok":true}'); }
+    // the workshop certificate: a profile for iPhone, the certificate itself for Android
+    if (p === '/workshop.mobileconfig' && ca) { res.writeHead(200, { 'content-type': 'application/x-apple-aspen-config', 'content-disposition': 'attachment; filename="Pathline Monitor workshop.mobileconfig"', 'cache-control': 'no-store' }); return res.end(certs.mobileconfig(ca)); }
+    if (p === '/workshop-ca.crt' && ca) { res.writeHead(200, { 'content-type': 'application/x-x509-ca-cert', 'content-disposition': 'attachment; filename="pathline-monitor-workshop.crt"', 'cache-control': 'no-store' }); return res.end(ca.der); }
     if (p === '/api/find' && req.method === 'POST') return send(res, 200, await findMachines());
     // a phone's settings, and its push subscription once notifications are turned on
     if (p === '/api/device' && req.method === 'POST') {
@@ -209,7 +231,7 @@ async function handle(req, res) {
     if (p.startsWith('/api/')) return send(res, 404, { error: 'No route ' + p });
 
     // the app
-    let f = p === '/' ? 'index.html' : decodeURIComponent(p.slice(1));
+    let f = p === '/' ? 'index.html' : p === '/setup' ? 'setup.html' : decodeURIComponent(p.slice(1));
     const full = path.join(APP, f);
     if (!full.startsWith(APP + path.sep) || !fs.existsSync(full) || fs.statSync(full).isDirectory()) { res.writeHead(404); return res.end('Not found'); }
     // the service worker and the page are always checked for a newer copy; icons can be kept
@@ -221,15 +243,19 @@ async function handle(req, res) {
   }
 }
 
-const server = tls ? https.createServer(tls, handle) : http.createServer(handle);
+// http (any phone, and the setup page) and, when there's a certificate, https (the full app)
+const server = http.createServer(handle);
+const secure = tls ? https.createServer(tls, handle) : null;
 server.listen(PORT, () => {
-log('Pathline Monitor ' + pkg.version + ' · ' + watcher.list.length + ' machines so far · data in ' + DATA);
+  log('Pathline Monitor ' + pkg.version + ' · ' + watcher.list.length + ' machines so far · data in ' + DATA);
   const urls = phoneUrls();
-  if (urls.length) log('  phones on this network open ' + urls[0] + (urls.length > 1 ? ' (or ' + urls.slice(1).join(', ') + ')' : ''));
-  log('  on this PC, open ' + (tls ? 'https' : 'http') + '://localhost:' + PORT + ' for a QR code to scan with a phone');
-  if (!tls) log('Plain http: alerts show while the app is open. For alerts with it closed, see README.md (local certificate).');
+  if (urls.length) log('  phones: scan the QR code on http://localhost:' + PORT + ' (on this PC), or open ' + urls[0] + 'setup');
+  if (secure) secure.listen(HTTPS_PORT, () => { const a = appUrls(); if (a.length) log('  the full app (once a phone trusts the workshop certificate): ' + a[0]); });
+  else log('No https: the app works, and alerts show while it\'s open (README.md).');
   watcher.start();
   findMachines();
 });
+// the workshop certificate follows this computer's addresses (and is renewed before it runs out)
+if (secure && ca) setInterval(() => { try { const t = loadTls(); secure.setSecureContext(t); } catch (e) { log('certificate: ' + e.message); } }, 6 * 3600 * 1000);
 // a comment line every 25 s keeps the live connection open through proxies and phone sleep
 setInterval(() => { for (const res of streams) res.write(': keep-alive\n\n'); }, 25000);

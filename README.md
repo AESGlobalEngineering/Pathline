@@ -41,7 +41,7 @@ Updates work as in Pathline: it checks when it opens and every minute, then asks
 
 ## Get Pathline Monitor (for phones)
 
-**Pathline Monitor** is a phone app for the workshop network only: every machine's progress and queue, what finished today, and an alert with a tone when a job finishes or a machine needs someone. A lid opened or a pause pressed at the machine doesn't alert, because someone is already there. It only watches: nothing on the phone starts or moves a machine. More in [monitor/README.md](monitor/README.md).
+**Pathline Monitor** is a phone app (a progressive web app) for the workshop network only: every machine's progress and queue, what finished today, and an alert when a job finishes or a machine needs someone, even with the app closed. A lid opened or a pause pressed at the machine doesn't alert, because someone is already there. It only watches: nothing on the phone starts or moves a machine. More in [monitor/README.md](monitor/README.md).
 
 **1. Once per workshop: the Monitor hub.** The phones get the app, and the machines' news, from one always-on PC or Pi on the same network. It finds every Pathline Run by itself, the way Prepare's **Find machines** does.
 
@@ -50,14 +50,15 @@ Updates work as in Pathline: it checks when it opens and every minute, then asks
 | **Windows PC** | **[⬇ Pathline-Monitor-Windows.zip](https://github.com/AESGlobalEngineering/Pathline/releases/download/pathlinemonitor/Pathline-Monitor-Windows.zip)** | Right-click it, **Extract All**, then double-click **Start Pathline Monitor.cmd** in the folder it makes, and leave its window open. Node.js is inside: nothing else to install |
 | **Raspberry Pi**, Linux or Mac | [Pathline-Monitor.zip](https://github.com/AESGlobalEngineering/Pathline/releases/download/pathlinemonitor/Pathline-Monitor.zip) | Unzip it, then `sh start.sh` (needs Node.js 18 or newer: `sudo apt install nodejs`) |
 
-**2. On each phone.** On that PC, open `http://localhost:8480`: it shows a QR code. Scan it with the phone's camera, on the workshop Wi-Fi (or type the address the hub's window prints, such as `http://192.168.1.20:8480`). Then add it to the Home Screen, and it opens full screen like an app:
+**2. On each phone.** On that PC, open `http://localhost:8480`: it shows a QR code. Scan it with the phone's camera, on the workshop Wi-Fi. It opens **Set up this phone**, which walks through it in a few minutes, once per phone:
 
-- **iPhone**: in Safari, tap **Share**, then **Add to Home Screen**.
-- **Android**: in Chrome, tap the menu, then **Add to Home screen**.
+1. Download the **workshop certificate** and trust it. The hub makes its own, and it can only vouch for addresses on private networks.
+2. Open the app (`https://<hub>:8443`) and add it to the Home Screen (iPhone: Share, then Add to Home Screen; Android: **Install app**).
+3. Turn on notifications in its Settings, then **Send a test**.
 
-The app shows the same steps (**How**, at the top of Machines). Keep it open on the phone you carry: alerts sound while it's open. For alerts while it's closed, see "Alerts with the app closed" in [monitor/README.md](monitor/README.md).
+From then on it's an app on the Home Screen: full screen, it opens without the network, and alerts arrive with it closed (iPhone: iOS 16.4 or newer). Without the setup, `http://<hub>:8480` works as a web page that alerts while it's open. Details in [monitor/README.md](monitor/README.md).
 
-To update the hub, unzip a newer download over the old folder: the machines it found and its alerts are kept, and the phones pick up the new app the next time they open it. All the downloads are in the [**pathlinemonitor**](https://github.com/AESGlobalEngineering/Pathline/releases/tag/pathlinemonitor) release.
+To update the hub, unzip a newer download over the old folder: the machines it found, the workshop certificate and its alerts are kept, and the phones pick up the new app the next time they open it. All the downloads are in the [**pathlinemonitor**](https://github.com/AESGlobalEngineering/Pathline/releases/tag/pathlinemonitor) release.
 
 ## Releasing a new version
 

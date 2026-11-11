@@ -115,6 +115,25 @@ server.listen(0, async () => {
   a = took();
   ok(m.view.state === 'offline' && /lost its laser/.test((a[0] || {}).title || ''), 'Run up but the laser lost: offline, one alert');
 
+  // the workshop certificate (lib/certs.js)
+  console.log('Workshop certificate');
+  const certs = require('./lib/certs');
+  const crypto = require('crypto');
+  const fs = require('fs');
+  const dir = fs.mkdtempSync(require('path').join(require('os').tmpdir(), 'pm-certs-'));
+  const c1 = certs.ensure(dir, ['192.168.1.54', '203.0.113.9']);
+  const leaf = new crypto.X509Certificate(c1.cert);
+  const auth = new crypto.X509Certificate(c1.ca.pem);
+  ok(auth.ca && leaf.checkIssued(auth) && leaf.verify(auth.publicKey), 'this computer\'s certificate is signed by the workshop authority');
+  ok(leaf.checkIP('192.168.1.54') && leaf.checkIP('127.0.0.1') && !leaf.checkIP('203.0.113.9'), 'it covers the private address, not the public one');
+  ok(Date.parse(leaf.validTo) - Date.now() <= 398 * 864e5, 'it lasts no more than 398 days (phones refuse longer)');
+  ok(require('node-forge').pki.certificateFromPem(c1.ca.pem).extensions.some((e) => e.id === '2.5.29.30' && e.critical), 'the authority is limited to private networks (name constraints)');
+  ok(certs.ensure(dir, ['192.168.1.54', '203.0.113.9']).cert === c1.cert, 'started again: the same certificate');
+  const c2 = certs.ensure(dir, ['192.168.1.77']);
+  ok(c2.cert !== c1.cert && new crypto.X509Certificate(c2.cert).checkIP('192.168.1.77') && c2.ca.pem === c1.ca.pem, 'a new address: a new certificate from the same authority');
+  ok(/com\.apple\.security\.root/.test(certs.mobileconfig(c1.ca)), 'the iPhone profile carries the authority');
+  fs.rmSync(dir, { recursive: true, force: true });
+
   console.log(failed ? '\n' + failed + ' failed' : '\nAll passed');
   server.close();
   process.exit(failed ? 1 : 0);

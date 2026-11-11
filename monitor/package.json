@@ -1,7 +1,7 @@
 {
   "name": "pathline-monitor",
   "productName": "Pathline Monitor",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "Pathline Monitor: every Pathline Run machine's progress and queue on a phone, with a notification when a job finishes. An internal web app served from one workshop PC.",
   "main": "server.js",
   "private": true,
@@ -13,6 +13,7 @@
     "node": ">=18"
   },
   "dependencies": {
+    "node-forge": "1.4.3",
     "qrcode-generator": "2.0.4",
     "web-push": "3.6.7"
   }
