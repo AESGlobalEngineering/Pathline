@@ -549,7 +549,7 @@ class Machine {
     job.progress = 0;
     this.store.flush();
     this.st.marks = null;
-    Object.assign(this.st, { state: 'running', job: job.id, progress: 0, message: prepare ? 'Reading registration marks' : 'Running ' + job.name });
+    Object.assign(this.st, { state: 'running', job: job.id, progress: 0, marker: null, message: prepare ? 'Reading registration marks' : 'Running ' + job.name });
     let total = 1;
     let doneSec = 0;
     // [ms since the stream started, x, y, marker, state, 'p' for a status check while the buffer
@@ -610,7 +610,17 @@ class Machine {
           const markerSec = (m) => seg.steps.filter((s) => s.i + 1 <= m).reduce((a, s) => a + s.seconds, 0);
           const stepSec = (m) => { const s = seg.steps.find((x) => x.marker === m); return s ? s.seconds : 0; };
           let mark = null; // the last marker reported, and the working time when it came
+          // The Trotec reports the last marker it passed until it passes another, so a new job
+          // starts with the previous job's last marker still showing. Taken as this job's, it
+          // put a job run after one as long (J0067 after J0066, both 966 parts; J0068 run five
+          // times) at 100 % from the start: progress, Remaining and the head drawn all at the end.
+          // So the marker showing before this job is sent is ignored until another one shows.
+          let stale;
+          try { const p0 = await this.link.poll(); this.apply(p0); stale = p0.marker; } catch (e) { stale = this.link.lastReply ? this.link.lastReply.marker : undefined; }
+          let fresh = !stale;
           const follow = (p) => {
+            if (!fresh && p.marker !== undefined && p.marker !== stale) fresh = true;
+            if (!fresh) p = { ...p, marker: undefined };
             this.apply(p);
             const now = Date.now();
             if (p.state === 'busy') { sawBusy = true; active += ((now - last) / 1000) * (this.link.timeScale || 1); }
@@ -622,6 +632,8 @@ class Machine {
             if (p.marker && seg.steps.some((s) => s.marker === p.marker)) {
               if (!mark || mark.m !== p.marker) mark = { m: p.marker, at: active };
             }
+            // the last part the laser reported done: the screen looks for the head on the next one
+            this.st.marker = mark ? mark.m : null;
             const est = mark ? markerSec(mark.m) + Math.min(active - mark.at, stepSec(mark.m + 1)) : Math.min(active, seg.steps.length ? seg.steps[0].seconds : seg.seconds);
             setProgress(doneSec + Math.min(est, seg.seconds));
             record(p, '');
@@ -687,6 +699,7 @@ class Machine {
       this.onPos = null;
       this.st.job = null;
       this.st.placed = null;
+      this.st.marker = null;
       // the registration marks found belong to this run: off the bed view with it
       this.st.marks = null;
       if (this.st.state !== 'alarm') {

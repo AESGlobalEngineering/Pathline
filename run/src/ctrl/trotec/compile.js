@@ -20,6 +20,24 @@ const COMMIT_EVERY = 200;
 // never reach speed); this lands every job within −2.5 … +3.3 %.
 const CUT = { arc: 1000, acc: 2000 };
 const MARK_SEC = 4;
+// Engraving: each line is one move across the box and its overscan at the engraving speed, and
+// the head stops and turns at each end: 2·v/acc, 0.08 s at 300 mm/s. Fitted on J0068's labels
+// (45 lines at 300 mm/s: 8.5 s for an 11 mm label, 18.4 s for 76 mm; this gives 8.3 and 18.0 s).
+// Pathline Prepare's own time for them was 80–88 s, and the screen drew the head 10× too slow.
+const ENGRAVE = { acc: 7500 };
+
+// The lines one engraving step is sent as: { pitch, lines, xs, xe (mm, the row with its
+// overscan), v, secPerLine }
+function engraveLines(step, S) {
+  const p = step.proc;
+  // line pitch: the nominal pitch rounded down to whole 6 µm firmware Y steps (§4.7)
+  const pitch = Math.max(0.006, Math.floor(25.4 / step.dpi / 0.006 + 1e-9) * 0.006);
+  const lines = scanLines(step, pitch);
+  const os = S.overscan + (p.overshoot || 0);
+  const xs = Math.max(0, step.box[0] - os), xe = Math.min(S.bed[0], step.box[2] + os);
+  const v = Math.min(p.speed, S.max);
+  return { pitch, lines, xs, xe, v, secPerLine: (xe - xs) / v + (2 * v) / ENGRAVE.acc };
+}
 const cutProfile = (P) => ({ arc: CUT.arc, corner: P ? P[2] : 20, acc: CUT.acc });
 
 // Seconds along one cut run at speed v: moves are fitArcs pieces ({ to } lines, { c, r, sweep,
@@ -255,12 +273,8 @@ function compile(plan, cfg) {
   const engrave = (step) => {
     const p = step.proc;
     setupEngrave(p);
-    // line pitch: the nominal pitch rounded down to whole 6 µm firmware Y steps (§4.7)
-    const pitch = Math.max(0.006, Math.floor(25.4 / step.dpi / 0.006 + 1e-9) * 0.006);
-    const lines = scanLines(step, pitch);
-    const os = S.overscan + p.overshoot;
-    const xs = Math.max(0, step.box[0] - os);
-    const xe = Math.min(S.bed[0], step.box[2] + os);
+    const E = engraveLines(step, S);
+    const { lines, xs, xe } = E;
     const uS = U.x(xs);
     const uE = U.x(xe);
     const len = uE - uS;
@@ -274,7 +288,15 @@ function compile(plan, cfg) {
       out(TT.moveXY(fwd ? uS : uE, uy), TT.commit());
       out(fwd ? TT.moveXPlus(len) : TT.moveXMinus(len), TT.switchTableBW(runs), TT.commit());
     });
-    if (!lines.length) warnings.push('Step ' + (step.i + 1) + ' (' + p.name + '): nothing to engrave');
+    if (!lines.length) { warnings.push('Step ' + (step.i + 1) + ' (' + p.name + '): nothing to engrave'); return 0; }
+    // the time: travel to the first line, then each line across and back (engraveLines)
+    const T = travelLimits(cfg, PLANNER[st.planner] || PLANNER.Standard, S.travel);
+    // (the first line always goes left to right)
+    const first = [xs, lines[0].y];
+    const travel = moveTime(Math.hypot(first[0] - head[0], first[1] - head[1]), Math.min(T.v, S.max), T.a, T.j);
+    const last = lines[lines.length - 1];
+    head = [!step.bidi || (lines.length - 1) % 2 === 0 ? xe : xs, last.y];
+    return travel + lines.length * E.secPerLine;
   };
 
   for (const step of plan.steps) {
@@ -289,10 +311,10 @@ function compile(plan, cfg) {
     // the step's time. A cut is timed here: the cutting at its set speed on straights, slower round
     // curves and corners (runTime: on the X8 sheet Pathline's own cutting time ran ~15 % long) and
     // the travel to each cut as the planner really moves (Pathline times that at 2000 mm/s with no
-    // jerk limit). Engraving keeps Pathline's time
+    // jerk limit). Engraving from the lines sent (engraveLines: Pathline's time ran 10× long)
     let sec = step.seconds;
     if (step.op === 'cut') sec = cut(step);
-    else if (step.op === 'engrave') engrave(step);
+    else if (step.op === 'engrave') sec = engrave(step);
     out(TT.progressMarker(step.i + 1));
     seg.steps.push({ i: step.i, marker: step.i + 1, seconds: sec });
     seg.seconds += sec;
@@ -318,4 +340,20 @@ function exportFiles(plan, cfg) {
   return { bin, txt: txt.join('\n'), ext: '.sf' };
 }
 
-module.exports = { compile, exportFiles, settings, units, PLANNER, runTime, cutProfile };
+// For the screen's route (and the follow fit): each engraving step as sent, by toolpath index:
+// { n lines, y0, y1 (first and last line), xs, xe (the row with overscan), sec (whole step,
+// lines only) }. The screen draws the head along these at this pace.
+function engraveRows(pkg, cfg) {
+  const S = settings(cfg);
+  const out = {};
+  const { build } = require('../../job/plan');
+  for (const step of build(pkg).steps) {
+    if (step.op !== 'engrave') continue;
+    const E = engraveLines(step, S);
+    if (!E.lines.length) continue;
+    out[step.i] = { n: E.lines.length, y0: +E.lines[0].y.toFixed(3), y1: +E.lines[E.lines.length - 1].y.toFixed(3), xs: +E.xs.toFixed(3), xe: +E.xe.toFixed(3), bidi: step.bidi, sec: +(E.lines.length * E.secPerLine).toFixed(3) };
+  }
+  return out;
+}
+
+module.exports = { compile, exportFiles, settings, units, PLANNER, runTime, cutProfile, engraveRows };

@@ -85,7 +85,15 @@ function placement(run, pkg0, M) {
   let T = fit(pairs);
   const res = pairs.map(([a, b]) => Math.hypot(ap(T, a)[0] - b[0], ap(T, a)[1] - b[1])).sort((x, y) => x - y);
   T = fit(pairs.filter(([a, b]) => Math.hypot(ap(T, a)[0] - b[0], ap(T, a)[1] - b[1]) <= res[Math.floor(res.length * 0.8)]));
-  const placed = () => ({ ...pkg0, toolpath: tp.map((s) => (Array.isArray(s.p) ? { ...s, p: s.p.map((p) => ap(T, p)) } : s)) });
+  // (engraving rows, pkg0.rows, moved with it)
+  const placed = () => {
+    const out = { ...pkg0, toolpath: tp.map((s) => (Array.isArray(s.p) ? { ...s, p: s.p.map((p) => ap(T, p)) } : s)) };
+    if (pkg0.rows) {
+      out.rows = {};
+      for (const [i, r] of Object.entries(pkg0.rows)) { const a = ap(T, [r.xs, r.y0]), b = ap(T, [r.xe, r.y1]); out.rows[i] = { ...r, xs: a[0], y0: a[1], xe: b[0], y1: b[1] }; }
+    }
+    return out;
+  };
   for (let it = 0; it < 6; it++) {
     const route = F.routeOf(placed(), M);
     const stepK = {};
@@ -125,6 +133,10 @@ function replay(run, pkg, M, stamp, opts = {}) {
   for (const s of steps) stepSec[s.marker] = s.seconds;
   const follow = F.follower();
   let active = 0, lastT = tl[0][0], mark = null, prog = 0, ti = 0, seen = -1, ri = 0;
+  // the previous job's last marker, still showing as this one starts (machine.js): ignored until
+  // another shows (runs saved before Pathline Run did that themselves)
+  const firstM = (tl.find((t) => t[3] != null) || [])[3];
+  let stale = firstM !== undefined && steps.length && firstM !== steps[0].marker ? firstM : undefined;
   const errs = [];
   const poll = opts.poll || 700, bias = opts.bias || 0;
   let nextPoll = tl[0][0] + (opts.phase || 350);
@@ -135,7 +147,8 @@ function replay(run, pkg, M, stamp, opts = {}) {
       const p = tl[ti];
       if (p[4] === 'busy') active += (p[0] - lastT) / 1000;
       lastT = p[0];
-      if (p[3] && markerSec[p[3]] !== undefined && (!mark || mark.m !== p[3])) mark = { m: p[3], at: active };
+      if (stale !== undefined && p[3] != null && p[3] !== stale) stale = undefined;
+      if (p[3] && p[3] !== stale && markerSec[p[3]] !== undefined && (!mark || mark.m !== p[3])) mark = { m: p[3], at: active };
       const est = mark ? markerSec[mark.m] + Math.min(active - mark.at, stepSec[mark.m + 1] || 0) : Math.min(active, steps.length ? steps[0].seconds : active);
       prog = Math.max(prog, Math.min(0.999, est / total));
       ti++;
@@ -145,7 +158,7 @@ function replay(run, pkg, M, stamp, opts = {}) {
       const j = ti - 1;
       if (j >= 0) {
         const r = tl[j];
-        F.place(follow, { job: run.id, pos: { x: r[1], y: r[2] }, posAge: clock - r[0] + bias, progress: prog }, pkg, clock, M);
+        F.place(follow, { job: run.id, pos: { x: r[1], y: r[2] }, posAge: clock - r[0] + bias, progress: prog, marker: mark ? mark.m : undefined }, pkg, clock, M);
         seen = j;
       }
     }
@@ -153,7 +166,11 @@ function replay(run, pkg, M, stamp, opts = {}) {
     const d = F.draw(follow, tl[Math.max(0, ti - 1)][4] !== 'paused', clock);
     while (ri < tl.length && tl[ri][0] <= clock) {
       const r = tl[ri];
-      if (ri > seen && r[4] === 'busy' && clock - r[0] < 33) errs.push(Math.hypot(d.p[0] - r[1], d.p[1] - r[2]));
+      if (ri > seen && r[4] === 'busy' && clock - r[0] < 33) {
+        const e = Math.hypot(d.p[0] - r[1], d.p[1] - r[2]);
+        // opts.detail: what the drawing was on (cut, row, travel …) with each error
+        errs.push(opts.detail ? { e, kind: follow.route.segs[d.k].kind, speed: (pkg.processes || []).find((q) => q.index === ((pkg.toolpath || [])[follow.route.segs[d.k].step] || {}).process) } : e);
+      }
       ri++;
     }
   }
@@ -214,6 +231,11 @@ function fit(dataDir, current = {}, opts = {}) {
   const cfg = opts.cfg || {};
   const motion = opts.motion || {};
   const prof0 = { travel: { ...F.TROTEC.travel, ...(current.travel || {}) }, cut: { ...F.TROTEC.cut, ...(current.cut || {}) } };
+  // engraving as it was sent (the screen draws it so): its lines and their time
+  if (cfg.controller === 'trotec' || !cfg.controller) {
+    const { engraveRows } = require('./ctrl/trotec/compile');
+    for (const r of runs) { try { if ((r.pkg.toolpath || []).some((s) => s.type === 'engrave')) r.pkg.rows = engraveRows(r.pkg, { ...require('./config').defaults('trotec'), ...cfg }); } catch (e) { /* drawn as before */ } }
+  }
   const M = (prof) => F.motionFor({ ...motion, cut: motion.cut || prof.cut, follow: prof }, cfg);
   // where each job was, found once with the profile in use: the placement found, or the job as
   // sent if that fits the reports better (a placement can go wrong on a regular grid of parts)

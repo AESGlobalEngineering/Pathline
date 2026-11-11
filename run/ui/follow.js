@@ -80,6 +80,23 @@
     const go = (p, step) => { if (cur && Math.hypot(p[0] - cur[0], p[1] - cur[1]) > 0.01) add(cur, p, moveTime(Math.hypot(p[0] - cur[0], p[1] - cur[1]), M.v, M.a, M.j), 'travel', step); cur = p; };
     (pkg.toolpath || []).forEach((s, i) => {
       let pts = null, kind = 'cut';
+      // engraving as Pathline Run sends it (pkg.rows from the server: the lines, their overscan
+      // and their time); the head is drawn across each line at the real pace (Prepare's own time
+      // for J0068's labels was 10× too long, and the drawing fell far behind)
+      const rows = pkg.rows && pkg.rows[i];
+      if (s.type === 'engrave' && rows && rows.n > 0) {
+        const n = Math.max(1, Math.min(200, rows.n)), per = rows.sec / n;
+        go([rows.xs, rows.y0], i);
+        for (let r = 0; r < n; r++) {
+          const y = n > 1 ? rows.y0 + ((rows.y1 - rows.y0) * r) / (n - 1) : rows.y0;
+          const back = rows.bidi !== false && r % 2;
+          const a = back ? [rows.xe, y] : [rows.xs, y], b = back ? [rows.xs, y] : [rows.xe, y];
+          if (r) add(cur, a, 1e-3, 'step', i);
+          add(a, b, per, 'row', i);
+          cur = b;
+        }
+        return;
+      }
       if (Array.isArray(s.p) && s.p.length > 1) pts = s.closed ? s.p.concat([s.p[0]]) : s.p;
       else if (s.type === 'engrave' && Array.isArray(s.box) && s.box.length === 4) {
         // the scan lines (at most 200 of them here: enough to follow and draw)
@@ -126,6 +143,21 @@
     return { k: lo, p: [g.a[0] + (g.b[0] - g.a[0]) * u, g.a[1] + (g.b[1] - g.a[1]) * u] };
   }
 
+  // The route times [from, to] of the part after the one marker m says is done (marker m is set
+  // after toolpath step m − 1): the travel to it and the part itself. null if there's none
+  function partSpan(R, m) {
+    if (!R.byStep) {
+      R.byStep = [];
+      R.segs.forEach((g, k) => { if (R.byStep.length === 0 || R.segs[R.byStep[R.byStep.length - 1]].step !== g.step) R.byStep.push(k); });
+    }
+    const starts = R.byStep;
+    let lo = 0, hi = starts.length - 1, found = -1;
+    while (lo <= hi) { const mid = (lo + hi) >> 1; if (R.segs[starts[mid]].step >= m) { found = mid; hi = mid - 1; } else lo = mid + 1; }
+    if (found < 0) return null;
+    const t0 = R.segs[starts[found]].t0, t1 = found + 1 < starts.length ? R.segs[starts[found + 1]].t0 : R.end;
+    return [t0, t1];
+  }
+
   // A new follower: job, route, where the head was last placed (k, t, at), shown: where it's drawn
   const follower = () => ({ job: null, route: null, k: 0, t: 0, at: 0, miss: 0, doneK: -1, rate: 1, found: false, shown: { t: null, at: 0 } });
 
@@ -147,22 +179,34 @@
     // the controller's progress allows (the head waiting where the last run ended can also be where
     // this one ends: the same job again), nearest that progress. Otherwise a few seconds ahead.
     const wide = !follow.found || follow.miss >= 3;
-    // (the progress follows the job closely now: within 10 % of the job, at least 5 s, of it. With
-    // 30 % and 15 s, J0043's first report was placed 15 s on)
-    const hint = (Number(st.progress) || 0) * R.end, tol = Math.max(5, 0.1 * R.end);
+    // Where to look when searching wide: the part the laser says it's on (st.marker: the last
+    // part it reported done, so the head is on the next one, or travelling to it), else the
+    // progress (within 10 % of the job, at least 5 s, of it: with 30 % and 15 s, J0043's first
+    // report was placed 15 s on). The progress comes from the estimate: with J0068's labels timed
+    // 10× too long it pointed far from the head, and the drawing never found it again
+    let a = (Number(st.progress) || 0) * R.end, b = a;
+    let tol = Math.max(5, 0.1 * R.end);
+    const part = Number.isFinite(st.marker) ? partSpan(R, st.marker) : null;
+    if (part) { a = part[0]; b = part[1]; tol = 3; }
     const from = wide ? 0 : follow.k;
-    const reach = wide ? hint + tol : follow.t + 3 + (2 * (now - follow.at)) / 1000;
+    const reach = wide ? b + tol : follow.t + 3 + (2 * (now - follow.at)) / 1000;
     let best = null;
     for (let k = from; k < R.segs.length && R.segs[k].t0 <= reach; k++) {
       const g = R.segs[k], dx = g.b[0] - g.a[0], dy = g.b[1] - g.a[1], L2 = dx * dx + dy * dy;
       let u = L2 ? ((P[0] - g.a[0]) * dx + (P[1] - g.a[1]) * dy) / L2 : 0;
       u = Math.max(!wide && k === follow.k ? Math.min(1, (follow.t - g.t0) / g.dt) : 0, Math.min(1, u));
       const d = Math.hypot(g.a[0] + dx * u - P[0], g.a[1] + dy * u - P[1]), t = g.t0 + u * g.dt;
-      if (wide && Math.abs(t - hint) > tol) continue;
-      // (searching wide, of the places that fit, the one nearest the progress reported: a second of
-      // the job away counts as a mm off. At 0.01 mm a second, the first report, on the way to the
-      // first cut, was put 15 s on where the path passes close by: the head drawn 40–50 mm off for 3 s)
-      const score = wide ? d + Math.abs(t - hint) : d;
+      const off = Math.max(0, a - t, t - b);
+      if (wide && off > tol) continue;
+      // (searching wide, of the places that fit, the one nearest where the head should be: a
+      // second of the job away counts as a mm off. At 0.01 mm a second, the first report, on the
+      // way to the first cut, was put 15 s on where the path passes close by: the head drawn
+      // 40–50 mm off for 3 s)
+      // and the part the laser says: on it (or on the way to the next) beats a place on another
+      // part by 3 mm. J0068's 8 mm test squares, 4.5 mm apart: a corner of one is within reach
+      // of the travel across to another, and the drawing jumped squares ahead
+      const elsewhere = Number.isFinite(st.marker) && (g.step < st.marker || g.step > st.marker + 1) ? 3 : 0;
+      const score = (wide ? d + off : d) + elsewhere;
       if (d < 4 && (!best || score < best.score - 0.01)) best = { k, t, d, score };
     }
     // the head moves on from here at the route's own pace (rate 1). A pace learnt from the fixes
@@ -195,5 +239,5 @@
     return routeAt(follow.route, sh.t);
   }
 
-  return { TROTEC, moveTime, polyTimes, motionFor, routeOf, routeAt, follower, place, draw };
+  return { TROTEC, moveTime, polyTimes, motionFor, routeOf, routeAt, partSpan, follower, place, draw };
 }));

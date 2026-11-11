@@ -25,11 +25,11 @@ class ZFollow {
     this.lastSent = null;
   }
 
-  // a head position from the laser: { pos, at } and the job's progress
-  position(p, progress) {
+  // a head position from the laser: { pos, at }, the job's progress and the last part reported done
+  position(p, progress, marker) {
     if (!p || !p.pos || !Number.isFinite(p.pos.x)) return;
     const now = this.clock();
-    F.place(this.follow, { job: this.o.job, pos: p.pos, posAge: now - (p.at || now), progress }, this.o.pkg, now, this.o.M);
+    F.place(this.follow, { job: this.o.job, pos: p.pos, posAge: now - (p.at || now), progress, marker }, this.o.pkg, now, this.o.M);
   }
 
   // where the head is on the route now (s), when it's sure

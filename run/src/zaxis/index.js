@@ -203,6 +203,8 @@ class ZAxis {
     if (!this.mesh) throw err(409, 'The Z axis has no height map of this sheet: Z axis → Scan first (or switch the Z axis off in Setup)');
     if (!Number.isFinite(c.dRef)) throw err(409, 'Set the Z axis focus first (Z axis → Set focus)');
     const M = F.motionFor(this.o.motion(), this.m.cfg);
+    // a Trotec's engraving as it's sent (its lines and their time), as the screen draws it
+    if (this.m.cfg.controller === 'trotec' && (pkg.toolpath || []).some((s) => s.type === 'engrave')) pkg = { ...pkg, rows: require('../ctrl/trotec/compile').engraveRows(pkg, this.m.cfg) };
     const route = F.routeOf(pkg, M);
     const plan = P.plan(route, this.mesh, { ref: c.ref, gap: c.gap, gapMin: c.gapMin, lift: c.lift, vmax: c.planVmax, bottom: c.bottom });
     const why = P.refusal(plan);
@@ -221,7 +223,7 @@ class ZAxis {
     this.run = { zf, job, timer: setInterval(() => zf.tick(this.m.st.state === 'running' && !this.m.st.interlock), 50) };
     this.log('z axis: following ' + job.name + (c.dry ? ' (dry run: nothing moves)' : ''));
   }
-  position(p, progress) { if (this.run) this.run.zf.position(p, progress); }
+  position(p, progress) { if (this.run) this.run.zf.position(p, progress, this.m.st.marker); }
   // the job ended: the nozzle up, and what was done (for the run's record)
   end() {
     const r = this.run;

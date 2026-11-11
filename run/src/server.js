@@ -283,6 +283,22 @@ function start(opts = {}) {
   };
 
   // ---------------------------------------------------------------- HMI screen
+  // A Trotec job's engraving as it's sent (lines, overscan, time), for the screen to draw the head
+  // along at the real pace (ui/follow.js). Kept per job and placement: working out the lines of a
+  // large engraving takes a moment
+  const rowsCache = new Map();
+  function withRows(id, pkg) {
+    if (cfg.controller !== 'trotec' || !(pkg.toolpath || []).some((s) => s.type === 'engrave')) return pkg;
+    const job = store.get(id);
+    const key = id + ':' + (pkg.placed || '') + ':' + JSON.stringify((job && job.anchor) || null);
+    if (!rowsCache.has(key)) {
+      try { rowsCache.set(key, require('./ctrl/trotec/compile').engraveRows(pkg, cfg)); } catch (e) { rowsCache.set(key, null); }
+      if (rowsCache.size > 20) rowsCache.delete(rowsCache.keys().next().value);
+    }
+    const rows = rowsCache.get(key);
+    return rows ? { ...pkg, rows } : pkg;
+  }
+
   function exportJob(id, format, ctrlName) {
     const pkg = store.get(id) ? store.runPkg(id) : store.pkg(id);
     const c = controller(ctrlName || cfg.controller);
@@ -527,8 +543,8 @@ function start(opts = {}) {
           const id = decodeURIComponent(m[1]);
           // running print and cut: the job as moved onto the marks it found (status.placed says when)
           const run = machine.run;
-          if (run && run.placed && run.job.id === id) return send(res, 200, { ...run.placed, placed: machine.st.placed });
-          return send(res, 200, store.get(id) ? store.runPkg(id) : store.pkg(id));
+          if (run && run.placed && run.job.id === id) return send(res, 200, withRows(id, { ...run.placed, placed: machine.st.placed }));
+          return send(res, 200, withRows(id, store.get(id) ? store.runPkg(id) : store.pkg(id)));
         }
         // anchor the job's top-left corner to the head: where the head is when Start is pressed
         // (machine.start takes the position), for that run only. { clear: true } puts it back
