@@ -1501,6 +1501,15 @@
         const moving = drag && drag.kind === 'move';
         const scaling = drag && drag.kind === 'scale';
         const normal = [], selected = [];
+        // engraving fills even-odd: a shape inside another engraved shape is a
+        // hole in it (CC.engraveHoles), so the host is filled with its holes
+        // cut out and the hole itself is drawn as an outline
+        if (this._holesOf !== p.job.entities || this._holesProcs !== p.job.processes) { this._holesOf = p.job.entities; this._holesProcs = p.job.processes; this._holes = CC.engraveHoles(p.job); }
+        const holes = this._holes, hostD = new Map();
+        if (holes.size) {
+          const byId = new Map(p.job.entities.map((x) => [x.id, x]));
+          for (const [inner, host] of holes) hostD.set(host, (hostD.get(host) || '') + entityD(byId.get(inner)));
+        }
         for (const e of p.job.entities) {
           if (e.hidden) continue;
           const pr = procByAci.get(e.aci);
@@ -1508,13 +1517,14 @@
           const isEng = pr && pr.proc === 'Engrave';
           const isReg = regAci.has(e.aci);
           const dash = pr && pr.dash && !isReg ? (pr.dl * v.s).toFixed(1) + ' ' + (pr.gl * v.s).toFixed(1) : null;
+          const isHole = isEng && holes.has(e.id);
           const el = h('path', {
-            key: e.id, d: entityD(e), transform: this.isPlot() && e.bed ? 'translate(' + this.bedX(e.bed) + ' 0)' : undefined,
+            key: e.id, d: entityD(e) + (isEng && hostD.has(e.id) ? hostD.get(e.id) : ''), transform: this.isPlot() && e.bed ? 'translate(' + this.bedX(e.bed) + ' 0)' : undefined,
             fillOpacity: isReg ? 1 : isEng ? 0.22 : undefined, fillRule: 'evenodd',
             strokeWidth: selSet.has(e.id) ? 2 : 1.3, strokeDasharray: dash || undefined,
             vectorEffect: 'non-scaling-stroke', opacity: pr && pr.hidden ? 0.2 : !pr || pr.out === false ? 0.35 : e.locked ? 0.7 : 1,
             // colours as CSS so ACI 7 and reg marks follow the theme; reg marks are drawn solid, the way the camera sees them
-            style: { fill: isReg ? 'var(--ink)' : isEng ? col : 'none', stroke: col }
+            style: { fill: isReg ? 'var(--ink)' : isEng && !isHole ? col : 'none', stroke: col }
           });
           (selSet.has(e.id) ? selected : normal).push(el);
         }

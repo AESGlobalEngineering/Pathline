@@ -593,6 +593,47 @@
     if (inner.c && inner.p.length > 2 && !pointInPoly(x, y, inner.p)) [x, y] = inner.p[0];
     return pointInPoly(x, y, outer);
   }
+  // Engraving fills even-odd: a closed shape inside another engraved shape is
+  // a hole in it (the lens of a magnifying glass), even when it was drawn as
+  // a separate object. Pathline Run fills each object on its own, so the
+  // objects inside another object of the same engrave process are joined to
+  // the outermost one. Returns Map(inner entity id → outer entity id).
+  function engraveHoles(job) {
+    const out = new Map();
+    const engr = new Set(job.processes.map((p, i) => (p.proc === 'Engrave' ? i : -1)).filter((i) => i >= 0));
+    if (!engr.size) return out;
+    const byProc = new Map();
+    for (const e of job.entities || []) {
+      if (e.hidden || !e.paths || !e.paths.length) continue;
+      const pi = processOfAci(job, e.aci);
+      if (!engr.has(pi)) continue;
+      const closed = e.paths.filter((p) => p.c && p.p.length > 2);
+      if (!closed.length || closed.length !== e.paths.length) continue;
+      const rings = closed.map((p) => { const b = EMPTY_BOX(); p.p.forEach(([x, y]) => growBox(b, x, y)); return { p, b, a: Math.abs(polyArea(p.p)) }; });
+      const box = EMPTY_BOX();
+      rings.forEach((r) => { growBox(box, r.b.x0, r.b.y0); growBox(box, r.b.x1, r.b.y1); });
+      if (!byProc.has(pi)) byProc.set(pi, []);
+      byProc.get(pi).push({ e, rings, box, a: Math.max(...rings.map((r) => r.a)), bed: e.bed || 0 });
+    }
+    for (const list of byProc.values()) {
+      if (list.length < 2) continue;
+      // biggest first, so each object is tested only against bigger ones
+      list.sort((u, v) => v.a - u.a);
+      for (let i = 1; i < list.length; i++) {
+        const it = list[i];
+        let host = null;
+        for (let k = 0; k < i; k++) {
+          const o = list[k];
+          if (o.bed !== it.bed || it.box.x0 < o.box.x0 || it.box.x1 > o.box.x1 || it.box.y0 < o.box.y0 || it.box.y1 > o.box.y1) continue;
+          // every shape of it lies inside one of o's shapes
+          if (it.rings.every((r) => o.rings.some((q) => insideOf(r.p, r.b, r.a, q.p.p, q.b, q.a)))) { host = o; break; }
+        }
+        // join the outermost object: the host's own host, if it has one
+        if (host) out.set(it.e.id, out.get(host.e.id) || host.e.id);
+      }
+    }
+    return out;
+  }
   // how many closed paths a path is inside (an open line inside a closed shape
   // is inside it too, so it is cut before that shape's outline)
   function nestDepth(path, all) {
@@ -1698,12 +1739,12 @@
     foam: { name: 'Polystyrene foam board', rho: 30, c: 1300, k: 0.035, aCO2: 0.8, aFiber: 0.2, limit: 90, limitLabel: 'foam melts', src: 'EN ISO 10456 (EPS); polystyrene softens ≈ 90–100 °C' },
     film: { name: 'Polyester film (PET)', rho: 1390, c: 1170, k: 0.15, aCO2: 0.9, aFiber: 0.1, limit: 150, limitLabel: 'film shrinks', src: 'DuPont Teijin Mylar physical properties' },
     magnetic: { name: 'Flexible magnet (ferrite in rubber)', rho: 3600, c: 900, k: 0.5, aCO2: 0.9, aFiber: 0.5, limit: 85, limitLabel: 'demagnetises', src: 'Typical flexible-magnet data sheets (max. working 85 °C)' },
-    ss304: { name: 'Stainless steel 304', rho: 8000, c: 500, k: 16.2, aCO2: 0.1, aFiber: 0.35, limit: 1400, limitLabel: 'melts', src: 'AISI 304 data (ASM Handbook); melts 1400–1450 °C' },
-    ss316: { name: 'Stainless steel 316', rho: 8000, c: 500, k: 16.3, aCO2: 0.1, aFiber: 0.35, limit: 1375, limitLabel: 'melts', src: 'AISI 316 data (ASM Handbook); melts 1375–1400 °C' },
-    mildsteel: { name: 'Mild steel (1018)', rho: 7870, c: 486, k: 51.9, aCO2: 0.1, aFiber: 0.35, limit: 1420, limitLabel: 'melts', src: 'AISI 1018 data (ASM Handbook); melts ≈ 1420–1460 °C' },
-    aluminium: { name: 'Aluminium 5052', rho: 2680, c: 880, k: 138, aCO2: 0.03, aFiber: 0.1, limit: 607, limitLabel: 'melts', src: 'Aluminium 5052-H32 data (ASM Handbook); melts 607–650 °C' },
-    anodised: { name: 'Anodised aluminium 5005', rho: 2700, c: 900, k: 200, aCO2: 0.8, aFiber: 0.3, limit: 632, limitLabel: 'melts', src: 'Aluminium 5005 data (ASM Handbook); the oxide layer absorbs 10.6 µm' },
-    brass: { name: 'Brass C26000', rho: 8530, c: 375, k: 120, aCO2: 0.03, aFiber: 0.1, limit: 915, limitLabel: 'melts', src: 'C26000 cartridge brass (Copper Development Association); melts 915–955 °C' }
+    ss304: { name: 'Stainless steel 304', rho: 8000, c: 500, k: 16.2, aCO2: 0.1, aFiber: 0.35, limit: 1400, limitLabel: 'melts', src: 'AISI 304 data (ASM Handbook); melts 1400–1450 °C', mech: { E: 193, alpha: 17.3, nu: 0.29, yield: 205, src: 'ASTM A240 304 minimum yield; ASM thermal expansion 0–100 °C' } },
+    ss316: { name: 'Stainless steel 316', rho: 8000, c: 500, k: 16.3, aCO2: 0.1, aFiber: 0.35, limit: 1375, limitLabel: 'melts', src: 'AISI 316 data (ASM Handbook); melts 1375–1400 °C', mech: { E: 193, alpha: 15.9, nu: 0.3, yield: 205, src: 'ASTM A240 316 minimum yield; ASM thermal expansion 0–100 °C' } },
+    mildsteel: { name: 'Mild steel (1018)', rho: 7870, c: 486, k: 51.9, aCO2: 0.1, aFiber: 0.35, limit: 1420, limitLabel: 'melts', src: 'AISI 1018 data (ASM Handbook); melts ≈ 1420–1460 °C', mech: { E: 205, alpha: 12, nu: 0.29, yield: 220, src: 'AISI 1018 hot rolled (ASM Handbook)' } },
+    aluminium: { name: 'Aluminium 5052', rho: 2680, c: 880, k: 138, aCO2: 0.03, aFiber: 0.1, limit: 607, limitLabel: 'melts', src: 'Aluminium 5052-H32 data (ASM Handbook); melts 607–650 °C', mech: { E: 70.3, alpha: 23.8, nu: 0.33, yield: 193, src: 'Aluminium 5052-H32 (ASM Handbook)' } },
+    anodised: { name: 'Anodised aluminium 5005', rho: 2700, c: 900, k: 200, aCO2: 0.8, aFiber: 0.3, limit: 632, limitLabel: 'melts', src: 'Aluminium 5005 data (ASM Handbook); the oxide layer absorbs 10.6 µm', mech: { E: 68.9, alpha: 23.8, nu: 0.33, yield: 165, src: 'Aluminium 5005-H34 (ASM Handbook)' } },
+    brass: { name: 'Brass C26000', rho: 8530, c: 375, k: 120, aCO2: 0.03, aFiber: 0.1, limit: 915, limitLabel: 'melts', src: 'C26000 cartridge brass (Copper Development Association); melts 915–955 °C', mech: { E: 110, alpha: 19.9, nu: 0.375, yield: 275, src: 'C26000 quarter-hard (Copper Development Association)' } }
   };
   // Reference properties for a material, matched on its name and group.
   // Values stored on a material are ignored; no match means no thermal data.
@@ -1723,6 +1764,27 @@
     if (/board|card|grey|paper/.test(n)) return 'card';
     if (/wood|ply|birch|oak|poplar|bamboo/.test(n)) return 'wood';
     return null;
+  }
+  // Sheet metal bends when one area gets hotter than the rest: the hot area
+  // tries to expand and the cold sheet around it holds it back, squeezing it
+  // (a hot disc in a large cold plate: σ = E·α·ΔT / 2). Two limits, as a rise
+  // in °C over the cold sheet:
+  //  - set: the squeeze reaches the yield strength, so the bend stays after
+  //    it cools: ΔT = 2·σy / (E·α), whatever the size of the hot area;
+  //  - bow: a wide hot area on thin sheet buckles out of plane first (a disc
+  //    of radius a, held at its edge: σcr = 1.22·E·(t/a)² / (1 − ν²)), so
+  //    ΔT = 2.45·(t/a)² / ((1 − ν²)·α). It springs back once the heat evens out
+  //    unless it also went past set.
+  // Strengths at room temperature; hot metal yields sooner, so these are on
+  // the high side once the sheet is a few hundred °C.
+  function bendLimit(props, tMm, hotDiaMm) {
+    const m = props && props.mech;
+    if (!m) return null;
+    const alpha = m.alpha * 1e-6;
+    const set = (2 * m.yield) / (m.E * 1000 * alpha);
+    const a = Math.max(0.5, (Number(hotDiaMm) || 0) / 2);
+    const bow = hotDiaMm > 0 ? (2.45 * Math.pow(tMm / a, 2)) / ((1 - m.nu * m.nu) * alpha) : Infinity;
+    return { set, bow, rise: Math.min(set, bow), by: bow < set ? 'bow' : 'set' };
   }
   function thermalOf(mat) {
     const key = thermalKey(mat);
@@ -1810,13 +1872,28 @@
     const powerOf = (op) => {
       const p = job.processes[op.proc];
       if (!p || op.kind !== 'op') return 0;
-      // most of a cut's energy leaves with the vaporised material; engraving keeps more
-      const residual = p.proc === 'Cut' ? 0.3 : 0.45;
+      // most of a cut's energy leaves with the vaporised material; engraving
+      // keeps more, and marking metal (nothing is removed) keeps nearly all of it
+      const residual = props.mech ? (p.proc === 'Cut' ? 0.5 : 0.9) : p.proc === 'Cut' ? 0.3 : 0.45;
       return rated * ((Number(p.power) || 0) / 100) * absorb * residual;
     };
     let T = new Float32Array(nx * ny).fill(T0), N = new Float32Array(nx * ny);
     let time = 0, peak = T0, peakAt = 0;
-    const snaps = [{ time: 0, T: T.slice(), peak, peakAt }];
+    // sheet metal: the hot area (where the rise is at least half the hottest
+    // cell's) and how close it is to bending (bendLimit), worst so far
+    const tMm = t_m * 1000;
+    const hotSpot = () => {
+      let m = T0;
+      for (let k = 0; k < T.length; k++) if (T[k] > m) m = T[k];
+      const rise = m - T0;
+      if (rise < 0.5) return { rise: 0, dia: 0, limit: bendLimit(props, tMm, 0) };
+      let n = 0;
+      for (let k = 0; k < T.length; k++) if (T[k] - T0 >= rise / 2) n++;
+      const dia = 2 * Math.sqrt((n * dx * dx) / Math.PI);
+      return { rise, dia, limit: bendLimit(props, tMm, dia) };
+    };
+    let bend = 0, bendAt = 0, lastBend = -1;
+    const snaps = [{ time: 0, T: T.slice(), peak, peakAt, bend, bendAt }];
     const step = () => {
       // heat from the beam
       for (let s = 1; s <= samples; s++) {
@@ -1838,18 +1915,27 @@
       const tmp = T; T = N; N = tmp;
       time += dt;
       for (let k = 0; k < T.length; k++) if (T[k] > peak) { peak = T[k]; peakAt = time; }
-      if (time - snaps[snaps.length - 1].time >= 5) snaps.push({ time, T: T.slice(), peak, peakAt });
+      if (props.mech && time - lastBend >= 0.5) {
+        lastBend = time;
+        const h = hotSpot();
+        const f = h.limit ? h.rise / h.limit.rise : 0;
+        if (f > bend) { bend = f; bendAt = time; }
+      }
+      if (time - snaps[snaps.length - 1].time >= 5) snaps.push({ time, T: T.slice(), peak, peakAt, bend, bendAt });
     };
     const api = {
       nx, ny, dx, x0, y0, T0, props, absorb, colour, fibre, cellMm: dx,
       get T() { return T; }, get time() { return time; }, get peak() { return peak; }, get peakAt() { return peakAt; },
+      // sheet metal only: the hot area now { rise, dia, limit }, and the worst
+      // share of the bending limit reached so far (1 = starts to bend) and when
+      hotSpot, get bend() { return bend; }, get bendAt() { return bendAt; }, tMm,
       // advance (or rewind to a snapshot and advance) to time t
       to(t) {
         t = Math.max(0, Math.min(total, t));
         if (t < time) {
           let s = snaps[0];
           for (const x of snaps) if (x.time <= t) s = x;
-          T = s.T.slice(); time = s.time; peak = s.peak; peakAt = s.peakAt;
+          T = s.T.slice(); time = s.time; peak = s.peak; peakAt = s.peakAt; bend = s.bend; bendAt = s.bendAt; lastBend = -1;
           snaps.length = snaps.indexOf(s) + 1;
         }
         while (time + dt <= t) step();
@@ -2035,9 +2121,9 @@
     ACI_HEX, ACI_NAMES, aciHex, aciName, aciFg, aciStroke, rgbToAci, hexToRgb,
     uid, EMPTY_BOX, growBox, entityBox, boxOf, boxValid, boxW, boxH,
     mapEntity, translate, scaleAbout, rotateAbout, polyLen, polyArea, pointInPoly, distToEntity, isClosedPts, cleanPath, shapes,
-    processOrder, processOfAci, toolSlot, toolRank, polyTime, travelTime, rasterSpans, orderPaths,
+    processOrder, processOfAci, engraveHoles, toolSlot, toolRank, polyTime, travelTime, rasterSpans, orderPaths,
     estimate, headAt, fmtDuration, fmtLen, fmtArea, checkJob, regMarks, regMarkAci, camReach, marksOutOfReach, reachShift, regProcess, withPresets, ensureRegProcess, isRegProc, REG_PROC, REG_NEEDED,
     cutOrderOf, CUT_ORDER_DEFAULT, START_CLEAR, commonLines, bedOf, bedCount, defaultPresets, DEFAULTS,
-    rasterIslands, engraveScan, ENGRAVE_DIRS, DPI_STEPS, starterPresets, nestRects, THERMAL, thermalKey, thermalOf, colourOf, absorptionOf, thermalSim, metalPresets, presetsFor
+    rasterIslands, engraveScan, ENGRAVE_DIRS, DPI_STEPS, starterPresets, nestRects, THERMAL, thermalKey, thermalOf, colourOf, absorptionOf, thermalSim, bendLimit, metalPresets, presetsFor
   };
 });

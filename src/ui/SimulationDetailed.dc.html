@@ -462,10 +462,17 @@ class Component extends DCLogic {
       } else {
         model.to(t);
         const pr = model.props;
-        const top = Math.max(model.T0 + 20, pr.limit);
+        // sheet metal: the limit that matters is where the sheet starts to
+        // bend (CC.bendLimit), far below melting; the colour scale tops out
+        // where a bend stays after cooling
+        const metal = !!pr.mech;
+        const hot = metal ? model.hotSpot() : null;
+        const setT = metal ? model.T0 + hot.limit.set : 0;
+        const top = metal ? setT : Math.max(model.T0 + 20, pr.limit);
         const deg = (v) => Math.round(v) + ' °C';
         let over = 0;
-        for (let k = 0; k < model.T.length; k++) if (model.T[k] >= pr.limit) over++;
+        const overT = metal ? setT : pr.limit;
+        for (let k = 0; k < model.T.length; k++) if (model.T[k] >= overT) over++;
         const overArea = over * model.dx * model.dx;
         thermal = {
           on: true, has: true, model, top, pick,
@@ -475,15 +482,27 @@ class Component extends DCLogic {
             { l: 'Under the head', v: deg(model.at(head.x, head.y)) },
             { l: 'Hottest now', v: deg(model.max()) },
             { l: 'Peak', v: deg(model.peak) + (model.peak > model.T0 + 0.5 ? ' at ' + fmt(model.peakAt) : '') },
+            ...(metal ? [
+              { l: 'Hot area', v: hot.rise > 0.5 ? Math.round(hot.dia) + ' mm across' : '–' },
+              { l: 'Bends at', v: '+' + Math.round(hot.limit.rise) + ' °C' },
+              { l: 'Towards bending', v: Math.round((hot.rise / hot.limit.rise) * 100) + ' % now · ' + Math.round(model.bend * 100) + ' % worst' }
+            ] : []),
             { l: 'Colour', v: model.colour ? model.colour.label : 'not given' },
             { l: 'Beam absorbed', v: Math.round(model.absorb * 100) + ' %' }
           ],
           legend: 'linear-gradient(90deg, ' + [0, 0.1, 0.35, 0.65, 1].map((f) => { const c = this.heatCol(f); return 'rgba(' + c[0] + ', ' + c[1] + ', ' + c[2] + ', ' + Math.max(0.15, c[3] / 255).toFixed(2) + ') ' + f * 100 + '%'; }).join(', ') + ')',
           lo: deg(model.T0), mid: deg((model.T0 + top) / 2), hi: deg(top),
           overCol: 'rgb(' + this.heatCol(1.2).slice(0, 3).join(', ') + ')',
-          limit: deg(pr.limit) + ' · ' + pr.limitLabel,
-          warn: over > 0 ? 'Over ' + deg(pr.limit) + ' now across ' + CC.fmtArea(overArea) + ' — ' + pr.limitLabel : model.peak >= pr.limit ? 'Went over ' + deg(pr.limit) + ' at ' + fmt(model.peakAt) + ' — ' + pr.limitLabel : '',
+          limit: metal
+            ? 'bends ' + Math.round(hot.limit.set) + ' °C over the rest of the sheet (stays bent' + (hot.limit.by === 'bow' ? '; this ' + Math.round(hot.dia) + ' mm hot area bows from +' + Math.round(hot.limit.bow) + ' °C' : '') + ')'
+            : deg(pr.limit) + ' · ' + pr.limitLabel,
+          warn: metal
+            ? (hot.limit && hot.rise >= hot.limit.rise ? 'Bending now: the hot area (' + Math.round(hot.dia) + ' mm) is ' + Math.round(hot.rise) + ' °C over the rest of the sheet; ' + mat.t + ' mm ' + pr.name.toLowerCase() + ' ' + (hot.limit.by === 'bow' ? 'bows' : 'stays bent') + ' from ' + Math.round(hot.limit.rise) + ' °C over'
+              : model.bend >= 1 ? 'Went past the bending limit at ' + fmt(model.bendAt)
+                : model.bend >= 0.8 ? 'Close to bending: ' + Math.round(model.bend * 100) + ' % of the way at ' + fmt(model.bendAt) : '')
+            : over > 0 ? 'Over ' + deg(pr.limit) + ' now across ' + CC.fmtArea(overArea) + ' — ' + pr.limitLabel : model.peak >= pr.limit ? 'Went over ' + deg(pr.limit) + ' at ' + fmt(model.peakAt) + ' — ' + pr.limitLabel : '',
           note: 'Approximate: averages over ' + model.dx.toFixed(1) + ' mm cells from the material, its colour, its thickness and the laser power, with forced airflow from the extraction. The spot under the beam is far hotter. '
+            + (metal ? 'Bending: the hot area pushes against the cold sheet around it; past ' + Math.round(hot.limit.set) + ' °C over the rest it yields and stays bent, and a wide hot area on thin sheet bows sooner. Strengths are room-temperature values (' + pr.mech.src + '), so hot sheet bends a little sooner still. Bare metal reflects most of a CO2 beam; through a marking spray it takes far more. ' : '')
             + (model.fibre ? 'On a fibre laser colour matters a lot: clear and white sheet let most of the beam through, black takes most of it.' : 'On a CO2 laser colour changes little: plastics, wood and paper take nearly all of the 10.6 µm beam whatever their colour.')
             + (model.colour ? '' : ' Put the colour in the material\'s name (e.g. Clear, Black) or set its swatch.')
         };

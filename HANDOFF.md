@@ -15,6 +15,17 @@ Latest round (28 Oct, final):
 - **Dark mode bed is grey** (`--bed`, `--sheet`, `--bed-grid*` in theme.css). **ACI 7 shows as white in dark mode** (black in light), as in CAD, and so do the marks drawn on the bed (registration marks, engrave hatching, arrows, start points): see the `--aci7*` and `--ink` tokens, and `LRC.aci.hex/fg/stroke` in app.js. Exports (DXF/SVG/PDF) still use real black.
 - **Sample machines and materials from earlier builds are removed on first start** (main.js, tracked by `settings.samplesRemoved`). This is by exact id (trotec, flatbed, laser2, acr-print-3 … brass-1); anything the operator created stays.
 
+Version 1.6.12 (12 Nov):
+- **Engraving holes across objects** (owner's bug report "Etch issue": the magnifying glass lens was engraved). Run fills even-odd per object, then merges, so a hole drawn as its own object was filled. `CC.engraveHoles(job)` maps each closed-only object of an Engrave process that lies inside another object of the same process (`insideOf` on every ring) to the outermost one.
+  - The package: `packageEntities` adds the holes' paths to the host, and the hole gets `holeOf`. `toolpath` drops holes from engrave steps whose host is in the step. This works with the current Run, with no Run change.
+  - Job page (`JobCanvas`): the host is filled with its holes cut out, and holes are drawn as outlines (cached on `entities`/`processes`). The Simulation page already drew islands even-odd.
+  - Self-test: ring/lens/dot, separate and overlapping circles, cut shapes, the package, and Run's own `plan.scanLines` (when `run/` is there).
+- **Thermal map: bending of sheet metal** (owner: "at what point does the material start to bend from the uneven heat"). The metal rows in `THERMAL` have `mech` { E GPa, alpha µm/m·K, nu, yield MPa, src }.
+  - `bendLimit(props, tMm, hotDiaMm)`: set = 2·σy/(E·α) (a hot disc in a cold plate yields); bow = 2.45·(t/a)²/((1−ν²)·α) (a clamped disc of radius a buckles). Both are a rise over the cold sheet; the lower one is used. For 0.9 mm 304: set ≈ 123 °C, and a 100 mm hot area bows at ≈ 50 °C.
+  - `thermalSim`: `hotSpot()` (the area at or above half the hottest rise, as an equivalent diameter), and `bend`/`bendAt` (worst share of the limit, checked every 0.5 s of sim time and kept in the snapshots). Metals keep 0.9 of the absorbed power when engraving (nothing is removed) and 0.5 when cutting.
+  - Simulation panel for metals: the scale tops out at T0 + set, rows for Hot area / Bends at / Towards bending, and warnings for bending now, past the limit, or ≥ 80 %. Plastics keep their own limits.
+  - On the owner's Etch Calibration job (0.9 mm stainless, 130 W CO2, 35 % at 400 mm/s): the hot area is ≈ 12 mm and +88–95 °C, and the worst is 84 % of the bending limit. That assumes 10 % absorption (bare stainless on CO2); with marking spray far more is absorbed.
+
 Version 1.6.11 (10 Nov):
 - **Finding machines without an IP address** (owner's request), in `src/main/discover.js`:
   - `scan()`: `GET /api/v1/info` on port 8470 for every host of each local IPv4 network (narrowed to the /24 around the PC's address; 128 at a time, 0.9 s each). Works with any Run today.
