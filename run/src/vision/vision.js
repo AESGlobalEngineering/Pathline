@@ -226,6 +226,7 @@ class Vision {
   async readMarks(pkg, ctl = {}, status = () => {}, opts = {}) {
     const steps = (pkg.toolpath || []).filter((s) => s.type === 'inspect');
     const E = [], D = [];
+    let byHand = false;
     this.clearMarkFrames();
     for (const s of steps) {
       // predict from the marks found so far: the shift from one; shift and rotation from two (their
@@ -248,6 +249,7 @@ class Vision {
       // then the dot finder looks again from there. Put there by hand, the dot nearest the
       // crosshair counts even without clean white round it (artwork close by may be why it was missed)
       for (let again = false; !r; again = true) {
+        byHand = true;
         this.log('mark ' + s.mark + (again ? ' still not found' : ' not found near ' + pred.map((v) => v.toFixed(1)).join(', ') + ' mm') + ': waiting for the camera to be jogged over it');
         const at = await this.m.waitForMark({ mark: s.mark, of: s.of, near: pred, again }, ctl);
         status('Reading mark ' + s.mark + ' of ' + s.of + ' where the camera was put');
@@ -274,7 +276,7 @@ class Vision {
     const f = fitting.fit(E, D, type);
     const i = f.info;
     this.log('print and cut: ' + i.type + ', shift ' + i.shift.map((v) => v.toFixed(3)).join(', ') + ' mm, rotation ' + i.rotation.toFixed(3) + '°, scale ' + ((i.scaleX - 1) * 1000).toFixed(2) + ' / ' + ((i.scaleY - 1) * 1000).toFixed(2) + ' mm/m');
-    return { f, expected: E, found: D, info: i };
+    return { f, expected: E, found: D, info: i, byHand };
   }
 
   // the job without its inspect steps, moved onto the marks found

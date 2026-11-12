@@ -505,7 +505,12 @@ class Machine {
         throw Object.assign(busyErr('"' + job.name + '": ' + far.text), { detail: { ...far, job: job.name } });
       }
       this.execute(job, null, async (ctl, status) => {
+        const t0 = Date.now();
         const r = await this.vision.readMarks(pkg, ctl, status, { anchored: !!job.anchor });
+        // how long the marks took, a mark: the estimate learns it (cfg.trotec.markSec). Not when
+        // one was found by hand (the wait is the operator's)
+        const nMarks = (r.found || []).length;
+        if (this.run && this.run.job === job && nMarks && !r.byHand) this.run.markSec = (Date.now() - t0) / 1000 / nMarks;
         this.st.marks = r.found;
         // kept with the run: where the marks were expected and found (follow-fit.js rebuilds the job as cut)
         if (this.run && this.run.job === job) this.run.placement = { ...(this.run.placement || {}), marks: { expected: r.expected, found: r.found, type: r.info && r.info.type } };
@@ -548,7 +553,10 @@ class Machine {
     const startedAt = new Date().toISOString();
     // placement: where the job was put (anchored at the head; print and cut adds its marks), kept
     // with the run so the follow fit replays the job exactly where it was cut
-    this.run = { job, program, ctl, startedAt, z: z || null, placement: { anchor: job.anchor ? { x: job.anchor.x, y: job.anchor.y } : null } };
+    // (and the bed map it was sent through, by when it was made: data/bedmaps.json keeps them)
+    const vm = this.cfg.vision;
+    const mapAt = this.cfg.controller === 'trotec' && vm && vm.enabled && vm.mapOn !== false && vm.map ? vm.mapAt || 'unknown' : null;
+    this.run = { job, program, ctl, startedAt, z: z || null, placement: { anchor: job.anchor ? { x: job.anchor.x, y: job.anchor.y } : null, mapAt } };
     const runRef = this.run;
     job.status = 'running';
     job.progress = 0;
@@ -704,7 +712,7 @@ class Machine {
       this.store.finish(job, result, startedAt, this.cfg.removeDone);
       if (timeline.length && this.store.saveRun) this.store.saveRun(job, { startedAt, result, estimate: program ? program.seconds : null, steps: program ? program.segments.filter((s) => s.kind === 'stream').flatMap((s) => s.steps) : [], timeline, placement: runRef.placement, ...(zRun ? { z: { dry: zRun.dry, log: zRun.log.map((e) => [e[0] - since, e[1], e[2], e[3]]) } } : {}) });
       // a run saved: the server fits the screen's head drawing to it (follow-fit.js)
-      if (timeline.length && this.onRunSaved) { try { this.onRunSaved(job, result); } catch (e) { /* never stops the run ending */ } }
+      if (timeline.length && this.onRunSaved) { try { this.onRunSaved(job, result, { markSec: runRef.markSec || null }); } catch (e) { /* never stops the run ending */ } }
       this.run = null;
       this.onPos = null;
       this.st.job = null;

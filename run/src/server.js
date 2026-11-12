@@ -23,6 +23,7 @@ const network = require('./network');
 const ruidaModels = require('./ctrl/ruida/models');
 const anchor = require('./job/anchor');
 const fitting = require('./vision/fit');
+const bedmaps = require('./bedmaps');
 const { DEFAULTS: VisionDefaults } = require('./vision/vision');
 const { controller, CONTROLLERS } = require('./ctrl');
 const pkgJson = require('../package.json');
@@ -57,6 +58,8 @@ function start(opts = {}) {
     cfg.connection = { ...cfg.connection, mode: 'sim' };
     if (!cfg.configured) Object.assign(cfg, { configured: true, name: cfg.name || 'Simulated laser' });
   }
+  // the bed map in use goes into the maps' history (data/bedmaps.json) if it isn't there yet
+  try { bedmaps.ensure(DATA, cfg.vision.map, cfg.vision.mapAt); } catch (e) { /* history only */ }
   const PORT = Number(opts.port || cfg.httpPort || 8470);
   const updates = opts.updates || NO_UPDATES;
   const isLocalReq = (req) => /^(::1|127\.0\.0\.1|::ffff:127\.0\.0\.1)$/.test(req.socket.remoteAddress || '');
@@ -147,8 +150,16 @@ function start(opts = {}) {
     });
     return fitting;
   }
-  machine.onRunSaved = (job, result) => {
+  machine.onRunSaved = (job, result, info = {}) => {
     setTimeout(() => fitFollow('after ' + job.name), 5000);
+    // the time a registration mark takes, learnt (the estimate's 4 s was 7–9 s on Ruby): halfway
+    // to each new run's, kept between 3 and 30 s. (Top level, not under trotec: a change there
+    // reconnects the laser)
+    if (cfg.controller === 'trotec' && Number.isFinite(info.markSec) && info.markSec > 1 && info.markSec < 60) {
+      const was = Number(cfg.markSec) || 8;
+      const now = +Math.max(3, Math.min(30, was + 0.5 * (info.markSec - was))).toFixed(1);
+      if (now !== was) learnt({ markSec: now }, 'estimate: a registration mark takes ' + now + ' s (this job ' + info.markSec.toFixed(1) + ' s a mark)').catch(() => {});
+    }
     // a test grid cut: the head camera checks it as soon as the machine is free (vision/grid.js)
     if (result === 'Completed' && cfg.vision && cfg.vision.enabled) {
       let grid = null;
@@ -320,6 +331,41 @@ function start(opts = {}) {
   let discovery = null;
   // what watchers read (GET /api/v1/monitor, /api/v1/events)
   const monitor = require('./monitor').createMonitor({ machine, store, dataDir: DATA, info: () => ({ id: deviceId, ...infoView() }) });
+  // who has been watching (ip → when): the Pathline Monitor hub asks every 2 s or keeps a stream
+  const watchers = new Map();
+  const noteWatcher = (req) => {
+    const ip = String(req.socket.remoteAddress || '').replace(/^::ffff:/, '');
+    if (ip) watchers.set(ip === '::1' ? '127.0.0.1' : ip, Date.now());
+  };
+  // a Pathline Monitor hub at host:port answers GET /api/phone with the addresses phones open
+  const askHub = (host, port) => new Promise((resolve) => {
+    const r = http.get({ host, port, path: '/api/phone', timeout: 1500, headers: { accept: 'application/json' } }, (res) => {
+      let s = '';
+      res.on('data', (c) => { s += c; if (s.length > 256 * 1024) r.destroy(); });
+      res.on('end', () => { try { const j = JSON.parse(s); resolve(res.statusCode === 200 && Array.isArray(j.urls) ? j : null); } catch (e) { resolve(null); } });
+    });
+    r.on('timeout', () => r.destroy());
+    r.on('error', () => resolve(null));
+  });
+  async function findMonitorHub() {
+    const typed = String(cfg.monitorHub || '').trim();
+    const cands = [];
+    if (typed) { const m = typed.replace(/^https?:\/\//, '').replace(/\/.*$/, '').match(/^([^:]+)(?::(\d+))?$/); if (m) cands.push({ host: m[1], port: Number(m[2] || 8480), typed: true }); }
+    const recent = [...watchers].filter(([, t]) => Date.now() - t < 10 * 60 * 1000).sort((a, b) => b[1] - a[1]).map(([ip]) => ip);
+    for (const ip of recent) if (!cands.some((c) => c.host === ip)) cands.push({ host: ip, port: 8480 });
+    for (const c of cands) {
+      const j = await askHub(c.host, c.port);
+      if (!j) continue;
+      // the address this machine reaches the hub at is one phones on this network reach too
+      // (not when the hub runs on this computer: then the hub's own first address)
+      const local = /^(127\.|localhost$)/.test(c.host);
+      const port = (() => { try { return Number(new URL(j.urls[0]).port) || c.port; } catch (e) { return c.port; } })();
+      const web = local ? j.urls[0] : 'http://' + c.host + ':' + port + '/';
+      const app = (j.app || []).find((u) => u.includes('//' + c.host + ':')) || (j.app || [])[0] || null;
+      return { found: true, host: c.host, typed: c.typed ? typed : null, web, setup: web ? web.replace(/\/?$/, '/') + 'setup' : null, app, urls: j.urls };
+    }
+    return { found: false, typed: typed || null, watchers: recent };
+  }
 
   // what Pathline is told while no machine has been added
   const needMachine =() => { if (!cfg.configured) throw err(409, 'No machine is set up in Pathline Run yet. Add one on its screen: Setup → Add machine.'); };
@@ -412,16 +458,25 @@ function start(opts = {}) {
   // along at the real pace (ui/follow.js). Kept per job and placement: working out the lines of a
   // large engraving takes a moment
   const rowsCache = new Map();
+  // The job as the laser is sent it: through the Trotec's bed map when it's on (machine.compile
+  // does the same). The head's reports are where it was sent, so the screen follows this, not the
+  // job as Pathline placed it: on J0085 that put the reports 0.006 mm (median) off the drawn route,
+  // not 0.49 mm (1.36 mm p90), and the drawn head 1.5 mm from the real one, not 2.0 (4.5 not 8.2 p90).
   function withRows(id, pkg) {
-    if (cfg.controller !== 'trotec' || !(pkg.toolpath || []).some((s) => s.type === 'engrave')) return pkg;
+    const v = cfg.vision;
+    const map = cfg.controller === 'trotec' && v && v.enabled && v.mapOn !== false && v.map ? v.map : null;
+    const engraves = cfg.controller === 'trotec' && (pkg.toolpath || []).some((s) => s.type === 'engrave');
+    if (!map && !engraves) return pkg;
     const job = store.get(id);
-    const key = id + ':' + (pkg.placed || '') + ':' + JSON.stringify((job && job.anchor) || null);
+    const key = id + ':' + (pkg.placed || '') + ':' + JSON.stringify((job && job.anchor) || null) + ':' + (map ? v.mapAt || 'map' : '');
     if (!rowsCache.has(key)) {
-      try { rowsCache.set(key, require('./ctrl/trotec/compile').engraveRows(pkg, cfg)); } catch (e) { rowsCache.set(key, null); }
+      let out = pkg;
+      if (map) { try { out = { ...fitting.transformPkg(pkg, (q) => fitting.correct(map, q)), mapped: v.mapAt || true }; } catch (e) { out = pkg; } }
+      if (engraves) { try { const rows = require('./ctrl/trotec/compile').engraveRows(out, cfg); if (rows) out = { ...out, rows }; } catch (e) { /* drawn without rows */ } }
+      rowsCache.set(key, out);
       if (rowsCache.size > 20) rowsCache.delete(rowsCache.keys().next().value);
     }
-    const rows = rowsCache.get(key);
-    return rows ? { ...pkg, rows } : pkg;
+    return rowsCache.get(key);
   }
 
   function exportJob(id, format, ctrlName) {
@@ -461,6 +516,10 @@ function start(opts = {}) {
   const onlyHere = (req) => { if (!isLocalReq(req)) throw err(403, 'Updates can only be installed on the machine\'s own screen'); };
 
   const local = {
+    // ☰ → Pathline Monitor: the hub's phone setup page, for a QR code on this screen. The hub
+    // isn't announced; it's whoever has been watching this machine (GET /api/v1/monitor or
+    // /events) lately, or the address typed in (monitorHub: "host" or "host:port")
+    'GET /monitor-hub': () => findMonitorHub(),
     'GET /state': (b, req) => ({
       app: pkgJson.version, update: updates.status(), here: isLocalReq(req), config: cfg, status: machine.status(), info: machine.info, ruidaModels: ruidaModels.MODELS,
       fromController: machine.ctrl || null,
@@ -583,7 +642,14 @@ function start(opts = {}) {
       const r = await machine.cameraTask(calibrate ? 'Calibrating the bed with the checkerboard' : 'Checking the bed with the checkerboard', (ctl, status) => machine.vision.scanBoard({ raw: calibrate, board: b && b.board }, ctl, status));
       if (calibrate) {
         const map = r.map || fitting.bedMap(r.points, r.step, cfg.bed);
+        // kept with the maps before it, and compared with the last: a big change is more likely
+        // the board (bent, damp, laid differently) than the machine
+        try { bedmaps.ensure(DATA, (cfg.vision || {}).map, (cfg.vision || {}).mapAt); } catch (e) { /* history only */ }
+        let since = null;
+        try { since = bedmaps.add(DATA, map, r.at, { points: r.points.length, missed: r.missed, bumps: r.bumps, noise: r.noise, model: r.model }).since; } catch (e) { log('bed map history: ' + e.message); }
+        r.since = since;
         await learnt({ vision: { ...(cfg.vision || {}), map, mapOn: true, mapAt: r.at } }, 'camera: bed map saved (' + r.points.length + ' corners, worst ' + r.worst.toFixed(3) + ' mm before correcting)');
+        if (since) log('camera: bed map against the one of ' + since.from + ': X scale ' + (since.scaleX >= 0 ? '+' : '') + since.scaleX + ' ‰, Y scale ' + (since.scaleY >= 0 ? '+' : '') + since.scaleY + ' ‰, squareness ' + (since.lean >= 0 ? '+' : '') + since.lean + '°' + (since.big ? ': more than a machine drifts; check the board is flat and dry, or cut a test rectangle and measure its diagonals' : ''));
       }
       return r;
     },
@@ -656,6 +722,7 @@ function start(opts = {}) {
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://x');
     const p = url.pathname;
+    if (req.method === 'GET' && (p === '/api/v1/events' || p === '/api/v1/monitor')) noteWatcher(req);
     try {
       // watchers (Pathline Monitor): the same answer as GET /api/v1/monitor, as it changes
       if (req.method === 'GET' && p === '/api/v1/events') return monitor.stream(req, res);

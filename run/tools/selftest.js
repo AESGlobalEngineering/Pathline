@@ -8,6 +8,7 @@
 // the fake Ruida answers whatever port asked; the real 40200 may be held by Pathline Run itself
 process.env.PATHLINE_RUN_RUIDA_PORT_IN = process.env.PATHLINE_RUN_RUIDA_PORT_IN || '41200';
 const fs = require('fs');
+const http = require('http');
 const os = require('os');
 const path = require('path');
 const zlib = require('zlib');
@@ -1344,10 +1345,32 @@ async function monitorTests() {
     const m3 = (await get('/monitor')).j;
     ok(m2.today.filter((x) => x.id === q.id).length === 1 && m2.today[0].result === 'Completed' && m3.today[0].finishedAt === m2.today[0].finishedAt && m2.job === null, 'GET /monitor after: the job once in today, finishedAt unchanged', JSON.stringify(m2.today));
     ok((events.match(/event: finished/g) || []).length === 1 && events.includes('"id":"' + q.id + '"'), 'GET /events: one "finished" event for the job', (events.match(/event: finished/g) || []).length + ' finished events');
+    // ☰ → Pathline Monitor on a phone: the hub is whoever watches (this test did), or the address
+    // typed in; its setup page, for a QR code
+    const loc = 'http://127.0.0.1:' + port + '/api/local';
+    const h0 = await (await fetch(loc + '/monitor-hub')).json();
+    ok(h0.found || (h0.watchers || []).includes('127.0.0.1'), 'Monitor hub: the watcher\'s address is remembered (' + JSON.stringify(h0.watchers || h0.host) + ')', JSON.stringify(h0));
+    const hub = http.createServer((rq, rs) => { rs.writeHead(rq.url === '/api/phone' ? 200 : 404, { 'content-type': 'application/json' }); rs.end(JSON.stringify({ urls: ['http://192.168.7.7:' + hub.address().port + '/'], app: ['https://192.168.7.7:8443/'] })); });
+    await new Promise((r) => hub.listen(0, '127.0.0.1', r));
+    try {
+      await fetch(loc + '/config', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ monitorHub: '127.0.0.1:' + hub.address().port }) });
+      const h1 = await (await fetch(loc + '/monitor-hub')).json();
+      ok(h1.found && h1.typed === '127.0.0.1:' + hub.address().port && h1.setup === 'http://192.168.7.7:' + hub.address().port + '/setup' && h1.app === 'https://192.168.7.7:8443/', 'Monitor hub at the address typed in: its setup page ' + h1.setup + ' (on this computer, so the hub\'s own address)', JSON.stringify(h1));
+    } finally { hub.close(); }
   } finally {
     if (ac) ac.abort();
     srv.kill();
   }
+  // bed maps over time (data/bedmaps.json): what each says about the machine, and a jump flagged
+  const bm = require('../src/bedmaps');
+  const dataB = fs.mkdtempSync(path.join(os.tmpdir(), 'pathline-maps-'));
+  const mk = (sx, sy, lean) => { const m = { x0: 0, y0: 0, step: 50, nx: 21, ny: 11, ex: [], ey: [] }; for (let j = 0; j < 11; j++) for (let i = 0; i < 21; i++) { const x = i * 50, y = j * 50; m.ex.push(x * sx / 1000 + y * Math.tan(lean * Math.PI / 180)); m.ey.push(y * sy / 1000); } return m; };
+  bm.add(dataB, mk(1.76, -0.13, 0.033), '2026-11-03T15:46:43.000Z');
+  const small = bm.add(dataB, mk(1.70, -0.10, 0.04), '2026-11-04T10:00:00.000Z').since;
+  const big = bm.add(dataB, mk(1.12, -1.34, -0.147), '2026-11-12T14:43:37.000Z').since;
+  const s0 = bm.load(dataB)[0];
+  ok(Math.abs(s0.scaleX - 1.76) < 0.01 && Math.abs(s0.scaleY + 0.13) < 0.01 && Math.abs(s0.lean - 0.033) < 0.001 && s0.bend < 0.001, 'bed maps: scale and squareness read back from the map (' + s0.scaleX + ' / ' + s0.scaleY + ' ‰, ' + s0.lean + '°)', JSON.stringify(s0).slice(0, 120));
+  ok(small && !small.big && big && big.big && Math.abs(big.lean + 0.187) < 0.001 && bm.byAt(dataB, '2026-11-04T10:00:00.000Z'), 'bed maps: a small change passes, a jump like 3 → 12 Nov (Y ' + (big && big.scaleY) + ' ‰, ' + (big && big.lean) + '°) is flagged', JSON.stringify({ small, big }));
 }
 
 async function discoveryTests() {

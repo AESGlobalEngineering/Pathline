@@ -44,7 +44,7 @@ function check(pkg, cfg) {
     if (!STEP_TYPES.has(s.type)) throw bad(where + ': unknown step type ' + JSON.stringify(s.type));
     if (!plotter && (s.type === 'toolchange' || s.type === 'feed')) throw bad(where + ': plotter steps can\'t run on a laser');
     if (plotter && (s.type === 'engrave' || s.type === 'inspect')) throw bad(where + ': laser steps can\'t run on a plotter');
-    if (plotter && s.type === 'feed' && !cfg.f.conveyor) throw bad(where + ': the job feeds the conveyor, but this plotter has no conveyor (Setup → Work area)');
+    if (plotter && s.type === 'feed' && !cfg.f.conveyor) throw bad(where + ': the job feeds the conveyor, but this plotter has no conveyor (Setup → Machine)');
     if ((s.type === 'cut' || s.type === 'engrave') && !procs.has(s.process)) throw bad(where + ': unknown process ' + s.process);
     if (s.type === 'cut') {
       if (!Array.isArray(s.p) || s.p.length < 2) throw bad(where + ': the path has no points');

@@ -19,7 +19,9 @@ const COMMIT_EVERY = 200;
 // run's ends. Length ÷ speed ran 2–5 % short at 33 mm/s and 78 % short at 400 mm/s (small shapes
 // never reach speed); this lands every job within −2.5 … +3.3 %.
 const CUT = { arc: 1000, acc: 2000 };
-const MARK_SEC = 4;
+// a registration mark, s: learnt from the jobs run (cfg.markSec, server.js), this until then.
+// Ruby's X21 jobs took 7–9 s a mark (19–28 s for 3), not the 4 s first assumed
+const MARK_SEC = 8;
 // Engraving: each line is one move across the box and its overscan at the engraving speed, and
 // the head turns at each end in turn0 + turnPerV · v seconds: measured on the calibration bars
 // (J0076, 100–600 mm/s, 47 lines each) and J0068's labels (300 mm/s): 0.064 s a line at 100 mm/s,
@@ -319,9 +321,9 @@ function compile(plan, cfg) {
   for (const step of plan.steps) {
     if (step.op === 'dwell' || step.op === 'inspect') {
       end();
-      // a registration mark: the camera moves to it, settles and looks, about 4 s a mark on the
-      // Q500 (3 marks took 11–17 s in J0040–J0065, the return to the start included)
-      segments.push({ ...step, kind: step.op, seconds: step.op === 'inspect' ? Math.max(Number(step.seconds) || 0, MARK_SEC) : step.seconds });
+      // a registration mark: the camera moves to it, settles and looks (learnt per machine)
+      const markSec = Number(cfg.markSec) > 0 ? Number(cfg.markSec) : MARK_SEC;
+      segments.push({ ...step, kind: step.op, seconds: step.op === 'inspect' ? Math.max(Number(step.seconds) || 0, markSec) : step.seconds });
       continue;
     }
     begin();

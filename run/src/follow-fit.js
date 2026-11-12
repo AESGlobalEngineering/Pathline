@@ -47,6 +47,8 @@ function loadRuns(dataDir, opts = {}) {
     try { pkg = JSON.parse(fs.readFileSync(path.join(dataDir, 'jobs', run.id, 'package.json'), 'utf8')); } catch (e) { continue; }
     // something the route follows: cut paths, or engraving (drawn along its lines as sent)
     if (!(pkg.toolpath || []).some((s) => (Array.isArray(s.p) && s.p.length > 1) || s.type === 'engrave')) continue;
+    // the bed map the run was sent through (Trotec), so it's replayed as the laser was sent it
+    if (run.placement && run.placement.mapAt) { const m = require('./bedmaps').byAt(dataDir, run.placement.mapAt); if (m) run.bedMap = m.map; }
     out.push({ run, pkg, file: f });
     reports += busy;
   }
@@ -86,6 +88,14 @@ function savedPlacement(run, pkg0) {
     const s0 = (pkg0.toolpath || []).findIndex((s) => Array.isArray(s.p) && s.p.length);
     const dx = s0 >= 0 ? pkg.toolpath[s0].p[0][0] - pkg0.toolpath[s0].p[0][0] : 0, dy = s0 >= 0 ? pkg.toolpath[s0].p[0][1] - pkg0.toolpath[s0].p[0][1] : 0;
     pkg.rows = Object.fromEntries(Object.entries(pkg0.rows).map(([i, r]) => [i, { ...r, xs: r.xs + dx, xe: r.xe + dx, y0: r.y0 + dy, y1: r.y1 + dy }]));
+  }
+  // then through the bed map it was sent with: where the head was really told to go
+  if (run.bedMap) {
+    const fit = require('./vision/fit');
+    const f = (q) => fit.correct(run.bedMap, q);
+    const rows = pkg.rows;
+    pkg = fit.transformPkg(pkg, f);
+    if (rows) pkg.rows = Object.fromEntries(Object.entries(rows).map(([i, r]) => { const a = f([r.xs, r.y0]), b = f([r.xe, r.y1]); return [i, { ...r, xs: a[0], y0: a[1], xe: b[0], y1: b[1] }]; }));
   }
   return pkg;
 }

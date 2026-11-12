@@ -227,6 +227,27 @@ body{overflow:hidden}
 @keyframes plr-sweep{from{background-position:100vw 0}to{background-position:-100vw 0}}
 @media (prefers-reduced-motion:reduce){.hmi .loop{animation:none !important}.hmi .skel{background-image:none;animation:none}}
 
+/* ---- touch screens ----
+   Every control answers a tap at once (no double-tap zoom wait), nothing turns blue or selects
+   its text under a finger, lists scroll with momentum and don't drag the window along, and on a
+   finger-driven screen (pointer: coarse) the controls and the scrollbars are bigger. */
+.hmi button,.hmi [role="radio"],.hmi [role="switch"],.hmi .tb,.hmi a{touch-action:manipulation;-webkit-tap-highlight-color:transparent}
+.hmi button,.hmi .tb,.hmi .seg,.hmi .lbl,.hmi .h-sec,.hmi .pill{-webkit-user-select:none;user-select:none}
+.hmi .view,.hmi [data-keep],.hmi .dlg{-webkit-overflow-scrolling:touch;overscroll-behavior:contain}
+@media (pointer:coarse){
+  .hmi{--ctl-h:52px}
+  .hmi .tb.sm{height:48px;padding:0 16px;font-size:14px}
+  .hmi .seg > button{height:46px;padding:0 18px;font-size:15px}
+  .hmi .sw{width:60px;height:34px;border-radius:17px}
+  .hmi .sw::after{width:28px;height:28px}
+  .hmi .tabs.views > button{min-height:56px}
+  .hmi .pop .opt{min-height:52px}
+  .hmi ::-webkit-scrollbar{width:16px;height:16px}
+  .hmi ::-webkit-scrollbar-thumb{background:var(--line-strong);border-radius:8px;border:4px solid transparent;background-clip:padding-box}
+  /* hover colours stick after a tap on a touch screen */
+  .hmi .tb:hover{border-color:var(--line-strong)}
+}
+
 /* not running: the big Estimated time says it, so the small one under the bar goes (it stays
    on a narrow screen, where the big one is hidden) */
 @media (min-width:1101px){.hmi .qest-idle{visibility:hidden}}

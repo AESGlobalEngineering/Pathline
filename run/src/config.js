@@ -45,6 +45,7 @@ const BASE = {
   regMarks: 'refuse',            // 'refuse' or 'ignore' (run without print-and-cut correction)
   removeDone: true,              // completed jobs leave the queue for History
   returnHead: true,              // after a completed job the head goes back to where it was at Start
+  monitorHub: '',                // Pathline Monitor hub ("host" or "host:port"), when it isn't found by itself
   manual: [],                    // settings typed in Setup over the controller's own ('bed.0', 'speed' …)
   knifeHome: null,               // RDD6584: where the head homes and parks, controller mm (learnt)
   vision: { enabled: false },    // the Trotec's head camera (vision/vision.js DEFAULTS for the rest)
@@ -60,7 +61,7 @@ const BASE = {
 };
 
 // settings that belong to Pathline Run, not to the machine (kept when a machine is removed)
-const APP_PREFS = ['httpPort', 'regMarks', 'removeDone', 'returnHead', 'prefix', 'sim'];
+const APP_PREFS = ['httpPort', 'regMarks', 'removeDone', 'returnHead', 'prefix', 'sim', 'monitorHub'];
 
 // the setup with the machine removed
 function withoutMachine(cfg) {
