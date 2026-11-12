@@ -285,12 +285,12 @@ class Vision {
 
   // ---------------------------------------------------------------- calibration
   // Stage 1, camera: a small checkerboard (10 mm squares) under the camera, filling the picture.
-  // Its corners give the pixel size: the squares are a known size, so it doesn't depend on how
-  // accurately the machine moves; how far its corners stray from a perfect grid shows how much
-  // the lens bends straight lines. Then the head moves a little along X, then Y (under half a
-  // square, so the corner followed can't be mistaken for its neighbour): that gives which way the
-  // picture is turned and whether it's mirrored, relative to the machine. The board itself can
-  // lie at any angle.
+  // Its corners are something sharp to follow; how far they stray from a perfect grid shows how
+  // much the lens bends straight lines. The head moves a little along X, then Y (under half a
+  // square, so a corner followed can't be mistaken for its neighbour), and how far the corners
+  // move gives the pixel size along X and Y, which way the picture is turned and whether it's
+  // mirrored. A printed board is seldom quite to scale, so its own size is only reported. The
+  // board can lie at any angle.
   // The board goes under the camera, where it is now: this stage needs no offset (stage 2 finds
   // it), so the camera isn't moved over the laser's spot first. The head goes back where it was.
   async calibrateCamera(opts = {}) {
@@ -305,19 +305,14 @@ class Vision {
     const cs0 = detect.findCornersIn(await this.grabSteps());
     const L = detect.fitLattice(cs0);
     if (!L) throw err('Put the ' + square + ' mm checkerboard under the camera, flat, filling the camera view (' + cs0.length + ' corners seen)');
-    const detA = L.a[0] * L.b[1] - L.a[1] * L.b[0]; // px² per square (b is left of a: > 0)
-    const pixel = square / Math.sqrt(Math.abs(detA));
-    // The board's squares are square, so the board alone gives the picture's size and shape:
-    // a step u px in the picture is B·u mm along the board's own two directions. That holds
-    // across and down equally, and doesn't rest on how accurately the head moves.
-    const B = [L.b[1], -L.b[0], -L.a[1], L.a[0]].map((v) => (square * v) / detA);
-    const onBoard = (u) => [B[0] * u[0] + B[1] * u[1], B[2] * u[0] + B[3] * u[1]];
-    // Only which way the board lies against the machine is left: the head moves a little along X,
-    // then Y, and the board's corners follow in the picture. Every corner on the grid is followed
-    // (a false one, a soft edge or a shadow, could be nearer), and the steps averaged: one corner,
-    // near the edge where the lens bends most, is off by a pixel or two.
+    const detA = L.a[0] * L.b[1] - L.a[1] * L.b[0]; // px² per square
+    const boardPixel = square / Math.sqrt(Math.abs(detA)); // as printed: only a first guess
+    // The head moves a little along X, then Y, and the board's corners follow in the picture.
+    // Every corner on the grid is followed (a false one, a soft edge or a shadow, could be
+    // nearer), and the steps averaged: one corner, near the edge where the lens bends most, was
+    // off by a pixel or two, and the X and Y sizes came out up to 0.8 % apart.
     const d = square * 0.3;
-    const reach = (d / pixel) * 1.6;
+    const reach = (d / boardPixel) * 1.6;
     const follow = async (x, y) => {
       await this.m.link.moveTo(x, y);
       await this.m.waitIdle(30000, 150);
@@ -341,27 +336,33 @@ class Vision {
       await this.m.link.moveTo(start.x, start.y);
       await this.m.waitIdle(30000, 150);
     }
-    if (Math.abs(u1[0] * u2[1] - u1[1] * u2[0]) < 1) throw err('The picture hardly moved: is the camera on?');
-    // the head moves +d along X → the board moves u1 in the picture, which must come out as −d
-    // along X (and u2 as −d along Y). The turn (or turn and mirror) that best does that:
-    const p1 = onBoard(u1), p2 = onBoard(u2);
-    const M = [-d * p1[0], -d * p1[1], -d * p2[0], -d * p2[1]]; // Σ q·pᵀ with q = (−d, 0), (0, −d)
-    const turn = Math.hypot(M[0] + M[3], M[2] - M[1]), flip = Math.hypot(M[0] - M[3], M[1] + M[2]);
-    let R;
-    if (turn >= flip) { const t = Math.atan2(M[2] - M[1], M[0] + M[3]); R = [Math.cos(t), -Math.sin(t), Math.sin(t), Math.cos(t)]; }
-    else { const t = Math.atan2(M[1] + M[2], M[0] - M[3]); R = [Math.cos(t), Math.sin(t), Math.sin(t), -Math.cos(t)]; }
-    const matrix = [R[0] * B[0] + R[1] * B[2], R[0] * B[1] + R[1] * B[3], R[2] * B[0] + R[3] * B[2], R[2] * B[1] + R[3] * B[3]].map((v) => +v.toPrecision(8));
+    // the head moves +d → the board moves u px in the picture: A·u = −d along that axis. The size
+    // and shape come from these moves, not from the board's print: on Ruby a printed 10 mm board
+    // measured 10.12 × 10.07 mm by the head's moves (a printer's scaling), which would have put
+    // the size 1 % out and the pixels 0.5 % from square. The machine itself is within 0.2 %
+    // (the bed checkerboard map), and averaged over the corners the moves repeat to 0.05 %.
+    const det = u1[0] * u2[1] - u1[1] * u2[0];
+    if (Math.abs(det) < 1) throw err('The picture hardly moved: is the camera on?');
+    const inv = [u2[1] / det, -u2[0] / det, -u1[1] / det, u1[0] / det];
+    const matrix = inv.map((v) => +(-d * v).toPrecision(8));
+    const pixel = Math.sqrt(Math.abs(matrix[0] * matrix[3] - matrix[1] * matrix[2]));
     const rotation = (Math.atan2(matrix[2], matrix[0]) * 180) / Math.PI;
     const mirrored = matrix[0] * matrix[3] - matrix[1] * matrix[2] < 0;
-    // how the head's moves compare with the board (the machine's own length error, roughly: the
-    // checkerboard bed check says more), and whether the picture's pixels come out square
-    const moved = (Math.hypot(...p1) + Math.hypot(...p2)) / (2 * d);
+    // the board's squares as the head's moves measure them (mm): how true its print is
+    // (mm), the one nearer the machine's X first
+    const mmOf = (v) => [matrix[0] * v[0] + matrix[1] * v[1], matrix[2] * v[0] + matrix[3] * v[1]];
+    const ma = mmOf(L.a), mb = mmOf(L.b);
+    const squares = (Math.abs(ma[0]) >= Math.abs(mb[0]) ? [ma, mb] : [mb, ma]).map((v) => +Math.hypot(v[0], v[1]).toFixed(3));
     const r = {
       matrix, pixel, rotation, mirrored, corners: L.n,
-      lens: L.worst * pixel, moveVsBoard: (moved - 1) * 1000,
-      aspect: Math.hypot(...L.a) / Math.hypot(...L.b)
+      lens: L.worst * pixel, squares,
+      // the picture's X and Y pixel sizes: the same on a camera looking straight down
+      pixelXY: [Math.hypot(matrix[0], matrix[1]), Math.hypot(matrix[2], matrix[3])],
+      // how far the board's print is from its size (‰, the mean of across and down)
+      moveVsBoard: ((squares[0] + squares[1]) / (2 * square) - 1) * 1000
     };
-    this.log('camera calibrated on the ' + square + ' mm board: ' + L.n + ' corners, pixel size ' + (pixel * 1000).toFixed(3) + ' µm (across vs down ' + ((r.aspect - 1) * 100).toFixed(2) + ' %), picture turned ' + rotation.toFixed(2) + '°' + (mirrored ? ' (mirrored)' : '') + ', lens bends lines up to ' + (r.lens * 1000).toFixed(0) + ' µm');
+    const off = squares.some((s) => Math.abs(s / square - 1) > 0.005);
+    this.log('camera calibrated on the ' + square + ' mm board: ' + L.n + ' corners, pixel size ' + (pixel * 1000).toFixed(3) + ' µm (X ' + (r.pixelXY[0] * 1000).toFixed(3) + ', Y ' + (r.pixelXY[1] * 1000).toFixed(3) + '), picture turned ' + rotation.toFixed(2) + '°' + (mirrored ? ' (mirrored)' : '') + ', lens bends lines up to ' + (r.lens * 1000).toFixed(0) + ' µm; the board\'s squares measure ' + squares[0].toFixed(2) + ' × ' + squares[1].toFixed(2) + ' mm' + (off ? ' (printed off scale: the size is taken from the head\'s moves, so it doesn\'t matter here)' : ''));
     return r;
   }
 

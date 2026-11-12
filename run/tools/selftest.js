@@ -1057,11 +1057,12 @@ async function visionTests() {
     const px = await call('POST', 'local/camera/calibrate');
     ok(px.status === 200 && Math.abs(px.data.pixel - 0.08) < 0.0002 && Math.abs(Math.abs(px.data.rotation) - 90) < 0.2 && !px.data.mirrored,
       'stage 1, camera on the 10 mm board: ' + (px.data && px.data.corners) + ' corners, ' + (px.data && (px.data.pixel * 1000).toFixed(2)) + ' µm, picture turned ' + (px.data && px.data.rotation.toFixed(2)) + '° (80 µm, 90°)', JSON.stringify(px.data));
-    // the size and shape from the board: square pixels (the same across X and Y), whatever the
-    // machine's own length error; and a second calibration agrees with the first
-    const sides = (m) => [Math.hypot(m[0], m[1]), Math.hypot(m[2], m[3])];
-    const s1 = px.data && px.data.matrix ? sides(px.data.matrix) : [0, 1];
-    ok(Math.abs(s1[0] / s1[1] - 1) < 0.0005, 'stage 1: X and Y pixel sizes the same: ' + (s1[0] * 1000).toFixed(3) + ' and ' + (s1[1] * 1000).toFixed(3) + ' µm', JSON.stringify(px.data && px.data.matrix));
+    // the size from the head's moves, not the board's print (printed 1.2 % large across, 0.65 %
+    // down): X and Y as the machine moves (its X travel is 1.5 ‰ long, so 80 / 1.0015 µm along
+    // X), the print reported; and a second calibration agrees with the first
+    const xy = (px.data && px.data.pixelXY) || [0, 0], sq = (px.data && px.data.squares) || [0, 0];
+    ok(Math.abs(xy[0] / (0.08 / 1.0015) - 1) < 0.0005 && Math.abs(xy[1] / 0.08 - 1) < 0.0005 && sq[0] > 10.08 && sq[1] > 10.04 && sq[1] < 10.1,
+      'stage 1 on a board printed off scale: X ' + (xy[0] * 1000).toFixed(3) + ' µm (79.880), Y ' + (xy[1] * 1000).toFixed(3) + ' µm (80.000); its squares measured ' + sq.join(' × ') + ' mm', JSON.stringify(px.data));
     await new Promise((r) => setTimeout(r, 400));
     const px2 = await call('POST', 'local/camera/calibrate');
     ok(px2.status === 200 && Math.abs(px2.data.pixel / px.data.pixel - 1) < 0.001 && Math.abs(px2.data.rotation - px.data.rotation) < 0.1,

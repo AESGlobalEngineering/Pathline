@@ -93,8 +93,9 @@ function start(opts = {}) {
           // a bump round board point (450, 150): the pattern pushed outward up to 0.3 mm
           bump: (u, v) => { const dx = u - 450, dy = v - 150, r = Math.hypot(dx, dy); if (r < 1) return [0, 0]; const k = 0.3 * Math.exp(-(r * r) / 4050); return [(k * dx) / r, (k * dy) / r]; }
         },
-        // the small one for camera calibration: 10 mm squares, turned 7°
-        boards: [{ x: 700, y: 100, angle: 7, square: 10, nx: 10, ny: 10 }]
+        // the small one for camera calibration: 10 mm squares, turned 7°, printed 1.2 % large
+        // across and 0.65 % down (as Ruby's measured)
+        boards: [{ x: 700, y: 100, angle: 7, square: 10, nx: 10, ny: 10, print: [1.012, 1.0065] }]
       },
       light: (ix, iy) => 0.25 + 0.75 * Math.exp(-((ix - 14) ** 2 + (iy + 8) ** 2) / 648)
     }

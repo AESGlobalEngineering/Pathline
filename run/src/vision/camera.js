@@ -356,7 +356,8 @@ class SimCamera {
       const a = (-b.angle * Math.PI) / 180, dx = p[0] - b.x, dy = p[1] - b.y;
       let bu = dx * Math.cos(a) - dy * Math.sin(a), bv = dx * Math.sin(a) + dy * Math.cos(a);
       if (b.bump) { const d = b.bump(bu, bv); bu -= d[0]; bv -= d[1]; }
-      const u = bu / b.square, v = bv / b.square;
+      // b.print: [across, down] how far the print is from its size (a printer's scaling)
+      const u = bu / (b.square * (b.print ? b.print[0] : 1)), v = bv / (b.square * (b.print ? b.print[1] : 1));
       if (u >= -1 && v >= -1 && u < (b.nx || 30) - 1 && v < (b.ny || 20) - 1) return (Math.floor(u) + Math.floor(v)) % 2 === 0 ? 30 : 220;
     }
     return this.scene.sheet === undefined ? 225 : this.scene.sheet;

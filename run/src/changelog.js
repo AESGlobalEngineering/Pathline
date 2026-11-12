@@ -12,7 +12,7 @@ module.exports = [
     ],
     fixed: [
       'A request from Pathline Prepare or Monitor could fail as "connection reset" when it reused a connection just as Pathline Run closed it for being idle, most often right after the camera had kept Run busy. Idle connections are now kept 30 s, not 5.',
-      'Camera calibration (stage 1) took the picture\'s X and Y pixel sizes from a 3 mm move of the head, following one corner of the board near the edge of the picture, so they came out up to 0.8 % apart and the turn varied by 0.2° from one calibration to the next. The size and shape now come from the 10 mm board alone, whose squares are square, and the move only says which way the picture is turned (following every corner on the board and averaging). Recalibrate once to use it.'
+      'Camera calibration (stage 1) gave a slightly different answer each time. The picture\'s X and Y pixel sizes came from a 3 mm move of the head following one corner of the board, near the edge of the picture where the lens bends most, so they came out up to 0.8 % apart and the turn varied by 0.2°. The move now follows every corner on the board and averages them: on the Q500 three calibrations agreed to 0.01 % and 0.06°. The pixel size also no longer rests on the board\'s print: a printed 10 mm board measured 10.12 × 10.07 mm by the head\'s moves, which put the size 1 % out. The log says how the board measures. Recalibrate once to use it.'
     ]
   },
   {
