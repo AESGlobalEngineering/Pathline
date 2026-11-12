@@ -7,7 +7,8 @@ module.exports = [
   {
     version: '1.6.12', date: '12 Nov 2026',
     added: [
-      'Thermal map on sheet metal: shows where the sheet starts to bend from uneven heat, not where it melts. A hot area pushing against the cold sheet around it stays bent once it is about 123 °C hotter than the rest (0.9 mm stainless 304); a wide hot area on thin sheet bows sooner. The panel shows the hot area, the bending limit for it, how close the job comes and when.'
+      'Thermal map on sheet metal: shows where the sheet starts to bend from uneven heat, not where it melts. A hot area pushing against the cold sheet around it stays bent once it is about 123 °C hotter than the rest (0.9 mm stainless 304); a wide hot area on thin sheet bows sooner. The panel shows the hot area, the bending limit for it, how close the job comes and when.',
+      'Thermal map → Marking spray (bare metal): metal marked through a marking spray takes far more of a CO2 beam (about 70 %, an estimate, against about 10 % bare). It is on by itself when the material\'s name or notes say spray or coated.'
     ],
     fixed: [
       'Engraving: a shape drawn inside another engraved shape as a separate object (the lens of a magnifying glass, the inside of a frame) is now left unengraved, as a hole, on the Job page and on the machine. Before, both were filled.'

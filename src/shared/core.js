@@ -1815,7 +1815,19 @@
   // beam through or reflects it and a black one takes most of it. Bare metals
   // reflect either way (no colour).
   const BARE_METAL = new Set(['ss304', 'ss316', 'mildsteel', 'aluminium', 'brass']);
-  function absorptionOf(props, mat, fibre) {
+  // Bare metal marked through a marking spray (CerMark, TherMark, Enduramark…):
+  // the coating is made to take the beam and fuses onto the metal, so most of
+  // the power ends up in the sheet. No published absorption figure at 10.6 µm,
+  // so 70 % is an estimate (dark ceramic coatings absorb ≈ 80–90 %, less what
+  // the coating reflects or burns off).
+  const SPRAY_ABSORB = 0.7;
+  const isBareMetal = (props) => !!props && BARE_METAL.has(props.key);
+  // whether the heat model takes the metal as sprayed: the job's own choice
+  // (Simulation → Thermal map → Marking spray), else the material's name or notes
+  const markingSprayOf = (mat, job) => (job && typeof job.thermalSpray === 'boolean' ? job.thermalSpray
+    : /spray|coated|cermark|thermark|enduramark|marking compound/i.test(((mat && mat.name) || '') + ' ' + ((mat && mat.notes) || '')));
+  function absorptionOf(props, mat, fibre, spray) {
+    if (spray && isBareMetal(props)) return { absorb: SPRAY_ABSORB, colour: null, spray: true };
     const base = fibre ? props.aFiber : props.aCO2;
     const col = BARE_METAL.has(props.key) ? null : colourOf(mat);
     if (!col) return { absorb: base, colour: null };
@@ -1837,8 +1849,10 @@
     const props = thermalOf(material);
     if (!props) return null;
     const fibre = /fib/i.test(info.source || '');
-    // the material's colour changes how much of the beam it takes (mostly on fibre)
-    const { absorb, colour } = absorptionOf(props, material, fibre);
+    // the material's colour changes how much of the beam it takes (mostly on
+    // fibre); bare metal takes far more through a marking spray
+    const spray = isBareMetal(props) && markingSprayOf(material, job);
+    const { absorb, colour } = absorptionOf(props, material, fibre, spray);
     const rated = Number(info.power) || 80;
     const t_m = Math.max(0.1, Number(material && material.t) || 3) / 1000;
     // Every laser has a robust extraction system, so the sheet is cooled by
@@ -1924,7 +1938,7 @@
       if (time - snaps[snaps.length - 1].time >= 5) snaps.push({ time, T: T.slice(), peak, peakAt, bend, bendAt });
     };
     const api = {
-      nx, ny, dx, x0, y0, T0, props, absorb, colour, fibre, cellMm: dx,
+      nx, ny, dx, x0, y0, T0, props, absorb, colour, fibre, spray, cellMm: dx,
       get T() { return T; }, get time() { return time; }, get peak() { return peak; }, get peakAt() { return peakAt; },
       // sheet metal only: the hot area now { rise, dia, limit }, and the worst
       // share of the bending limit reached so far (1 = starts to bend) and when
@@ -2124,6 +2138,6 @@
     processOrder, processOfAci, engraveHoles, toolSlot, toolRank, polyTime, travelTime, rasterSpans, orderPaths,
     estimate, headAt, fmtDuration, fmtLen, fmtArea, checkJob, regMarks, regMarkAci, camReach, marksOutOfReach, reachShift, regProcess, withPresets, ensureRegProcess, isRegProc, REG_PROC, REG_NEEDED,
     cutOrderOf, CUT_ORDER_DEFAULT, START_CLEAR, commonLines, bedOf, bedCount, defaultPresets, DEFAULTS,
-    rasterIslands, engraveScan, ENGRAVE_DIRS, DPI_STEPS, starterPresets, nestRects, THERMAL, thermalKey, thermalOf, colourOf, absorptionOf, thermalSim, bendLimit, metalPresets, presetsFor
+    rasterIslands, engraveScan, ENGRAVE_DIRS, DPI_STEPS, starterPresets, nestRects, THERMAL, thermalKey, thermalOf, colourOf, absorptionOf, thermalSim, bendLimit, isBareMetal, markingSprayOf, SPRAY_ABSORB, metalPresets, presetsFor
   };
 });

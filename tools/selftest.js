@@ -385,6 +385,12 @@ async function main() {
     ok(wide.by === 'bow' && near(wide.bow, 50, 2), 'a 100 mm hot area on 0.9 mm stainless bows sooner, ≈ 50 °C over (' + wide.bow.toFixed(0) + ' °C)');
     ok(thick.by === 'set', '3 mm stainless doesn\'t bow from a 100 mm hot area before it would stay bent');
     ok(CC.bendLimit(CC.thermalOf(acr), 3, 50) === null, 'no bending limit for plastics (they have their own limit)');
+    // marking spray: bare metal takes far more of a CO2 beam through it
+    const bare = { name: 'Stainless Steel', g: 'Metal', t: 0.9 };
+    ok(!CC.markingSprayOf(bare, job) && CC.markingSprayOf({ ...bare, name: 'Stainless 304 + CerMark' }, job) && CC.markingSprayOf(bare, { ...job, thermalSpray: true }) && !CC.markingSprayOf({ ...bare, notes: 'marking spray' }, { ...job, thermalSpray: false }), 'marking spray from the job\'s switch, else the material\'s name or notes');
+    const plain = CC.thermalSim(job, laser, bare, est.timeline).to(est.total), sprayed = CC.thermalSim({ ...job, thermalSpray: true }, laser, bare, est.timeline).to(est.total);
+    ok(sprayed.spray && sprayed.absorb === CC.SPRAY_ABSORB && sprayed.peak - 20 > 4 * (plain.peak - 20), 'sprayed stainless heats far more than bare (+' + Math.round(sprayed.peak - 20) + ' vs +' + Math.round(plain.peak - 20) + ' °C)');
+    ok(!CC.thermalSim({ ...job, thermalSpray: true }, laser, acr, est.timeline).spray, 'the spray switch only applies to bare metal');
     const steel = CC.thermalSim(job, laser, { name: 'Stainless Steel', g: 'Metal', t: 0.9 }, est.timeline).to(est.total);
     const hs = steel.hotSpot();
     ok(hs.limit && steel.bend >= 0 && steel.bendAt >= 0 && (hs.rise === 0 || hs.dia > 0), 'stainless heat model reports the hot area and how close it came to bending (worst ' + Math.round(steel.bend * 100) + ' %)');

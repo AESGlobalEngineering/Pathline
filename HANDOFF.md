@@ -24,6 +24,8 @@ Version 1.6.12 (12 Nov):
   - `bendLimit(props, tMm, hotDiaMm)`: set = 2·σy/(E·α) (a hot disc in a cold plate yields); bow = 2.45·(t/a)²/((1−ν²)·α) (a clamped disc of radius a buckles). Both are a rise over the cold sheet; the lower one is used. For 0.9 mm 304: set ≈ 123 °C, and a 100 mm hot area bows at ≈ 50 °C.
   - `thermalSim`: `hotSpot()` (the area at or above half the hottest rise, as an equivalent diameter), and `bend`/`bendAt` (worst share of the limit, checked every 0.5 s of sim time and kept in the snapshots). Metals keep 0.9 of the absorbed power when engraving (nothing is removed) and 0.5 when cutting.
   - Simulation panel for metals: the scale tops out at T0 + set, rows for Hot area / Bends at / Towards bending, and warnings for bending now, past the limit, or ≥ 80 %. Plastics keep their own limits.
+  - **Marking spray** (the owner marks stainless through spray): `SPRAY_ABSORB` 0.7 (an estimate; no published 10.6 µm figure) for bare metal when `markingSprayOf(mat, job)` is true. That is `job.thermalSpray` (the Simulation panel's Marking spray switch, bare metals only), else /spray|coated|cermark|thermark|enduramark/ in the material's name or notes. The panel's thermal cache is keyed on it.
+  - With spray, the Etch Calibration job passes the limit within 30 s: the hot area is ≈ 13 mm and +600 °C, worst 589 %. Staying under needs ≈ 6 % power. 1.5 / 2 / 3 mm sheet comes out at 407 / 330 / 243 %.
   - On the owner's Etch Calibration job (0.9 mm stainless, 130 W CO2, 35 % at 400 mm/s): the hot area is ≈ 12 mm and +88–95 °C, and the worst is 84 % of the bending limit. That assumes 10 % absorption (bare stainless on CO2); with marking spray far more is absorbed.
 
 Version 1.6.11 (10 Nov):
