@@ -531,15 +531,31 @@ function messageWindow(title, msg) {
 
 // ---------------------------------------------------------------- queue view
 // the processes the job uses (a step of its toolpath names it): a material's others are left out
-function procRows(pkg) {
+// The job's processes. editJob: the id of a queued job whose power and speed can be changed
+// here before it runs (Edit on a row; Save sends it, POST /jobs/{id}/process)
+function procRows(pkg, editJob) {
   const used = new Set((pkg.toolpath || []).map((s) => s.process).filter((i) => i !== undefined));
+  const pe = ui.pe && ui.pe.job === editJob ? ui.pe : null;
   return (pkg.processes || []).filter((p) => !used.size || used.has(p.index)).map((p) => {
+    const laser = p.power !== undefined;
     const pv = p.tool !== undefined && p.proc === undefined
       ? String(p.tool).split(' · ')[0] + ' · ' + p.speed + ' mm/s' + (p.passes > 1 ? '  ×' + p.passes : '') // plotter: tool and speed
       : p.proc === 'Engrave' ? 'P ' + p.power + ' %  V ' + p.speed + ' mm/s  ' + p.f + ' DPI' : 'P ' + p.power + ' %  V ' + p.speed + ' mm/s' + (p.passes > 1 ? '  ×' + p.passes : '');
-    return '<div style="display:flex;align-items:center;gap:10px;min-height:34px;padding:0 2px;border-bottom:1px solid var(--line-soft)">' +
-      '<span style="display:flex;gap:3px">' + (p.aci || []).slice(0, 4).map((n) => '<span class="chip" title="ACI ' + n + '" style="background:' + (aciHex(n) || 'var(--text)') + ';color:' + (n === 7 ? 'var(--surface)' : aciFg(n)) + '">' + n + '</span>').join('') + '</span>' +
-      '<span style="flex:1;min-width:0">' + esc(p.name) + '</span><span class="mono" style="font-size:13px;color:var(--text-2)">' + pv + '</span></div>';
+    const chips = '<span style="display:flex;gap:3px">' + (p.aci || []).slice(0, 4).map((n) => '<span class="chip" title="ACI ' + n + '" style="background:' + (aciHex(n) || 'var(--text)') + ';color:' + (n === 7 ? 'var(--surface)' : aciFg(n)) + '">' + n + '</span>').join('') + '</span>';
+    // being changed: the two fields, Save and Cancel
+    if (pe && pe.index === p.index) {
+      const field = (k, label, unit) => '<label style="display:flex;align-items:center;gap:6px"><span class="lbl">' + label + '</span><input class="mono" inputmode="decimal" data-pe="' + k + '" value="' + esc(pe[k]) + '" aria-label="' + label + '" style="width:76px;height:40px;padding:0 8px;border-radius:8px;border:1px solid var(--line-strong);background:var(--surface);color:var(--text);font-size:16px"><span class="lbl">' + unit + '</span></label>';
+      return '<div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:8px 2px;border-bottom:1px solid var(--line-soft);background:var(--accent-soft);border-radius:8px">' + chips +
+        '<span style="flex:1 1 120px;min-width:0;font-weight:500">' + esc(p.name) + '</span>' +
+        (laser ? field('power', 'Power', '%') : '') + field('speed', 'Speed', 'mm/s') +
+        '<button class="tb sm" data-a="procCancel">Cancel</button><button class="btn-primary" style="height:40px" data-a="procSave">Save</button></div>';
+    }
+    // changed here: the setting in the accent colour, what Pathline sent under it
+    const was = p.was ? '<span class="lbl" title="As Pathline sent it" style="font-size:12px">was ' + (p.was.power !== undefined ? p.was.power + ' % · ' : '') + p.was.speed + ' mm/s</span>' : '';
+    return '<div style="display:flex;align-items:center;gap:10px;min-height:34px;padding:2px;border-bottom:1px solid var(--line-soft)">' + chips +
+      '<span style="flex:1;min-width:0">' + esc(p.name) + '</span>' +
+      '<span style="display:flex;flex-direction:column;align-items:flex-end;gap:1px"><span class="mono" style="font-size:13px;white-space:nowrap;color:' + (p.was ? 'var(--accent)' : 'var(--text-2)') + ';font-weight:' + (p.was ? 600 : 400) + '">' + pv + '</span>' + was + '</span>' +
+      (editJob && !pe ? '<button class="tb sm" data-a="procEdit" data-v="' + p.index + '" aria-label="Change power and speed of ' + esc(p.name) + '" title="Change power and speed">Edit</button>' : '') + '</div>';
   }).join('');
 }
 
@@ -633,7 +649,7 @@ function queueView() {
     })() +
     '<div style="display:flex;align-items:center;gap:12px;min-height:44px"><button role="switch" class="sw" aria-checked="' + !!cfg().removeDone + '" data-a="removeDone" aria-label="Remove completed job from queue"></button><span style="font-size:16px">Remove completed job from queue</span></div>' +
     '</div>' +
-    (shownPkg && shownPkg !== 'loading' ? '<div style="display:flex;flex-direction:column;gap:6px">' + procRows(shownPkg) + '</div>' : '') + warn +
+    (shownPkg && shownPkg !== 'loading' ? '<div style="display:flex;flex-direction:column;gap:6px">' + procRows(shownPkg, !runJob && job && job.status === 'queued' ? job.id : null) + '</div>' : '') + warn +
     '</div>' +
     '<div class="qbed"><div class="viewport" style="position:relative;flex:1;min-height:0;border:1px solid var(--line);border-radius:10px;overflow:hidden">' +
     '<div style="position:absolute;inset:50px 8px 8px">' + bedSvg(shownPkg, { big: true, head: true }) + '</div>' +
@@ -1200,6 +1216,8 @@ function render() {
   const ae = document.activeElement;
   const focused = ae && /^(INPUT|SELECT|TEXTAREA)$/.test(ae.tagName) && ae.dataset && (ae.dataset.f || ae.dataset.n);
   if (ui.view === 'setup' && focused) { const h = $app.querySelector('header'); if (h) h.outerHTML = header(); markOpened(true); return; }
+  // nor a job's power and speed while one is being typed (Queue → Edit)
+  if (ae && ae.tagName === 'INPUT' && ae.dataset && ae.dataset.pe) { const h = $app.querySelector('header'); if (h) h.outerHTML = header(); markOpened(true); return; }
   // every part that scrolls keeps its place: the screen is redrawn every 0.7 s, and the job's
   // process list (a test grid has dozens) went back to the top each time, so it couldn't be scrolled
   const scrollers = '.view, [data-keep], .dlg, pre.log';
@@ -1331,6 +1349,28 @@ const H = {
     toast('Scanning the sheet\'s height under the job: the head moves over it with the nozzle up…', { ms: 6000 });
     const m = await call('POST', LOCAL('/zaxis/scan'), { id });
     toast('Sheet scanned: ' + m.nx + ' × ' + m.ny + ' points, ' + m.min.toFixed(1) + ' to +' + m.max.toFixed(1) + ' mm, steepest ' + (m.slope * 100).toFixed(1) + ' %' + (m.dropped ? ' (' + m.dropped + ' readings dropped)' : ''), { ms: 8000 });
+  }),
+  // a queued job's power and speed (procRows): Edit opens the fields, Save sends them
+  procEdit: (v) => {
+    const id = ui.sel, pkg = ui.pkgs[id];
+    const p = pkg && pkg !== 'loading' ? (pkg.processes || []).find((x) => x.index === Number(v)) : null;
+    if (!p) return;
+    ui.pe = { job: id, index: p.index, power: p.power === undefined ? '' : String(p.power), speed: String(p.speed) };
+    render();
+    const f = $app.querySelector('[data-pe="' + (p.power === undefined ? 'speed' : 'power') + '"]');
+    if (f) { f.focus(); f.select(); }
+  },
+  // (the field typed in lets go first: while it has focus the screen isn't redrawn)
+  procCancel: () => { ui.pe = null; if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); render(); },
+  procSave: act(async () => {
+    const pe = ui.pe;
+    if (!pe) return;
+    const num = (s) => (s === '' ? undefined : Number(String(s).replace(',', '.')));
+    const r = await call('POST', LOCAL('/jobs/' + encodeURIComponent(pe.job) + '/process'), { index: pe.index, power: num(pe.power), speed: num(pe.speed) });
+    ui.pe = null;
+    if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+    delete ui.pkgs[pe.job]; // shown again as it now is
+    toast((r.process.name || 'Process') + ': ' + (r.process.power !== undefined ? r.process.power + ' % at ' : '') + r.process.speed + ' mm/s' + (r.seconds ? ' · now ' + hms(r.seconds) : ''));
   }),
   // a test grid's results (vision/grid.js)
   gridShow: act(async () => { const g = await call('GET', LOCAL('/grid')); if (!g.result) throw new Error('No test grid has been checked yet'); ui.dlg = { kind: 'grid', r: g.result }; }),
@@ -1646,6 +1686,13 @@ $app.addEventListener('change', (e) => {
   }
 });
 $app.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.dataset && (e.target.dataset.f || e.target.dataset.n)) e.target.blur(); });
+// a job's power and speed being typed (Queue → Edit): kept as typed, Enter saves, Escape cancels
+$app.addEventListener('input', (e) => { const k = e.target.dataset && e.target.dataset.pe; if (k && ui.pe) ui.pe[k] = e.target.value; });
+$app.addEventListener('keydown', (e) => {
+  if (!(e.target.dataset && e.target.dataset.pe)) return;
+  if (e.key === 'Enter') { e.preventDefault(); H.procSave(); }
+  if (e.key === 'Escape') { e.preventDefault(); H.procCancel(); }
+});
 $app.addEventListener('focusout', (e) => { if (e.target.dataset && (e.target.dataset.f || e.target.dataset.n)) setTimeout(render, 0); });
 
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => { if (!ui.themeSet) { ui.dark = e.matches; render(); } });

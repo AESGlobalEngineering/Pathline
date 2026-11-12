@@ -5,8 +5,9 @@
 
 module.exports = [
   {
-    version: '0.7.13', date: '11 Nov 2026',
+    version: '0.7.13', date: '12 Nov 2026',
     added: [
+      'Queue: change a job\'s power and speed on the machine before it runs. Edit on any of a queued job\'s processes, type the power and speed, then Save (or Enter). The estimate follows, and a changed process shows its new setting in the accent colour with what Pathline sent under it ("was 90 % · 20 mm/s"). Set it back and the mark goes. Not while the job runs. The change is on this machine only: Pathline Prepare keeps the job as it sent it.',
       'Automatic power and speed from a test grid (Setup → Camera). Once a power × speed test grid from Pathline Prepare has been cut, the head camera looks at every square by itself and works out which cut through. It measures each square\'s cut line against the material either side, its weakest stretch (a bridge left uncut) and its inside. The grid decides: more power or a slower speed can only help, so the squares that cut through lie on one side of a staircase across the grid, and one misread square is put right by its neighbours. It then picks the fastest speed that cut through, one power step above the lowest that did, and shows every square\'s picture with the pick. Save puts it into that material\'s cut setting on this machine, and Pathline Prepare takes it on its next sync. When the squares don\'t separate cleanly it says it isn\'t sure.'
     ],
     fixed: [

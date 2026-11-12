@@ -1178,6 +1178,40 @@ async function visionTests() {
 // ---------------------------------------------------------------- found on the network
 // Run's mDNS answers, as Pathline Prepare asks for them (its own discover.js when it's in this
 // repo): a question from an ordinary port is answered straight back, with id, name, port, IP
+// ---------------------------------------------------------------- a queued job's power and speed
+async function editTests() {
+  console.log('Changing a queued job\'s power and speed');
+  const data = fs.mkdtempSync(path.join(os.tmpdir(), 'pathline-run-'));
+  fs.writeFileSync(path.join(data, 'config.json'), JSON.stringify({ controller: 'trotec', regMarks: 'ignore', bed: [813, 508], sim: { speedup: 400 } }));
+  const port = 19400 + Math.floor(Math.random() * 200);
+  const srv = spawn(process.execPath, [path.join(__dirname, '..', 'src', 'server.js'), '--sim', '--port', String(port), '--data', data], { stdio: ['ignore', 'pipe', 'pipe'] });
+  const base = 'http://127.0.0.1:' + port + '/api';
+  const call = async (m, r, b) => { const res = await fetch(base + r, { method: m, headers: { 'content-type': 'application/json' }, body: b ? JSON.stringify(b) : undefined }); return { s: res.status, j: await res.json().catch(() => null) }; };
+  try {
+    for (let i = 0; i < 60; i++) { try { await call('GET', '/v1/info'); break; } catch (e) { await new Promise((r) => setTimeout(r, 100)); } }
+    const q = (await call('POST', '/v1/jobs', example)).j;
+    const cut = example.processes.find((p) => p.proc === 'Cut');
+    const before = (await call('GET', '/v1/jobs')).j.find((j) => j.id === q.id).seconds;
+    const e1 = await call('POST', '/local/jobs/' + q.id + '/process', { index: cut.index, power: 55, speed: 10 });
+    const pkg = (await call('GET', '/local/jobs/' + q.id + '/package')).j;
+    const p = pkg.processes.find((x) => x.index === cut.index);
+    const after = (await call('GET', '/v1/jobs')).j.find((j) => j.id === q.id).seconds;
+    ok(e1.s === 200 && p.power === 55 && p.speed === 10 && p.was && p.was.power === cut.power && p.was.speed === cut.speed && after > before, 'power and speed changed on a queued job: kept, with what Pathline sent, and the estimate longer at the slower speed (' + before + ' → ' + after + ' s)', JSON.stringify({ e1, p }));
+    const bad = await call('POST', '/local/jobs/' + q.id + '/process', { index: cut.index, power: 140 });
+    const bad2 = await call('POST', '/local/jobs/' + q.id + '/process', { index: cut.index, speed: 0 });
+    ok(bad.s === 400 && /0 to 100/.test(bad.j.error) && bad2.s === 400, 'power over 100 % or a speed of 0 is refused', JSON.stringify([bad.j, bad2.j]));
+    await call('POST', '/local/jobs/' + q.id + '/process', { index: cut.index, power: cut.power, speed: cut.speed });
+    const back = (await call('GET', '/local/jobs/' + q.id + '/package')).j.processes.find((x) => x.index === cut.index);
+    ok(back.power === cut.power && back.was === undefined, 'set back as sent: no longer marked as changed');
+    await call('POST', '/local/jobs/' + q.id + '/process', { index: cut.index, power: 60 });
+    await call('POST', '/v1/start', { id: q.id });
+    const busy = await call('POST', '/local/jobs/' + q.id + '/process', { index: cut.index, power: 70 });
+    ok(busy.s === 409, 'not while the job runs', JSON.stringify(busy.j));
+    let s; for (let i = 0; i < 80; i++) { await new Promise((r) => setTimeout(r, 250)); s = (await call('GET', '/v1/status')).j; if (s.state === 'idle') break; }
+    ok(s.state === 'idle' && s.progress === 1, 'the changed job runs to the end');
+  } finally { srv.kill(); }
+}
+
 // ---------------------------------------------------------------- test grid: power and speed by camera
 async function gridTests() {
   console.log('Test grid checked by the head camera (power and speed)');
@@ -1480,7 +1514,7 @@ async function zaxisTests() {
   ok(zf.state === 'up', 'paused or stopped: the nozzle goes up');
 }
 
-jogTests().then(linkTests).then(serverTests).then(monitorTests).then(gridTests).then(discoveryTests).then(followFitTests).then(zaxisTests).then(materialsTests).then(visionTests).then(() => {
+jogTests().then(linkTests).then(serverTests).then(editTests).then(monitorTests).then(gridTests).then(discoveryTests).then(followFitTests).then(zaxisTests).then(materialsTests).then(visionTests).then(() => {
   console.log(failed ? '\n' + failed + ' FAILED' : '\nAll passed');
   process.exit(failed ? 1 : 0);
 });

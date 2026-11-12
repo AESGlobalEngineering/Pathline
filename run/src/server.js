@@ -360,6 +360,48 @@ function start(opts = {}) {
     'POST /toolchange': () => { throw err(409, 'Tools are chosen by the job: each tool has its own output on the controller'); }
   };
 
+  // ---------------------------------------------------------------- a queued job's power and speed
+  // The operator can change a process's power and speed on the machine before the job runs
+  // (Queue → the job's processes → Edit). The package Pathline sent is changed in place; each
+  // process keeps what it was sent with (`was`), so the screen shows what changed. Not while it runs.
+  function editProcess(id, b) {
+    const job = store.get(id);
+    if (!job) throw err(404, 'No such job');
+    if ((machine.run && machine.run.job.id === id) || job.status === 'running') throw err(409, 'The job is running: change it before you start it');
+    if (job.status !== 'queued') throw err(409, 'Only a queued job can be changed (this one is ' + job.status + ')');
+    const pkg = store.pkg(id);
+    const k = (pkg.processes || []).findIndex((x) => x.index === Number(b.index));
+    if (k < 0) throw err(404, 'That job has no such process');
+    const p = pkg.processes[k], next = { ...p };
+    const laser = p.power !== undefined;
+    if (b.power !== undefined && b.power !== null && b.power !== '') {
+      if (!laser) throw err(400, 'This process has no power to set');
+      const v = Number(b.power);
+      if (!(v >= 0 && v <= 100)) throw err(400, 'Power must be 0 to 100 %');
+      next.power = Math.round(v * 10) / 10;
+    }
+    if (b.speed !== undefined && b.speed !== null && b.speed !== '') {
+      const v = Number(b.speed), max = Number((cfg.trotec && cfg.controller === 'trotec' && cfg.trotec.maxSpeed) || cfg.speed) || 2000;
+      if (!(v > 0 && v <= max)) throw err(400, 'Speed must be above 0 and at most ' + max + ' mm/s');
+      next.speed = Math.round(v * 10) / 10;
+    }
+    // what Pathline sent, kept once; dropped again when it's set back
+    const was = p.was || (laser ? { power: p.power, speed: p.speed } : { speed: p.speed });
+    if (was.speed === next.speed && (!laser || was.power === next.power)) delete next.was; else next.was = was;
+    if (typeof next.summary === 'string' && laser) next.summary = next.summary.replace(/\d+(?:\.\d+)? %/, next.power + ' %').replace(/\d+(?:\.\d+)? mm\/s/, next.speed + ' mm/s');
+    pkg.processes[k] = next;
+    // still converts for this controller; the estimate as it now is
+    let program;
+    try { program = controller(cfg.controller).compile(plan.build(require('./job/anchor').apply(pkg, job.anchor)), cfg); } catch (e) { throw err(400, 'Can\'t convert the job with that setting: ' + e.message); }
+    fs.writeFileSync(path.join(store.jobDir(id), 'package.json'), JSON.stringify(pkg));
+    if (program && program.estimated) job.seconds = Math.round(program.seconds);
+    job.edited = pkg.processes.some((x) => x.was);
+    store.flush();
+    rowsCache.clear();
+    log('changed ' + job.name + ', ' + (p.name || 'process ' + p.index) + ': ' + (laser ? p.power + ' % at ' : '') + p.speed + ' mm/s → ' + (laser ? next.power + ' % at ' : '') + next.speed + ' mm/s' + (program && program.estimated ? ' (now ' + Math.floor(job.seconds / 60) + ' min ' + String(job.seconds % 60).padStart(2, '0') + ' s)' : ''));
+    return { id, process: next, seconds: job.seconds };
+  }
+
   // ---------------------------------------------------------------- HMI screen
   // A Trotec job's engraving as it's sent (lines, overscan, time), for the screen to draw the head
   // along at the real pace (ui/follow.js). Kept per job and placement: working out the lines of a
@@ -649,6 +691,11 @@ function start(opts = {}) {
           const f = exportJob(decodeURIComponent(m[1]), url.searchParams.get('format'), url.searchParams.get('ctrl'));
           res.writeHead(200, { 'content-type': f.type, 'content-disposition': 'attachment; filename="' + encodeURIComponent(f.name) + '"; filename*=UTF-8\'\'' + encodeURIComponent(f.name) });
           return res.end(f.data);
+        }
+        // a queued job's process: { index, power?, speed? }
+        if (isLocal && (m = route.match(/^POST \/jobs\/([^/]+)\/process$/))) {
+          const b = await body(req, 4096);
+          return send(res, 200, editProcess(decodeURIComponent(m[1]), b || {}));
         }
         if (isLocal && (m = route.match(/^POST \/jobs\/([^/]+)\/requeue$/))) {
           const b = await body(req, 1024);
