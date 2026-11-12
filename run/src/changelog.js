@@ -11,7 +11,8 @@ module.exports = [
       'Automatic power and speed from a test grid (Setup → Camera). Once a power × speed test grid from Pathline Prepare has been cut, the head camera looks at every square by itself and works out which cut through. It measures each square\'s cut line against the material either side, its weakest stretch (a bridge left uncut) and its inside. The grid decides: more power or a slower speed can only help, so the squares that cut through lie on one side of a staircase across the grid, and one misread square is put right by its neighbours. It then picks the fastest speed that cut through, one power step above the lowest that did, and shows every square\'s picture with the pick. Save puts it into that material\'s cut setting on this machine, and Pathline Prepare takes it on its next sync. When the squares don\'t separate cleanly it says it isn\'t sure.'
     ],
     fixed: [
-      'A request from Pathline Prepare or Monitor could fail as "connection reset" when it reused a connection just as Pathline Run closed it for being idle, most often right after the camera had kept Run busy. Idle connections are now kept 30 s, not 5.'
+      'A request from Pathline Prepare or Monitor could fail as "connection reset" when it reused a connection just as Pathline Run closed it for being idle, most often right after the camera had kept Run busy. Idle connections are now kept 30 s, not 5.',
+      'Camera calibration (stage 1) took the picture\'s X and Y pixel sizes from a 3 mm move of the head, following one corner of the board near the edge of the picture, so they came out up to 0.8 % apart and the turn varied by 0.2° from one calibration to the next. The size and shape now come from the 10 mm board alone, whose squares are square, and the move only says which way the picture is turned (following every corner on the board and averaging). Recalibrate once to use it.'
     ]
   },
   {

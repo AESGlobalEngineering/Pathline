@@ -305,42 +305,63 @@ class Vision {
     const cs0 = detect.findCornersIn(await this.grabSteps());
     const L = detect.fitLattice(cs0);
     if (!L) throw err('Put the ' + square + ' mm checkerboard under the camera, flat, filling the camera view (' + cs0.length + ' corners seen)');
-    const spacing = Math.sqrt(Math.abs(L.a[0] * L.b[1] - L.a[1] * L.b[0])); // px per square
-    const pixel = square / spacing;
-    // only corners on the board's grid: a false one (a soft edge, a shadow) could be nearer
-    const c0 = L.points[0];
+    const detA = L.a[0] * L.b[1] - L.a[1] * L.b[0]; // px² per square (b is left of a: > 0)
+    const pixel = square / Math.sqrt(Math.abs(detA));
+    // The board's squares are square, so the board alone gives the picture's size and shape:
+    // a step u px in the picture is B·u mm along the board's own two directions. That holds
+    // across and down equally, and doesn't rest on how accurately the head moves.
+    const B = [L.b[1], -L.b[0], -L.a[1], L.a[0]].map((v) => (square * v) / detA);
+    const onBoard = (u) => [B[0] * u[0] + B[1] * u[1], B[2] * u[0] + B[3] * u[1]];
+    // Only which way the board lies against the machine is left: the head moves a little along X,
+    // then Y, and the board's corners follow in the picture. Every corner on the grid is followed
+    // (a false one, a soft edge or a shadow, could be nearer), and the steps averaged: one corner,
+    // near the edge where the lens bends most, is off by a pixel or two.
     const d = square * 0.3;
+    const reach = (d / pixel) * 1.6;
     const follow = async (x, y) => {
       await this.m.link.moveTo(x, y);
       await this.m.waitIdle(30000, 150);
       const Lk = detect.fitLattice(detect.findCornersIn(await this.grabSteps()));
       const cs = Lk ? Lk.points : [];
-      const near = cs.sort((p, q) => Math.hypot(p.x - c0.x, p.y - c0.y) - Math.hypot(q.x - c0.x, q.y - c0.y))[0];
-      if (!near || Math.hypot(near.x - c0.x, near.y - c0.y) > (d / pixel) * 1.6) throw err('Lost the board while moving: keep it flat under the camera and try again');
-      return [near.x - c0.x, near.y - c0.y];
+      const steps = [];
+      for (const c0 of L.points) {
+        let near = null, best = Infinity;
+        for (const c of cs) { const g = Math.hypot(c.x - c0.x, c.y - c0.y); if (g < best) { best = g; near = c; } }
+        if (near && best <= reach) steps.push([near.x - c0.x, near.y - c0.y]);
+      }
+      if (!steps.length) throw err('Lost the board while moving: keep it flat under the camera and try again');
+      // the step most corners agree on (a corner matched to its neighbour would stray): the
+      // median, then the mean of those near it
+      const med = [0, 1].map((k) => steps.map((s) => s[k]).sort((p, q) => p - q)[steps.length >> 1]);
+      const near = steps.filter((s) => Math.hypot(s[0] - med[0], s[1] - med[1]) < 2);
+      return [0, 1].map((k) => near.reduce((t, s) => t + s[k], 0) / near.length);
     };
     let u1, u2;
     try { u1 = await follow(start.x + d, start.y); u2 = await follow(start.x, start.y + d); } finally {
       await this.m.link.moveTo(start.x, start.y);
       await this.m.waitIdle(30000, 150);
     }
-    // the head moves +d → the board moves u px in the picture: A·u = −d along that axis
-    const det = u1[0] * u2[1] - u1[1] * u2[0];
-    if (Math.abs(det) < 1) throw err('The picture hardly moved: is the camera on?');
-    const inv = [u2[1] / det, -u2[0] / det, -u1[1] / det, u1[0] / det];
-    const motion = inv.map((v) => -d * v);
-    const motionPx = Math.sqrt(Math.abs(motion[0] * motion[3] - motion[1] * motion[2]));
-    // direction from the move, size from the board
-    const matrix = motion.map((v) => +((v * pixel) / motionPx).toPrecision(8));
+    if (Math.abs(u1[0] * u2[1] - u1[1] * u2[0]) < 1) throw err('The picture hardly moved: is the camera on?');
+    // the head moves +d along X → the board moves u1 in the picture, which must come out as −d
+    // along X (and u2 as −d along Y). The turn (or turn and mirror) that best does that:
+    const p1 = onBoard(u1), p2 = onBoard(u2);
+    const M = [-d * p1[0], -d * p1[1], -d * p2[0], -d * p2[1]]; // Σ q·pᵀ with q = (−d, 0), (0, −d)
+    const turn = Math.hypot(M[0] + M[3], M[2] - M[1]), flip = Math.hypot(M[0] - M[3], M[1] + M[2]);
+    let R;
+    if (turn >= flip) { const t = Math.atan2(M[2] - M[1], M[0] + M[3]); R = [Math.cos(t), -Math.sin(t), Math.sin(t), Math.cos(t)]; }
+    else { const t = Math.atan2(M[1] + M[2], M[0] - M[3]); R = [Math.cos(t), Math.sin(t), Math.sin(t), -Math.cos(t)]; }
+    const matrix = [R[0] * B[0] + R[1] * B[2], R[0] * B[1] + R[1] * B[3], R[2] * B[0] + R[3] * B[2], R[2] * B[1] + R[3] * B[3]].map((v) => +v.toPrecision(8));
     const rotation = (Math.atan2(matrix[2], matrix[0]) * 180) / Math.PI;
     const mirrored = matrix[0] * matrix[3] - matrix[1] * matrix[2] < 0;
+    // how the head's moves compare with the board (the machine's own length error, roughly: the
+    // checkerboard bed check says more), and whether the picture's pixels come out square
+    const moved = (Math.hypot(...p1) + Math.hypot(...p2)) / (2 * d);
     const r = {
       matrix, pixel, rotation, mirrored, corners: L.n,
-      // how far the corners stray from a perfect grid (lens), and how the head's moves compare
-      // with the board (the machine's own length error, roughly: the checkerboard bed check says more)
-      lens: L.worst * pixel, moveVsBoard: (motionPx / pixel - 1) * 1000
+      lens: L.worst * pixel, moveVsBoard: (moved - 1) * 1000,
+      aspect: Math.hypot(...L.a) / Math.hypot(...L.b)
     };
-    this.log('camera calibrated on the ' + square + ' mm board: ' + L.n + ' corners, pixel size ' + (pixel * 1000).toFixed(3) + ' µm, picture turned ' + rotation.toFixed(2) + '°' + (mirrored ? ' (mirrored)' : '') + ', lens bends lines up to ' + (r.lens * 1000).toFixed(0) + ' µm');
+    this.log('camera calibrated on the ' + square + ' mm board: ' + L.n + ' corners, pixel size ' + (pixel * 1000).toFixed(3) + ' µm (across vs down ' + ((r.aspect - 1) * 100).toFixed(2) + ' %), picture turned ' + rotation.toFixed(2) + '°' + (mirrored ? ' (mirrored)' : '') + ', lens bends lines up to ' + (r.lens * 1000).toFixed(0) + ' µm');
     return r;
   }
 
