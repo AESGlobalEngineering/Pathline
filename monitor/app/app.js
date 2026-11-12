@@ -35,12 +35,13 @@ let gotAt = 0;          // when it arrived (this phone's clock), to count down b
 let live = false;
 const ui = { view: 'machines', machine: null, seenAt: store.get('seenAt', 0), prefs: null, notif: false, busy: false, note: '' };
 
-// time left on a running job, counted down since the last update
+// time left on a running job (Run's own figure from 0.7.12), counted down since the last update
 const remain = (m) => {
   if (!m.job) return 0;
-  const r = m.job.seconds * (1 - m.job.progress);
+  const r = Number.isFinite(m.job.remaining) ? m.job.remaining : m.job.seconds * (1 - m.job.progress);
   return m.state === 'running' ? Math.max(0, r - (Date.now() - gotAt) / 1000) : r;
 };
+const bedOf = (m) => (m.job && Array.isArray(m.job.beds) ? 'bed ' + m.job.beds[0] + ' of ' + m.job.beds[1] : '');
 const pctOf = (m) => (m.job ? Math.floor(Math.min(1, m.job.progress + (m.state === 'running' && m.job.seconds ? (Date.now() - gotAt) / 1000 / m.job.seconds : 0)) * 100) : 0);
 const queueSecs = (m) => m.queue.reduce((a, j) => a + (j.seconds || 0), 0);
 const at = (secs) => clock(Date.now() + secs * 1000);
@@ -69,7 +70,7 @@ function card(m) {
   let body = '';
   if (busy(m)) {
     const pct = pctOf(m);
-    body += '<div class="job"><span class="t">' + esc(m.job.name) + '</span><span class="s">' + esc(m.job.material || ' ') + '</span></div>' +
+    body += '<div class="job"><span class="t">' + esc(m.job.name) + '</span><span class="s">' + esc([m.job.material, bedOf(m)].filter(Boolean).join(' · ') || ' ') + '</span></div>' +
       '<div class="track" role="progressbar" aria-label="' + esc(m.name) + ' progress" aria-valuenow="' + pct + '" aria-valuemin="0" aria-valuemax="100"><i style="width:' + pct + '%"></i></div>' +
       '<div class="meta"><span>' + (m.state === 'running' ? 'Done at <span class="mono">' + at(remain(m)) + '</span> · <span class="mono">' + left(remain(m)) + '</span> left' : m.since ? 'Waiting ' + since(m.since) : '') + '</span><span class="mono">' + pct + ' %</span></div>';
   }
@@ -118,11 +119,21 @@ function detailView() {
       (m.state === 'running' ? '<div><div class="big">' + left(remain(m)) + '</div><div style="font-size:12px;color:var(--text-3)">left · done at ' + at(remain(m)) + '</div></div>' : '<div style="font-size:13px;color:var(--text-2)">' + esc(m.why || (m.state === 'paused' ? 'Paused at the machine' : '')) + '</div>') +
       '</div></div>' + noteFor(m) +
       '<div class="kv"><div><span class="k">Job</span><span class="v">' + esc(m.job.name) + '</span></div>' + (m.job.material ? '<div><span class="k">Material</span><span class="v">' + esc(m.job.material) + '</span></div>' : '') +
-      '<div><span class="k">Run time</span><span class="v mono">' + dur(m.job.seconds * m.job.progress) + ' of ' + dur(m.job.seconds) + '</span></div></div>';
+      (bedOf(m) ? '<div><span class="k">Bed</span><span class="v mono">' + m.job.beds[0] + ' of ' + m.job.beds[1] + '</span></div>' : '') +
+      '<div><span class="k">Run time</span><span class="v mono">' + dur(m.job.seconds - remain(m)) + ' of ' + dur(m.job.seconds) + '</span></div></div>';
   } else {
     top = '<div class="hero"><span class="pill ' + cls + '" style="margin-left:0">' + label + '</span><span style="color:var(--text-2);font-size:14px">' + (m.state === 'idle' ? 'Nothing running.' : m.state === 'done' ? 'Waiting for Start at the machine.' : '') + '</span></div>' + noteFor(m);
   }
-  const queue = '<div class="list">' + (m.queue.length ? m.queue.map((j, i) => '<div class="li"><span class="ord">' + (i + 1) + '</span><span class="body"><span class="t">' + esc(j.name) + '</span><span class="s">' + esc(j.material) + '</span></span><span class="end"><span class="mono">' + short(j.seconds) + '</span></span></div>').join('')
+  // each queued job: how long, and when it starts (a plotter's Select run starts the next by itself)
+  let t = m.state === 'running' ? remain(m) : 0;
+  let chain = m.state === 'running';
+  const queue = '<div class="list">' + (m.queue.length ? m.queue.map((j, i) => {
+    const self = chain && j.autoStart;
+    const starts = self ? 'starts ' + at(t) + ' by itself' : 'needs Start';
+    chain = self;
+    t += j.seconds || 0;
+    return '<div class="li"><span class="ord">' + (i + 1) + '</span><span class="body"><span class="t">' + esc(j.name) + '</span><span class="s">' + esc(j.material) + '</span></span><span class="end"><span class="mono">' + short(j.seconds) + '</span><br><span class="s">' + starts + '</span></span></div>';
+  }).join('')
     : '<div class="empty">Queue empty. New jobs come from Pathline Prepare.</div>') + '</div>';
   const hist = '<div class="list">' + (m.today.length ? m.today.map((h) => '<div class="li"><span class="body"><span class="t">' + esc(h.name) + '</span><span class="s mono">' + clock(h.finishedAt) + ' · ' + dur(h.seconds) + '</span></span><span class="pill ' + (h.ok ? 'ok' : 'warn') + '">' + (h.ok ? 'Completed' : 'Stopped') + '</span></div>').join('')
     : '<div class="empty">No jobs finished today.</div>') + '</div>';
@@ -130,7 +141,7 @@ function detailView() {
   return bar('<button class="back" data-a="home">' + ic(I.back) + 'Machines</button>', liveTag()) +
     '<main class="main"><div class="row" style="gap:12px">' + badge(m, true) + '<div style="min-width:0"><div style="font-size:22px;font-weight:600;line-height:1.2">' + esc(m.name) + '</div><div class="m-model" style="white-space:normal">' + esc(m.model) + '</div></div></div>' + top +
     '<section class="sec"><div class="sec-h">Up next <span class="n">' + m.queue.length + (m.queue.length ? ' · ' + short(queueSecs(m)) : '') + '</span></div>' + queue +
-    (m.queue.length ? '<span style="font-size:12px;color:var(--text-3);padding:0 2px">Each job is started at the machine.' + (m.state === 'running' ? ' Started straight away, the queue clears at ' + at(remain(m) + queueSecs(m)) + '.' : '') + '</span>' : '') + '</section>' +
+    (m.queue.length ? '<span style="font-size:12px;color:var(--text-3);padding:0 2px">' + (m.queue.some((j) => j.autoStart) ? 'Jobs in a plotter\'s Select run start by themselves; the others are started at the machine.' : 'Each job is started at the machine.') + (m.state === 'running' ? ' Started straight away, the queue clears at ' + at(remain(m) + queueSecs(m)) + '.' : '') + '</span>' : '') + '</section>' +
     '<section class="sec"><div class="sec-h">Today</div>' + hist + '</section>' +
     '<section class="sec"><div class="sec-h">Notifications</div><div class="list"><div class="set"><span class="body">Notify me about ' + esc(m.name) + '<span class="s">Finished jobs, waiting for you, errors</span></span><button role="switch" class="sw" aria-checked="' + !muted + '" aria-label="Notifications for ' + esc(m.name) + '" data-a="mute" data-v="' + esc(m.id) + '"></button></div></div></section></main>';
 }

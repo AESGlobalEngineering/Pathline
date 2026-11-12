@@ -119,3 +119,7 @@ All three parts:
 - **Documented** in PROTOCOL.md under *Watching*.
 - **Self-test** (`run/tools/selftest.js`, "Watchers"): `remaining` while a job runs, the finished job once in `today` and one `finished` event, `markWait.since`, `interlockSince`, hidden jobs left out of `queue`, and `autoStart`.
 - `/api/local/state` is unchanged.
+
+## Used by Pathline Monitor 0.4.0
+
+Monitor listens to `/api/v1/events` on Runs that have it (asking `/api/v1/monitor` every 2 s while the stream is down), and keeps reading `/api/local/state` from older Runs. From the answer it takes Run's `since` times, `job.remaining` and `beds`, and `queue[].autoStart` (a finished job whose next one starts by itself isn't shown as waiting for Start, and the alert says so). It keeps Run's `id` with each machine. Please keep `/api/local/state`'s fields for Runs that haven't updated yet.

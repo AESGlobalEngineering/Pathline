@@ -115,6 +115,61 @@ server.listen(0, async () => {
   a = took();
   ok(m.view.state === 'offline' && /lost its laser/.test((a[0] || {}).title || ''), 'Run up but the laser lost: offline, one alert');
 
+  // ---- Pathline Run 0.7.12 and later: GET /api/v1/monitor and the /api/v1/events stream
+  console.log('Pathline Run 0.7.12+ (watcher answer and live stream)');
+  const iso = (t) => new Date(t).toISOString();
+  const mon = {
+    id: 'run-3f9c2a71', name: 'Plotter P', type: 'plotter', ctrl: 'Ruida', model: 'RDC6445', app: 'Pathline Run 0.7.12',
+    link: 'online', state: 'running', since: iso(Date.now() - 300000), message: '', interlock: false, interlockSince: null, markWait: null,
+    job: { id: 'P1', name: 'Foam signs', material: 'Foam board 5 mm', seconds: 1200, progress: 0.5, elapsed: 650, remaining: 480, startedAt: iso(Date.now() - 650000), beds: [2, 3] },
+    queue: [{ id: 'P2', name: 'Window decals', material: 'Vinyl', seconds: 540, autoStart: true }, { id: 'P3', name: 'Stickers', material: 'Vinyl', seconds: 300, autoStart: false }],
+    today: [],
+  };
+  const sse = new Set();
+  const push = () => { for (const r of sse) r.write('data: ' + JSON.stringify(mon) + '\n\n'); };
+  const run2 = http.createServer((req, res) => {
+    if (req.url === '/api/v1/monitor') { res.writeHead(200, { 'content-type': 'application/json' }); return res.end(JSON.stringify(mon)); }
+    if (req.url === '/api/v1/events') { res.writeHead(200, { 'content-type': 'text/event-stream' }); res.write('retry: 2000\n\ndata: ' + JSON.stringify(mon) + '\n\n'); sse.add(res); req.on('close', () => sse.delete(res)); return; }
+    res.writeHead(404, { 'content-type': 'application/json' }); res.end('{"error":"No route"}');
+  });
+  await new Promise((r) => run2.listen(0, r));
+  const alerts2 = [];
+  let changes = 0;
+  const w2 = new Watcher([{ host: '127.0.0.1', port: run2.address().port, found: true }], { onAlert: (x) => alerts2.push(x), onChange: () => changes++ });
+  const p = w2.list[0];
+  await w2.poll(p);
+  ok(p.api === 'monitor' && p.view.source === 'monitor', 'it reads /api/v1/monitor, not the screen\'s data');
+  ok(p.view.name === 'Plotter P' && p.view.kind === 'plotter' && p.conf.deviceId === 'run-3f9c2a71', 'name, kind and Run\'s id from the answer');
+  ok(p.view.job.remaining === 480 && p.view.job.beds.join() === '2,3', 'Run\'s own time left (480 s, not 600) and the bed it\'s on');
+  ok(p.view.queue[0].autoStart && !p.view.queue[1].autoStart, 'which queued job starts by itself');
+  // the stream: changes arrive without asking
+  const waitFor = async (f, t = 3000) => { const end = Date.now() + t; while (!f() && Date.now() < end) await new Promise((r) => setTimeout(r, 20)); return f(); };
+  ok(await waitFor(() => sse.size === 1), 'it opens the live stream');
+  mon.state = 'running'; mon.markWait = { mark: 2, of: 3, since: iso(Date.now() - 120000) };
+  push();
+  ok(await waitFor(() => alerts2.length === 1), 'a mark not found arrives over the stream, without a poll');
+  ok(p.view.state === 'mark' && Math.abs(p.view.since - (Date.now() - 120000)) < 2000, 'waiting since Run\'s own time (2 min ago), not since the hub saw it');
+  alerts2.splice(0);
+  // P1 finishes; P2 starts by itself (a plotter's Select run)
+  mon.markWait = null; mon.state = 'idle'; mon.job = null;
+  mon.today = [{ id: 'P1', name: 'Foam signs', material: 'Foam board 5 mm', seconds: 1207, result: 'Completed', startedAt: iso(Date.now() - 1207000), finishedAt: iso(Date.now()) }];
+  push();
+  ok(await waitFor(() => alerts2.length === 1), 'the finished job arrives over the stream');
+  ok(/starts next by itself/.test(alerts2[0].body) && !/press Start/.test(alerts2[0].body), 'the alert says the next job starts by itself, not "press Start"');
+  ok(p.view.state === 'idle', 'not shown as waiting for Start');
+  push();
+  await new Promise((r) => setTimeout(r, 150));
+  ok(alerts2.length === 1, 'the same answer again: no second alert');
+  ok(changes > 0, 'each change goes on to the phones');
+  // the stream drops: it's asked again, and listened to again
+  for (const r of sse) r.destroy();
+  ok(await waitFor(() => !p.live), 'a dropped stream is noticed');
+  await w2.poll(p);
+  ok(await waitFor(() => sse.size === 1) && p.view.state === 'idle', 'asked again, and the stream reopened');
+  w2.stop();
+  for (const r of sse) r.destroy();
+  run2.close();
+
   // the workshop certificate (lib/certs.js)
   console.log('Workshop certificate');
   const certs = require('./lib/certs');
