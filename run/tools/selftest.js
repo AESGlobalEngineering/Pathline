@@ -1082,11 +1082,14 @@ async function visionTests() {
     const fl = await call('POST', 'local/camera/offset', { power: 20, speed: 50 });
     ok(fl.status === 200 && Math.abs(fl.data.offset[0] - 41.2) < 0.2 && Math.abs(fl.data.offset[1] - 12.9) < 0.2 && fl.data.check < 0.05,
       'stage 2 with the offset stored the other way round: found, ' + (fl.data && fl.data.offset && fl.data.offset.join(', ')) + ' mm (41.2, 12.9)', JSON.stringify(fl.data));
-    // checkerboard: the laser head over its first corner (100, 300); calibrate, then check with the map on
+    // checkerboard: the laser head over its first corner (100, 300), which the camera can't see
+    // (covered, as one out of its reach would be); calibrate, then check with the map on
     await jogTo(100, 300);
     const cal = await call('POST', 'local/camera/board', { mode: 'calibrate', board: { model: 'linear' } });
     ok(cal.status === 200 && cal.data.points.length >= 15 && Math.abs(cal.data.boardAngle - 1.5) < 0.1 && Math.abs(cal.data.scaleX - 1.5) < 0.15 && Math.abs(cal.data.squareness - 0.03) < 0.015,
       'bumpy checkerboard at 1.5°, uneven light: ' + (cal.data.points && cal.data.points.length) + ' corners, ' + cal.data.bumps + ' left out as bumps; X travel ' + (cal.data.scaleX || 0).toFixed(2) + ' mm/m (+1.5), Y leans ' + (cal.data.squareness || 0).toFixed(3) + '° (0.03)', JSON.stringify(cal.data).slice(0, 300));
+    ok(cal.status === 200 && cal.data.missed >= 1 && !cal.data.points.some((p) => p.grid[0] === 0 && p.grid[1] === 0),
+      'the board\'s first corner not seen: left out, and the scan carried on from the others (' + (cal.data && cal.data.missed) + ' missed)', JSON.stringify(cal.data).slice(0, 200));
     await jogTo(100, 300);
     const chk = await call('POST', 'local/camera/board', { mode: 'check', board: { model: 'linear' } });
     // (corners on the bump stay where the bump put them: the machine error is what's checked)

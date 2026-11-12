@@ -468,31 +468,50 @@ class Vision {
   }
 
   async scanFrom(cam0, { b, raw, step, ni, nj }, ctl, status) {
-    const first = await this.measure(cam0, 'corner', { raw, ctl });
-    if (!first) throw err('No checkerboard corner under the laser head. Jog the laser head over the board\'s top-left corner, then start again.');
-    // which way the board's lines run: the corner's angle in the frame, turned onto the bed
-    const [a, bm, c, dm] = this.cfg.matrix;
-    const ai = ((first.hit.angle || 0) * Math.PI) / 180;
-    let th = Math.atan2(c * Math.cos(ai) + dm * Math.sin(ai), a * Math.cos(ai) + bm * Math.sin(ai));
-    // of the board's two line directions, u is the one nearest +X, v nearest +Y
-    th = Math.atan2(Math.sin(th * 4), Math.cos(th * 4)) / 4; // fold into −45…45°
-    const u = [Math.cos(th), Math.sin(th)], v = [-Math.sin(th), Math.cos(th)];
+    // The first corner may be out of the camera's reach (the camera sits beside the laser, so a
+    // board reaching the bed's edge has corners only the laser can get over) or not seen: like
+    // any other corner it's then left out, and the scan goes on from where the head is, along the
+    // machine's axes, until it finds one. A board doesn't need every corner of every row seen.
+    let first = null;
+    try { first = await this.measure(cam0, 'corner', { raw, ctl }); } catch (e) { if (ctl.aborted) throw e; this.log('first corner: ' + e.message); }
+    // which way the board's lines run: a corner's angle in the frame, turned onto the bed
+    let u = [1, 0], v = [0, 1];
+    const lines = (hit) => {
+      const [a, bm, c, dm] = this.cfg.matrix;
+      const ai = ((hit.angle || 0) * Math.PI) / 180;
+      let th = Math.atan2(c * Math.cos(ai) + dm * Math.sin(ai), a * Math.cos(ai) + bm * Math.sin(ai));
+      // of the board's two line directions, u is the one nearest +X, v nearest +Y
+      th = Math.atan2(Math.sin(th * 4), Math.cos(th * 4)) / 4; // fold into −45…45°
+      u = [Math.cos(th), Math.sin(th)]; v = [-Math.sin(th), Math.cos(th)];
+    };
+    if (first) lines(first.hit);
     const grid = [], found = [];
     const order = [];
     for (let j = 0; j < nj; j++) for (let k = 0; k < ni; k++) order.push([j % 2 ? ni - 1 - k : k, j]); // back and forth
-    let missed = 0;
+    let missed = 0, unreachable = 0;
     for (const [i, j] of order) {
       if (ctl.aborted) throw err('Stopped');
       const g = [i * step, j * step];
-      // predict from the corners found so far (board → bed, rotation + shift)
-      const pred = grid.length >= 2 ? fitting.fit(grid, found, 'rigid')(g) : [first.found[0] + g[0] * u[0] + g[1] * v[0], first.found[1] + g[0] * u[1] + g[1] * v[1]];
+      // predict from the corners found so far (board → bed, rotation + shift); from one corner,
+      // or none yet (from the first corner's place under the laser), along the board's lines
+      const o = grid.length ? [found[0], grid[0]] : [first ? first.found : cam0, [0, 0]];
+      const dg = [g[0] - o[1][0], g[1] - o[1][1]];
+      const pred = grid.length >= 2 ? fitting.fit(grid, found, 'rigid')(g) : [o[0][0] + dg[0] * u[0] + dg[1] * v[0], o[0][1] + dg[0] * u[1] + dg[1] * v[1]];
       status('Corner ' + (grid.length + missed + 1) + ' of ' + order.length);
       let r = null;
-      try { r = await this.measure(pred, 'corner', { raw, ctl }); } catch (e) { if (ctl.aborted) throw e; this.log('corner ' + i + ', ' + j + ': ' + e.message); }
+      try { r = await this.measure(pred, 'corner', { raw, ctl }); } catch (e) {
+        if (ctl.aborted) throw e;
+        if (/can't reach/.test(e.message)) unreachable++; else this.log('corner ' + i + ', ' + j + ': ' + e.message);
+      }
       if (!r) { missed++; continue; }
+      if (!grid.length && !first) lines(r.hit);
       grid.push(g); found.push(r.found);
     }
-    if (grid.length < 4) throw err('Only ' + grid.length + ' corners found: check the board size in Setup → Camera');
+    if (unreachable) this.log('checkerboard: ' + unreachable + ' corners out of the camera\'s reach (it sits beside the laser), left out');
+    if (grid.length < 4) {
+      if (!first && grid.length === 0) throw err('No checkerboard corners found. Jog the laser head over the board\'s top-left corner, then start again.');
+      throw err('Only ' + grid.length + ' corners found: check the board size in Setup → Camera');
+    }
     // The board's own position and angle (rigid: the board is the length reference) come out
     // first; what's left is the machine's error, plus wherever the board isn't flat. The
     // machine's part is the smooth model (Setup: scale and squareness / smooth / every corner);

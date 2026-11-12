@@ -88,6 +88,10 @@ function start(opts = {}) {
       truth: { offset: [41.2, 12.9], pixel: 0.08, rotation: 90, error: (p) => [p[0] * 1.0015 + p[1] * 0.0005236, p[1]] },
       scene: {
         dots: [[40, 25], [340, 25], [40, 215]].map((p) => { const q = sheet(p); return { x: q[0], y: q[1], d: 5 }; }),
+        // the bed board's first corner covered (as one out of the camera's reach): the scan has
+        // to carry on without it
+        // (bigger than the picture, so no edge of it shows round the corner)
+        rects: [{ x0: 60, y0: 260, x1: 140, y1: 340 }],
         board: {
           x: 100, y: 300, angle: 1.5, square: 50, nx: 20, ny: 10,
           // a bump round board point (450, 150): the pattern pushed outward up to 0.3 mm
