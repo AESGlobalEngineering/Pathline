@@ -408,15 +408,18 @@
       if (!rows.length) continue;
       const b = EMPTY_BOX();
       rows.forEach(([y, x0, x1]) => { growBox(b, x0, y); growBox(b, x1, y); });
-      let dur = 0, area = 0;
+      // on: seconds the beam is on (the sweep across the artwork; the turn
+      // round past each end, often most of a line's time, is with it off)
+      let dur = 0, area = 0, on = 0;
       for (const [, x0, x1] of rows) {
         dur += lineTime(x0, x1, speed, acc, uni, vTravel);
         area += (x1 - x0) * step;
+        on += (x1 - x0) / speed;
       }
       // sampled scan-line heights so the simulation can follow gaps
       const every = Math.max(1, Math.ceil(rows.length / 240));
       const ys = withYs ? rows.filter((_, k) => k % every === 0).map((x) => x[0]) : undefined;
-      out.push({ ents: list.map((e) => e.id), rows, step, b, dur, area, ys });
+      out.push({ ents: list.map((e) => e.id), rows, step, b, dur, area, ys, on });
     }
     return out;
   }
@@ -466,7 +469,7 @@
         }
       }
       const rows = [];
-      let dur = 0;
+      let dur = 0, on = 0;
       for (const k of [...lines.keys()].sort((a, b) => a - b)) {
         const { y, spans } = lines.get(k);
         spans.sort((a, b) => a[0] - b[0]);
@@ -476,9 +479,11 @@
           const [a, b] = spans[i];
           if (a <= x1) { x1 = Math.max(x1, b); continue; }
           t += (x1 - x0) / speed + segTime(a - x1, speed, speed, vGap, acc);
+          on += (x1 - x0) / speed;
           x0 = a; x1 = b;
         }
         t += (x1 - x0) / speed;
+        on += (x1 - x0) / speed;
         // one way: back across the whole line to its start
         if (uni) t += travelTime(x1 - first + 2 * over, vGap, acc);
         dur += t;
@@ -489,7 +494,7 @@
       rows.forEach(([y, a, c]) => { growBox(b, a, y); growBox(b, c, y); });
       const every = Math.max(1, Math.ceil(rows.length / 240));
       const unit = {
-        ents: list.flatMap((r) => r.ents), rows, step, b, dur, area: list.reduce((s, r) => s + r.area, 0),
+        ents: list.flatMap((r) => r.ents), rows, step, b, dur, on, area: list.reduce((s, r) => s + r.area, 0),
         ys: withYs ? rows.filter((_, k) => k % every === 0).map((x) => x[0]) : undefined, shared: list.length
       };
       order.set(unit, Math.min(...list.map((r) => order.get(r))));
@@ -1533,7 +1538,7 @@
           travelTo(startAt(rows), bed, pi);
           per[pi].time += r.dur;
           per[pi].ops++;
-          push({ kind: 'op', mode: 'raster', proc: pi, bed, dur: r.dur, box: r.b, rows: rows.length, step: r.step, ys: up && r.ys ? r.ys.slice().reverse() : r.ys, dir: up ? 'up' : 'down', uni: scan.uni, dpi, passes: 1, pass: passNo(k), ents: r.ents, shared: r.shared || 0 });
+          push({ kind: 'op', mode: 'raster', proc: pi, bed, dur: r.dur, box: r.b, rows: rows.length, step: r.step, ys: up && r.ys ? r.ys.slice().reverse() : r.ys, dir: up ? 'up' : 'down', uni: scan.uni, dpi, passes: 1, pass: passNo(k), ents: r.ents, shared: r.shared || 0, on: r.on });
           at = endAt(rows);
         };
         // fastest: each island's passes back to back unless whole rounds are
@@ -1889,7 +1894,10 @@
       // most of a cut's energy leaves with the vaporised material; engraving
       // keeps more, and marking metal (nothing is removed) keeps nearly all of it
       const residual = props.mech ? (p.proc === 'Cut' ? 0.5 : 0.9) : p.proc === 'Cut' ? 0.3 : 0.45;
-      return rated * ((Number(p.power) || 0) / 100) * absorb * residual;
+      // engraving: the beam is only on while crossing the artwork, not while
+      // the head turns round past each end of a line
+      const duty = op.mode === 'raster' && op.on > 0 && op.dur > 0 ? Math.min(1, op.on / op.dur) : 1;
+      return rated * ((Number(p.power) || 0) / 100) * absorb * residual * duty;
     };
     let T = new Float32Array(nx * ny).fill(T0), N = new Float32Array(nx * ny);
     let time = 0, peak = T0, peakAt = 0;

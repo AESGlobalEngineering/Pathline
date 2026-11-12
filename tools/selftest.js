@@ -391,6 +391,15 @@ async function main() {
     const plain = CC.thermalSim(job, laser, bare, est.timeline).to(est.total), sprayed = CC.thermalSim({ ...job, thermalSpray: true }, laser, bare, est.timeline).to(est.total);
     ok(sprayed.spray && sprayed.absorb === CC.SPRAY_ABSORB && sprayed.peak - 20 > 4 * (plain.peak - 20), 'sprayed stainless heats far more than bare (+' + Math.round(sprayed.peak - 20) + ' vs +' + Math.round(plain.peak - 20) + ' °C)');
     ok(!CC.thermalSim({ ...job, thermalSpray: true }, laser, acr, est.timeline).spray, 'the spray switch only applies to bare metal');
+    // engraving heats only while the beam crosses the artwork: the same marking
+    // done with slow turnarounds (low acceleration) spreads the heat over longer
+    {
+      const engr = { ...job, processes: [{ name: 'Engrave fill', proc: 'Engrave', power: 35, speed: 400, f: 500, passes: 1, out: true, aci: [7] }], entities: [{ id: 'sq', aci: 7, paths: [{ p: CC.shapes.rect(20, 20, 15, 15, 0), c: true }] }] };
+      const run = (acc) => { const m = { ...laser, info: { ...laser.info, acc } }; const e = CC.estimate(engr, m, { timeline: true }); const r = e.timeline.find((o) => o.kind === 'op' && o.mode === 'raster'); return { r, sim: CC.thermalSim({ ...engr, thermalSpray: true }, m, bare, e.timeline).to(e.total) }; };
+      const slow = run(350), quick = run(20000);
+      ok(near(slow.r.on, quick.r.on, 1e-6) && slow.r.on < slow.r.dur * 0.05, 'beam-on time is the sweep across the artwork (' + slow.r.on.toFixed(2) + ' s of ' + slow.r.dur.toFixed(0) + ' s)');
+      ok(quick.sim.peak - 20 > 5 * (slow.sim.peak - 20), 'the same marking heats far more with quick turnarounds (+' + Math.round(quick.sim.peak - 20) + ' vs +' + Math.round(slow.sim.peak - 20) + ' °C)');
+    }
     const steel = CC.thermalSim(job, laser, { name: 'Stainless Steel', g: 'Metal', t: 0.9 }, est.timeline).to(est.total);
     const hs = steel.hotSpot();
     ok(hs.limit && steel.bend >= 0 && steel.bendAt >= 0 && (hs.rise === 0 || hs.dia > 0), 'stainless heat model reports the hot area and how close it came to bending (worst ' + Math.round(steel.bend * 100) + ' %)');
