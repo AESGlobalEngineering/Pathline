@@ -24,6 +24,7 @@ const ruidaModels = require('./ctrl/ruida/models');
 const anchor = require('./job/anchor');
 const fitting = require('./vision/fit');
 const bedmaps = require('./bedmaps');
+const accuracy = require('./accuracy');
 const { DEFAULTS: VisionDefaults } = require('./vision/vision');
 const { controller, CONTROLLERS } = require('./ctrl');
 const pkgJson = require('../package.json');
@@ -64,16 +65,42 @@ function start(opts = {}) {
   const updates = opts.updates || NO_UPDATES;
   const isLocalReq = (req) => /^(::1|127\.0\.0\.1|::ffff:127\.0\.0\.1)$/.test(req.socket.remoteAddress || '');
 
+  // The diagnostics log: on screen (☰ → Diagnostics log) and kept on disk, a file a day in
+  // data/logs (run-2026-11-13.log), the last 30 days. It was only in memory, so a restart lost
+  // it: why J0064 stopped and the 14:43 bed calibration's numbers were gone by the evening.
   const logLines = [];
+  const LOGS = path.join(DATA, 'logs');
+  const LOG_DAYS = 30;
+  const dayOf = (d) => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  let logFail = false;
+  function pruneLogs() {
+    try {
+      const keep = dayOf(new Date(Date.now() - LOG_DAYS * 864e5));
+      for (const f of fs.readdirSync(LOGS)) { const m = f.match(/^run-(\d{4}-\d{2}-\d{2})\.log$/); if (m && m[1] < keep) fs.unlinkSync(path.join(LOGS, f)); }
+    } catch (e) { /* nothing to prune */ }
+  }
+  try { fs.mkdirSync(LOGS, { recursive: true }); } catch (e) { logFail = true; }
+  pruneLogs();
+  setInterval(pruneLogs, 6 * 3600 * 1000).unref();
   function log(msg) {
-    const line = new Date().toLocaleTimeString() + '  ' + msg;
+    const now = new Date();
+    const line = now.toLocaleTimeString() + '  ' + msg;
     console.log(line);
     logLines.push(line);
-    if (logLines.length > 300) logLines.shift();
+    if (logLines.length > 1000) logLines.shift();
+    if (!logFail) { try { fs.appendFileSync(path.join(LOGS, 'run-' + dayOf(now) + '.log'), line + '\n'); } catch (e) { logFail = true; console.log('log file: ' + e.message); } }
     if (opts.log) opts.log(msg);
   }
+  // an earlier day's log (the last lines), and the days kept
+  const logDays = () => { try { return fs.readdirSync(LOGS).map((f) => (f.match(/^run-(\d{4}-\d{2}-\d{2})\.log$/) || [])[1]).filter(Boolean).sort().reverse(); } catch (e) { return []; } };
+  const logOf = (day) => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(day))) throw err(400, 'A day is YYYY-MM-DD');
+    try { return fs.readFileSync(path.join(LOGS, 'run-' + day + '.log'), 'utf8').split('\n').filter(Boolean).slice(-5000); } catch (e) { throw err(404, 'No log for ' + day); }
+  };
 
   const store = new Store(DATA);
+  // old jobs' folders: kept while queued, learnt from, or in the last 30 days of History
+  try { const c = store.cleanup(); if (c.removed) log('storage: ' + c.removed + ' old job folder' + (c.removed === 1 ? '' : 's') + ' removed (' + (c.bytes / 1048576).toFixed(1) + ' MB)'); } catch (e) { log('storage: ' + e.message); }
   // jobs queued before the Trotec timed its own travel: its estimate for them too
   if (cfg.configured && cfg.controller === 'trotec') {
     for (const j of store.jobs.filter((x) => x.status === 'queued' || x.status === 'done')) {
@@ -131,6 +158,13 @@ function start(opts = {}) {
       w.on('message', (m) => {
         if (m.log) log(m.log);
         if (m.error) log('follow fit: ' + m.error);
+        // the estimate's cutting, travel and engraving scaled by what the runs took (timefit.js)
+        if (m.times) {
+          const t = m.times;
+          const s = t.scale ? 'cutting ×' + t.scale.cut + ', travel ×' + t.scale.travel + ', engraving ×' + t.scale.engrave : '';
+          if (t.use) learnt({ timeScale: { ...t.scale, runs: t.runs, at: t.at } }, 'estimate fitted to ' + t.runs + ' runs: ' + s + '; the runs\' totals ' + t.before.rms + ' % → ' + t.after.rms + ' % off (rms), worst ' + t.after.worst + ' %').then(() => { try { store.jobs.filter((j) => j.status === 'queued').forEach((j) => { const p = controller(cfg.controller).compile(plan.build(store.runPkg(j.id)), cfg); if (p && p.estimated) j.seconds = Math.round(p.seconds); }); store.flush(); } catch (e) { /* the old estimates stay */ } }).catch(() => {});
+          else log('estimate fit: not used (' + (t.why || 'no better') + ')' + (s ? ': ' + s + (t.before ? ', ' + t.before.rms + ' % → ' + t.after.rms + ' % off' : '') : ''));
+        }
         if (!m.result) return;
         const r = m.result;
         const learnt = { ...(followState.learnt || {}) };
@@ -397,7 +431,8 @@ function start(opts = {}) {
     'POST /start': (b) => machine.start(b || {}),
     'POST /pause': () => machine.pause(),
     'POST /resume': () => machine.resume(),
-    'POST /stop': () => machine.stop(),
+    // (who stopped it goes into History: this screen, or Pathline on another computer)
+    'POST /stop': (b, req) => machine.stop(isLocalReq(req) ? 'Stop pressed on this screen' : 'Stopped from Pathline on another computer'),
     'POST /jog': (b) => machine.jog(b),
     // print and cut: the mark the job is waiting for is under the camera's crosshair
     'POST /marks/accept': () => machine.markAccept(),
@@ -516,6 +551,42 @@ function start(opts = {}) {
   const onlyHere = (req) => { if (!isLocalReq(req)) throw err(403, 'Updates can only be installed on the machine\'s own screen'); };
 
   const local = {
+    // Setup → Camera → Check with a cut rectangle (accuracy.js): the rectangle and its diagonals
+    // queued as a job; then what was measured with a rule, worked out; then, if it's out, the bed
+    // map corrected by it
+    'POST /accuracy/job': (b) => {
+      const pkg = accuracy.rectJob(b || {}, cfg.bed);
+      const job = queueJob(pkg, 'bed check');
+      return { id: job.id, name: job.name, rect: pkg.bedCheck };
+    },
+    'POST /accuracy/measure': async (b) => {
+      const r = accuracy.measure(b || {});
+      const v = cfg.vision || {};
+      r.mapOn = cfg.controller === 'trotec' && !!(v.enabled && v.mapOn !== false && v.map);
+      r.mapAt = r.mapOn ? v.mapAt || null : null;
+      r.at = new Date().toISOString();
+      r.applied = null;
+      await learnt({ accuracyCheck: r }, 'bed check (cut rectangle ' + r.w + ' × ' + r.h + ' mm' + (r.mapOn ? ', bed map on' : ', no bed map') + '): X scale ' + r.scaleX + ' ‰, Y scale ' + r.scaleY + ' ‰' + (r.lean !== null ? ', out of square ' + r.lean + '°' : '') + (r.ok ? ': within what a rule can tell' : ''));
+      return r;
+    },
+    'POST /accuracy/apply': async () => {
+      const c = cfg.accuracyCheck;
+      if (cfg.controller !== 'trotec') throw err(409, 'Only the Trotec has a bed map');
+      if (!c) throw err(409, 'Measure the cut rectangle first');
+      if (c.applied) throw err(409, 'This check has already corrected the bed map: cut and measure a new rectangle to check it');
+      const v = cfg.vision || {};
+      const mapNow = v.enabled && v.mapOn !== false && v.map ? v.mapAt || null : null;
+      if ((c.mapOn ? c.mapAt : null) !== mapNow) throw err(409, 'The bed map has changed since the rectangle was cut: cut and measure a new one');
+      const base = c.mapOn ? v.map : accuracy.flatMap(cfg.bed);
+      const map = accuracy.correctMap(base, c);
+      const at = new Date().toISOString();
+      try { bedmaps.ensure(DATA, v.map, v.mapAt); } catch (e) { /* history only */ }
+      let since = null;
+      try { since = bedmaps.add(DATA, map, at, { from: 'rectangle', check: { scaleX: c.scaleX, scaleY: c.scaleY, lean: c.lean, w: c.w, h: c.h } }).since; } catch (e) { log('bed map history: ' + e.message); }
+      await learnt({ vision: { ...v, map, mapOn: true, mapAt: at }, accuracyCheck: { ...c, applied: at } }, 'camera: bed map corrected by the cut rectangle (X ' + c.scaleX + ' ‰, Y ' + c.scaleY + ' ‰' + (c.lean !== null ? ', ' + c.lean + '°' : '') + ')');
+      rowsCache.clear();
+      return { mapAt: at, since };
+    },
     // ☰ → Pathline Monitor: the hub's phone setup page, for a QR code on this screen. The hub
     // isn't announced; it's whoever has been watching this machine (GET /api/v1/monitor or
     // /events) lately, or the address typed in (monitorHub: "host" or "host:port")
@@ -562,6 +633,9 @@ function start(opts = {}) {
       return (await fitFollow('asked for')) || followState;
     },
     'GET /log': () => logLines,
+    // earlier days (data/logs): the days kept, and one day's lines
+    'GET /logs': () => logDays(),
+    'GET /logs/day': (b, req) => logOf(new URL(req.url, 'http://x').searchParams.get('d')),
     'GET /ports': async () => {
       try {
         const ports = await require('./ctrl/trotec/link').listPorts();
@@ -620,7 +694,7 @@ function start(opts = {}) {
     // how much the lens bends lines; a small head move gives which way the picture is turned
     'POST /camera/calibrate': async () => {
       const r = await machine.cameraTask('Calibrating the camera on the small checkerboard', () => machine.vision.calibrateCamera({ square: cfg.vision.camBoard && cfg.vision.camBoard.square }));
-      await learnt({ vision: { ...(cfg.vision || {}), matrix: r.matrix, cameraAt: new Date().toISOString(), cameraLens: +r.lens.toFixed(4) } }, 'camera: pixel size ' + (r.pixel * 1000).toFixed(3) + ' µm, turned ' + r.rotation.toFixed(2) + '° saved');
+      await learnt({ vision: { ...(cfg.vision || {}), matrix: r.matrix, cameraAt: new Date().toISOString(), cameraLens: +r.lens.toFixed(4), cameraSensor: Number.isFinite(r.sensor) ? +r.sensor.toFixed(2) : null } }, 'camera: pixel size ' + (r.pixel * 1000).toFixed(3) + ' µm, turned ' + r.rotation.toFixed(2) + '° saved');
       return r;
     },
     // pixel size and rotation without the small board: a dot or checkerboard corner under the camera, the head moves a little
@@ -841,7 +915,7 @@ function start(opts = {}) {
           try { if (discovery) await discovery.close(); } catch (e) { /* closing anyway */ }
           try { await machine.zaxis.close(); } catch (e) { /* closing anyway */ }
           try { monitor.close(); } catch (e) { /* closing anyway */ }
-          try { await machine.stop(); } catch (e) { /* closing anyway */ }
+          try { await machine.stop('Pathline Run was closed'); } catch (e) { /* closing anyway */ }
           try { if (machine.link) await machine.link.close(); } catch (e) { /* closing anyway */ }
           server.close();
         }

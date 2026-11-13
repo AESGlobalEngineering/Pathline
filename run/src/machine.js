@@ -344,13 +344,15 @@ class Machine {
   }
 
   // true once the machine is idle, false if it still isn't after ms
-  async waitIdle(ms, minMs) {
+  // every: how often to ask (ms). The camera asks every 40 ms: the Trotec answers in 1 ms when
+  // idle, and each mark waits for two or three moves
+  async waitIdle(ms, minMs, every) {
     const t0 = Date.now();
     await sleep(minMs || 0);
     while (Date.now() - t0 < ms) {
       const p = this.apply(await this.link.poll());
       if (p.state === 'idle') return true;
-      await sleep(150);
+      await sleep(every || 150);
     }
     return false;
   }
@@ -513,7 +515,7 @@ class Machine {
         if (this.run && this.run.job === job && nMarks && !r.byHand) this.run.markSec = (Date.now() - t0) / 1000 / nMarks;
         this.st.marks = r.found;
         // kept with the run: where the marks were expected and found (follow-fit.js rebuilds the job as cut)
-        if (this.run && this.run.job === job) this.run.placement = { ...(this.run.placement || {}), marks: { expected: r.expected, found: r.found, type: r.info && r.info.type } };
+        if (this.run && this.run.job === job) this.run.placement = { ...(this.run.placement || {}), marks: { expected: r.expected, found: r.found, type: r.info && r.info.type, height: r.height || null } };
         // the job as moved onto the marks: the screen follows the head along this one (the
         // package as sent sat ~150 mm away on the X8 sheet: no position fitted it, the head jumped)
         const placed = Vision.corrected(pkg, r.f);
@@ -686,6 +688,8 @@ class Machine {
         if (ctl.aborted) result = 'Stopped';
       } catch (e) {
         result = 'Stopped';
+        // not stopped by anyone: what went wrong is why (History shows it)
+        if (!ctl.aborted && runRef) runRef.stopReason = e.message;
         this.log((ctl.aborted ? 'job stopped: ' : 'job failed: ') + e.message);
         await this.link.abort().catch(() => {});
         // Stop pressed (while reading marks, say) is not an alarm
@@ -709,7 +713,9 @@ class Machine {
           this.log('back to the start position, X ' + back.x.toFixed(1) + ' Y ' + back.y.toFixed(1));
         } catch (e) { this.log('return to start: ' + e.message); }
       }
-      this.store.finish(job, result, startedAt, this.cfg.removeDone);
+      const reason = result === 'Stopped' ? (runRef && runRef.stopReason ? runRef.stopReason : 'Stopped') + ' at ' + Math.round((this.st.progress || 0) * 100) + ' %' : null;
+      if (reason) this.log(job.name + ': ' + reason);
+      this.store.finish(job, result, startedAt, this.cfg.removeDone, reason);
       if (timeline.length && this.store.saveRun) this.store.saveRun(job, { startedAt, result, estimate: program ? program.seconds : null, steps: program ? program.segments.filter((s) => s.kind === 'stream').flatMap((s) => s.steps) : [], timeline, placement: runRef.placement, ...(zRun ? { z: { dry: zRun.dry, log: zRun.log.map((e) => [e[0] - since, e[1], e[2], e[3]]) } } : {}) });
       // a run saved: the server fits the screen's head drawing to it (follow-fit.js)
       if (timeline.length && this.onRunSaved) { try { this.onRunSaved(job, result, { markSec: runRef.markSec || null }); } catch (e) { /* never stops the run ending */ } }
@@ -794,12 +800,19 @@ class Machine {
   }
 
   // always accepted, in every state
-  async stop() {
+  async stop(by) {
     this.jogRelease();
     this.framing = false;
     this.batch = []; // Stop also ends a run of chosen jobs
     if (this.camCtl) this.camCtl.aborted = true; // and camera work
-    if (this.run) this.run.ctl.aborted = true;
+    if (this.run) {
+      // why, for History: who pressed Stop, and what the machine was doing then
+      if (!this.run.ctl.aborted) {
+        const doing = this.st.markWait ? ', waiting for registration mark ' + this.st.markWait.mark + ' to be found by hand' : this.st.interlock ? ', with the lid open' : this.st.state === 'paused' ? ', while paused' : '';
+        this.run.stopReason = (by || 'Stop pressed') + doing;
+      }
+      this.run.ctl.aborted = true;
+    }
     // the head Z axis: the nozzle up at once
     if (this.zaxis && this.zaxis.link) this.zaxis.link.up().catch(() => {});
     try { if (this.link) await this.link.abort(); } catch (e) { this.log('stop: ' + e.message); }

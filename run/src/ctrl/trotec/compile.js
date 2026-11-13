@@ -238,6 +238,13 @@ function compile(plan, cfg) {
 
   // where the head is (for the travel time; the job starts from home)
   let head = [0, 0];
+  // The time model's parts, each scaled by what the jobs run have shown (cfg.timeScale, fitted by
+  // timefit.js from when each part was reported done: on Ruby the cutting ran 1.2 % longer than
+  // runTime says and the travel 10 % shorter). Each step keeps its parts unscaled, for the next fit
+  const TS = cfg.timeScale || {};
+  const within = (v, lo, hi) => (Number.isFinite(v) && v >= lo && v <= hi ? v : 1);
+  const kCut = within(TS.cut, 0.7, 1.4), kTravel = within(TS.travel, 0.6, 1.5), kEngrave = within(TS.engrave, 0.6, 1.6);
+  let parts = null;
   const cut = (step) => {
     const p = step.proc;
     setupCut(p);
@@ -286,7 +293,8 @@ function compile(plan, cfg) {
       if (sent % COMMIT_EVERY) out(TT.commit());
       out(TT.selectPowerLevel(0), TT.commit());
     }
-    return travelSec + cutSec;
+    parts = { cut: +cutSec.toFixed(3), travel: +travelSec.toFixed(3) };
+    return travelSec * kTravel + cutSec * kCut;
   };
 
   const engrave = (step) => {
@@ -315,7 +323,8 @@ function compile(plan, cfg) {
     const travel = moveTime(Math.hypot(first[0] - head[0], first[1] - head[1]), Math.min(T.v, S.max), T.a, T.j) + (T.h || 0);
     const last = lines[lines.length - 1];
     head = [!step.bidi || (lines.length - 1) % 2 === 0 ? xe : xs, last.y];
-    return travel + lines.length * E.secPerLine;
+    parts = { travel: +travel.toFixed(3), engrave: +(lines.length * E.secPerLine).toFixed(3) };
+    return travel * kTravel + lines.length * E.secPerLine * kEngrave;
   };
 
   for (const step of plan.steps) {
@@ -332,10 +341,11 @@ function compile(plan, cfg) {
     // the travel to each cut as the planner really moves (Pathline times that at 2000 mm/s with no
     // jerk limit). Engraving from the lines sent (engraveLines: Pathline's time ran 10× long)
     let sec = step.seconds;
+    parts = null;
     if (step.op === 'cut') sec = cut(step);
     else if (step.op === 'engrave') sec = engrave(step);
     out(TT.progressMarker(step.i + 1));
-    seg.steps.push({ i: step.i, marker: step.i + 1, seconds: sec });
+    seg.steps.push({ i: step.i, marker: step.i + 1, seconds: sec, ...(parts ? { parts } : {}) });
     seg.seconds += sec;
     seg.trace.push(...trace(step));
   }

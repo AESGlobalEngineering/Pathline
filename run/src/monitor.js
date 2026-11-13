@@ -62,7 +62,7 @@ function createMonitor(o) {
     const queue = store.jobs.filter((j) => j.status === 'queued' && !j.hidden).map((j) => ({ id: j.id, name: j.name, material: j.material || '', seconds: j.seconds === undefined ? null : j.seconds, autoStart: batch.includes(j.id) }));
     const midnight = new Date(); midnight.setHours(0, 0, 0, 0);
     const today = store.history.filter((h) => h.finishedAt && Date.parse(h.finishedAt) >= midnight.getTime()).slice(0, 50)
-      .map((h) => ({ id: h.id, name: h.name, material: h.material || '', seconds: h.seconds === undefined ? null : h.seconds, result: h.result, startedAt: h.startedAt || null, finishedAt: h.finishedAt }));
+      .map((h) => ({ id: h.id, name: h.name, material: h.material || '', seconds: h.seconds === undefined ? null : h.seconds, result: h.result, startedAt: h.startedAt || null, finishedAt: h.finishedAt, ...(h.reason ? { reason: h.reason } : {}) }));
     const mw = st.markWait;
     return {
       id: info.id, name: info.name, type: info.type, ctrl: info.ctrl, model: info.model, app: info.app,

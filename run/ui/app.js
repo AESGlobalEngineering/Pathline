@@ -760,18 +760,19 @@ function camCard(c, st) {
 function historyView() {
   const hf = ui.histFilter;
   const rows = S.history.filter((h) => hf === 'All' || h.result === hf);
-  const cols = 'grid-template-columns:minmax(200px,2fr) minmax(160px,1.4fr) 140px 110px 120px 130px';
+  const cols = 'grid-template-columns:minmax(200px,2fr) minmax(140px,1.2fr) 140px 100px minmax(170px,1.4fr) 130px';
   return '<div class="view" style="padding:12px;display:flex"><section aria-label="History" class="card" style="flex:1;min-width:0;display:flex;flex-direction:column">' +
     '<div style="display:flex;flex-wrap:wrap;align-items:center;gap:12px;padding:14px 18px;border-bottom:1px solid var(--line)"><h2 class="h-sec">History</h2><div role="radiogroup" aria-label="Filter" class="seg">' +
     ['All', 'Completed', 'Stopped'].map((l) => '<button role="radio" aria-checked="' + (hf === l) + '" data-a="hist" data-v="' + l + '">' + l + '</button>').join('') +
-    '</div><span style="flex:1"></span><span class="lbl">' + rows.length + ' jobs</span></div><div data-keep="histlist" style="overflow:auto;flex:1 1 auto;min-height:0;-webkit-overflow-scrolling:touch;overscroll-behavior:contain"><div role="table" aria-label="Job history" style="min-width:860px">' +
+    '</div><span style="flex:1"></span><span class="lbl">' + rows.length + ' jobs</span></div><div data-keep="histlist" style="overflow:auto;flex:1 1 auto;min-height:0;-webkit-overflow-scrolling:touch;overscroll-behavior:contain"><div role="table" aria-label="Job history" style="min-width:920px">' +
     '<div role="row" style="display:grid;' + cols + ';gap:12px;align-items:center;padding:10px 18px;border-bottom:1px solid var(--line)">' +
     ['Job', 'Material', 'Started', 'Duration', 'Result', ''].map((h) => '<span role="columnheader" class="lbl" style="font-weight:500">' + h + '</span>').join('') + '</div>' +
     (rows.length ? rows.map((h) => '<div role="row" style="display:grid;' + cols + ';gap:12px;align-items:center;padding:10px 18px;border-bottom:1px solid var(--line-soft)">' +
       '<span role="cell" style="font-weight:500">' + esc(h.name) + '</span><span role="cell" style="color:var(--text-2)">' + esc(h.material || '—') + '</span>' +
       '<span role="cell" class="mono" style="font-size:13px">' + stamp(h.startedAt) + '</span><span role="cell" class="mono" style="font-size:13px">' + hms(h.seconds) + '</span>' +
-      '<span role="cell"><span class="pill ' + (h.result === 'Completed' ? 'ok' : 'warn') + '">' + h.result + '</span></span>' +
-      '<span role="cell"><button class="tb sm" data-a="rerun" data-v="' + h.id + '">Run again</button></span></div>').join('')
+      '<span role="cell" style="display:flex;flex-direction:column;align-items:flex-start;gap:4px;min-width:0"><span class="pill ' + (h.result === 'Completed' ? 'ok' : 'warn') + '">' + h.result + '</span>' +
+      (h.reason ? '<span class="lbl" style="line-height:1.3;white-space:normal" title="' + esc(h.reason) + '">' + esc(h.reason.length > 90 ? h.reason.slice(0, 88) + '…' : h.reason) + '</span>' : '') + '</span>' +
+      '<span role="cell">' + (h.gone ? '<span class="lbl" title="Its files are kept 30 days">Files removed</span>' : '<button class="tb sm" data-a="rerun" data-v="' + h.id + '">Run again</button>') + '</span></div>').join('')
       : '<div style="padding:28px;text-align:center;color:var(--text-3)">No jobs have run yet</div>') +
     '</div></div></section></div>';
 }
@@ -936,7 +937,7 @@ function setupView() {
       ro('Pixel size', (pixel * 1000).toFixed(2) + ' µm') + ro('Picture turned', turned.toFixed(2) + '°' + (ma * md - mb * mc < 0 ? ' (mirrored)' : '')) +
       ro('Lens bends lines', v.cameraLens !== undefined ? (v.cameraLens * 1000).toFixed(0) + ' µm at most' : '—') + ro('Calibrated', when(v.cameraAt)) +
       '<div style="display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end"><button class="btn-primary" data-a="camCalibrate"' + need + '>Calibrate camera</button></div>',
-    'Lay the ' + (get(d, 'vision.camBoard.square') || 10) + ' mm checkerboard flat, at any angle, and jog the head until the board fills the camera view. The head moves a few mm, then goes back.'));
+    'Lay the ' + (get(d, 'vision.camBoard.square') || 10) + ' mm checkerboard flat, at any angle, focus the table on the board\'s surface as you would on material (the camera measures right only at that height), and jog the head until the board fills the camera view. The head moves a few mm, then goes back.'));
     const stage2 = !v.cameraAt ? ' disabled title="Calibrate the camera (stage 1) first"' : need;
     tabs.Camera.push(card('2 · Offset calibration (cut check)', num('Camera offset X', 'vision.offset.0', 'mm', 'Laser − camera') + num('Camera offset Y', 'vision.offset.1', 'mm') +
       num('Cut power', 'vision.mark.power', '%', 'For the check mark') + num('Cut speed', 'vision.mark.speed', 'mm/s') +
@@ -959,6 +960,7 @@ function setupView() {
       (busy ? '<div class="warnbox">' + esc(S.status.message || busy) + '</div>' : '') +
       (b && b.points ? boardResult(b) : ''),
     'After steps 1 and 2. Lay the checkerboard flat on the bed at any angle and jog the laser head over its top-left inner corner (corners the camera can\'t reach are left out). Check measures with the bed map on; Calibrate saves a new map. Use Every corner only with a board that is perfectly flat.'));
+    tabs.Camera.push(card('4 · Check with a cut rectangle', accuracyCard(), 'The machine measured with a rule, not a printed board: settles whether a new bed map is the machine or the board.'));
   }
 
   // the head Z axis (an ESP32 moving the whole nozzle, an ultrasonic sensor beside it)
@@ -1035,6 +1037,33 @@ function setupView() {
         readBtn + '<button class="btn-primary" data-a="save"' + (dirty ? '' : ' disabled') + '>Save to machine</button></section>') +
     '<div role="tablist" aria-label="Setup sections" class="tabs">' + Object.keys(tabs).map((t) => '<button role="tab" aria-selected="' + (t === tab) + '" data-a="setTab" data-v="' + t + '">' + t + '</button>').join('') + '</div>' +
     '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));gap:12px;align-items:start">' + tabs[tab].join('') + '</div></div>';
+}
+
+// Setup → Camera → 4 · Check with a cut rectangle: cut it, measure it with a rule, see how far out
+// the machine is with the bed map as it is, and correct the map by it
+function accuracyCard() {
+  const c = cfg();
+  const [BW, BH] = c.bed;
+  if (!ui.acc) ui.acc = { w: Math.min(1000, Math.floor((BW - 40) / 50) * 50), h: Math.min(800, Math.floor((BH - 40) / 50) * 50), power: 30, speed: 50 };
+  const a = ui.acc;
+  const fld = (l, k, unit, hint) => '<label class="row"><span>' + l + (hint ? '<span class="hint">' + hint + '</span>' : '') + '</span><span class="fld"><input class="mono" inputmode="decimal" data-acc="' + k + '" value="' + esc(a[k] === undefined ? '' : a[k]) + '" autocomplete="off"><span class="lbl mono">' + (unit || '') + '</span></span></label>';
+  const r = c.accuracyCheck;
+  const sg = (x, d) => (x > 0 ? '+' : '') + Number(x).toFixed(d);
+  const result = r ? '<div class="' + (r.ok ? 'okbox' : 'warnbox') + '" style="line-height:1.5;padding:10px 12px;border-radius:8px' + (r.ok ? ';background:var(--ok-soft,var(--surface-2))' : '') + '">' +
+      '<strong>' + (r.ok ? 'Within what a rule can tell' : 'Out by more than a rule\'s reading') + '</strong> (' + r.w + ' × ' + r.h + ' mm, ' + new Date(r.at).toLocaleString() + ', ' + (r.mapOn ? 'bed map on' : 'no bed map') + ')<br>' +
+      'X ' + sg(r.scaleX, 2) + ' ‰ (' + sg((r.scaleX * r.w) / 1000, 2) + ' mm), Y ' + sg(r.scaleY, 2) + ' ‰ (' + sg((r.scaleY * r.h) / 1000, 2) + ' mm)' +
+      (r.lean !== null && r.lean !== undefined ? ', out of square ' + sg(r.lean, 3) + '° (' + sg(Math.tan((r.lean * Math.PI) / 180) * r.h, 2) + ' mm over its height)' : ', squareness not measured (both diagonals needed)') +
+      (r.misfit > 1 ? '<br>The diagonals don\'t agree with the sides by ' + r.misfit + ' mm: measure again from corner to corner.' : '') +
+      (r.applied ? '<br>The bed map was corrected by it ' + new Date(r.applied).toLocaleString() + '. Cut another rectangle to check.' : '') + '</div>' +
+      (!r.ok && !r.applied && c.controller === 'trotec' ? '<div style="display:flex;justify-content:flex-end"><button class="btn-primary" data-a="accApply">Correct the bed map by this</button></div>' : '')
+    : '';
+  return '<span style="line-height:1.5">1. Lay card or thin board on the bed, focus on it, and cut the rectangle with its diagonals (it goes in the middle of the bed).</span>' +
+    fld('Width', 'w', 'mm') + fld('Height', 'h', 'mm') + fld('Power', 'power', '%', 'A score that measures cleanly') + fld('Speed', 'speed', 'mm/s') +
+    '<div style="display:flex;justify-content:flex-end"><button class="tb" data-a="accJob">Queue the rectangle</button></div>' +
+    '<span style="line-height:1.5">2. Measure it with a steel rule or tape, corner to corner along the cut lines, to a quarter of a mm if you can.</span>' +
+    fld('Top', 'top', 'mm') + fld('Bottom', 'bottom', 'mm') + fld('Left', 'left', 'mm') + fld('Right', 'right', 'mm') +
+    fld('Diagonal top left → bottom right', 'd1', 'mm') + fld('Diagonal top right → bottom left', 'd2', 'mm') +
+    '<div style="display:flex;justify-content:flex-end"><button class="btn-primary" data-a="accMeasure">Work it out</button></div>' + result;
 }
 
 // the last checkerboard result: numbers, and each corner's error as an arrow over the bed
@@ -1130,7 +1159,13 @@ function dialog() {
       '<div style="display:flex;justify-content:flex-end;gap:8px"><button class="tb" data-a="close">Cancel</button><button class="btn-primary" data-a="importGo"' + (ui.dlg.data ? '' : ' disabled') + '>Add to queue</button></div></div></div>';
   }
   if (ui.dlg.kind === 'log') {
-    return '<div class="scrim"><div role="dialog" aria-label="Diagnostics log" class="dlg wide"><span class="h-sec" style="font-size:18px">Diagnostics log</span><pre class="log">' + esc((ui.dlg.lines || []).join('\n')) + '</pre>' +
+    // today's (since Pathline Run started), or an earlier day's from data/logs
+    const days = ui.dlg.days || [];
+    const dayBtns = days.length ? '<div role="radiogroup" aria-label="Day" class="seg" style="flex-wrap:wrap;max-width:100%">' +
+      '<button role="radio" aria-checked="' + !ui.dlg.day + '" data-a="logDay" data-v="">Now</button>' +
+      days.slice(0, 8).map((d) => '<button role="radio" aria-checked="' + (ui.dlg.day === d) + '" data-a="logDay" data-v="' + d + '">' + new Date(d + 'T12:00:00').toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' }) + '</button>').join('') + '</div>' : '';
+    return '<div class="scrim"><div role="dialog" aria-label="Diagnostics log" class="dlg wide"><span class="h-sec" style="font-size:18px">Diagnostics log</span>' + dayBtns +
+      '<span class="lbl">' + (ui.dlg.day ? 'Kept on this computer: ' + esc(ui.dlg.day) : 'Since Pathline Run started. Each day is also kept on this computer for ' + 30 + ' days.') + '</span><pre class="log">' + esc((ui.dlg.lines || []).join('\n')) + '</pre>' +
       '<div style="display:flex;justify-content:flex-end"><button class="tb" data-a="close">Close</button></div></div></div>';
   }
   // ☰ → Pathline Monitor on a phone: the hub's setup page as a QR code for a phone's camera
@@ -1261,7 +1296,7 @@ function render() {
   const focused = ae && /^(INPUT|SELECT|TEXTAREA)$/.test(ae.tagName) && ae.dataset && (ae.dataset.f || ae.dataset.n);
   if (ui.view === 'setup' && focused) { const h = $app.querySelector('header'); if (h) h.outerHTML = header(); markOpened(true); return; }
   // nor a job's power and speed while one is being typed (Queue → Edit)
-  if (ae && ae.tagName === 'INPUT' && ae.dataset && (ae.dataset.pe || ae.dataset.mh)) { const h = $app.querySelector('header'); if (h) h.outerHTML = header(); markOpened(true); return; }
+  if (ae && ae.tagName === 'INPUT' && ae.dataset && (ae.dataset.pe || ae.dataset.mh || ae.dataset.acc)) { const h = $app.querySelector('header'); if (h) h.outerHTML = header(); markOpened(true); return; }
   // nor anything while a finger drags a list, or it glides on after: redrawing under the finger
   // ends the scroll (a touch screen); the next redraw catches up
   if (ui.drawn === ui.view && (ui.dragging || Date.now() < (ui.glideUntil || 0))) {
@@ -1575,8 +1610,30 @@ const H = {
   reconnect: act(async () => call('POST', LOCAL('/reconnect'), {})),
   import: () => { ui.dlg = { kind: 'import' }; render(); },
   importGo: act(async () => { const r = await call('POST', LOCAL('/import'), ui.dlg.data); ui.dlg = null; ui.sel = r.id; ui.view = 'queue'; }),
-  log: act(async () => { ui.navOpen = false; ui.dlg = { kind: 'log', lines: await call('GET', LOCAL('/log')) }; }),
+  log: act(async () => { ui.navOpen = false; ui.dlg = { kind: 'log', lines: await call('GET', LOCAL('/log')), days: await call('GET', LOCAL('/logs')).catch(() => []) }; }),
+  logDay: act(async (v) => {
+    if (!ui.dlg || ui.dlg.kind !== 'log') return;
+    const lines = v ? await call('GET', LOCAL('/logs/day?d=' + encodeURIComponent(v))) : await call('GET', LOCAL('/log'));
+    ui.dlg = { ...ui.dlg, day: v || null, lines };
+  }),
   about: () => { ui.navOpen = false; ui.dlg = { kind: 'about' }; render(); },
+  // Setup → Camera → Check with a cut rectangle
+  accJob: act(async () => {
+    const a = ui.acc || {};
+    const r = await call('POST', LOCAL('/accuracy/job'), { w: Number(a.w), h: Number(a.h), power: Number(a.power), speed: Number(a.speed) });
+    ui.acc = { ...a, w: r.rect.w, h: r.rect.h };
+    toast(r.name + ' is in the queue (' + r.id + ')', { ms: 6000 });
+  }),
+  accMeasure: act(async () => {
+    const el = document.activeElement; if (el && el.dataset && el.dataset.acc) el.blur();
+    const a = ui.acc || {};
+    await call('POST', LOCAL('/accuracy/measure'), a);
+  }),
+  accApply: act(async () => {
+    const r = await call('POST', LOCAL('/accuracy/apply'), {});
+    ui.draft = null;
+    toast('Bed map corrected' + (r.since ? ' (X ' + r.since.scaleX + ' ‰, Y ' + r.since.scaleY + ' ‰, ' + r.since.lean + '° against the one before)' : '') + '. Cut another rectangle to check it.', { ms: 9000 });
+  }),
   monitorQr: act(async () => { ui.navOpen = false; ui.dlg = { kind: 'monitorQr', r: await call('GET', LOCAL('/monitor-hub')) }; }),
   monitorHubSave: act(async () => {
     const el = document.querySelector('[data-mh]');
@@ -1762,7 +1819,7 @@ $app.addEventListener('change', (e) => {
 });
 $app.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.dataset && (e.target.dataset.f || e.target.dataset.n)) e.target.blur(); });
 // a job's power and speed being typed (Queue → Edit): kept as typed, Enter saves, Escape cancels
-$app.addEventListener('input', (e) => { const k = e.target.dataset && e.target.dataset.pe; if (k && ui.pe) ui.pe[k] = e.target.value; if (e.target.dataset && e.target.dataset.mh && ui.dlg) ui.dlg.typed = e.target.value; });
+$app.addEventListener('input', (e) => { const k = e.target.dataset && e.target.dataset.pe; if (k && ui.pe) ui.pe[k] = e.target.value; if (e.target.dataset && e.target.dataset.mh && ui.dlg) ui.dlg.typed = e.target.value; if (e.target.dataset && e.target.dataset.acc) ui.acc = { ...(ui.acc || {}), [e.target.dataset.acc]: e.target.value.trim() }; });
 $app.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.dataset && e.target.dataset.mh) H.monitorHubSave(); });
 $app.addEventListener('keydown', (e) => {
   if (!(e.target.dataset && e.target.dataset.pe)) return;

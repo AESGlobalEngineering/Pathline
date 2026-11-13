@@ -1182,6 +1182,8 @@ async function visionTests() {
     const ws = await waitFor((x) => x.markWait || x.state === 'idle' || x.state === 'alarm');
     if (ws.markWait) await call('POST', 'v1/stop');
     ok(ws.state === 'alarm' && /found [\d.]+ mm apart, but they are [\d.]+ mm apart in the job.*Nothing was cut/.test(ws.message) && !ws.progress, 'marks not as far apart as the job\'s: stopped before cutting', JSON.stringify(ws));
+    // (each is written just after it's looked at, while the head goes on to the next mark)
+    await new Promise((r) => setTimeout(r, 600));
     const kept = fs.existsSync(path.join(data, 'marks', 'mark1.bin.gz')) && fs.existsSync(path.join(data, 'marks', 'mark3.json'));
     ok(kept, 'the pictures looked at for the marks are kept (data/marks)', fs.existsSync(path.join(data, 'marks')) ? fs.readdirSync(path.join(data, 'marks')).join(', ') : 'no marks folder');
     await call('POST', 'v1/alarm/clear');
@@ -1224,6 +1226,85 @@ async function editTests() {
     let s; for (let i = 0; i < 80; i++) { await new Promise((r) => setTimeout(r, 250)); s = (await call('GET', '/v1/status')).j; if (s.state === 'idle') break; }
     ok(s.state === 'idle' && s.progress === 1, 'the changed job runs to the end');
   } finally { srv.kill(); }
+}
+
+// ---------------------------------------------------------------- keeping the machine in order
+// the log on disk, why a job stopped, old job folders, the cut-rectangle check and the estimate's fit
+async function upkeepTests() {
+  console.log('Upkeep: log on disk, stop reasons, old jobs, rectangle check, estimate fit');
+  const data = fs.mkdtempSync(path.join(os.tmpdir(), 'pathline-run-'));
+  fs.writeFileSync(path.join(data, 'config.json'), JSON.stringify({ controller: 'trotec', regMarks: 'ignore', bed: [1300, 900], sim: { speedup: 20 } }));
+  const port = 19610 + Math.floor(Math.random() * 200);
+  const srv = spawn(process.execPath, [path.join(__dirname, '..', 'src', 'server.js'), '--sim', '--port', String(port), '--data', data], { stdio: ['ignore', 'pipe', 'pipe'] });
+  const base = 'http://127.0.0.1:' + port + '/api';
+  const call = async (m, r, b) => { const res = await fetch(base + r, { method: m, headers: { 'content-type': 'application/json' }, body: b ? JSON.stringify(b) : undefined }); return { s: res.status, j: await res.json().catch(() => null) }; };
+  try {
+    for (let i = 0; i < 60; i++) { try { await call('GET', '/v1/info'); break; } catch (e) { await new Promise((r) => setTimeout(r, 100)); } }
+    // a job stopped on this screen part way: History says so, and the log is on disk
+    const q = (await call('POST', '/v1/jobs', example)).j;
+    await call('POST', '/v1/start', { id: q.id });
+    await new Promise((r) => setTimeout(r, 1500));
+    await call('POST', '/v1/stop', {});
+    let h; for (let i = 0; i < 40; i++) { await new Promise((r) => setTimeout(r, 200)); h = (await call('GET', '/local/state')).j.history || []; if (h.length) break; }
+    ok(h[0] && h[0].result === 'Stopped' && /^Stop pressed on this screen.* at \d+ %$/.test(h[0].reason || ''), 'History: why the job stopped (' + (h[0] && h[0].reason) + ')', JSON.stringify(h[0]));
+    const days = (await call('GET', '/local/logs')).j;
+    const lines = days.length ? (await call('GET', '/local/logs/day?d=' + days[0])).j : [];
+    ok(days.length === 1 && lines.some((l) => /Stop pressed on this screen/.test(l)) && fs.existsSync(path.join(data, 'logs', 'run-' + days[0] + '.log')), 'the log is kept on disk, a file a day (' + days[0] + ', ' + lines.length + ' lines)', JSON.stringify(days));
+    // the rectangle: queued as a job in the middle of the bed, then measured
+    const rj = await call('POST', '/local/accuracy/job', { w: 1000, h: 800, power: 20, speed: 60 });
+    const rp = rj.s === 200 ? (await call('GET', '/local/jobs/' + rj.j.id + '/package')).j : null;
+    ok(rj.s === 200 && rp && rp.toolpath.length === 3 && rp.toolpath[0].p[0][0] === 150 && rp.toolpath[0].p[0][1] === 50, 'cut-rectangle check: 1000 × 800 mm and its diagonals queued in the middle of the bed', JSON.stringify(rj.j));
+    // measured as a machine 1 ‰ long in X, 0.5 ‰ short in Y and 0.1° out of square would cut it
+    const W = 1000, H = 800, a = W * 1.001, b = H * 0.9995, t = Math.tan(0.1 * Math.PI / 180);
+    const d1 = Math.hypot(a + t * b, b), d2 = Math.hypot(a - t * b, b);
+    const m = (await call('POST', '/local/accuracy/measure', { w: W, h: H, top: a, bottom: a, left: b, right: b, d1, d2 })).j;
+    ok(m && Math.abs(m.scaleX - 1) < 0.01 && Math.abs(m.scaleY + 0.5) < 0.01 && Math.abs(m.lean - 0.1) < 0.002 && !m.ok, 'cut-rectangle check: X +1 ‰, Y −0.5 ‰ and 0.1° out of square read back from the sides and diagonals (' + m.scaleX + ' ‰, ' + m.scaleY + ' ‰, ' + m.lean + '°)', JSON.stringify(m));
+    const ap = await call('POST', '/local/accuracy/apply', {});
+    const st = (await call('GET', '/local/state')).j.config;
+    const fit = require('../src/vision/fit');
+    // the corrected map sends the head where a machine with those errors really reaches the point
+    const truth = (q2) => [q2[0] * 1.001 + q2[1] * t, q2[1] * 0.9995];
+    const sent = fit.correct(st.vision.map, [1150, 850]), got = truth(sent);
+    ok(ap.s === 200 && st.vision.mapOn && st.accuracyCheck.applied && Math.hypot(got[0] - 1150, got[1] - 850) < 0.02, 'cut-rectangle check: the bed map corrected by it puts the far corner within ' + (Math.hypot(got[0] - 1150, got[1] - 850) * 1000).toFixed(0) + ' µm', JSON.stringify(ap.j));
+    const again = await call('POST', '/local/accuracy/apply', {});
+    ok(again.s === 409, 'cut-rectangle check: applied once only', JSON.stringify(again.j));
+  } finally { srv.kill(); }
+
+  // old job folders: kept while queued, learnt from or in the last 30 days of History
+  const Store = require('../src/store');
+  const dS = fs.mkdtempSync(path.join(os.tmpdir(), 'pathline-store-'));
+  const st = new Store(dS);
+  const mk = () => st.add({ job: { name: 'x' }, processes: [], toolpath: [] }, [], 'test');
+  const [jOld, jRecent, jRun, jQueued] = [mk(), mk(), mk(), mk()];
+  const old = new Date(Date.now() - 40 * 864e5).toISOString(), recent = new Date(Date.now() - 5 * 864e5).toISOString();
+  st.jobs = st.jobs.filter((j) => j.id === jQueued.id);
+  st.history = [{ id: jOld.id, name: 'old', finishedAt: old, result: 'Completed' }, { id: jRecent.id, name: 'recent', finishedAt: recent, result: 'Completed' }, { id: jRun.id, name: 'learnt', finishedAt: old, result: 'Completed' }];
+  fs.mkdirSync(path.join(dS, 'runs'), { recursive: true });
+  fs.writeFileSync(path.join(dS, 'runs', jRun.id + '-2026-10-01T00-00-00-000Z.json'), '{}');
+  const c = st.cleanup();
+  const has = (j) => fs.existsSync(path.join(dS, 'jobs', j.id));
+  ok(c.removed === 1 && !has(jOld) && has(jRecent) && has(jRun) && has(jQueued) && st.history[0].gone === true && !st.history[1].gone, 'old job folders removed (40 days old, not queued, not learnt from); recent, queued and learnt-from ones kept', JSON.stringify(c));
+  let refused = null; try { st.requeue(jOld.id); } catch (e) { refused = e; }
+  ok(refused && refused.code === 404 && /removed/.test(refused.message), 'Run again on a removed job says its files were removed', refused && refused.message);
+
+  // the estimate's parts fitted to whole runs: runs whose cutting took 3 % longer and travel 8 %
+  // less than estimated give those scales back
+  const tf = require('../src/timefit');
+  const dT = fs.mkdtempSync(path.join(os.tmpdir(), 'pathline-tf-'));
+  fs.mkdirSync(path.join(dT, 'runs'), { recursive: true });
+  [[400, 120, 0], [100, 80, 0], [30, 20, 200], [600, 90, 0], [50, 60, 30], [200, 200, 0]].forEach(([cu, tr, en], i) => {
+    const real = cu * 1.03 + tr * 0.92 + en;
+    const steps = [{ i: 0, marker: 1, seconds: cu + tr + en, parts: { cut: cu, travel: tr, engrave: en } }];
+    const timeline = Array.from({ length: 50 }, (_, k) => [(k / 49) * real * 1000, 0, 0, null, 'busy']);
+    fs.writeFileSync(path.join(dT, 'runs', 'J000' + i + '-2026-11-1' + i + 'T00-00-00-000Z.json'), JSON.stringify({ id: 'J000' + i, result: 'Completed', steps, timeline }));
+  });
+  const tr = tf.fit(dT, {}, { current: {} });
+  ok(tr.use && Math.abs(tr.scale.cut - 1.03) < 0.01 && Math.abs(tr.scale.travel - 0.92) < 0.02 && tr.after.rms < 0.5, 'estimate fit: cutting ×' + (tr.scale && tr.scale.cut) + ', travel ×' + (tr.scale && tr.scale.travel) + ' found (1.03, 0.92), runs ' + tr.before.rms + ' % → ' + tr.after.rms + ' % off', JSON.stringify(tr));
+  const prog = trotec.compile(plan.build(example), { ...config.defaults('trotec'), timeScale: { cut: 1.1, travel: 1, engrave: 1 } });
+  const prog1 = trotec.compile(plan.build(example), config.defaults('trotec'));
+  const st1 = prog1.segments.filter((s) => s.kind === 'stream').flatMap((s) => s.steps).find((s) => s.parts && s.parts.cut > 0);
+  const st2 = prog.segments.filter((s) => s.kind === 'stream').flatMap((s) => s.steps).find((s) => s.i === st1.i);
+  ok(st1 && Math.abs(st2.seconds - (st1.parts.cut * 1.1 + st1.parts.travel)) < 0.01 && st2.parts.cut === st1.parts.cut, 'the estimate uses the fitted scales, and each step keeps its parts unscaled for the next fit');
 }
 
 // ---------------------------------------------------------------- test grid: power and speed by camera
@@ -1550,7 +1631,7 @@ async function zaxisTests() {
   ok(zf.state === 'up', 'paused or stopped: the nozzle goes up');
 }
 
-jogTests().then(linkTests).then(serverTests).then(editTests).then(monitorTests).then(gridTests).then(discoveryTests).then(followFitTests).then(zaxisTests).then(materialsTests).then(visionTests).then(() => {
+jogTests().then(linkTests).then(serverTests).then(editTests).then(upkeepTests).then(monitorTests).then(gridTests).then(discoveryTests).then(followFitTests).then(zaxisTests).then(materialsTests).then(visionTests).then(() => {
   console.log(failed ? '\n' + failed + ' FAILED' : '\nAll passed');
   process.exit(failed ? 1 : 0);
 });

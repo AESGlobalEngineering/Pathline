@@ -11,3 +11,11 @@ try {
 } catch (e) {
   parentPort.postMessage({ error: e.message });
 }
+// and the estimate's parts (timefit.js): cutting, travel and engraving, each against the time the
+// laser really took
+try {
+  const t = require('./timefit').fit(workerData.dataDir, workerData.cfg || {}, { current: (workerData.cfg || {}).timeScale || {} });
+  parentPort.postMessage({ times: t });
+} catch (e) {
+  parentPort.postMessage({ log: 'estimate fit: ' + e.message });
+}

@@ -164,8 +164,11 @@ class Vision {
     const t = this.m.travel ? this.m.travel() : [0, 0, ...this.m.cfg.bed];
     if (x < t[0] - 0.5 || y < t[1] - 0.5 || x > t[2] + 0.5 || y > t[3] + 0.5) throw err('The camera can\'t reach ' + p.map((v) => v.toFixed(1)).join(', ') + ' mm: the head would leave the bed');
     // (within the half mm allowed: to the edge of the travel, never past the machine's zero)
+    const t0 = Date.now();
     await this.m.link.moveTo(Math.max(t[0], Math.min(t[2], x)), Math.max(t[1], Math.min(t[3], y)));
-    await this.m.waitIdle(30000, 150);
+    const t1 = Date.now();
+    await this.m.waitIdle(30000, 150, 40);
+    if (opts.times) { opts.times.send += t1 - t0; opts.times.travel += Date.now() - t1; }
   }
 
   // the thing nearest the middle of the frame: kind 'dot' (d mm across) or 'corner'
@@ -179,17 +182,23 @@ class Vision {
   }
 
   // where the thing really is, near p: camera over p, find, re-centre if needed
+  // opts.times: { send, travel, look } ms added up (registration marks log them)
   async measure(p, kind, opts = {}) {
     const v = this.cfg;
     let at = p.slice();
     for (let k = 0; k <= v.recentre; k++) {
       if (opts.ctl && opts.ctl.aborted) throw err('Stopped');
       await this.moveCamera(at, opts);
+      const tl = Date.now();
       const { img, hit } = await this.grabFind(kind, opts.d, opts);
+      if (opts.times) opts.times.look += Date.now() - tl;
       if (!hit) return null;
       const off = this.toBed(img, hit);
       const found = [at[0] + off[0], at[1] + off[1]];
-      if (Math.hypot(off[0], off[1]) <= v.tolerance || k === v.recentre) return { found, off, tries: k + 1, hit };
+      // a dot's size as the camera's calibration measures it (mm): against the size printed it
+      // shows whether the sheet is at the height the camera was calibrated at
+      const dotMm = kind === 'dot' && hit.d ? hit.d * this.pixelSize() : null;
+      if (Math.hypot(off[0], off[1]) <= v.tolerance || k === v.recentre) return { found, off, tries: k + 1, hit, dotMm };
       at = found;
     }
     return null;
@@ -198,19 +207,25 @@ class Vision {
   // The last picture looked at for a mark, kept for finding out why a mark was missed: half size,
   // grey bytes after a 4-byte header (width, height as 16-bit), gzipped, in the data folder's
   // marks/ (the last job's only), with what was looked for and found beside it
+  // (shrinking and packing a 5 MP picture takes a moment: done once the head is on its way to
+  // the next mark, not before it sets off)
   saveMarkFrame(name, info) {
-    try {
-      const dir = this.m.store && this.m.store.dir && require('path').join(this.m.store.dir, 'marks');
-      if (!dir || !this.last) return;
-      const fs = require('fs');
-      fs.mkdirSync(dir, { recursive: true });
-      const s = detect.shrink(this.last.img, Math.max(this.last.img.w, this.last.img.h) / 2);
-      const b = Buffer.alloc(4 + s.w * s.h);
-      b.writeUInt16BE(s.w, 0); b.writeUInt16BE(s.h, 2);
-      for (let i = 0; i < s.w * s.h; i++) b[4 + i] = Math.round(s.data[i]);
-      fs.writeFileSync(require('path').join(dir, name + '.bin.gz'), require('zlib').gzipSync(b));
-      fs.writeFileSync(require('path').join(dir, name + '.json'), JSON.stringify({ ...info, head: this.last.at, exposure: this.exposureNow(), pixel: this.pixelSize(), half: true }, null, 1));
-    } catch (e) { this.log('mark picture not kept: ' + e.message); }
+    const dir = this.m.store && this.m.store.dir && require('path').join(this.m.store.dir, 'marks');
+    const last = this.last;
+    if (!dir || !last) return;
+    const extra = { head: last.at, exposure: this.exposureNow(), pixel: this.pixelSize(), half: true };
+    setTimeout(() => {
+      try {
+        const fs = require('fs');
+        fs.mkdirSync(dir, { recursive: true });
+        const s = detect.shrink(last.img, Math.max(last.img.w, last.img.h) / 2);
+        const b = Buffer.alloc(4 + s.w * s.h);
+        b.writeUInt16BE(s.w, 0); b.writeUInt16BE(s.h, 2);
+        for (let i = 0; i < s.w * s.h; i++) b[4 + i] = Math.round(s.data[i]);
+        fs.writeFileSync(require('path').join(dir, name + '.bin.gz'), require('zlib').gzipSync(b));
+        fs.writeFileSync(require('path').join(dir, name + '.json'), JSON.stringify({ ...info, ...extra }, null, 1));
+      } catch (e) { this.log('mark picture not kept: ' + e.message); }
+    }, 30);
   }
 
   clearMarkFrames() {
@@ -226,6 +241,7 @@ class Vision {
   async readMarks(pkg, ctl = {}, status = () => {}, opts = {}) {
     const steps = (pkg.toolpath || []).filter((s) => s.type === 'inspect');
     const E = [], D = [];
+    const sizes = []; // each mark's measured diameter against the printed one
     let byHand = false;
     this.clearMarkFrames();
     for (const s of steps) {
@@ -234,7 +250,10 @@ class Vision {
       // worth, 45 mm, into the prediction); the full fit from three
       const pred = E.length ? fitting.fit(E, D, E.length === 1 ? 'shift' : E.length === 2 ? 'rigid' : 'affine')(s.at) : s.at;
       status('Reading mark ' + s.mark + ' of ' + s.of);
-      let r = await this.measure(pred, 'dot', { d: s.d, ctl, whiteRing: true });
+      // where each mark's time goes (logged): sending the move, the head travelling and settling,
+      // the pictures and finding the dot
+      const times = { send: 0, travel: 0, look: 0 }, tm0 = Date.now();
+      let r = await this.measure(pred, 'dot', { d: s.d, ctl, whiteRing: true, times });
       this.saveMarkFrame('mark' + s.mark, { mark: s.mark, design: s.at, expected: pred, d: s.d, found: r ? r.found : null, hit: r ? r.hit : null });
       // Anchored, and the first mark isn't there: the camera may have been put over the dot at
       // Start in place of the laser (J0064: every mark 42, 19 mm off, the camera's offset). Look
@@ -258,7 +277,10 @@ class Vision {
         if (r) this.log('mark ' + s.mark + ': found by hand, ' + Math.hypot(r.found[0] - pred[0], r.found[1] - pred[1]).toFixed(2) + ' mm from where it was expected; the camera was put ' + Math.hypot(r.found[0] - at[0], r.found[1] - at[1]).toFixed(2) + ' mm from it');
       }
       E.push(s.at); D.push(r.found);
-      this.log('mark ' + s.mark + ': expected ' + s.at.map((v) => v.toFixed(2)).join(', ') + ', found ' + r.found.map((v) => v.toFixed(3)).join(', ') + ' (' + r.tries + ' frame' + (r.tries > 1 ? 's' : '') + ')');
+      if (r.dotMm && s.d) sizes.push(r.dotMm / s.d);
+      const sec = (ms) => (ms / 1000).toFixed(2) + ' s';
+      this.log('mark ' + s.mark + ': expected ' + s.at.map((v) => v.toFixed(2)).join(', ') + ', found ' + r.found.map((v) => v.toFixed(3)).join(', ') + ' (' + r.tries + ' frame' + (r.tries > 1 ? 's' : '') + '); ' +
+        sec(Date.now() - tm0) + ': sending ' + sec(times.send) + ', travel and settle ' + sec(times.travel) + ', pictures ' + sec(times.look) + (r.dotMm ? '; dot ' + r.dotMm.toFixed(2) + ' mm across (' + s.d + ' expected)' : ''));
     }
     // the marks found must be as far apart as the job's: a dot that isn't the mark (a hole in the
     // bed through clear acrylic, artwork) bent the job 5 % one way and 6 % the other, and it was cut
@@ -276,7 +298,36 @@ class Vision {
     const f = fitting.fit(E, D, type);
     const i = f.info;
     this.log('print and cut: ' + i.type + ', shift ' + i.shift.map((v) => v.toFixed(3)).join(', ') + ' mm, rotation ' + i.rotation.toFixed(3) + '°, scale ' + ((i.scaleX - 1) * 1000).toFixed(2) + ' / ' + ((i.scaleY - 1) * 1000).toFixed(2) + ' mm/m');
-    return { f, expected: E, found: D, info: i, byHand };
+    const height = await this.heightCheck(sizes);
+    return { f, expected: E, found: D, info: i, byHand, height };
+  }
+
+  // The camera measures right only at the height it was calibrated at: the picture's scale goes
+  // with the distance to the surface (the 3 Nov calibration, on a board the table wasn't focused
+  // on, was 4 % out). Two checks, each only a warning in the log:
+  //   - the marks' size: printed dots measured more than 5 % larger (nearer the camera) or smaller
+  //     than printed. (Printers spread a dot a little, so a few % is normal.)
+  //   - with the head Z axis: its sensor's distance against what it read at camera calibration.
+  async heightCheck(sizes) {
+    const out = {};
+    const ok = sizes.filter((s) => Number.isFinite(s) && s > 0).sort((a, b) => a - b);
+    if (ok.length) {
+      out.dots = +ok[ok.length >> 1].toFixed(3);
+      if (Math.abs(out.dots - 1) > 0.05) this.log('camera: the marks measure ' + Math.abs((out.dots - 1) * 100).toFixed(0) + ' % ' + (out.dots > 1 ? 'larger' : 'smaller') + ' than printed: the sheet is ' + (out.dots > 1 ? 'nearer the camera' : 'further from the camera') + ' than the board was when the camera was calibrated (is the table focused on the sheet?), or the print was scaled');
+    }
+    const z = await this.sensorNow();
+    if (Number.isFinite(z) && Number.isFinite(this.cfg.cameraSensor)) {
+      out.sensor = +(z - this.cfg.cameraSensor).toFixed(2);
+      if (Math.abs(out.sensor) > 1.5) this.log('camera: the sheet is ' + Math.abs(out.sensor).toFixed(1) + ' mm ' + (out.sensor < 0 ? 'nearer' : 'further') + ' than the board was at camera calibration (Z axis sensor); its measurements scale with that');
+    }
+    return out;
+  }
+
+  // the head Z axis sensor's distance now (mm), when it's on and ready
+  async sensorNow() {
+    const z = this.m.zaxis;
+    try { if (z && z.enabled && z.enabled() && z.state === 'ready') return (await z.read(8)).mm; } catch (e) { /* not available */ }
+    return null;
   }
 
   // the job without its inspect steps, moved onto the marks found
@@ -363,6 +414,8 @@ class Vision {
       // how far the board's print is from its size (‰, the mean of across and down)
       moveVsBoard: ((squares[0] + squares[1]) / (2 * square) - 1) * 1000
     };
+    // the head Z axis sensor's distance here, when there is one: jobs compare against it
+    r.sensor = await this.sensorNow();
     const off = squares.some((s) => Math.abs(s / square - 1) > 0.005);
     this.log('camera calibrated on the ' + square + ' mm board: ' + L.n + ' corners, pixel size ' + (pixel * 1000).toFixed(3) + ' µm (X ' + (r.pixelXY[0] * 1000).toFixed(3) + ', Y ' + (r.pixelXY[1] * 1000).toFixed(3) + '), picture turned ' + rotation.toFixed(2) + '°' + (mirrored ? ' (mirrored)' : '') + ', lens bends lines up to ' + (r.lens * 1000).toFixed(0) + ' µm; the board\'s squares measure ' + squares[0].toFixed(2) + ' × ' + squares[1].toFixed(2) + ' mm' + (off ? ' (printed off scale: the size is taken from the head\'s moves, so it doesn\'t matter here)' : ''));
     return r;
