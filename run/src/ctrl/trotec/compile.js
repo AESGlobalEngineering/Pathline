@@ -22,16 +22,19 @@ const CUT = { arc: 1000, acc: 2000 };
 // a registration mark, s: learnt from the jobs run (cfg.markSec, server.js), this until then.
 // Ruby's X21 jobs took 7–9 s a mark (19–28 s for 3), not the 4 s first assumed
 const MARK_SEC = 8;
-// Engraving: each line is one move across the box and its overscan at the engraving speed, and
-// the head turns at each end in turn0 + turnPerV · v seconds: measured on the calibration bars
-// (J0076, 100–600 mm/s, 47 lines each) and J0068's labels (300 mm/s): 0.064 s a line at 100 mm/s,
-// 0.087 at 300, 0.113 at 600. Pathline Prepare's own time for J0068's labels was 80–88 s for 8.5,
-// and the screen drew the head 10× too slow. (2·v/7500, fitted at 300 mm/s alone, ran 26–38 %
-// long at 600 mm/s and short at 100.)
-const ENGRAVE = { turn0: 0.0578, turnPerV: 9.44e-5 };
+// Engraving: each line is one move across the island's box and its overscan, whatever is on that
+// line, at the engraving speed; the head then turns, in turn0 + turnPerV · v seconds; and each
+// island (step) costs `step` s more. The sweep takes as long as if it were `short` mm shorter than
+// sent (as if the overscan were 8.3 mm, not 10: the head is at speed sooner than the line's ends).
+// Fitted on 34 engraving steps: the calibration bars (J0076, 100–600 mm/s, 40 and 80 mm) and two
+// 500 DPI stainless jobs of 9 islands each (J0093, J0094, ~500 mm/s, 16 Nov), each step's real time
+// from its markers less Run's own travel to it: 2.2 % rms a step, the jobs −0.7, +0.8, −0.3 %.
+// (Before: turn0 0.0578, turnPerV 9.44e-5 on J0076 and J0068 alone ran the two jobs 5–6 % long.
+// Pathline Prepare's 2·v/acc a line, with the travel acceleration, ran them 16× long.)
+const ENGRAVE = { turn0: 0.0902, turnPerV: 2.295e-5, short: 3.43, step: 0.203 };
 
 // The lines one engraving step is sent as: { pitch, lines, xs, xe (mm, the row with its
-// overscan), v, secPerLine }
+// overscan), v, sweep and turn (s, one line's), secPerLine, lead (s, the step's own) }
 function engraveLines(step, S) {
   const p = step.proc;
   // line pitch: the nominal pitch rounded down to whole 6 µm firmware Y steps (§4.7)
@@ -40,7 +43,8 @@ function engraveLines(step, S) {
   const os = S.overscan + (p.overshoot || 0);
   const xs = Math.max(0, step.box[0] - os), xe = Math.min(S.bed[0], step.box[2] + os);
   const v = Math.min(p.speed, S.max);
-  return { pitch, lines, xs, xe, v, secPerLine: (xe - xs) / v + ENGRAVE.turn0 + ENGRAVE.turnPerV * v };
+  const sweep = Math.max(0.2 * (xe - xs), xe - xs - ENGRAVE.short) / v, turn = ENGRAVE.turn0 + ENGRAVE.turnPerV * v;
+  return { pitch, lines, xs, xe, v, sweep, turn, secPerLine: sweep + turn, lead: ENGRAVE.step };
 }
 // (cfg.trotec.cutModel overrides any of them: for fitting and trying values)
 const cutProfile = (P, cfg) => ({ arc: CUT.arc, corner: P ? P[2] : 20, acc: CUT.acc, ...((cfg && cfg.trotec && cfg.trotec.cutModel) || {}) });
@@ -323,8 +327,9 @@ function compile(plan, cfg) {
     const travel = moveTime(Math.hypot(first[0] - head[0], first[1] - head[1]), Math.min(T.v, S.max), T.a, T.j) + (T.h || 0);
     const last = lines[lines.length - 1];
     head = [!step.bidi || (lines.length - 1) % 2 === 0 ? xe : xs, last.y];
-    parts = { travel: +travel.toFixed(3), engrave: +(lines.length * E.secPerLine).toFixed(3) };
-    return travel * kTravel + lines.length * E.secPerLine * kEngrave;
+    const eng = lines.length * E.secPerLine + E.lead;
+    parts = { travel: +travel.toFixed(3), engrave: +eng.toFixed(3) };
+    return travel * kTravel + eng * kEngrave;
   };
 
   for (const step of plan.steps) {
@@ -371,16 +376,22 @@ function exportFiles(plan, cfg) {
 
 // For the screen's route (and the follow fit): each engraving step as sent, by toolpath index:
 // { n lines, y0, y1 (first and last line), xs, xe (the row with overscan), sec (whole step,
-// lines only) }. The screen draws the head along these at this pace.
+// lines only), lead (the step's own) }. The screen draws the head along these at this pace. With
+// the job's timeScale.engrave, as the estimate (so the drawing keeps up with the laser the same way).
 function engraveRows(pkg, cfg) {
   const S = settings(cfg);
   const out = {};
   const { build } = require('../../job/plan');
+  const TS = (cfg && cfg.timeScale) || {};
+  const k = Number.isFinite(TS.engrave) && TS.engrave >= 0.6 && TS.engrave <= 1.6 ? TS.engrave : 1;
   for (const step of build(pkg).steps) {
     if (step.op !== 'engrave') continue;
     const E = engraveLines(step, S);
     if (!E.lines.length) continue;
-    out[step.i] = { n: E.lines.length, y0: +E.lines[0].y.toFixed(3), y1: +E.lines[E.lines.length - 1].y.toFixed(3), xs: +E.xs.toFixed(3), xe: +E.xe.toFixed(3), bidi: step.bidi, sec: +(E.lines.length * E.secPerLine).toFixed(3) };
+    out[step.i] = {
+      n: E.lines.length, y0: +E.lines[0].y.toFixed(3), y1: +E.lines[E.lines.length - 1].y.toFixed(3), xs: +E.xs.toFixed(3), xe: +E.xe.toFixed(3), bidi: step.bidi,
+      sec: +(E.lines.length * E.secPerLine * k).toFixed(3), lead: +(E.lead * k).toFixed(3)
+    };
   }
   return out;
 }

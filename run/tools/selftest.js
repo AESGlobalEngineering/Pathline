@@ -182,6 +182,21 @@ console.log('Trotec job stream');
   ok(lens[0].name === 'MOVEX_PLUS' && lens[1].name === 'MOVEX_MINUS', 'bidirectional lines alternate');
   const ys = cmds.filter((c) => c.name === 'MOVEXY').map((c) => c.v[1]);
   ok(ys[0] > ys[ys.length - 1], 'direction "up" starts at the front (largest Y)');
+  // its time, as Ruby engraves (fitted on J0076, J0093, J0094): each line (40 − 3.43) mm at the set
+  // speed, then a turn of 0.0902 + 2.295e-5 · v s, and 0.203 s for the island
+  const st = trotec.compile(plan.build(pkg), cfg).segments[0].steps[0];
+  const n = tables.length, want = n * ((40 - 3.43) / 400 + 0.0902 + 2.295e-5 * 400) + 0.203;
+  ok(Math.abs(st.parts.engrave - want) < 0.05, 'engraving time: ' + n + ' lines × ' + ((st.parts.engrave - 0.203) / n).toFixed(4) + ' s + 0.203 s = ' + st.parts.engrave + ' s (' + want.toFixed(2) + ')', JSON.stringify(st.parts));
+  const rows = trotec.engraveRows(pkg, cfg)[0];
+  ok(rows && rows.n === n && rows.lead === 0.203 && Math.abs(rows.sec + rows.lead - st.parts.engrave) < 0.01,
+    'the screen\'s engraving rows take the estimate\'s time (lines and the island\'s own 0.203 s)', JSON.stringify(rows));
+  const rowsK = trotec.engraveRows(pkg, { ...cfg, timeScale: { engrave: 0.99 } })[0];
+  ok(Math.abs(rowsK.sec - rows.sec * 0.99) < 0.01, 'the drawing takes the fitted engraving scale, as the estimate does');
+  // drawn: each line at an even pace, the island's time in all
+  const F = require('../ui/follow');
+  const route = F.routeOf({ ...pkg, rows: trotec.engraveRows(pkg, cfg) }, F.motionFor(null, cfg));
+  const drawn = route.segs.filter((g) => g.step === 0 && g.kind !== 'travel').reduce((a, g) => a + g.dt, 0);
+  ok(Math.abs(drawn - st.parts.engrave) < 0.3, 'drawn: the island takes the estimate\'s time (' + drawn.toFixed(2) + ' s of ' + st.parts.engrave + ')');
 }
 {
   // travel between cuts: the planner's S-curve (motion.js), the profiles, and Run's own estimate
@@ -1578,6 +1593,7 @@ async function reportTests() {
     const lidAt = got.slice(n1).find((g) => g.body.interlock);
     ok(lidAt && lidAt.at - tLid < 1000, 'a change (the lid opened) arrives within a second (' + (lidAt ? lidAt.at - tLid : '-') + ' ms)', JSON.stringify(got.slice(n1).map((g) => g.body.interlock)));
     await call('POST', 'local/sim/lid', { open: false });
+    for (let i = 0; i < 40 && (await call('GET', 'v1/status')).data.interlock; i++) await wait(100);
     // a job running: about every 5 s (1 s here)
     const q = await call('POST', 'v1/jobs', example);
     await call('POST', 'local/jobs/' + q.data.id + '/anchor', { clear: true });

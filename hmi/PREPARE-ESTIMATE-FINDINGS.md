@@ -7,7 +7,7 @@ From Pathline Run 0.7.13, 16 Nov 2026. Measured on the Trotec Q500 "Ruby" from R
 | | Run's estimate | Prepare's estimate |
 |---|---|---|
 | Cutting jobs (Ruby's last 27 runs) | 1.11 % off (rms) | J0087: **+10 %** |
-| Engraving jobs (J0093, J0094) | +5.0 % and +5.7 %; +2.4 % and +2.9 % with the scale fitted since | **+1574 % and +1429 %** (about 16× too long) |
+| Engraving jobs (J0093, J0094) | were +5.0 % and +5.7 %; −0.6 % and +0.9 % with the model below (Run 0.7.13) | **+1574 % and +1429 %** (about 16× too long) |
 | Registration marks | learnt per machine (4.7 s now) | 1.5 s each, always |
 
 The engraving error is one term, and it's the first thing to fix. Run now sends `markTime`, which Prepare already reads.
@@ -24,23 +24,24 @@ The same `acc` gives an overscan of v²/2acc = 345 mm, which inflates the travel
 - **Every line sweeps the whole island's box width plus 10 mm overscan each side**, whatever the artwork on that line. Prepare uses each line's own extent, about 2 mm on these jobs, with no overscan.
 - **Each line costs a near-constant ~0.1 s on top of the sweep**: the turnaround. It isn't proportional to the line's length, and what's left after it is within ±3 ms per line.
 
-Fitted over all three jobs: 1.6 % rms per step, worst 4 %. Run's present constants give 2.9 %.
+Pathline Run 0.7.13 times engraving this way now (`ENGRAVE` in `run/src/ctrl/trotec/compile.js`). It was fitted on all 34 engraving steps of the three jobs, with each step's travel (timed separately) taken out of its real time: 2.2 % rms per step, and the job totals −0.6 % (J0093), +0.9 % (J0094) and −0.3 % (J0076's bars). Run's old constants ran the two jobs +5.0 % and +5.7 %.
 
 ```
 p     = floor(25.4 / dpi / 0.006) · 0.006            line spacing, mm
 lines = round(boxH / p)
-W     = boxW + 2 · 10                                 the sweep, mm
-time  = lines · (0.955 · W / v + 0.0770 + 4.58e-5 · v) + 0.32 s     per island, v in mm/s
+W     = boxW + 2 · 10                                 each line as sent, mm (box and overscan)
+time  = lines · ((W − 3.43) / v + 0.0902 + 2.295e-5 · v) + 0.203 s   per island, v in mm/s
+        plus the travel to the island, as any travel
 ```
 
-On the two jobs this gives 471.5 s (real 472.6) and 527.9 s (real 525.9).
-
-The 0.955 means the head covers the sweep about 4.5 % faster than the set speed would. It also shows in J0076, where 80 mm lines run relatively quicker than 40 mm ones. *Why* is inferred, not measured: the overscan really travelled may be shorter than 10 mm, or the real speed a little higher.
+- **The sweep, `(W − 3.43) / v`.** The head covers each line as if the overscan were 8.3 mm, not the 10 mm sent. It's at speed sooner than the line's ends. A sweep factor (0.955 · W / v) fits the data just as well; the shorter overscan is the one kept because it leaves the head at the set speed. Which one is physically right is inferred, not measured.
+- **The turn, `0.0902 + 2.295e-5 · v` per line:** 0.094 s at 200 mm/s, 0.102 s at 500.
+- **0.203 s per island.** An earlier fit gave 0.32 s, but that included the travel to the island.
 
 **For Prepare (Trotec, both directions):**
 
 1. Don't use `info.acc` for an engraving line's turnaround or overscan. It's for travel only. PROTOCOL.md now says so under `GET /machine`.
-2. Time each island with the formula above: box width plus 2 × 10 mm per line, and the line count from the 6 µm spacing.
+2. Time each island with the formula above, the same one Run uses: box width plus 2 × 10 mm per line, and the line count from the 6 µm spacing.
 3. One-way engraving hasn't been measured on Ruby. Keep the return stroke as it is until it is.
 
 **What Prepare can't know.** Run places a print-and-cut job onto its marks. J0094's sheet lay rotated −46°, so its lines came out 2–4× wider than designed (step 1: 66 mm, not 31 mm), and the job ran longer than J0093. Run estimates again after placing, so the machine's own figure (Monitor, the screen) covers this. Prepare's figure can only assume the sheet lies square.
@@ -84,7 +85,7 @@ Prepare already reads `info.markTime` and falls back to 1.5 s, but Run never sen
 - `GET /machine` sends `markTime` (section 2).
 - PROTOCOL.md says what a Trotec's `acc` is for (travel only) and what `markTime` is.
 - Run's own estimate fits its cut, travel and engrave scales after every job (`timeScale`), and learns the time per mark.
-- Not yet in Run: the engraving formula above. Run's engraving is already within 3–6 %. It's a candidate for Run's `compile.js` too (turnaround 0.0770 + 4.58e-5·v, sweep ×0.955), with the engrave scale then refitted towards 1.
+- Run times engraving with the formula in section 1. The screen draws the head across each line at the sweep's pace and steps it down as it turns. Run's estimate fit now works every past job out again with the current model, placed where it was cut. On Ruby's last 26 runs that fit puts engraving at ×0.991, so the formula needs almost no machine scale.
 
 ## The data
 

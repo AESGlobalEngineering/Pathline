@@ -15,15 +15,24 @@ const path = require('path');
 const LIMIT = { cut: [0.7, 1.4], travel: [0.6, 1.5], engrave: [0.6, 1.6] };
 const KEYS = ['cut', 'travel', 'engrave'];
 
-// a run's steps with their parts: as saved (since 13 Nov), or worked out again from the job
+// a run's steps with their parts, as the estimate times them now: worked out again from the job,
+// placed where it was cut (the anchor, the marks found, the bed map: J0094's sheet lay at −46°, and
+// its lines came out 2–4× longer than drawn). The parts saved with the run are from the estimate of
+// the day: after the engraving model changed (16 Nov) they'd have pulled the scale back to the old
+// model's error. Those are used only when the job's files are gone.
 function stepsOf(run, dataDir, cfg) {
-  if ((run.steps || []).some((s) => s.parts)) return run.steps;
-  try {
-    const pkg = JSON.parse(fs.readFileSync(path.join(dataDir, 'jobs', run.id, 'package.json'), 'utf8'));
-    const plan = require('./job/plan');
-    const p = require('./ctrl/trotec/compile').compile(plan.build(pkg), { ...cfg, timeScale: null });
-    return p.segments.filter((s) => s.kind === 'stream').flatMap((s) => s.steps);
-  } catch (e) { return null; }
+  let pkg0 = null;
+  try { pkg0 = JSON.parse(fs.readFileSync(path.join(dataDir, 'jobs', run.id, 'package.json'), 'utf8')); } catch (e) { /* removed */ }
+  if (pkg0) {
+    try {
+      if (run.placement && run.placement.mapAt && !run.bedMap) { const m = require('./bedmaps').byAt(dataDir, run.placement.mapAt); if (m) run.bedMap = m.map; }
+      const pkg = (run.placement && require('./follow-fit').savedPlacement(run, pkg0)) || pkg0;
+      const plan = require('./job/plan');
+      const p = require('./ctrl/trotec/compile').compile(plan.build(pkg), { ...cfg, timeScale: null });
+      return p.segments.filter((s) => s.kind === 'stream').flatMap((s) => s.steps);
+    } catch (e) { /* as saved */ }
+  }
+  return (run.steps || []).some((s) => s.parts) ? run.steps : null;
 }
 
 // each step's real time: from when the marker before it was first reported to when its own was

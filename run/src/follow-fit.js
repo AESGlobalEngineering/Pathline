@@ -210,7 +210,7 @@ function replay(run, pkg, M, stamp, opts = {}) {
       if (ri > seen && r[4] === 'busy' && clock - r[0] < 33) {
         const e = Math.hypot(d.p[0] - r[1], d.p[1] - r[2]);
         // opts.detail: what the drawing was on (cut, row, travel …) with each error
-        errs.push(opts.detail ? { e, kind: follow.route.segs[d.k].kind, speed: (pkg.processes || []).find((q) => q.index === ((pkg.toolpath || [])[follow.route.segs[d.k].step] || {}).process) } : e);
+        errs.push(opts.detail ? { e, dx: d.p[0] - r[1], dy: d.p[1] - r[2], kind: follow.route.segs[d.k].kind, speed: (pkg.processes || []).find((q) => q.index === ((pkg.toolpath || [])[follow.route.segs[d.k].step] || {}).process) } : e);
       }
       ri++;
     }
@@ -281,8 +281,18 @@ function fit(dataDir, current = {}, opts = {}) {
   const M = (prof) => F.motionFor({ ...motion, cut: motion.cut || prof.cut, follow: prof }, cfg);
   // where each job was, found once with the profile in use: the placement found, or the job as
   // sent if that fits the reports better (a placement can go wrong on a regular grid of parts)
+  // a placed job's engraving lines, worked out from the job as placed, as it was sent: moving the
+  // job's rows keyed by step number broke on print and cut, whose mark steps are left out of the
+  // placed job (J0093 was drawn on the wrong islands, 76 mm from the reports; 9 mm placed right),
+  // and lines can't be turned with a sheet laid at an angle (J0094: −46°)
+  const rowsFor = (p) => {
+    if (cfg.controller !== 'trotec' && cfg.controller) return p;
+    if (!(p.toolpath || []).some((s) => s.type === 'engrave')) return p;
+    try { return { ...p, rows: require('./ctrl/trotec/compile').engraveRows(p, { ...require('./config').defaults('trotec'), ...cfg }) }; } catch (e) { return p; }
+  };
   const jobs = runs.map((r) => {
-    const found = placement(r.run, r.pkg, M(prof0));
+    const found0 = placement(r.run, r.pkg, M(prof0));
+    const found = found0 && r.run.placement ? rowsFor(found0) : found0;
     const sent = score(replay(r.run, r.pkg, M(prof0), current.stamp || null));
     return { ...r, placed: found && score(replay(r.run, found, M(prof0), current.stamp || null)) <= sent ? found : r.pkg };
   });
@@ -344,4 +354,4 @@ function fit(dataDir, current = {}, opts = {}) {
   return { use: better, stampUse: !!ks, stamp, travel: prof.travel, cut: prof.cut, before, after, runs: jobs.map((j) => j.run.id), at: new Date().toISOString() };
 }
 
-module.exports = { fit, loadRuns, placement, replay, retimed, timeOf, tripleSpread, fitStampK, summary, score, LIMITS };
+module.exports = { fit, loadRuns, placement, savedPlacement, replay, retimed, timeOf, tripleSpread, fitStampK, summary, score, LIMITS };
