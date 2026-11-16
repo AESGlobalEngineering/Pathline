@@ -146,7 +146,8 @@ function start(opts = {}) {
   let fitting = null;
   const trotecMotion = () => ({ ...require('./ctrl/trotec/motion').travelLimits(cfg, require('./ctrl/trotec/compile').PLANNER.Standard, (cfg.trotec && cfg.trotec.travelSpeed) || 700), cut: require('./ctrl/trotec/compile').cutProfile(require('./ctrl/trotec/compile').PLANNER.Standard) });
   function fitFollow(why) {
-    if (fitting || cfg.controller !== 'trotec' || opts.sim) return fitting;
+    // (not on the simulator, except for the self-test: PATHLINE_RUN_FIT_IN_SIM)
+    if (fitting || cfg.controller !== 'trotec' || (opts.sim && !process.env.PATHLINE_RUN_FIT_IN_SIM)) return fitting;
     const { Worker } = require('worker_threads');
     const L = followState.learnt || {};
     fitting = new Promise((resolve) => {
@@ -155,7 +156,8 @@ function start(opts = {}) {
         w = new Worker(path.join(__dirname, 'follow-worker.js'), { workerData: { dataDir: DATA, current: { stamp: L.stamp, travel: L.travel, cut: L.cut }, cfg, motion: trotecMotion() } });
       } catch (e) { log('follow fit: not started (' + e.message + ')'); fitting = null; return resolve(null); }
       log('follow fit: started (' + why + ')');
-      w.on('message', (m) => {
+      w.on('message', (m) => { try { onFit(m); } catch (e) { log('follow fit: ' + (e && e.message)); } });
+      const onFit = (m) => {
         if (m.log) log(m.log);
         if (m.error) log('follow fit: ' + m.error);
         // the estimate's cutting, travel and engraving scaled by what the runs took (timefit.js)
@@ -167,17 +169,19 @@ function start(opts = {}) {
         }
         if (!m.result) return;
         const r = m.result;
-        const learnt = { ...(followState.learnt || {}) };
-        if (r.stampUse) learnt.stamp = r.stamp;
-        if (r.use) Object.assign(learnt, { travel: r.travel, cut: r.cut, score: r.after, runs: r.runs });
+        // (not called learnt: that hid learnt(), the setting saver, all through this handler, and
+        // the estimate fit above threw "Cannot access 'learnt' before initialization")
+        const kept = { ...(followState.learnt || {}) };
+        if (r.stampUse) kept.stamp = r.stamp;
+        if (r.use) Object.assign(kept, { travel: r.travel, cut: r.cut, score: r.after, runs: r.runs });
         if (r.stampUse || r.use) {
-          learnt.at = r.at;
-          machine.learnt = learnt;
-          if (machine.link) machine.link.stamp = learnt.stamp || null;
+          kept.at = r.at;
+          machine.learnt = kept;
+          if (machine.link) machine.link.stamp = kept.stamp || null;
         }
-        followState = { learnt: r.stampUse || r.use ? learnt : followState.learnt || null, last: r };
+        followState = { learnt: r.stampUse || r.use ? kept : followState.learnt || null, last: r };
         try { fs.writeFileSync(FOLLOW_FILE, JSON.stringify(followState, null, 2)); } catch (e) { log('follow fit: not saved (' + e.message + ')'); }
-      });
+      };
       const done = () => { fitting = null; resolve(followState); };
       w.on('error', (e) => { log('follow fit: ' + e.message); done(); });
       w.on('exit', done);

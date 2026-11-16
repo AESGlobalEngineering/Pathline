@@ -1300,6 +1300,22 @@ async function upkeepTests() {
   });
   const tr = tf.fit(dT, {}, { current: {} });
   ok(tr.use && Math.abs(tr.scale.cut - 1.03) < 0.01 && Math.abs(tr.scale.travel - 0.92) < 0.02 && tr.after.rms < 0.5, 'estimate fit: cutting ×' + (tr.scale && tr.scale.cut) + ', travel ×' + (tr.scale && tr.scale.travel) + ' found (1.03, 0.92), runs ' + tr.before.rms + ' % → ' + tr.after.rms + ' % off', JSON.stringify(tr));
+  // the same, through the server's own background fit (the worker after a job): kept in the setup,
+  // and the server carries on (its handler once threw, as a JavaScript error dialog in the app)
+  fs.writeFileSync(path.join(dT, 'config.json'), JSON.stringify({ controller: 'trotec', regMarks: 'ignore', bed: [1300, 900] }));
+  const portT = 19820 + Math.floor(Math.random() * 100);
+  const srvT = spawn(process.execPath, [path.join(__dirname, '..', 'src', 'server.js'), '--sim', '--port', String(portT), '--data', dT], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, PATHLINE_RUN_FIT_IN_SIM: '1' } });
+  let outT = '';
+  srvT.stdout.on('data', (d) => { outT += d; }); srvT.stderr.on('data', (d) => { outT += d; });
+  try {
+    const bT = 'http://127.0.0.1:' + portT + '/api';
+    for (let i = 0; i < 60; i++) { try { await fetch(bT + '/v1/info'); break; } catch (e) { await new Promise((r) => setTimeout(r, 100)); } }
+    await fetch(bT + '/local/follow/fit', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+    let ts = null;
+    for (let i = 0; i < 40 && !ts; i++) { await new Promise((r) => setTimeout(r, 250)); ts = (await (await fetch(bT + '/local/state')).json()).config.timeScale || null; }
+    const alive = (await fetch(bT + '/v1/status')).status === 200;
+    ok(ts && Math.abs(ts.cut - 1.03) < 0.01 && alive && !/before initialization|TypeError|ReferenceError/.test(outT), 'the background fit after a job keeps the estimate\'s scales, and the server carries on (cutting ×' + (ts && ts.cut) + ')', outT.split('\n').filter((l) => /estimate|follow fit|Error/.test(l)).slice(-4).join(' | '));
+  } finally { srvT.kill(); }
   const prog = trotec.compile(plan.build(example), { ...config.defaults('trotec'), timeScale: { cut: 1.1, travel: 1, engrave: 1 } });
   const prog1 = trotec.compile(plan.build(example), config.defaults('trotec'));
   const st1 = prog1.segments.filter((s) => s.kind === 'stream').flatMap((s) => s.steps).find((s) => s.parts && s.parts.cut > 0);
