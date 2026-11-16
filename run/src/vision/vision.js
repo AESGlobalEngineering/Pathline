@@ -284,11 +284,18 @@ class Vision {
     }
     // the marks found must be as far apart as the job's: a dot that isn't the mark (a hole in the
     // bed through clear acrylic, artwork) bent the job 5 % one way and 6 % the other, and it was cut
-    // off the print. Over 1 % (2 mm at least) out: stop before anything is cut
+    // off the print. Over 1 % (2 mm at least) out: stop before anything is cut.
+    // Not with Non-linear: it's chosen for a print that has stretched (or shrunk) unevenly, and it
+    // bends the job to the marks wherever they're found, so the difference is only logged
+    const bends = pkg.regMarks && pkg.regMarks.mode === 'nonlinear';
     for (let i = 0; i < E.length; i++) {
       for (let j = i + 1; j < E.length; j++) {
         const de = Math.hypot(E[j][0] - E[i][0], E[j][1] - E[i][1]), dd = Math.hypot(D[j][0] - D[i][0], D[j][1] - D[i][1]);
         if (Math.abs(dd - de) > Math.max(2, 0.01 * de)) {
+          if (bends) {
+            this.log('print and cut: marks ' + steps[i].mark + ' and ' + steps[j].mark + ' found ' + dd.toFixed(1) + ' mm apart, ' + de.toFixed(1) + ' mm in the job (' + ((dd / de - 1) * 100).toFixed(1) + ' %): Non-linear, so the job follows the marks');
+            continue;
+          }
           this.log('print and cut: marks ' + steps[i].mark + ' and ' + steps[j].mark + ' found ' + dd.toFixed(1) + ' mm apart, ' + de.toFixed(1) + ' mm in the job: stopped');
           throw err('Registration marks ' + steps[i].mark + ' and ' + steps[j].mark + ' were found ' + dd.toFixed(1) + ' mm apart, but they are ' + de.toFixed(1) + ' mm apart in the job. One of them wasn\'t the mark (or the sheet isn\'t this job\'s). Nothing was cut.');
         }

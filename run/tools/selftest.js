@@ -1186,6 +1186,21 @@ async function visionTests() {
     await new Promise((r) => setTimeout(r, 600));
     const kept = fs.existsSync(path.join(data, 'marks', 'mark1.bin.gz')) && fs.existsSync(path.join(data, 'marks', 'mark3.json'));
     ok(kept, 'the pictures looked at for the marks are kept (data/marks)', fs.existsSync(path.join(data, 'marks')) ? fs.readdirSync(path.join(data, 'marks')).join(', ') : 'no marks folder');
+    await call('POST', 'local/alarm/clear');
+    // the same sheet as a Non-linear job: chosen for a print that stretched unevenly, so it follows
+    // the marks where they're found; the difference is logged, nothing stops
+    const bent = JSON.parse(JSON.stringify(wrong));
+    bent.regMarks = { ...(bent.regMarks || {}), mode: 'nonlinear' };
+    const q7 = await unanchored(bent);
+    await waitFor((x) => x.state === 'idle');
+    await new Promise((r) => setTimeout(r, 300));
+    const s7 = await call('POST', 'v1/start', { id: q7.data.id });
+    if (s7.status !== 200) ok(false, 'Non-linear job starts', JSON.stringify(s7));
+    const w7 = await waitFor((x) => x.markWait || x.state === 'idle' || x.state === 'alarm');
+    if (w7.markWait) await call('POST', 'v1/stop');
+    const log7 = (await call('GET', 'local/log')).data || [];
+    ok(w7.state === 'idle' && w7.progress === 1 && log7.some((l) => /mm in the job \([-\d.]+ %\): Non-linear, so the job follows the marks/.test(l)) && log7.some((l) => /print and cut: nonlinear/.test(l)),
+      'Non-linear: marks not as far apart as the job\'s are logged, not stopped, and the job runs bent to them', JSON.stringify({ w7, last: log7.slice(-5) }));
     await call('POST', 'v1/alarm/clear');
   } catch (e) { ok(false, 'head camera', e.stack + '\n' + out.slice(-1500)); }
   srv.kill();
