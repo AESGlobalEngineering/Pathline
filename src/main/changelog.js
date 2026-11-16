@@ -5,6 +5,13 @@
 
 module.exports = [
   {
+    version: '1.6.13', date: '16 Nov 2026',
+    added: [],
+    fixed: [
+      'Engraving time on a Trotec was about 16 times too long (the Etch Calibration job showed 1 h 55 min; it is now 9 min 48 s). It now uses how the Q500 really engraves, as measured by Pathline Run: lines 0.048 mm apart at 500 DPI, each sweeping the island\'s full width plus 10 mm each side, with about 0.1 s to turn round. The thermal map follows, so engraving heats as fast as it really does.'
+    ]
+  },
+  {
     version: '1.6.12', date: '12 Nov 2026',
     added: [
       'Thermal map on sheet metal: shows where the sheet starts to bend from uneven heat, not where it melts. A hot area pushing against the cold sheet around it stays bent once it is about 123 °C hotter than the rest (0.9 mm stainless 304); a wide hot area on thin sheet bows sooner. The panel shows the hot area, the bending limit for it, how close the job comes and when.',

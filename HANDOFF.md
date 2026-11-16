@@ -15,6 +15,14 @@ Latest round (28 Oct, final):
 - **Dark mode bed is grey** (`--bed`, `--sheet`, `--bed-grid*` in theme.css). **ACI 7 shows as white in dark mode** (black in light), as in CAD, and so do the marks drawn on the bed (registration marks, engrave hatching, arrows, start points): see the `--aci7*` and `--ink` tokens, and `LRC.aci.hex/fg/stroke` in app.js. Exports (DXF/SVG/PDF) still use real black.
 - **Sample machines and materials from earlier builds are removed on first start** (main.js, tracked by `settings.samplesRemoved`). This is by exact id (trotec, flatbed, laser2, acr-print-3 … brass-1); anything the operator created stays.
 
+Version 1.6.13 (16 Nov):
+- **Trotec engraving timed as measured** (from Pathline Run 0.7.13's PREPARE-ESTIMATE-FINDINGS: Prepare was +1574 % / +1429 % on J0093/J0094). `rasterModelOf(machine)` returns `TROTEC_RASTER` for ctrl Trotec, or the machine's own `info.raster` when it sends one.
+  - `rasterModelTime`: pitch = floor(25.4/dpi / 0.006)·0.006; lines = round(boxH / pitch); W = boxW + 2·10; t = lines·(0.955·W/v + 0.077 + 4.58e-5·v) + 0.32. One way adds the return stroke across W, from acc (not measured yet).
+  - Used for islands and shared scans (the whole art box per line), and as the overscan for travel to an island (10 mm). `info.acc` is travel only for a Trotec. Other controllers keep `lineTime`. The beam-on time `on` is scaled to the real line count, so the thermal map heats at the real rate.
+  - Etch Calibration: 1 h 55 min → 9 min 48 s, travel 17.5 → 6.5 s. Heat with the real timing: bare +12 °C (10 % of the bending limit), spray +83 °C (68 %), nearly all from the 11 × 53 mm frames island (189 s).
+  - **Banded/interleaved engraving was simulated and not built**: 5 / 2 / 1 mm bands round-robin give 65 / 62 / 57 % for +6 / +16 / +33 % time. The local heat settles within seconds, about one band's time, so stepping away between bands lets little escape. Prototype: scratchpad `band-proto.js` (not in the repo).
+  - Not done from the findings: cutting is +10 % on J0087 (cause not worked out; Run slows on curves and sends arcs).
+
 Version 1.6.12 (12 Nov):
 - **Engraving holes across objects** (owner's bug report "Etch issue": the magnifying glass lens was engraved). Run fills even-odd per object, then merges, so a hole drawn as its own object was filled. `CC.engraveHoles(job)` maps each closed-only object of an Engrave process that lies inside another object of the same process (`insideOf` on every ring) to the outermost one.
   - The package: `packageEntities` adds the holes' paths to the host, and the hole gets `holeOf`. `toolpath` drops holes from engrave steps whose host is in the step. This works with the current Run, with no Run change.

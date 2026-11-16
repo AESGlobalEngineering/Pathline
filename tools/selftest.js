@@ -395,10 +395,19 @@ async function main() {
     // done with slow turnarounds (low acceleration) spreads the heat over longer
     {
       const engr = { ...job, processes: [{ name: 'Engrave fill', proc: 'Engrave', power: 35, speed: 400, f: 500, passes: 1, out: true, aci: [7] }], entities: [{ id: 'sq', aci: 7, paths: [{ p: CC.shapes.rect(20, 20, 15, 15, 0), c: true }] }] };
-      const run = (acc) => { const m = { ...laser, info: { ...laser.info, acc } }; const e = CC.estimate(engr, m, { timeline: true }); const r = e.timeline.find((o) => o.kind === 'op' && o.mode === 'raster'); return { r, sim: CC.thermalSim({ ...engr, thermalSpray: true }, m, bare, e.timeline).to(e.total) }; };
+      const run = (acc) => { const m = { ...laser, ctrl: 'Ruida', info: { ...laser.info, acc } }; const e = CC.estimate(engr, m, { timeline: true }); const r = e.timeline.find((o) => o.kind === 'op' && o.mode === 'raster'); return { r, sim: CC.thermalSim({ ...engr, thermalSpray: true }, m, bare, e.timeline).to(e.total) }; };
       const slow = run(350), quick = run(20000);
       ok(near(slow.r.on, quick.r.on, 1e-6) && slow.r.on < slow.r.dur * 0.05, 'beam-on time is the sweep across the artwork (' + slow.r.on.toFixed(2) + ' s of ' + slow.r.dur.toFixed(0) + ' s)');
       ok(quick.sim.peak - 20 > 5 * (slow.sim.peak - 20), 'the same marking heats far more with quick turnarounds (+' + Math.round(quick.sim.peak - 20) + ' vs +' + Math.round(slow.sim.peak - 20) + ' °C)');
+      // a Trotec engraves as measured (PREPARE-ESTIMATE-FINDINGS): its acc is for travel only
+      const M = CC.TROTEC_RASTER;
+      ok(near(CC.rasterPitch(M, 500), 0.048, 1e-9) && near(CC.rasterPitch(null, 500), 0.0508, 1e-9), 'Trotec lines are 0.048 mm apart at 500 DPI (its 6 µm steps), not 0.0508');
+      const box10 = CC.rasterModelTime(M, { x0: 0, y0: 0, x1: 10, y1: 10 }, 500, 500, false);
+      ok(box10.lines === 208 && near(box10.t, 208 * (0.955 * 30 / 500 + 0.077 + 4.58e-5 * 500) + 0.32, 1e-9), 'Trotec island: box width + 2 × 10 mm per line, 0.077 s + 4.58e-5·v turnaround, 0.32 s per island (' + box10.t.toFixed(1) + ' s for 10 × 10 mm at 500 mm/s)');
+      const tro = (acc) => { const m = { ...laser, ctrl: 'Trotec', info: { ...laser.info, acc } }; return CC.estimate(engr, m, { timeline: true }).timeline.find((o) => o.kind === 'op' && o.mode === 'raster'); };
+      const t352 = tro(352), t5000 = tro(5000);
+      ok(near(t352.dur, t5000.dur, 1e-9) && near(t352.dur, CC.rasterModelTime(M, { x0: 20, y0: 20, x1: 35, y1: 35 }, 500, 400, false).t, 0.01), 'a Trotec\'s engraving time doesn\'t come from its travel acc (' + t352.dur.toFixed(1) + ' s at 352 and 5000 mm/s²)');
+      ok(CC.rasterModelOf({ ...laser, ctrl: 'Ruida' }) === null && CC.rasterModelOf({ ...laser, ctrl: 'Ruida', info: { raster: { over: 5, turn: 0.05 } } }).turn === 0.05, 'other controllers time lines from acc, unless the machine sends its own raster model');
     }
     const steel = CC.thermalSim(job, laser, { name: 'Stainless Steel', g: 'Metal', t: 0.9 }, est.timeline).to(est.total);
     const hs = steel.hotSpot();

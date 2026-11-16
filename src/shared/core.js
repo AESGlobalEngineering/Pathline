@@ -377,10 +377,44 @@
     return uni ? t + travelTime(x1 - x0 + (speed * speed) / acc, Math.max(speed, vTravel || speed), acc) : t;
   }
 
+  // How a controller really engraves, measured, when known. A Trotec (Ruby,
+  // Q500; Pathline Run 0.7.13's PREPARE-ESTIMATE-FINDINGS, 1.6 % rms per
+  // island over 34 steps, 100–600 mm/s, both directions):
+  //  - lines are 25.4/DPI apart rounded down to its 6 µm steps (0.048 mm at 500 DPI);
+  //  - every line sweeps the whole island's box width plus 10 mm each side;
+  //  - each line costs a near-constant turnaround, 0.0770 s + 4.58e-5·v;
+  //  - the sweep runs ≈ 4.5 % quicker than the set speed (× 0.955);
+  //  - 0.32 s per island.
+  // Its `acc` from GET /machine is for travel only; a line's turnaround and
+  // overscan don't come from it. A machine may send its own (info.raster).
+  // null: lines timed from acc (lineTime), each line over its own artwork.
+  const TROTEC_RASTER = { grid: 0.006, over: 10, sweep: 0.955, turn: 0.077, turnPerV: 4.58e-5, island: 0.32, src: 'Trotec Q500, measured by Pathline Run 0.7.13' };
+  function rasterModelOf(machine) {
+    const info = (machine && machine.info) || {};
+    const own = info.raster;
+    if (own && typeof own === 'object' && Number(own.turn) >= 0 && Number(own.over) >= 0) return { ...TROTEC_RASTER, ...own };
+    return machine && /trotec/i.test(machine.ctrl || info.ctrl || '') ? TROTEC_RASTER : null;
+  }
+  // line spacing a model really engraves at, mm
+  const rasterPitch = (model, dpi) => {
+    const p = 25.4 / Math.max(1, dpi);
+    return model && model.grid > 0 ? Math.max(model.grid, Math.floor(p / model.grid + 1e-9) * model.grid) : p;
+  };
+  // seconds to engrave the art box `b` as one island with a measured model
+  function rasterModelTime(model, b, dpi, speed, uni, vTravel, acc) {
+    const p = rasterPitch(model, dpi);
+    const lines = Math.max(1, Math.round((b.y1 - b.y0) / p));
+    const W = b.x1 - b.x0 + 2 * model.over;
+    let t = lines * ((model.sweep * W) / speed + model.turn + model.turnPerV * speed) + model.island;
+    // one way hasn't been measured: the return stroke across the sweep, as before
+    if (uni) t += lines * travelTime(W, Math.max(speed, vTravel || speed), acc);
+    return { t, lines, p };
+  }
+
   // Split an engraving into islands: shapes whose outlines are within `gap` mm
   // of each other are engraved together, separate groups on their own. Each
   // island gets its own scan lines, time and box (in original drawing order).
-  function rasterIslands(ents, dpi, speed, acc, withYs, gap, uni, vTravel) {
+  function rasterIslands(ents, dpi, speed, acc, withYs, gap, uni, vTravel, model) {
     gap = gap === undefined ? 2 : gap;
     const boxes = ents.map((e) => entityBox(e));
     const parent = ents.map((_, i) => i);
@@ -412,9 +446,16 @@
       // round past each end, often most of a line's time, is with it off)
       let dur = 0, area = 0, on = 0;
       for (const [, x0, x1] of rows) {
-        dur += lineTime(x0, x1, speed, acc, uni, vTravel);
+        if (!model) dur += lineTime(x0, x1, speed, acc, uni, vTravel);
         area += (x1 - x0) * step;
         on += (x1 - x0) / speed;
+      }
+      if (model) {
+        // the whole art box, every line, at the controller's real spacing
+        const art = boxOf(list);
+        const m = rasterModelTime(model, art, dpi, speed, uni, vTravel, acc);
+        dur = m.t;
+        on *= step / m.p;
       }
       // sampled scan-line heights so the simulation can follow gaps
       const every = Math.max(1, Math.ceil(rows.length / 240));
@@ -428,9 +469,9 @@
   // scan at engrave speed over each island and travel speed across the gaps
   // between them. For each set of islands that overlap in height, whichever
   // is quicker is used — the islands one by one, or the shared scan.
-  function rasterBands(isl, ents, dpi, speed, acc, vTravel, withYs, uni) {
+  function rasterBands(isl, ents, dpi, speed, acc, vTravel, withYs, uni, model) {
     if (isl.length < 2) return isl;
-    const over = (speed * speed) / (2 * acc);
+    const over = model ? model.over : (speed * speed) / (2 * acc);
     const vGap = Math.max(speed, vTravel || speed);
     const startOf = (r) => [r.rows[0][1] - over, r.rows[0][0]];
     const endOf = (r) => { const l = r.rows[r.rows.length - 1]; return [uni || r.rows.length % 2 ? l[2] + over : l[1] - over, l[0]]; };
@@ -470,6 +511,7 @@
       }
       const rows = [];
       let dur = 0, on = 0;
+      const art = model ? boxOf(list.flatMap((r) => r.ents.map((id) => byId.get(id)).filter(Boolean))) : null;
       for (const k of [...lines.keys()].sort((a, b) => a - b)) {
         const { y, spans } = lines.get(k);
         spans.sort((a, b) => a[0] - b[0]);
@@ -489,6 +531,8 @@
         dur += t;
         rows.push([y, first, x1]);
       }
+      // a measured controller sweeps the whole shared box on every line
+      if (model) { const m = rasterModelTime(model, art, dpi, speed, uni, vTravel, acc); dur = m.t; on *= step / m.p; }
       if (!rows.length || dur >= apart) { list.forEach((r) => out.push(r)); continue; }
       const b = EMPTY_BOX();
       rows.forEach(([y, a, c]) => { growBox(b, a, y); growBox(b, c, y); });
@@ -1504,7 +1548,9 @@
         // each separate island of artwork is engraved on its own, unless one
         // side-to-side scan across islands at the same height is quicker
         const dpi = Number(proc.f) || 500;
-        const over = (speed * speed) / (2 * acc);
+        // how this controller really engraves (measured), else from acc
+        const rModel = rasterModelOf(machine);
+        const over = rModel ? rModel.over : (speed * speed) / (2 * acc);
         const scan = engraveScan(proc);
         // an island's scan lines run top down, or bottom up (reversed)
         const rowsOf = (r, up) => (up ? r.rowsUp || (r.rowsUp = r.rows.slice().reverse()) : r.rows);
@@ -1515,7 +1561,7 @@
         const goesUp = (r, from) => scan.dir === 'up' || (scan.dir === 'fastest' && dist(startAt(rowsOf(r, true)), from) < dist(startAt(r.rows), from));
         let isl = cache.get(key);
         if (!isl) {
-          isl = rasterBands(rasterIslands(mine, dpi, speed, acc, opts.timeline, undefined, scan.uni, vTravel), mine, dpi, speed, acc, vTravel, opts.timeline, scan.uni);
+          isl = rasterBands(rasterIslands(mine, dpi, speed, acc, opts.timeline, undefined, scan.uni, vTravel, rModel), mine, dpi, speed, acc, vTravel, opts.timeline, scan.uni, rModel);
           isl.forEach((r) => { per[pi].area += r.area; engArea += r.area; });
           // order the islands like cuts: nearest next
           {
@@ -2146,6 +2192,6 @@
     processOrder, processOfAci, engraveHoles, toolSlot, toolRank, polyTime, travelTime, rasterSpans, orderPaths,
     estimate, headAt, fmtDuration, fmtLen, fmtArea, checkJob, regMarks, regMarkAci, camReach, marksOutOfReach, reachShift, regProcess, withPresets, ensureRegProcess, isRegProc, REG_PROC, REG_NEEDED,
     cutOrderOf, CUT_ORDER_DEFAULT, START_CLEAR, commonLines, bedOf, bedCount, defaultPresets, DEFAULTS,
-    rasterIslands, engraveScan, ENGRAVE_DIRS, DPI_STEPS, starterPresets, nestRects, THERMAL, thermalKey, thermalOf, colourOf, absorptionOf, thermalSim, bendLimit, isBareMetal, markingSprayOf, SPRAY_ABSORB, metalPresets, presetsFor
+    rasterIslands, engraveScan, ENGRAVE_DIRS, DPI_STEPS, starterPresets, nestRects, THERMAL, thermalKey, thermalOf, colourOf, absorptionOf, thermalSim, bendLimit, rasterModelOf, rasterPitch, rasterModelTime, TROTEC_RASTER, isBareMetal, markingSprayOf, SPRAY_ABSORB, metalPresets, presetsFor
   };
 });
