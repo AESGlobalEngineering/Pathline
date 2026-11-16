@@ -163,16 +163,34 @@ function jobSheet(job, machine, material, est) {
 // The job in run order, exactly as simulated: each cut with its chosen start
 // point and passes, engraving blocks, tool changes and conveyor feeds.
 // (Travel between them is implied: go to the next item's first point.)
+// The drawing as sent: an engraved object with holes inside it (other
+// objects, CC.engraveHoles) also carries the holes' paths, so it fills
+// even-odd around them; holeOf names the object a hole belongs to.
+function packageEntities(job) {
+  const holes = CC.engraveHoles(job);
+  const ents = outputEntities(job);
+  const byId = new Map(ents.map((e) => [e.id, e]));
+  const extra = new Map();
+  for (const [inner, host] of holes) if (byId.has(inner) && byId.has(host)) extra.set(host, (extra.get(host) || []).concat(byId.get(inner).paths));
+  return ents.map((e) => ({ id: e.id, name: e.name, aci: e.aci, bed: e.bed || 0, paths: extra.has(e.id) ? e.paths.concat(extra.get(e.id)) : e.paths, ...(holes.has(e.id) && byId.has(holes.get(e.id)) ? { holeOf: holes.get(e.id) } : {}) }));
+}
+
 function toolpath(job, est) {
   const r3 = (v) => Math.round(v * 1000) / 1000;
   const out = [];
+  // engraving fills even-odd: an object inside another engraved object is a
+  // hole in it and travels with that object (its paths are added to the
+  // host in the package's entities), so Pathline Run, which fills object by
+  // object, leaves it unengraved
+  const holes = CC.engraveHoles(job);
+  const engraveEnts = (ids) => ids.filter((id) => !(holes.has(id) && ids.includes(holes.get(id))));
   for (const o of est.timeline || []) {
     const p = o.proc >= 0 ? job.processes[o.proc] : null;
     if (o.kind === 'op' && o.mode === 'vector') {
       out.push({ type: 'cut', process: o.proc, name: p.name, ent: o.ent, bed: o.bed, closed: !!o.path.c, passes: o.passes || 1, pass: o.pass || undefined, round: o.round, seconds: +o.dur.toFixed(3), p: o.path.p.map(([x, y]) => [r3(x), r3(y)]) });
     } else if (o.kind === 'op' && o.mode === 'raster') {
       // direction is resolved per step ("fastest" becomes up or down); bidirectional false = every line left to right
-      out.push({ type: 'engrave', process: o.proc, name: p.name, ents: o.ents, bed: o.bed, dpi: o.dpi, passes: o.passes || 1, pass: o.pass || undefined, round: o.round, lines: o.rows, scan: o.shared ? 'across' : 'island', direction: o.dir || 'down', bidirectional: !o.uni, seconds: +o.dur.toFixed(3), box: [r3(o.box.x0), r3(o.box.y0), r3(o.box.x1), r3(o.box.y1)] });
+      out.push({ type: 'engrave', process: o.proc, name: p.name, ents: engraveEnts(o.ents), bed: o.bed, dpi: o.dpi, passes: o.passes || 1, pass: o.pass || undefined, round: o.round, lines: o.rows, scan: o.shared ? 'across' : 'island', direction: o.dir || 'down', bidirectional: !o.uni, seconds: +o.dur.toFixed(3), box: [r3(o.box.x0), r3(o.box.y0), r3(o.box.x1), r3(o.box.y1)] });
     } else if (o.kind === 'inspect') {
       out.push({ type: 'inspect', mark: o.mark, of: o.of, at: [r3(o.at[0]), r3(o.at[1])], d: r3(o.d), seconds: +o.dur.toFixed(3) });
     } else if (o.kind === 'dwell') {
@@ -228,7 +246,7 @@ function buildPackage(job, machine, material, est) {
     },
     checks: CC.checkJob(job, machine),
     toolpath: toolpath(job, est),
-    entities: outputEntities(job).map((e) => ({ id: e.id, name: e.name, aci: e.aci, bed: e.bed || 0, paths: e.paths }))
+    entities: packageEntities(job)
   };
 }
 

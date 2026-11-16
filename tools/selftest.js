@@ -378,6 +378,31 @@ async function main() {
     ok(CC.thermalOf({ name: 'Cast acrylic', g: 'Acrylic', thermal: { limit: 999 } }).limit === 105, 'thermal data comes from the reference table, not the material');
     ok(CC.thermalKey({ name: 'Stainless steel 316', g: 'Metal' }) === 'ss316' && CC.thermalKey({ name: 'Stainless steel 304', g: 'Metal' }) === 'ss304', 'stainless 304 and 316 have their own data');
     ok(CC.thermalOf({ name: 'Mystery sheet', g: 'Other' }) === null && CC.thermalSim(job, laser, { name: 'Mystery sheet', g: 'Other', t: 3 }, est.timeline) === null, 'no thermal map without reference data');
+    // sheet metal: where it starts to bend, not where it melts
+    const ss = CC.thermalOf({ name: 'Stainless Steel', g: 'Metal' });
+    const small = CC.bendLimit(ss, 0.9, 12), wide = CC.bendLimit(ss, 0.9, 100), thick = CC.bendLimit(ss, 3, 100);
+    ok(near(small.set, 123, 2) && small.by === 'set', '0.9 mm stainless 304 stays bent ≈ 123 °C over the rest of the sheet (' + small.set.toFixed(0) + ' °C)');
+    ok(wide.by === 'bow' && near(wide.bow, 50, 2), 'a 100 mm hot area on 0.9 mm stainless bows sooner, ≈ 50 °C over (' + wide.bow.toFixed(0) + ' °C)');
+    ok(thick.by === 'set', '3 mm stainless doesn\'t bow from a 100 mm hot area before it would stay bent');
+    ok(CC.bendLimit(CC.thermalOf(acr), 3, 50) === null, 'no bending limit for plastics (they have their own limit)');
+    // marking spray: bare metal takes far more of a CO2 beam through it
+    const bare = { name: 'Stainless Steel', g: 'Metal', t: 0.9 };
+    ok(!CC.markingSprayOf(bare, job) && CC.markingSprayOf({ ...bare, name: 'Stainless 304 + CerMark' }, job) && CC.markingSprayOf(bare, { ...job, thermalSpray: true }) && !CC.markingSprayOf({ ...bare, notes: 'marking spray' }, { ...job, thermalSpray: false }), 'marking spray from the job\'s switch, else the material\'s name or notes');
+    const plain = CC.thermalSim(job, laser, bare, est.timeline).to(est.total), sprayed = CC.thermalSim({ ...job, thermalSpray: true }, laser, bare, est.timeline).to(est.total);
+    ok(sprayed.spray && sprayed.absorb === CC.SPRAY_ABSORB && sprayed.peak - 20 > 4 * (plain.peak - 20), 'sprayed stainless heats far more than bare (+' + Math.round(sprayed.peak - 20) + ' vs +' + Math.round(plain.peak - 20) + ' °C)');
+    ok(!CC.thermalSim({ ...job, thermalSpray: true }, laser, acr, est.timeline).spray, 'the spray switch only applies to bare metal');
+    // engraving heats only while the beam crosses the artwork: the same marking
+    // done with slow turnarounds (low acceleration) spreads the heat over longer
+    {
+      const engr = { ...job, processes: [{ name: 'Engrave fill', proc: 'Engrave', power: 35, speed: 400, f: 500, passes: 1, out: true, aci: [7] }], entities: [{ id: 'sq', aci: 7, paths: [{ p: CC.shapes.rect(20, 20, 15, 15, 0), c: true }] }] };
+      const run = (acc) => { const m = { ...laser, info: { ...laser.info, acc } }; const e = CC.estimate(engr, m, { timeline: true }); const r = e.timeline.find((o) => o.kind === 'op' && o.mode === 'raster'); return { r, sim: CC.thermalSim({ ...engr, thermalSpray: true }, m, bare, e.timeline).to(e.total) }; };
+      const slow = run(350), quick = run(20000);
+      ok(near(slow.r.on, quick.r.on, 1e-6) && slow.r.on < slow.r.dur * 0.05, 'beam-on time is the sweep across the artwork (' + slow.r.on.toFixed(2) + ' s of ' + slow.r.dur.toFixed(0) + ' s)');
+      ok(quick.sim.peak - 20 > 5 * (slow.sim.peak - 20), 'the same marking heats far more with quick turnarounds (+' + Math.round(quick.sim.peak - 20) + ' vs +' + Math.round(slow.sim.peak - 20) + ' °C)');
+    }
+    const steel = CC.thermalSim(job, laser, { name: 'Stainless Steel', g: 'Metal', t: 0.9 }, est.timeline).to(est.total);
+    const hs = steel.hotSpot();
+    ok(hs.limit && steel.bend >= 0 && steel.bendAt >= 0 && (hs.rise === 0 || hs.dia > 0), 'stainless heat model reports the hot area and how close it came to bending (worst ' + Math.round(steel.bend * 100) + ' %)');
     ok(seed.machines().length === 0 && seed.materials().length === 0, 'ships with no machines or materials');
     // presets per machine: a machine's own list wins, others use the shared list for their type
     const [m1, , m2] = fixtureMachines();
@@ -471,6 +496,40 @@ async function main() {
     const pd = await importFile(path.join(tmp, 'd.pdf'));
     ok(pd.entities.length === 1 && pd.entities[0].aci === 1 && pd.entities[0].paths[0].c, 'PDF: closed red path');
     ok(near(pd.width, 25.4, 0.01), 'PDF: points converted to mm (' + pd.width.toFixed(2) + ')');
+  }
+
+  console.log('Engraving holes');
+  {
+    // a magnifying glass: the lens circle is its own object inside the ring-and-handle shape
+    const { laser } = testJob();
+    const circle = (cx, cy, r) => CC.shapes.ellipse(cx, cy, r, r);
+    const job = { ...testJob().job, processes: [{ name: 'Engrave fill', proc: 'Engrave', power: 35, speed: 400, dpi: 500, passes: 1, out: true, aci: [7] }, { name: 'Cut', proc: 'Cut', power: 90, speed: 20, f: 5000, passes: 1, out: true, aci: [1] }],
+      entities: [
+        { id: 'ring', aci: 7, paths: [{ p: circle(50, 50, 10), c: true }] },
+        { id: 'lens', aci: 7, paths: [{ p: circle(50, 50, 7), c: true }] },
+        { id: 'dot', aci: 7, paths: [{ p: circle(50, 50, 2), c: true }] },
+        { id: 'apart', aci: 7, paths: [{ p: circle(90, 50, 5), c: true }] },
+        { id: 'overlap', aci: 7, paths: [{ p: circle(97, 50, 5), c: true }] },
+        { id: 'plate', aci: 1, paths: [{ p: CC.shapes.rect(20, 20, 100, 60, 0), c: true }] },
+        { id: 'cutHole', aci: 1, paths: [{ p: circle(30, 70, 3), c: true }] }
+      ] };
+    const holes = CC.engraveHoles(job);
+    ok(holes.get('lens') === 'ring' && holes.get('dot') === 'ring', 'a shape inside an engraved shape is a hole in it (and one inside that, of the outermost): ' + JSON.stringify([...holes]));
+    ok(!holes.has('apart') && !holes.has('overlap') && !holes.has('ring') && !holes.has('cutHole'), 'overlapping or separate shapes, and cut shapes, are not holes');
+    const est = CC.estimate(job, laser, { timeline: true });
+    const pkg = ex.buildPackage(job, laser, null, est);
+    const ring = pkg.entities.find((e) => e.id === 'ring'), lens = pkg.entities.find((e) => e.id === 'lens');
+    const eng = pkg.toolpath.filter((s) => s.type === 'engrave');
+    ok(ring.paths.length === 3 && lens.holeOf === 'ring', 'the package gives the outer shape its holes (' + ring.paths.length + ' paths)');
+    ok(eng.length && eng.every((s) => !s.ents.includes('lens') && !s.ents.includes('dot')) && eng.some((s) => s.ents.includes('ring')), 'engrave steps leave the holes out, so Run fills the outer shape even-odd');
+    // what Pathline Run makes of it (its own fill code)
+    const planFile = path.join(__dirname, '..', 'run', 'src', 'job', 'plan.js');
+    if (fs.existsSync(planFile)) {
+      const runPlan = require(planFile);
+      const steps = runPlan.build(pkg).steps.filter((x) => x.op === 'engrave');
+      const beam = (x, y) => steps.some((st) => runPlan.scanLines(st, 25.4 / st.dpi).some((L) => Math.abs(L.y - y) < 0.03 && L.spans.some(([a, b]) => x >= a && x <= b)));
+      ok(beam(41.5, 50) && !beam(45, 50) && beam(50, 50), 'Run engraves the ring, leaves the lens, engraves the dot in the middle');
+    }
   }
 
   console.log('Exporters');

@@ -1,8 +1,8 @@
-// Pathline Monitor: the phone app. Live machine views come from the Monitor service
-// (/api/events, a server-sent stream); this phone's alert settings are kept there too
-// (/api/device). On the workshop network (plain http) a new alert shows here while the app
-// is open: a banner, a tone and a buzz. With an https address the phone trusts, alerts can
-// also arrive with the app closed (Web Push, sw.js).
+// Pathline Monitor: the phone app. A phone signs in once with the workshop password. Live
+// machine views come from the Monitor server (/api/events, a server-sent stream: everything
+// once, then each machine as it changes); this phone's alert settings are kept there too
+// (/api/device). A new alert shows here while the app is open (a banner, a tone and a buzz)
+// and arrives as a notification when it's closed (Web Push, sw.js).
 'use strict';
 
 // ---------------------------------------------------------------- small things
@@ -30,19 +30,22 @@ let deviceId = store.get('device', null);
 if (!deviceId) { deviceId = (crypto.randomUUID ? crypto.randomUUID() : String(Math.random()).slice(2) + Date.now()).replace(/[^a-z0-9-]/gi, ''); store.set('device', deviceId); }
 
 // ---------------------------------------------------------------- state
-let S = null;           // the last snapshot: { now, machines, alerts }
-let gotAt = 0;          // when it arrived (this phone's clock), to count down between updates
+let S = null;           // what the server last said: { app, machines, alerts, pushKey }
+let skew = 0;           // this phone's clock minus the server's, to count down between updates
 let live = false;
-const ui = { view: 'machines', machine: null, seenAt: store.get('seenAt', 0), prefs: null, notif: false, busy: false, note: '' };
+// signedIn: null until the server has answered, then true or false
+const ui = { view: 'machines', machine: null, seenAt: store.get('seenAt', 0), prefs: null, notif: false, busy: false, note: '', signedIn: null, signMsg: '', code: null, codeNote: '', removing: null };
 
-// time left on a running job (Run's own figure from 0.7.12), counted down since the last update
+// seconds since the machine's last report (m.at, by the server's clock)
+const age = (m) => Math.max(0, (Date.now() - skew - m.at) / 1000);
+// time left on a running job (Run's own figure), counted down since that report
 const remain = (m) => {
   if (!m.job) return 0;
   const r = Number.isFinite(m.job.remaining) ? m.job.remaining : m.job.seconds * (1 - m.job.progress);
-  return m.state === 'running' ? Math.max(0, r - (Date.now() - gotAt) / 1000) : r;
+  return m.state === 'running' ? Math.max(0, r - age(m)) : r;
 };
 const bedOf = (m) => (m.job && Array.isArray(m.job.beds) ? 'bed ' + m.job.beds[0] + ' of ' + m.job.beds[1] : '');
-const pctOf = (m) => (m.job ? Math.floor(Math.min(1, m.job.progress + (m.state === 'running' && m.job.seconds ? (Date.now() - gotAt) / 1000 / m.job.seconds : 0)) * 100) : 0);
+const pctOf = (m) => (m.job ? Math.floor(Math.min(1, m.job.progress + (m.state === 'running' && m.job.seconds ? age(m) / m.job.seconds : 0)) * 100) : 0);
 const queueSecs = (m) => m.queue.reduce((a, j) => a + (j.seconds || 0), 0);
 const at = (secs) => clock(Date.now() + secs * 1000);
 
@@ -58,7 +61,7 @@ const badge = (m, big) => '<span class="badge' + (m.kind === 'plotter' ? ' plott
 function noteFor(m) {
   if (m.state === 'mark') return '<div class="note warn">' + ic(I.alert) + '<span><b>' + esc(m.why) + '.</b> Find it with the camera at the machine.</span></div>';
   if (m.state === 'alarm') return '<div class="note err">' + ic(I.alert) + '<span><b>' + esc(m.why) + '.</b> Clear it at the machine.</span></div>';
-  if (m.state === 'offline') return '<div class="note err">' + ic(I.off) + '<span><b>' + esc(m.why) + (m.since ? ' since ' + clock(m.since) : '') + '.</b> Check the machine is on and connected.</span></div>';
+  if (m.state === 'offline') return '<div class="note err">' + ic(I.off) + '<span><b>' + esc(m.why) + (m.since ? ' since ' + clock(m.since) : '') + '.</b> ' + (m.why === 'Not reporting' ? 'Check its PC is on, Pathline Run is open and it has internet.' : 'Check the machine is on and connected.') + '</span></div>';
   if (m.state === 'lid') return '<div class="note warn">' + ic(I.alert) + '<span><b>Lid open since ' + clock(m.since) + '.</b> No alert sent: someone opened it at the machine.</span></div>';
   if (m.state === 'paused') return '<div class="note warn">' + ic(I.alert) + '<span><b>Paused at the machine' + (m.since ? ' since ' + clock(m.since) : '') + '.</b> No alert sent.</span></div>';
   if (m.state === 'done') return '<div class="note ok">' + ic(I.check) + '<span><b>Finished ' + esc(m.lastDone) + ' at ' + clock(m.doneAt) + '.</b> Next job needs Start at the machine.</span></div>';
@@ -93,8 +96,8 @@ function machinesView() {
     '<div class="tile' + (attn.length ? ' warn' : '') + '"><b>' + attn.length + '</b><span>need you</span></div>' +
     '<div class="tile"><b>' + M.reduce((a, m) => a + m.queue.length, 0) + '</b><span>jobs queued</span></div></div>' +
     (soonest ? '<div class="next">' + ic(I.clock, 18) + '<span>Next to finish: <b>' + esc(soonest.name) + '</b> at <span class="mono">' + at(remain(soonest)) + '</span></span></div>' : '');
-  const empty = !M.length ? '<div class="list"><div class="hint">' + (S.finding ? '<b>Looking for Pathline Run machines on the network…</b>' : '<b>No machines found.</b> Check each machine\'s Pathline Run is open and on this network, then look again.') + '</div>' +
-    (S.finding ? '' : '<div class="set"><span class="body">Machines are found the way Pathline Prepare finds them</span><button class="tb" data-a="find">Look again</button></div>') + '</div>' : '';
+  const empty = !M.length ? '<div class="list"><div class="hint"><b>No machines yet.</b> Each machine is added once, with a code typed into its Pathline Run.</div>' +
+    '<div class="set"><span class="body">Add the first machine</span><button class="btn-primary" data-a="addMachine">Add a machine</button></div></div>' : '';
   return bar('<h1>Machines</h1><div class="sub">' + M.length + (M.length === 1 ? ' machine' : ' machines') + '</div>', liveTag()) +
     '<main class="main">' + installCard() + (M.length ? tiles : empty) +
     (attn.length ? '<section class="sec"><div class="sec-h">Needs you <span class="n">' + attn.length + '</span></div>' + attn.map(card).join('') + '</section>' : '') +
@@ -143,7 +146,10 @@ function detailView() {
     '<section class="sec"><div class="sec-h">Up next <span class="n">' + m.queue.length + (m.queue.length ? ' · ' + short(queueSecs(m)) : '') + '</span></div>' + queue +
     (m.queue.length ? '<span style="font-size:12px;color:var(--text-3);padding:0 2px">' + (m.queue.some((j) => j.autoStart) ? 'Jobs in a plotter\'s Select run start by themselves; the others are started at the machine.' : 'Each job is started at the machine.') + (m.state === 'running' ? ' Started straight away, the queue clears at ' + at(remain(m) + queueSecs(m)) + '.' : '') + '</span>' : '') + '</section>' +
     '<section class="sec"><div class="sec-h">Today</div>' + hist + '</section>' +
-    '<section class="sec"><div class="sec-h">Notifications</div><div class="list"><div class="set"><span class="body">Notify me about ' + esc(m.name) + '<span class="s">Finished jobs, waiting for you, errors</span></span><button role="switch" class="sw" aria-checked="' + !muted + '" aria-label="Notifications for ' + esc(m.name) + '" data-a="mute" data-v="' + esc(m.id) + '"></button></div></div></section></main>';
+    '<section class="sec"><div class="sec-h">Notifications</div><div class="list"><div class="set"><span class="body">Notify me about ' + esc(m.name) + '<span class="s">Finished jobs, waiting for you, errors</span></span><button role="switch" class="sw" aria-checked="' + !muted + '" aria-label="Notifications for ' + esc(m.name) + '" data-a="mute" data-v="' + esc(m.id) + '"></button></div></div></section>' +
+    '<section class="sec"><div class="sec-h">This machine</div><div class="list">' + (ui.removing === m.id
+      ? '<div class="hint"><b>Remove ' + esc(m.name) + ' from Pathline Monitor?</b> It disappears from every phone and its Pathline Run stops reporting. It can be added again with a new code.</div><div class="set"><span class="body"></span><span class="acts"><button class="tb" data-a="removeNo">Keep it</button><button class="btn-primary" data-a="removeYes" data-v="' + esc(m.id) + '">Remove</button></span></div>'
+      : '<div class="set"><span class="body">Remove from Pathline Monitor<span class="s">For a machine that has gone, or one added by mistake</span></span><button class="tb" data-a="remove" data-v="' + esc(m.id) + '">Remove</button></div>') + '</div></section></main>';
 }
 
 // ---------------------------------------------------------------- alerts
@@ -168,8 +174,6 @@ const isAndroid = /Android/i.test(navigator.userAgent);
 const onDesk = () => matchMedia('(min-width: 1200px) and (pointer: fine)').matches;
 
 // ---------------------------------------------------------------- getting the app on a phone
-// Over the workshop network's plain http, "Add to Home Screen" is how a phone keeps the app
-// (Chrome's own Install prompt only comes with https; when it does, Install uses it).
 let installPrompt = null;
 window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installPrompt = e; render(); });
 window.addEventListener('appinstalled', () => { installPrompt = null; store.set('installHide', true); render(); });
@@ -179,28 +183,21 @@ function installSteps() {
   const step = (n, html) => '<li><span class="ord">' + n + '</span><span>' + html + '</span></li>';
   if (isIOS) return '<ol class="steps">' + step(1, 'Tap <b>Share</b> ' + ic(SHARE, 18) + ' in Safari\'s toolbar') + step(2, 'Scroll down and tap <b>Add to Home Screen</b>') + step(3, 'Tap <b>Add</b>. Pathline Monitor is on the Home Screen, with its white tile') + '</ol>';
   if (isAndroid) return '<ol class="steps">' + step(1, 'Tap the menu ' + ic(DOTS, 18) + ' in Chrome\'s corner') + step(2, 'Tap <b>Add to Home screen</b> (or <b>Install app</b>)') + step(3, 'Tap <b>Add</b>. Pathline Monitor is on the Home screen') + '</ol>';
-  return '<ol class="steps">' + step(1, 'Open this page on the phone, on the workshop Wi-Fi') + step(2, 'Use the browser\'s <b>Add to Home Screen</b>') + '</ol>';
+  return '<ol class="steps">' + step(1, 'Open this page on the phone') + step(2, 'Use the browser\'s <b>Add to Home Screen</b>') + '</ol>';
 }
 function installCard() {
   if (standalone || onDesk() || store.get('installHide', false)) return '';
-  // the workshop network's plain http: the full app needs the workshop certificate first
-  if (!window.isSecureContext) return '<div class="list install"><div class="set"><img class="mark" src="icon.svg" alt="" style="width:36px;height:36px"><span class="body">Make it a full app on this phone<span class="s">On the Home Screen, opens without the network, alerts with the app closed</span></span><a class="btn-primary" href="setup" style="text-decoration:none">Set up</a></div>' +
-    '<div class="set"><span class="body"><span class="s">Or keep using it as a web page: it alerts while it\'s open</span></span><button class="tb" data-a="installHide">Not now</button></div></div>';
-  return '<div class="list install"><div class="set"><img class="mark" src="icon.svg" alt="" style="width:36px;height:36px"><span class="body">Keep Pathline Monitor on your Home Screen<span class="s">It opens full screen, like an app, one tap away</span></span>' +
+  return '<div class="list install"><div class="set"><img class="mark" src="icon.svg" alt="" style="width:36px;height:36px"><span class="body">Keep Pathline Monitor on your Home Screen<span class="s">' + (isIOS ? 'On iPhone, notifications need it there' : 'It opens full screen, like an app, one tap away') + '</span></span>' +
     (installPrompt ? '<button class="btn-primary" data-a="install">Install</button>' : '<button class="tb" data-a="howInstall">How</button>') + '</div>' +
     (ui.howInstall ? '<div class="hint">' + installSteps() + '<button class="tb" data-a="installHide" style="margin-top:8px">Done, hide this</button></div>' : '') + '</div>';
 }
-// the PC's view: a QR code beside the app, for a phone's camera
-let phone = null;
+// the PC's view: the address to open on a phone, beside the app
 function deskCard() {
   if (!onDesk()) return '';
-  if (!phone) { phone = {}; fetch('api/phone').then((r) => r.json()).then((v) => { phone = v; render(); }).catch(() => {}); }
-  const url = phone.urls && phone.urls[0];
   return '<aside class="desk" aria-label="Get Pathline Monitor on a phone"><img src="icon.svg" alt="" width="48" height="48"><h2>Pathline Monitor is for your phone</h2>' +
-    '<p>Scan this with the phone\'s camera, on the workshop Wi-Fi. It walks you through putting the app on the phone.</p>' +
-    (phone.qr ? '<div class="qr">' + phone.qr + '</div>' : '<div class="qr empty">' + (phone.urls ? 'This PC has no network address' : '') + '</div>') +
-    (url ? '<p class="url mono">' + esc(url + 'setup') + '</p>' : '') +
-    '<p class="small">Each phone trusts the workshop\'s own certificate once, then Pathline Monitor is an app on its Home Screen, with alerts even when it\'s closed.</p></aside>';
+    '<p>Open this address in the phone\'s browser and sign in with the workshop password. It works anywhere the phone has internet.</p>' +
+    '<p class="url mono">' + esc(location.host) + '</p>' +
+    '<p class="small">Then add it to the Home Screen and turn on notifications in Settings, to hear when a job finishes with the app closed.</p></aside>';
 }
 const canPush = window.isSecureContext && 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
 
@@ -208,14 +205,25 @@ function phoneCard() {
   const p = ui.prefs || {};
   const sound = '<div class="set"><span class="body">Sound while the app is open<span class="s">A short tone and a buzz with each alert</span></span><button role="switch" class="sw" aria-checked="' + (p.sound !== false) + '" aria-label="Sound while the app is open" data-a="pref" data-v="sound"></button></div>';
   const test = '<div class="set"><span class="body">Try an alert<span class="s">Shows one here, with the sound</span></span><button class="tb" data-a="testLocal">Try it</button></div>';
-  // the workshop network: alerts reach the phone while the app is open
-  if (!window.isSecureContext) return '<div class="set"><span class="body">Alerts show here while Pathline Monitor is open<span class="s">For alerts with the app closed, put the full app on this phone (a few minutes, once)</span></span><a class="btn-primary" href="setup" style="text-decoration:none">Set up</a></div>' + sound + test;
   if (isIOS && !standalone) return '<div class="hint"><b>Add Pathline Monitor to your Home Screen first.</b> On iPhone, notifications only work from the Home Screen app: tap Share, then Add to Home Screen, and open Pathline Monitor from there.</div>';
-  if (!canPush) return '<div class="hint"><b>This browser can\'t show notifications.</b> Use Safari on iPhone, or Chrome on Android.</div>';
+  if (!canPush) return sound + test + '<div class="hint"><b>This browser can\'t show notifications with the app closed.</b> Use Safari on iPhone, or Chrome on Android.</div>';
   if (Notification.permission === 'denied') return '<div class="hint"><b>Notifications are blocked for Pathline Monitor.</b> Allow them in the phone\'s settings for this app, then come back here.</div>';
   if (ui.notif) return sound + '<div class="set"><span class="body">Notifications are on<span class="s">' + esc(ui.note || 'This phone gets the alerts chosen below') + '</span></span><span class="acts"><button class="tb" data-a="testPush"' + (ui.busy ? ' disabled' : '') + '>Send a test</button></span></div>' +
     '<div class="set"><span class="body">Stop notifications on this phone</span><button class="tb" data-a="pushOff"' + (ui.busy ? ' disabled' : '') + '>Turn off</button></div>';
-  return sound + '<div class="set"><span class="body">Notifications with the app closed<span class="s">' + esc(ui.note || 'Off. Turn them on to hear when jobs finish.') + '</span></span><button class="btn-primary" data-a="pushOn"' + (ui.busy ? ' disabled' : '') + '>Turn on</button></div>';
+  return sound + test + '<div class="set"><span class="body">Notifications with the app closed<span class="s">' + esc(ui.note || 'Off. Turn them on to hear when jobs finish.') + '</span></span><button class="btn-primary" data-a="pushOn"' + (ui.busy ? ' disabled' : '') + '>Turn on</button></div>';
+}
+
+// adding a machine: a one-time code, typed into that machine's Pathline Run with this address
+function addMachineCard() {
+  const c = ui.code;
+  if (!c) return '<div class="set"><span class="body">Add a machine<span class="s">' + esc(ui.codeNote || 'Gives a code to type into its Pathline Run') + '</span></span><button class="tb" data-a="addMachine"' + (ui.busy ? ' disabled' : '') + '>Add</button></div>';
+  if (Date.now() > c.until) return '<div class="set"><span class="body">That code has run out<span class="s">It lasts 10 minutes</span></span><button class="tb" data-a="addMachine">New code</button></div>';
+  const step = (n, html) => '<li><span class="ord">' + n + '</span><span>' + html + '</span></li>';
+  return '<div class="hint addm"><div class="code mono" aria-label="Code">' + esc(c.code.slice(0, 3) + '-' + c.code.slice(3)) + '</div>' +
+    '<ol class="steps">' + step(1, 'At the machine, open Pathline Run\'s <b>Settings</b>, then <b>Pathline Monitor</b>') +
+    step(2, 'Type this address: <b class="mono">' + esc(location.host) + '</b>') +
+    step(3, 'Type the code above and press <b>Connect</b>. It works once, until <span class="mono">' + clock(c.until) + '</span>') + '</ol>' +
+    '<button class="tb" data-a="codeDone">Done</button></div>';
 }
 
 function prefsView() {
@@ -224,16 +232,43 @@ function prefsView() {
   const M = S ? S.machines : [];
   return bar('<h1>Settings</h1><div class="sub">Alerts on this phone</div>', '') +
     '<main class="main"><section class="sec"><div class="sec-h">This phone</div><div class="list">' + phoneCard() + '</div>' +
-    (!standalone && !onDesk() && window.isSecureContext ? '<div class="list"><div class="set"><span class="body">Add to Home Screen<span class="s">Opens full screen, like an app</span></span>' + (installPrompt ? '<button class="btn-primary" data-a="install">Install</button>' : '<button class="tb" data-a="howInstall">How</button>') + '</div>' + (ui.howInstall ? '<div class="hint">' + installSteps() + '</div>' : '') + '</div>' : '') + '</section>' +
+    (!standalone && !onDesk() ? '<div class="list"><div class="set"><span class="body">Add to Home Screen<span class="s">Opens full screen, like an app</span></span>' + (installPrompt ? '<button class="btn-primary" data-a="install">Install</button>' : '<button class="tb" data-a="howInstall">How</button>') + '</div>' + (ui.howInstall ? '<div class="hint">' + installSteps() + '</div>' : '') + '</div>' : '') + '</section>' +
     '<section class="sec"><div class="sec-h">Notify me when</div><div class="list">' +
     sw('done', 'A job finishes', 'With how long it took and what\'s queued next') +
     sw('queue', 'A queue runs out', 'The machine has nothing left to do') +
     sw('attn', 'A machine is waiting for me', 'A registration mark it can\'t find. Not for a lid opened or a pause pressed at the machine') +
     sw('err', 'A machine stops or goes offline', 'Stopped jobs, errors, lost connection') +
     sw('quiet', 'Quiet hours', '18:00 to 07:00: alerts arrive without a sound') + '</div></section>' +
-    '<section class="sec"><div class="sec-h">Machines</div><div class="list">' + M.map((m) => '<div class="set">' + badge(m) + '<span class="body">' + esc(m.name) + '<span class="s">' + esc((m.model ? m.model + ' · ' : '') + m.address) + '</span></span><button role="switch" class="sw" aria-checked="' + !(p.mute && p.mute[m.id]) + '" aria-label="Alerts for ' + esc(m.name) + '" data-a="mute" data-v="' + esc(m.id) + '"></button></div>').join('') +
-    (S && S.canFind ? '<div class="set"><span class="body">' + (S.finding ? 'Looking on the network…' : 'Look for new machines') + '<span class="s">' + (S.lastFind ? 'Last looked at ' + clock(S.lastFind) + '. ' : '') + 'Every Pathline Run on this network is added</span></span><button class="tb" data-a="find"' + (S.finding ? ' disabled' : '') + '>Look now</button></div>' : '') + '</div></section>' +
+    '<section class="sec"><div class="sec-h">Machines</div><div class="list">' + M.map((m) => '<div class="set">' + badge(m) + '<span class="body">' + esc(m.name) + '<span class="s">' + esc(m.model || (m.kind === 'plotter' ? 'Plotter' : 'Laser')) + '</span></span><button role="switch" class="sw" aria-checked="' + !(p.mute && p.mute[m.id]) + '" aria-label="Alerts for ' + esc(m.name) + '" data-a="mute" data-v="' + esc(m.id) + '"></button></div>').join('') +
+    addMachineCard() + '</div></section>' +
+    '<section class="sec"><div class="sec-h">Sign-in</div><div class="list"><div class="set"><span class="body">Signed in on this phone<span class="s">Signing out also stops its notifications</span></span><button class="tb" data-a="signOut">Sign out</button></div></div></section>' +
     '<span style="font-size:12px;color:var(--text-4);padding:0 2px">Pathline Monitor ' + esc(S ? S.app : '') + '</span></main>';
+}
+
+// ---------------------------------------------------------------- signing in
+function signInView() {
+  return '<main class="main signin"><img src="icon.svg" alt="" width="56" height="56"><h1>Pathline Monitor</h1>' +
+    '<p>Every machine\'s progress and queue, and an alert when a job finishes.</p>' +
+    '<form id="signin" class="list"><input type="text" name="username" autocomplete="username" value="Pathline Monitor" hidden>' +
+    '<label class="field"><span>Workshop password</span><input type="password" name="password" autocomplete="current-password" autocapitalize="off" enterkeyhint="go" required></label>' +
+    '<div class="set"><span class="body"><span class="s" id="signmsg" role="alert"></span></span><button class="btn-primary" type="submit">Sign in</button></div></form>' +
+    '<p class="small">Whoever looks after Pathline Monitor has the password. This phone stays signed in.</p></main>';
+}
+async function signIn(form) {
+  const btn = form.querySelector('button');
+  const msg = (t) => { ui.signMsg = t; const el = document.getElementById('signmsg'); if (el) el.textContent = t; };
+  btn.disabled = true; msg('');
+  try {
+    const r = await fetch('api/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: deviceId, password: form.password.value }) });
+    if (!r.ok) { msg((await r.json().catch(() => ({}))).error || 'Couldn\'t sign in'); form.password.select(); return; }
+    ui.signedIn = true; ui.signMsg = '';
+    render(); connect(); loadDevice();
+  } catch (e) { msg('Can\'t reach Pathline Monitor. Check this phone is online.'); } finally { btn.disabled = false; }
+}
+function signedOut() {
+  if (es) { es.close(); es = null; }
+  S = null; live = false; ui.signedIn = false; ui.notif = false; ui.code = null;
+  render();
 }
 
 // ---------------------------------------------------------------- frame
@@ -248,6 +283,11 @@ function tabs() {
 
 const $app = document.getElementById('app');
 function render() {
+  // signed out: the form is drawn once and left alone, so typing isn't lost to the redraw
+  if (ui.signedIn === false) {
+    if (!document.getElementById('signin')) { $app.innerHTML = signInView(); const d = document.getElementById('desk'); if (d) d.remove(); document.getElementById('signmsg').textContent = ui.signMsg; }
+    return;
+  }
   const v = ui.view === 'machines' && ui.machine ? detailView() : ui.view === 'alerts' ? alertsView() : ui.view === 'prefs' ? prefsView() : machinesView();
   const y = window.scrollY;
   const focus = document.activeElement && document.activeElement.dataset ? [document.activeElement.dataset.a, document.activeElement.dataset.v] : null;
@@ -313,22 +353,51 @@ function banner(a, more) {
 }
 
 // ---------------------------------------------------------------- live updates
+// everything once ({ machines, alerts, ... }), then one machine ({ m }), one alert ({ alert })
+// or a machine removed ({ gone }) at a time
+let es = null;
 function connect() {
-  const es = new EventSource('api/events');
-  es.onmessage = (e) => { S = JSON.parse(e.data); gotAt = Date.now(); live = true; newAlerts(S.alerts); render(); };
-  es.onerror = () => { live = false; render(); };
+  if (es) es.close();
+  es = new EventSource('api/events');
+  es.onmessage = (e) => {
+    const v = JSON.parse(e.data);
+    skew = Date.now() - v.now;
+    live = true;
+    if (v.machines) S = v;
+    else if (!S) return;
+    else if (v.m) {
+      const i = S.machines.findIndex((m) => m.id === v.m.id);
+      if (i >= 0) S.machines[i] = v.m;
+      else { S.machines.push(v.m); if (ui.code) { ui.code = null; ui.codeNote = v.m.name + ' is connected'; } }
+    } else if (v.gone) S.machines = S.machines.filter((m) => m.id !== v.gone);
+    else if (v.alert) S.alerts.unshift(v.alert);
+    newAlerts(S.alerts);
+    render();
+  };
+  // a dropped connection comes back by itself; a closed one means signed out, or the server away
+  es.onerror = () => {
+    live = false; render();
+    if (es && es.readyState === 2) { es = null; setTimeout(() => { if (ui.signedIn !== false && !es) loadDevice().then(() => { if (ui.signedIn !== false && !es) connect(); }); }, 3000); }
+  };
 }
 setInterval(render, 1000);
 
 // ---------------------------------------------------------------- this phone's settings and push
+async function api(path, data) {
+  const r = await fetch('api/' + path, data === undefined ? {} : { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(data) });
+  const v = await r.json().catch(() => ({}));
+  if (r.status === 401) { signedOut(); throw new Error('Signed out'); }
+  if (!r.ok) throw new Error(v.error || 'Pathline Monitor didn\'t answer');
+  return v;
+}
 async function saveDevice(extra) {
-  const r = await fetch('api/device', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: deviceId, prefs: { ...ui.prefs, tzOffset: new Date().getTimezoneOffset() }, name: navigator.userAgent.slice(0, 80), ...extra }) });
-  const v = await r.json();
-  if (!r.ok) throw new Error(v.error || 'Not saved');
+  const v = await api('device', { prefs: { ...ui.prefs, tzOffset: new Date().getTimezoneOffset() }, name: navigator.userAgent.slice(0, 80), ...extra });
   ui.prefs = v.prefs; ui.notif = v.notifications;
 }
+// also how the app learns whether this phone is signed in
 async function loadDevice() {
-  try { const v = await (await fetch('api/device?id=' + encodeURIComponent(deviceId))).json(); ui.prefs = v.prefs; ui.notif = v.notifications; } catch (e) { ui.prefs = ui.prefs || { done: true, queue: true, attn: true, err: true, quiet: false, sound: true, mute: {} }; }
+  try { const v = await api('device'); ui.prefs = v.prefs; ui.notif = v.notifications; ui.signedIn = true; }
+  catch (e) { ui.prefs = ui.prefs || { done: true, queue: true, attn: true, err: true, quiet: false, sound: true, mute: {} }; }
   render();
 }
 const b64 = (s) => { const p = '='.repeat((4 - (s.length % 4)) % 4); const raw = atob((s + p).replace(/-/g, '+').replace(/_/g, '/')); return Uint8Array.from(raw, (c) => c.charCodeAt(0)); };
@@ -339,8 +408,7 @@ async function pushOn() {
     const perm = await Notification.requestPermission();
     if (perm !== 'granted') { ui.note = 'Not allowed. The phone asked, and the answer was no.'; return; }
     const reg = await swReg();
-    const { key } = await (await fetch('api/push-key')).json();
-    const sub = (await reg.pushManager.getSubscription()) || await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64(key) });
+    const sub = (await reg.pushManager.getSubscription()) || await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64(S.pushKey) });
     await saveDevice({ subscription: sub.toJSON() });
     ui.note = '';
   } catch (e) { ui.note = 'Couldn\'t turn them on: ' + e.message; } finally { ui.busy = false; render(); }
@@ -352,7 +420,7 @@ async function pushOff() {
 }
 async function testPush() {
   ui.busy = true; render();
-  try { const r = await fetch('api/test-push', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: deviceId }) }); const v = await r.json(); ui.note = r.ok ? 'Test sent. It should arrive in a few seconds.' : v.error; }
+  try { await api('test-push', {}); ui.note = 'Test sent. It should arrive in a few seconds.'; }
   catch (e) { ui.note = e.message; } finally { ui.busy = false; render(); }
 }
 
@@ -386,8 +454,22 @@ const H = {
   howInstall: () => { ui.howInstall = !ui.howInstall; render(); },
   installHide: () => { store.set('installHide', true); ui.howInstall = false; render(); },
   install: async () => { if (!installPrompt) return; installPrompt.prompt(); const c = await installPrompt.userChoice.catch(() => null); installPrompt = null; if (c && c.outcome === 'accepted') store.set('installHide', true); render(); },
-  find: async () => { try { await fetch('api/find', { method: 'POST' }); } catch (e) { /* the stream shows the result */ } },
+  addMachine: async () => {
+    ui.busy = true; ui.codeNote = ''; ui.view = 'prefs'; ui.machine = null; route(false);
+    try { const v = await api('machine-code', {}); ui.code = { code: v.code, until: Date.now() + v.minutes * 60000 }; }
+    catch (e) { ui.codeNote = e.message; } finally { ui.busy = false; render(); }
+  },
+  codeDone: () => { ui.code = null; render(); },
+  remove: (v) => { ui.removing = v; render(); },
+  removeNo: () => { ui.removing = null; render(); },
+  removeYes: async (v) => { ui.removing = null; try { await api('machine-remove', { id: v }); ui.machine = null; route(); } catch (e) { render(); } },
+  signOut: async () => {
+    try { if (canPush) { const sub = await (await swReg()).pushManager.getSubscription(); if (sub) await sub.unsubscribe(); } } catch (e) { /* the server forgets it anyway */ }
+    try { await api('logout', {}); } catch (e) { /* signed out either way */ }
+    signedOut();
+  },
 };
+$app.addEventListener('submit', (e) => { if (e.target.id === 'signin') { e.preventDefault(); signIn(e.target); } });
 $app.addEventListener('click', (e) => {
   const el = e.target.closest('[data-a]');
   if (!el || el.disabled || !H[el.dataset.a]) return;
@@ -401,5 +483,6 @@ if ('serviceWorker' in navigator && window.isSecureContext) {
 }
 
 fromHash();
-connect();
-loadDevice();
+// signed in already: straight to live. Not signed in: the form. No network: the app still
+// opens and keeps trying.
+loadDevice().then(() => { if (ui.signedIn !== false) connect(); });
