@@ -6,7 +6,7 @@ Three apps for laser and plotter/router work:
 |---|---|---|
 | **Pathline Prepare** (this folder) | The design PC (Windows) | Import drawings, arrange them, set speeds and feeds per colour, simulate with a time estimate, then send the job to the machine over **Ethernet**, or **save it locally** |
 | **[Pathline Run](run/README.md)** (`run/`) | The PC or Raspberry Pi next to each machine | Receives jobs from Prepare, converts them for a Trotec or Ruida controller and runs them |
-| **[Pathline Monitor](monitor/README.md)** (`monitor/`) | Phones on the workshop Wi-Fi (served by one always-on PC or Pi) | Every machine's progress and queue on a phone, with an alert when a job finishes or a machine needs someone |
+| **[Pathline Monitor](monitor/README.md)** (`monitor/`) | Phones, anywhere (served by one small server that the machines report to) | Every machine's progress and queue on a phone, with an alert when a job finishes or a machine needs someone |
 
 The controller runs the actual cut. Prepare prepares the file and can jog the machine through Pathline Run.
 
@@ -41,24 +41,19 @@ Updates work as in Pathline: it checks when it opens and every minute, then asks
 
 ## Get Pathline Monitor (for phones)
 
-**Pathline Monitor** is a phone app (a progressive web app) for the workshop network only: every machine's progress and queue, what finished today, and an alert when a job finishes or a machine needs someone, even with the app closed. A lid opened or a pause pressed at the machine doesn't alert, because someone is already there. It only watches: nothing on the phone starts or moves a machine. More in [monitor/README.md](monitor/README.md).
+**Pathline Monitor** is a phone app (a progressive web app) that works anywhere the phone has internet: every machine's progress and queue, what finished today, and an alert when a job finishes or a machine needs someone, even with the app closed. A lid opened or a pause pressed at the machine doesn't alert, because someone is already there. It only watches: nothing on the phone starts or moves a machine. More in [monitor/README.md](monitor/README.md).
 
-**1. Once per workshop: the Monitor hub.** The phones get the app, and the machines' news, from one always-on PC or Pi on the same network. It finds every Pathline Run by itself, the way Prepare's **Find machines** does.
+**1. Once: the Monitor server.** One small server, on the company's own Linux server, that every machine reports to and every phone opens. It needs Node.js 18 or newer and nothing else.
 
 | For | Download | Then |
 |---|---|---|
-| **Windows PC** | **[⬇ Pathline-Monitor-Windows.zip](https://github.com/AESGlobalEngineering/Pathline/releases/download/pathlinemonitor/Pathline-Monitor-Windows.zip)** | Right-click it, **Extract All**, then double-click **Start Pathline Monitor.cmd** in the folder it makes, and leave its window open. Node.js is inside: nothing else to install |
-| **Raspberry Pi**, Linux or Mac | [Pathline-Monitor.zip](https://github.com/AESGlobalEngineering/Pathline/releases/download/pathlinemonitor/Pathline-Monitor.zip) | Unzip it, then `sh start.sh` (needs Node.js 18 or newer: `sudo apt install nodejs`) |
+| **Amazon Linux** (or another Linux server) | **[⬇ Pathline-Monitor.zip](https://github.com/AESGlobalEngineering/Pathline/releases/download/pathlinemonitor/Pathline-Monitor.zip)** | Point a web address at the server and open ports 80 and 443 to it. Unzip, then `sudo sh pathline-monitor/install.sh monitor.example.com`. It asks for the workshop password, gets the certificate and starts the service |
 
-**2. On each phone.** On that PC, open `http://localhost:8480`: it shows a QR code. Scan it with the phone's camera, on the workshop Wi-Fi. It opens **Set up this phone**, which walks through it in a few minutes, once per phone:
+**2. Each machine, once.** In the app: **Settings → Add a machine** gives a code. At the machine, in Pathline Run: **Settings → Pathline Monitor**, type the server's address and the code. Run then reports to the server over an outgoing https connection: nothing is opened on the workshop network, and the server never sends a machine anything.
 
-1. Download the **workshop certificate** and trust it. The hub makes its own, and it can only vouch for addresses on private networks.
-2. Open the app (`https://<hub>:8443`) and add it to the Home Screen (iPhone: Share, then Add to Home Screen; Android: **Install app**).
-3. Turn on notifications in its Settings, then **Send a test**.
+**3. Each phone, once.** Open the server's address in the phone's browser and sign in with the workshop password. Add it to the Home Screen (iPhone: Share, then Add to Home Screen; Android: **Install app**), then turn on notifications in its Settings. iPhones need iOS 16.4 or newer.
 
-From then on it's an app on the Home Screen: full screen, it opens without the network, and alerts arrive with it closed (iPhone: iOS 16.4 or newer). Without the setup, `http://<hub>:8480` works as a web page that alerts while it's open. Details in [monitor/README.md](monitor/README.md).
-
-To update the hub, unzip a newer download over the old folder: the machines it found, the workshop certificate and its alerts are kept, and the phones pick up the new app the next time they open it. All the downloads are in the [**pathlinemonitor**](https://github.com/AESGlobalEngineering/Pathline/releases/tag/pathlinemonitor) release.
+To update the server, unzip a newer download and run `install.sh` again: the password, certificate, machines, phones and alerts are kept, and the phones pick up the new app the next time they open it. The download is in the [**pathlinemonitor**](https://github.com/AESGlobalEngineering/Pathline/releases/tag/pathlinemonitor) release.
 
 ## Releasing a new version
 
@@ -68,7 +63,7 @@ To update the hub, unzip a newer download over the old folder: the machines it f
 
 Pathline Run is released the same way from `run/package.json`, by [.github/workflows/release-run.yml](.github/workflows/release-run.yml). It replaces the files in the one `pathlinerun` release. That release never becomes the repository's "latest" release, which Pathline's own updater reads.
 
-Pathline Monitor's hub is released the same way from `monitor/package.json`, by [.github/workflows/release-monitor.yml](.github/workflows/release-monitor.yml), into the one `pathlinemonitor` release: two zips, one for Windows with Node.js inside and one for anything with Node.js installed. The hub doesn't update itself (unzip the newer download over the old one); the phones get the new app from it.
+Pathline Monitor's server is released the same way from `monitor/package.json`, by [.github/workflows/release-monitor.yml](.github/workflows/release-monitor.yml), into the one `pathlinemonitor` release: one zip for a Linux server with Node.js. The server doesn't update itself (unzip the newer download and run `install.sh` again); the phones get the new app from it.
 
 ## What Pathline Prepare does
 
@@ -90,7 +85,7 @@ Run order: registration marks are read first (the head visits each mark, in the 
 
 ## The controller side
 
-Ethernet jobs, status and jogging use a small HTTP/JSON protocol, described in **[PROTOCOL.md](PROTOCOL.md)**. **[Pathline Run](run/README.md)** (in `run/`) implements it for Trotec and Ruida lasers, on a Raspberry Pi or a Windows PC, and converts jobs into controller code. **[Pathline Monitor](monitor/README.md)** reads the same machines (status, queue and today's jobs) but never sends them anything. For a pretend machine, use the emulator:
+Ethernet jobs, status and jogging use a small HTTP/JSON protocol, described in **[PROTOCOL.md](PROTOCOL.md)**. **[Pathline Run](run/README.md)** (in `run/`) implements it for Trotec and Ruida lasers, on a Raspberry Pi or a Windows PC, and converts jobs into controller code. **[Pathline Monitor](monitor/README.md)** is sent the same machines' status, queue and today's jobs by Pathline Run, and never sends them anything. For a pretend machine, use the emulator:
 
 ```bash
 npm run emulator
@@ -124,11 +119,11 @@ npm run dist
 
 Layout:
 
-- `src/main/`: Electron main process: data store, importers (`importers/`), exporters, device link, machine finding (`discover.js`, also used by Monitor), IPC
+- `src/main/`: Electron main process: data store, importers (`importers/`), exporters, device link, machine finding (`discover.js`), IPC
 - `src/shared/core.js`: geometry, colour index, estimator and simulation timeline (used by both sides)
 - `src/ui/`: the four pages, wired to `window.api`, and `app.js` (job canvas, editing operations, dialogs)
 - `run/`: Pathline Run (server, controller drivers, the machine's touch screen)
-- `monitor/`: Pathline Monitor (the phone app in `app/`, and the hub that serves it and watches the machines: `server.js`, `lib/`)
+- `monitor/`: Pathline Monitor (the phone app in `app/`, and the server that serves it and takes the machines' reports: `server.js`, `lib/`)
 - `tools/`: device emulator, self-test, icon generator, screenshot tools
 - `_prototype/`: the original UI prototype, untouched
 
