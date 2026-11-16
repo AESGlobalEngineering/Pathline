@@ -371,9 +371,28 @@ function start(opts = {}) {
   const monitor = require('./monitor').createMonitor({ machine, store, dataDir: DATA, info: () => ({ id: deviceId, ...infoView() }) });
   // who has been watching (ip → when): the Pathline Monitor hub asks every 2 s or keeps a stream
   const watchers = new Map();
+  // streams still open (ip → how many): a hub holding /api/v1/events open is watching now, however
+  // long ago it connected (it was noted only when it connected, so it dropped out after 10 minutes)
+  const streaming = new Map();
+  // how long one that asks now and then counts as watching (shorter only in the self-tests)
+  const WATCH_MS = Number(process.env.PATHLINE_RUN_WATCH_MS) || 10 * 60 * 1000;
+  const watcherIp = (req) => { const ip = String(req.socket.remoteAddress || '').replace(/^::ffff:/, ''); return ip === '::1' ? '127.0.0.1' : ip; };
   const noteWatcher = (req) => {
-    const ip = String(req.socket.remoteAddress || '').replace(/^::ffff:/, '');
-    if (ip) watchers.set(ip === '::1' ? '127.0.0.1' : ip, Date.now());
+    const ip = watcherIp(req);
+    if (!ip) return;
+    watchers.set(ip, Date.now());
+    if (new URL(req.url, 'http://x').pathname !== '/api/v1/events') return;
+    streaming.set(ip, (streaming.get(ip) || 0) + 1);
+    let gone = false;
+    const end = () => {
+      if (gone) return;
+      gone = true;
+      watchers.set(ip, Date.now());
+      const n = (streaming.get(ip) || 1) - 1;
+      if (n > 0) streaming.set(ip, n); else streaming.delete(ip);
+    };
+    req.on('close', end);
+    req.socket.on('close', end);
   };
   // a Pathline Monitor hub at host:port answers GET /api/phone with the addresses phones open
   const askHub = (host, port) => new Promise((resolve) => {
@@ -389,7 +408,8 @@ function start(opts = {}) {
     const typed = String(cfg.monitorHub || '').trim();
     const cands = [];
     if (typed) { const m = typed.replace(/^https?:\/\//, '').replace(/\/.*$/, '').match(/^([^:]+)(?::(\d+))?$/); if (m) cands.push({ host: m[1], port: Number(m[2] || 8480), typed: true }); }
-    const recent = [...watchers].filter(([, t]) => Date.now() - t < 10 * 60 * 1000).sort((a, b) => b[1] - a[1]).map(([ip]) => ip);
+    const recent = [...watchers].filter(([ip, t]) => streaming.has(ip) || Date.now() - t < WATCH_MS)
+      .sort((a, b) => (streaming.has(b[0]) - streaming.has(a[0])) || b[1] - a[1]).map(([ip]) => ip);
     for (const ip of recent) if (!cands.some((c) => c.host === ip)) cands.push({ host: ip, port: 8480 });
     for (const c of cands) {
       const j = await askHub(c.host, c.port);

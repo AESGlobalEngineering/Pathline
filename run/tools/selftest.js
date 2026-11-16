@@ -1418,7 +1418,8 @@ async function monitorTests() {
   const data = fs.mkdtempSync(path.join(os.tmpdir(), 'pathline-run-'));
   fs.writeFileSync(path.join(data, 'config.json'), JSON.stringify({ controller: 'trotec', regMarks: 'ignore', bed: [813, 508], sim: { speedup: 120 } }));
   const port = 19370 + Math.floor(Math.random() * 300);
-  const srv = spawn(process.execPath, [path.join(__dirname, '..', 'src', 'server.js'), '--sim', '--port', String(port), '--data', data], { stdio: ['ignore', 'pipe', 'pipe'] });
+  // (a watcher that only asks now and then counts for 1.5 s here, not 10 minutes)
+  const srv = spawn(process.execPath, [path.join(__dirname, '..', 'src', 'server.js'), '--sim', '--port', String(port), '--data', data], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, PATHLINE_RUN_WATCH_MS: '1500' } });
   const base = 'http://127.0.0.1:' + port + '/api/v1';
   const get = async (r) => { const res = await fetch(base + r); return { res, j: await res.json() }; };
   let events = '', ac;
@@ -1445,8 +1446,15 @@ async function monitorTests() {
     // ☰ → Pathline Monitor on a phone: the hub is whoever watches (this test did), or the address
     // typed in; its setup page, for a QR code
     const loc = 'http://127.0.0.1:' + port + '/api/local';
+    // the stream opened long before (longer than a watcher counts for) and is still open, as the
+    // hub's is for hours: it's still watching (it dropped out after 10 minutes, and the QR with it)
+    await new Promise((r) => setTimeout(r, 1700));
     const h0 = await (await fetch(loc + '/monitor-hub')).json();
-    ok(h0.found || (h0.watchers || []).includes('127.0.0.1'), 'Monitor hub: the watcher\'s address is remembered (' + JSON.stringify(h0.watchers || h0.host) + ')', JSON.stringify(h0));
+    ok(h0.found || (h0.watchers || []).includes('127.0.0.1'), 'Monitor hub: a watcher with its stream still open is remembered however long ago it connected (' + JSON.stringify(h0.watchers || h0.host) + ')', JSON.stringify(h0));
+    ac.abort();
+    await new Promise((r) => setTimeout(r, 1700));
+    const hGone = await (await fetch(loc + '/monitor-hub')).json();
+    ok(!hGone.found && !(hGone.watchers || []).includes('127.0.0.1'), 'Monitor hub: once its stream closes, it counts for as long as one that asks now and then', JSON.stringify(hGone));
     const hub = http.createServer((rq, rs) => { rs.writeHead(rq.url === '/api/phone' ? 200 : 404, { 'content-type': 'application/json' }); rs.end(JSON.stringify({ urls: ['http://192.168.7.7:' + hub.address().port + '/'], app: ['https://192.168.7.7:8443/'] })); });
     await new Promise((r) => hub.listen(0, '127.0.0.1', r));
     try {
