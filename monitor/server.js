@@ -1,261 +1,276 @@
 #!/usr/bin/env node
-// Pathline Monitor: watches every Pathline Run machine on the workshop network, keeps the
-// alerts, and serves the phone app (app/) on the local network.
+// Pathline Monitor: one small server that every Pathline Run reports to and every phone opens.
+// Nothing to install but Node.js 18 or newer: there are no packages.
 //
-//   node server.js [--config config.json] [--port 8480] [--https-port 8443] [--data data]
+//   node server.js [--config config.json] [--port 8480] [--host 127.0.0.1] [--data data]
 //
-// Machines are found on the network the way Pathline Prepare finds them (src/main/discover.js:
-// Run's mDNS announcement and a scan of this computer's networks for port 8470), and kept in
-// data/found.json. config.json is optional:
-//   { "port": 8480, "httpsPort": 8443, "find": true, "machines": [{ "name": "Laser A", "host": "192.168.1.40" }],
-//     "tls": { "cert": "cert.pem", "key": "key.pem" }, "https": true }
-// Two addresses: http on 8480 (any phone, and the setup page) and https on 8443, the full app
-// (installable, offline, notifications with the app closed). The https certificate is the
-// workshop's own (lib/certs.js), made here; each phone trusts it once from the setup page.
-// "tls" uses a certificate from IT instead; "https": false turns https off.
+// config.json (next to this file), all of it optional:
+//   { "password": "the workshop's password for phones",
+//     "tls": { "cert": "fullchain.pem", "key": "privkey.pem" },
+//     "port": 8480, "host": "127.0.0.1", "address": "https://monitor.example.com" }
+// With a certificate it serves https itself (port 443); without, plain http on 127.0.0.1:8480
+// for a web server in front (nginx, Caddy) that has the certificate.
+// As a systemd service (install.sh) there's no config.json: the password and the certificate
+// are handed over as credentials (LoadCredential: password, fullchain.pem, privkey.pem).
+//
+// Machines:  POST /api/v1/enrol   a one-time code from the app → that machine's own key
+//            POST /api/v1/report  Run's GET /api/v1/monitor answer, with the key. Answers 204:
+//                                 nothing ever goes back to a machine.
+// Phones:    the app (app/), signed in with the workshop password; live over GET /api/events.
 'use strict';
 
 const fs = require('fs');
 const path = require('path');
-const http = require('http');
-const https = require('https');
 const crypto = require('crypto');
-const webpush = require('web-push');
-const { Watcher } = require('./lib/watch');
+const push = require('./lib/push');
+const { Machines } = require('./lib/machines');
 const pkg = require('./package.json');
 
 const argv = process.argv.slice(2);
 const arg = (k, d) => { const i = argv.indexOf('--' + k); return i >= 0 && argv[i + 1] ? argv[i + 1] : d; };
 const confPath = path.resolve(arg('config', path.join(__dirname, 'config.json')));
 const conf = fs.existsSync(confPath) ? JSON.parse(fs.readFileSync(confPath, 'utf8')) : {};
-const DATA = path.resolve(path.dirname(confPath), arg('data', conf.data || 'data'));
-const PORT = Number(arg('port', conf.port || 8480));
-const HTTPS_PORT = Number(arg('https-port', conf.httpsPort || 8443));
+const beside = (f) => path.resolve(path.dirname(confPath), f);
+const DATA = beside(arg('data', conf.data || 'data'));
+// what systemd hands over (LoadCredential), if anything
+const cred = (n) => { const f = path.join(process.env.CREDENTIALS_DIRECTORY || '', n); return process.env.CREDENTIALS_DIRECTORY && fs.existsSync(f) ? f : null; };
+const PASSWORD = String(process.env.MONITOR_PASSWORD || conf.password || (cred('password') ? fs.readFileSync(cred('password'), 'utf8').trim() : ''));
+const tlsFiles = conf.tls ? { cert: beside(conf.tls.cert), key: beside(conf.tls.key) } : cred('privkey.pem') ? { cert: cred('fullchain.pem'), key: cred('privkey.pem') } : null;
+const tls = tlsFiles ? { cert: fs.readFileSync(tlsFiles.cert), key: fs.readFileSync(tlsFiles.key) } : null;
+const PORT = Number(arg('port', process.env.PORT || conf.port || (tls ? 443 : 8480)));
+const HOST = arg('host', conf.host || (tls ? '0.0.0.0' : '127.0.0.1'));
+const log = (s) => console.log(new Date().toISOString().slice(0, 19).replace('T', ' ') + '  ' + s);
+if (PASSWORD.length < 8) { console.error('Set the workshop password first (8 characters or more): "password" in ' + confPath + '.'); process.exit(1); }
 fs.mkdirSync(DATA, { recursive: true });
-const log = (s) => console.log(new Date().toTimeString().slice(0, 8) + '  ' + s);
 
-
-// this computer's own addresses, for phones to open
-// (virtual adapters last: Hyper-V, WSL, VirtualBox, VPNs, so the first is usually the Wi-Fi or Ethernet one)
-const addresses = () => {
-  const out = [];
-  for (const [name, list] of Object.entries(require('os').networkInterfaces())) {
-    for (const a of list || []) {
-      if (!(a.family === 'IPv4' || a.family === 4) || a.internal || /^169\.254\./.test(a.address)) continue;
-      out.push({ ip: a.address, virtual: /vethernet|virtual|vmware|vbox|hyper-v|wsl|docker|tailscale|zerotier|vpn|loopback/i.test(name) });
-    }
-  }
-  return out.sort((a, b) => a.virtual - b.virtual).map((a) => a.ip);
-};
-
-// https: a certificate from IT ("tls"), else the workshop's own (made or renewed here)
-const certs = require('./lib/certs');
-let ca = null;
-function loadTls() {
-  if (conf.tls && conf.tls.cert && conf.tls.key) return { cert: fs.readFileSync(path.resolve(path.dirname(confPath), conf.tls.cert)), key: fs.readFileSync(path.resolve(path.dirname(confPath), conf.tls.key)) };
-  if (conf.https === false) return null;
-  const c = certs.ensure(DATA, addresses(), log);
-  ca = c.ca;
-  return { cert: c.cert, key: c.key };
-}
-let tls = null;
-try { tls = loadTls(); } catch (e) { log('https unavailable: ' + e.message); }
-
-// ---------------------------------------------------------------- kept on disk
+// ---------------------------------------------------------------- kept on disk (data/)
 const file = (n) => path.join(DATA, n);
 const load = (n, d) => { try { return JSON.parse(fs.readFileSync(file(n), 'utf8')); } catch (e) { return d; } };
-const save = (n, v) => { fs.writeFileSync(file(n) + '.tmp', JSON.stringify(v, null, 1)); fs.renameSync(file(n) + '.tmp', file(n)); };
+const save = (n, v) => { fs.writeFileSync(file(n) + '.tmp', JSON.stringify(v), { mode: 0o600 }); fs.renameSync(file(n) + '.tmp', file(n)); };
+const hash = (s) => crypto.createHash('sha256').update(s).digest('hex');
+const hmac = (key, s) => crypto.createHmac('sha256', key).update(s).digest();
+const same = (a, b) => crypto.timingSafeEqual(Buffer.from(hash(String(a)), 'hex'), Buffer.from(hash(String(b)), 'hex'));
 
-// the push keys: made once, kept, so phones stay subscribed across restarts
-let vapid = load('vapid.json', null);
-if (!vapid) { vapid = webpush.generateVAPIDKeys(); save('vapid.json', vapid); }
-webpush.setVapidDetails(conf.contact || 'mailto:workshop@localhost', vapid.publicKey, vapid.privateKey);
+// keys.json: the push keys and this server's secret, made once. Keep it: without it every
+// phone signs in and turns notifications on again.
+let keys = load('keys.json', null);
+if (!keys) { keys = { ...push.newKeys(), secret: crypto.randomBytes(32).toString('base64url') }; save('keys.json', keys); }
+// a phone's sign-in is tied to the password: change the password and every phone signs in again
+const sessionKey = hmac(keys.secret, PASSWORD);
+const pw = hash(sessionKey).slice(0, 12);
 
-// alerts, newest first, the last 300 or the last 14 days
+// devices.json: one entry per signed-in phone { id, name, pw, subscription, prefs, seenAt }
+const DEFAULT_PREFS = { done: true, queue: true, attn: true, err: true, quiet: false, sound: true, mute: {} };
+const devices = Object.fromEntries(Object.entries(load('devices.json', {})).filter(([, d]) => d.pw === pw));
+const saveDevices = () => save('devices.json', devices);
+
+// machines.json: the enrolled machines { id, name, key (its hash), addedAt }
+const enrolled = load('machines.json', {});
+const byKey = new Map(Object.values(enrolled).map((m) => [m.key, m.id]));
+
+// alerts.json: newest first, the last 300 or the last 14 days
 let alerts = load('alerts.json', []);
 const keepAlerts = () => { const cut = Date.now() - 14 * 864e5; alerts = alerts.filter((a) => a.at > cut).slice(0, 300); save('alerts.json', alerts); };
 
-// one entry per phone: its push subscription (if it turned notifications on) and what it wants
-//   { id, name, subscription, prefs: { done, queue, attn, err, quiet, mute: { machineId: true } }, seenAt }
-let devices = load('devices.json', {});
-const DEFAULT_PREFS = { done: true, queue: true, attn: true, err: true, quiet: false, sound: true, mute: {} };
-const saveDevices = () => save('devices.json', devices);
-
-// quiet hours (18:00 to 07:00, the phone's own clock is given with the prefs): delivered without a sound
-function quietNow(prefs) {
-  if (!prefs.quiet) return false;
-  const off = Number.isFinite(prefs.tzOffset) ? prefs.tzOffset : new Date().getTimezoneOffset();
-  const local = new Date(Date.now() - off * 60000);
-  const h = local.getUTCHours();
-  return h >= 18 || h < 7;
-}
-
-async function push(alert) {
-  for (const d of Object.values(devices)) {
-    if (!d.subscription) continue;
-    const p = { ...DEFAULT_PREFS, ...d.prefs };
-    if (p.mute && p.mute[alert.machine]) continue;
-    if (!alert.tags.some((t) => p[t])) continue;
-    const payload = JSON.stringify({ title: alert.title, body: alert.body, machine: alert.machine, id: alert.id, kind: alert.kind, silent: quietNow(p) });
-    try {
-      await webpush.sendNotification(d.subscription, payload, { TTL: 3600, urgency: alert.kind === 'done' ? 'normal' : 'high' });
-    } catch (e) {
-      // the phone unsubscribed or the browser dropped it: forget the subscription
-      if (e.statusCode === 404 || e.statusCode === 410) { d.subscription = null; saveDevices(); log('push: ' + (d.name || d.id) + ' unsubscribed'); }
-      else log('push to ' + (d.name || d.id) + ' failed: ' + (e.body || e.message));
-    }
-  }
-}
-
-// ---------------------------------------------------------------- the machines
-let machines = [];
+// ---------------------------------------------------------------- machines, alerts, phones
 const streams = new Set();
-const snapshot = () => ({ app: pkg.version, now: Date.now(), machines, alerts: alerts.slice(0, 100), finding: !!finding, lastFind, canFind: !!discover && conf.find !== false, push: !!tls });
-function broadcast() {
-  const msg = 'data: ' + JSON.stringify(snapshot()) + '\n\n';
-  for (const res of streams) res.write(msg);
-}
-const found = load('found.json', []);
-const watcher = new Watcher([...(conf.machines || []), ...found.map((m) => ({ ...m, found: true }))], {
-  log,
+const tell = (v) => { const msg = 'data: ' + JSON.stringify({ now: Date.now(), ...v }) + '\n\n'; for (const res of streams) res.write(msg); };
+let saving = null;
+const saveState = () => { clearTimeout(saving); saving = null; save('state.json', Object.fromEntries(machines.views().map((v) => [v.id, v]))); };
+const machines = new Machines({
+  saved: load('state.json', {}),
+  onChange: (m) => { tell({ m }); saving = saving || setTimeout(saveState, 2000); },
   onAlert: (a) => {
     a.id = crypto.randomBytes(6).toString('hex');
     alerts.unshift(a);
     keepAlerts();
     log('alert: ' + a.title + ' · ' + a.body);
-    push(a);
+    tell({ alert: a });
+    notify(a);
   },
-  onChange: (v) => { machines = v; broadcast(); },
 });
+for (const m of Object.values(enrolled)) machines.add(m.id, m.name);
+const snapshot = () => ({ app: pkg.version, now: Date.now(), machines: machines.views(), alerts: alerts.slice(0, 100), pushKey: keys.publicKey });
 
-// Prepare's network search (src/main/discover.js), on start, every 10 min and when a phone asks
-let discover = null;
-try { discover = require('../src/main/discover.js'); } catch (e) { log('Network search unavailable (' + e.message + '): list machines in config.json'); }
-let finding = null;
-let lastFind = 0;
-function findMachines() {
-  if (!discover || conf.find === false) return Promise.resolve({ added: 0 });
-  if (finding) return finding;
-  finding = discover.find({ timeout: 1500 }).then((list) => {
-    let added = 0;
-    for (const f of list) {
-      const known = watcher.find(f.ip, f.port, f.id);
-      if (known) {
-        // the same Run (its id), somewhere new
-        if (f.id && known.conf.deviceId === f.id && (known.conf.host !== f.ip || known.conf.port !== f.port)) { log(known.id + ' moved to ' + f.ip + ':' + f.port); watcher.moveTo(known, f.ip, f.port); }
-        continue;
-      }
-      if (watcher.add({ name: f.name || f.ip, host: f.ip, port: f.port, deviceId: f.id || undefined, found: true })) { added++; log('found ' + (f.name || f.ip) + ' at ' + f.ip + ':' + f.port); }
-    }
-    save('found.json', watcher.list.filter((m) => m.conf.found).map((m) => ({ name: m.conf.name, host: m.conf.host, port: m.conf.port, deviceId: m.conf.deviceId })));
-    lastFind = Date.now();
-    return { added, seen: list.length };
-  }).catch((e) => { log('network search failed: ' + e.message); return { added: 0, error: e.message }; })
-    .finally(() => { finding = null; broadcast(); });
-  broadcast();
-  return finding;
+// quiet hours (18:00 to 07:00 by the phone's own clock, given with its settings): no sound
+function quietNow(prefs) {
+  if (!prefs.quiet) return false;
+  const h = new Date(Date.now() - (Number(prefs.tzOffset) || 0) * 60000).getUTCHours();
+  return h >= 18 || h < 7;
 }
-setInterval(findMachines, 10 * 60 * 1000);
+let origin = conf.address || '';
+const subject = () => (conf.contact ? 'mailto:' + conf.contact : origin || 'https://pathline.invalid');
+async function pushTo(d, payload, urgent) {
+  try {
+    const r = await push.send(keys, subject(), d.subscription, JSON.stringify(payload), { urgent });
+    // the phone unsubscribed or the browser dropped it: forget the subscription
+    if (r.gone) { d.subscription = null; saveDevices(); } else if (!r.ok) log('push to ' + d.id.slice(0, 8) + ' failed: ' + r.status);
+    return r.ok;
+  } catch (e) { log('push failed: ' + e.message); return false; }
+}
+function notify(a) {
+  for (const d of Object.values(devices)) {
+    const p = { ...DEFAULT_PREFS, ...d.prefs };
+    if (!d.subscription || (p.mute && p.mute[a.machine]) || !a.tags.some((t) => p[t])) continue;
+    pushTo(d, { title: a.title, body: a.body, machine: a.machine, id: a.id, kind: a.kind, silent: quietNow(p) }, a.kind !== 'done');
+  }
+}
 
-const phoneUrls = () => addresses().map((ip) => 'http://' + ip + ':' + PORT + '/');
-const appUrls = () => (tls ? addresses().filter((ip) => !ca || certs.isPrivate(ip)).map((ip) => 'https://' + ip + ':' + HTTPS_PORT + '/') : []);
-// the address phones open, and the same as a QR code for a phone's camera
-const qrcode = require('qrcode-generator');
-function qrSvg(text) {
-  const qr = qrcode(0, 'M');
-  qr.addData(text);
-  qr.make();
-  return qr.createSvgTag({ cellSize: 4, margin: 2, scalable: true });
+// ---------------------------------------------------------------- who's asking
+// behind a web server on this computer, the caller's address is the one it passes on
+const ipOf = (req) => { const a = req.socket.remoteAddress || ''; const f = req.headers['x-forwarded-for']; return f && /^(::ffff:)?127\.|^::1$/.test(a) ? String(f).split(',').pop().trim() : a; };
+// wrong passwords and codes: 5 from one address, then a wait that doubles (1 min to 1 h); and
+// 50 from anywhere in 10 minutes closes sign-in for the rest of those 10 minutes
+const fails = new Map();
+let recent = [];
+const blocked = (ip, now) => (fails.get(ip) || {}).until > now || recent.filter((t) => now - t < 600000).length >= 50;
+function failed(ip, now) {
+  const f = fails.get(ip) || { n: 0, until: 0 };
+  f.n++;
+  if (f.n >= 5) f.until = now + Math.min(3600000, 60000 * 2 ** (f.n - 5));
+  fails.set(ip, f);
+  recent = recent.filter((t) => now - t < 600000).concat(now);
+}
+setInterval(() => { const now = Date.now(); for (const [ip, f] of fails) if (f.until < now - 3600000) fails.delete(ip); }, 3600000).unref();
+
+// a signed-in phone: the cookie is its id and that id signed with the session key
+const validId = (s) => typeof s === 'string' && /^[a-z0-9-]{8,64}$/i.test(s);
+const sign = (id) => hmac(sessionKey, id).toString('base64url');
+function phone(req) {
+  const m = /(?:^|;\s*)pm=([a-z0-9-]+)\.([\w-]+)/i.exec(req.headers.cookie || '');
+  return m && same(sign(m[1]), m[2]) ? devices[m[1]] || null : null;
+}
+const cookie = (req, v, age) => 'pm=' + v + '; Path=/; HttpOnly; SameSite=Lax; Max-Age=' + age + (tls || req.headers['x-forwarded-proto'] === 'https' ? '; Secure' : '');
+
+// one-time codes for adding a machine: 6 letters and digits (none that look alike), 10 minutes
+const LETTERS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+const codes = new Map();
+function newCode(now) {
+  for (const [c, until] of codes) if (until < now) codes.delete(c);
+  const c = Array.from({ length: 6 }, () => LETTERS[crypto.randomInt(32)]).join('');
+  codes.set(c, now + 600000);
+  return c;
 }
 
 // ---------------------------------------------------------------- http
 const APP = path.join(__dirname, 'app');
-const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.webmanifest': 'application/manifest+json', '.json': 'application/json' };
-
+const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.webmanifest': 'application/manifest+json' };
+const SAFE = {
+  'x-content-type-options': 'nosniff', 'referrer-policy': 'no-referrer', 'x-frame-options': 'DENY', 'strict-transport-security': 'max-age=31536000',
+  'content-security-policy': "default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; frame-ancestors 'none'",
+};
 function body(req) {
   return new Promise((resolve, reject) => {
     let s = '';
     req.on('data', (c) => { s += c; if (s.length > 64 * 1024) { reject(new Error('Too large')); req.destroy(); } });
-    req.on('end', () => { try { resolve(s ? JSON.parse(s) : {}); } catch (e) { reject(new Error('Not JSON')); } });
+    req.on('end', () => { try { const v = s ? JSON.parse(s) : {}; resolve(v && typeof v === 'object' ? v : {}); } catch (e) { reject(new Error('Not JSON')); } });
   });
 }
-const send = (res, code, v) => { res.writeHead(code, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }); res.end(JSON.stringify(v)); };
-const validId = (s) => typeof s === 'string' && /^[a-z0-9-]{8,64}$/i.test(s);
+const send = (res, code, v, extra) => { res.writeHead(code, { ...SAFE, 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', ...extra }); res.end(v === undefined ? '' : JSON.stringify(v)); };
 
 async function handle(req, res) {
-  const url = new URL(req.url, 'http://x');
-  const p = url.pathname;
+  const p = new URL(req.url, 'http://x').pathname;
+  const post = req.method === 'POST';
+  const now = Date.now();
   try {
-    if (p === '/api/state') return send(res, 200, snapshot());
-    if (p === '/api/events') {
-      res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive' });
-      res.write('retry: 3000\n\ndata: ' + JSON.stringify(snapshot()) + '\n\n');
-      streams.add(res);
-      req.on('close', () => streams.delete(res));
-      return;
+    // ---- machines
+    if (p === '/api/v1/report' && post) {
+      const id = byKey.get(hash((req.headers.authorization || '').replace(/^Bearer\s+/i, '')));
+      // 401: this machine was removed from Monitor (Run stops reporting and says so)
+      if (!id) return send(res, 401, { error: 'This machine isn\'t connected to Pathline Monitor' });
+      machines.report(id, await body(req), now);
+      return send(res, 204);
     }
-    if (p === '/api/push-key') return send(res, 200, { key: vapid.publicKey });
-    // the addresses phones open; the QR code is the setup page (it walks a phone through the rest)
-    if (p === '/api/phone') { const urls = phoneUrls(); return send(res, 200, { urls, app: appUrls(), httpsPort: tls ? HTTPS_PORT : null, own: !!ca, qr: urls[0] ? qrSvg(urls[0] + 'setup') : null }); }
-    // reached over https by the setup page (which is on http): only answers if the phone trusts us
-    if (p === '/api/ping') { res.writeHead(200, { 'content-type': 'application/json', 'access-control-allow-origin': '*', 'cache-control': 'no-store' }); return res.end('{"ok":true}'); }
-    // the workshop certificate: a profile for iPhone, the certificate itself for Android
-    if (p === '/workshop.mobileconfig' && ca) { res.writeHead(200, { 'content-type': 'application/x-apple-aspen-config', 'content-disposition': 'attachment; filename="Pathline Monitor workshop.mobileconfig"', 'cache-control': 'no-store' }); return res.end(certs.mobileconfig(ca)); }
-    if (p === '/workshop-ca.crt' && ca) { res.writeHead(200, { 'content-type': 'application/x-x509-ca-cert', 'content-disposition': 'attachment; filename="pathline-monitor-workshop.crt"', 'cache-control': 'no-store' }); return res.end(ca.der); }
-    if (p === '/api/find' && req.method === 'POST') return send(res, 200, await findMachines());
-    // a phone's settings, and its push subscription once notifications are turned on
-    if (p === '/api/device' && req.method === 'POST') {
+    if (p === '/api/v1/enrol' && post) {
+      const ip = ipOf(req);
+      if (blocked(ip, now)) return send(res, 429, { error: 'Too many tries. Wait a few minutes.' });
+      const b = await body(req);
+      const code = String(b.code || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+      if (!(codes.get(code) > now)) { failed(ip, now); return send(res, 403, { error: 'That code isn\'t right, or it has run out. Get a new one in Pathline Monitor: Settings, Add a machine.' }); }
+      if (!validId(b.id)) return send(res, 400, { error: 'Bad machine id' });
+      codes.delete(code);
+      const key = crypto.randomBytes(32).toString('base64url');
+      const old = enrolled[b.id];
+      if (old) byKey.delete(old.key);
+      enrolled[b.id] = { id: b.id, name: String(b.name || b.id).slice(0, 60), key: hash(key), addedAt: old ? old.addedAt : now };
+      byKey.set(hash(key), b.id);
+      save('machines.json', enrolled);
+      if (!old) machines.add(b.id, enrolled[b.id].name, now);
+      log('machine ' + (old ? 'connected again: ' : 'added: ') + enrolled[b.id].name + ' (' + b.id + ')');
+      return send(res, 200, { key });
+    }
+
+    // ---- phones
+    if (p === '/api/login' && post) {
+      const ip = ipOf(req);
+      if (blocked(ip, now)) return send(res, 429, { error: 'Too many tries. Wait a few minutes and try again.' });
       const b = await body(req);
       if (!validId(b.id)) return send(res, 400, { error: 'Bad device id' });
-      const d = devices[b.id] || { id: b.id, prefs: { ...DEFAULT_PREFS } };
-      if (b.prefs && typeof b.prefs === 'object') d.prefs = { ...DEFAULT_PREFS, ...b.prefs, mute: { ...(b.prefs.mute || {}) } };
-      if ('subscription' in b) d.subscription = b.subscription && b.subscription.endpoint ? b.subscription : null;
-      if (typeof b.name === 'string') d.name = b.name.slice(0, 80);
-      d.seenAt = Date.now();
-      devices[b.id] = d;
+      if (!same(b.password, PASSWORD)) { failed(ip, now); return send(res, 403, { error: 'That isn\'t the workshop password.' }); }
+      fails.delete(ip);
+      devices[b.id] = { prefs: { ...DEFAULT_PREFS }, ...devices[b.id], id: b.id, pw, seenAt: now };
       saveDevices();
-      return send(res, 200, { prefs: d.prefs, notifications: !!d.subscription });
+      if (!origin && req.headers.host) origin = 'https://' + req.headers.host;
+      return send(res, 200, { ok: true }, { 'set-cookie': cookie(req, b.id + '.' + sign(b.id), 400 * 86400) });
     }
-    if (p === '/api/device' && req.method === 'GET') {
-      const d = devices[url.searchParams.get('id')];
-      return send(res, 200, d ? { prefs: { ...DEFAULT_PREFS, ...d.prefs }, notifications: !!d.subscription } : { prefs: DEFAULT_PREFS, notifications: false });
+    if (p.startsWith('/api/')) {
+      const d = phone(req);
+      if (!d) return send(res, 401, { error: 'Sign in' });
+      if (p === '/api/events') {
+        res.writeHead(200, { ...SAFE, 'content-type': 'text/event-stream', 'cache-control': 'no-store', 'x-accel-buffering': 'no' });
+        res.write('retry: 3000\n\ndata: ' + JSON.stringify(snapshot()) + '\n\n');
+        streams.add(res);
+        req.on('close', () => streams.delete(res));
+        return;
+      }
+      const state = () => ({ prefs: { ...DEFAULT_PREFS, ...d.prefs }, notifications: !!d.subscription });
+      // this phone's settings; asking also keeps it signed in for another 400 days
+      if (p === '/api/device' && !post) { d.seenAt = now; return send(res, 200, state(), { 'set-cookie': cookie(req, d.id + '.' + sign(d.id), 400 * 86400) }); }
+      if (p === '/api/device' && post) {
+        const b = await body(req);
+        if (b.prefs && typeof b.prefs === 'object') d.prefs = { ...DEFAULT_PREFS, ...b.prefs, mute: { ...(b.prefs.mute || {}) } };
+        if ('subscription' in b) d.subscription = b.subscription && push.valid(b.subscription) ? { endpoint: b.subscription.endpoint, keys: { p256dh: b.subscription.keys.p256dh, auth: b.subscription.keys.auth } } : null;
+        if (typeof b.name === 'string') d.name = b.name.slice(0, 80);
+        saveDevices();
+        return send(res, 200, state());
+      }
+      if (p === '/api/test-push' && post) {
+        if (!d.subscription) return send(res, 409, { error: 'Notifications aren\'t on for this phone yet' });
+        return (await pushTo(d, { title: 'Pathline Monitor', body: 'Notifications are working on this phone.', kind: 'info', silent: false }, true)) ? send(res, 200, { ok: true }) : send(res, 502, { error: 'The phone\'s notification service didn\'t take it. Turn notifications off and on again.' });
+      }
+      if (p === '/api/logout' && post) { delete devices[d.id]; saveDevices(); return send(res, 200, { ok: true }, { 'set-cookie': cookie(req, '', 0) }); }
+      if (p === '/api/machine-code' && post) return send(res, 200, { code: newCode(now), minutes: 10 });
+      if (p === '/api/machine-remove' && post) {
+        const m = enrolled[(await body(req)).id];
+        if (!m) return send(res, 404, { error: 'No such machine' });
+        byKey.delete(m.key);
+        delete enrolled[m.id];
+        machines.remove(m.id);
+        save('machines.json', enrolled);
+        saveState();
+        tell({ gone: m.id });
+        log('machine removed: ' + m.name + ' (' + m.id + ')');
+        return send(res, 200, { ok: true });
+      }
+      return send(res, 404, { error: 'No route ' + p });
     }
-    // a test notification to this phone only
-    if (p === '/api/test-push' && req.method === 'POST') {
-      const b = await body(req);
-      const d = devices[b.id];
-      if (!d || !d.subscription) return send(res, 409, { error: 'Notifications aren\'t on for this phone yet' });
-      await webpush.sendNotification(d.subscription, JSON.stringify({ title: 'Pathline Monitor', body: 'Notifications are working on this phone.', kind: 'info', silent: false }));
-      return send(res, 200, { ok: true });
-    }
-    if (p.startsWith('/api/')) return send(res, 404, { error: 'No route ' + p });
 
-    // the app
-    let f = p === '/' ? 'index.html' : p === '/setup' ? 'setup.html' : decodeURIComponent(p.slice(1));
-    const full = path.join(APP, f);
-    if (!full.startsWith(APP + path.sep) || !fs.existsSync(full) || fs.statSync(full).isDirectory()) { res.writeHead(404); return res.end('Not found'); }
+    // ---- the app's own files
+    const full = path.join(APP, p === '/' ? 'index.html' : decodeURIComponent(p.slice(1)));
+    if (!full.startsWith(APP + path.sep) || !fs.existsSync(full) || fs.statSync(full).isDirectory()) { res.writeHead(404, SAFE); return res.end('Not found'); }
     // the service worker and the page are always checked for a newer copy; icons can be kept
     const ext = path.extname(full);
-    res.writeHead(200, { 'content-type': TYPES[ext] || 'application/octet-stream', 'cache-control': ext === '.png' || ext === '.svg' ? 'max-age=86400' : 'no-cache' });
+    res.writeHead(200, { ...SAFE, 'content-type': TYPES[ext] || 'application/octet-stream', 'cache-control': ext === '.png' || ext === '.svg' ? 'max-age=86400' : 'no-cache' });
     fs.createReadStream(full).pipe(res);
   } catch (e) {
-    send(res, 500, { error: e.message });
+    send(res, e.message === 'Not JSON' || e.message === 'Too large' ? 400 : 500, { error: e.message });
   }
 }
 
-// http (any phone, and the setup page) and, when there's a certificate, https (the full app)
-const server = http.createServer(handle);
-const secure = tls ? https.createServer(tls, handle) : null;
-server.listen(PORT, () => {
-  log('Pathline Monitor ' + pkg.version + ' · ' + watcher.list.length + ' machines so far · data in ' + DATA);
-  const urls = phoneUrls();
-  if (urls.length) log('  phones: scan the QR code on http://localhost:' + PORT + ' (on this PC), or open ' + urls[0] + 'setup');
-  if (secure) secure.listen(HTTPS_PORT, () => { const a = appUrls(); if (a.length) log('  the full app (once a phone trusts the workshop certificate): ' + a[0]); });
-  else log('No https: the app works, and alerts show while it\'s open (README.md).');
-  watcher.start();
-  findMachines();
-});
-// the workshop certificate follows this computer's addresses (and is renewed before it runs out)
-if (secure && ca) setInterval(() => { try { const t = loadTls(); secure.setSecureContext(t); } catch (e) { log('certificate: ' + e.message); } }, 6 * 3600 * 1000);
-// a comment line every 25 s keeps the live connection open through proxies and phone sleep
+const server = tls ? require('https').createServer(tls, handle) : require('http').createServer(handle);
+server.listen(PORT, HOST, () => log('Pathline Monitor ' + pkg.version + ' on ' + (tls ? 'https' : 'http') + '://' + HOST + ':' + server.address().port + ' · ' + machines.list.size + ' machines · data in ' + DATA));
+// who has gone quiet; and a comment line every 25 s keeps live connections open through
+// web servers in front and phone sleep
+setInterval(() => machines.tick(), 5000);
 setInterval(() => { for (const res of streams) res.write(': keep-alive\n\n'); }, 25000);
+for (const sig of ['SIGTERM', 'SIGINT']) process.on(sig, () => { saveState(); process.exit(0); });

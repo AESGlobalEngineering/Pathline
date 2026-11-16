@@ -1,5 +1,7 @@
 # Brief for Pathline Run: what Pathline Monitor (the phone app) needs
 
+> **Changed in Pathline Monitor 0.5.0 (16 Nov 2026):** Monitor is now one server that each Run reports to, so it works away from the workshop. The hub described here is gone. What Run needs for that is in [RUN-REPORT-BRIEF.md](RUN-REPORT-BRIEF.md). The `/api/v1/monitor` answer below is unchanged, and it's what Run sends.
+
 From Pathline Monitor 0.3.0 (11 Nov 2026). Monitor is the phone app for the workshop (`monitor/`, see [monitor/README.md](../monitor/README.md)). One always-on PC or Pi runs the Monitor hub. It finds every Pathline Run on the network, asks each one what it's doing every 2 seconds, and sends phones the machines' progress, queues and alerts (a job finished, a registration mark not found, an error, a machine offline).
 
 Monitor only reads. It never starts, pauses, moves or changes a machine, and nothing here should let it.

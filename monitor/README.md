@@ -1,15 +1,19 @@
 # Pathline Monitor
 
-A phone app (a progressive web app) for the workshop network only. It shows every Pathline Run machine: what each one is doing, how long the job has left, what's queued, and what finished today. When a job finishes, or a machine is stuck waiting for someone, the phone gets an alert, even with the app closed.
+A phone app (a progressive web app) that works anywhere the phone has internet. It shows every Pathline Run machine: what each one is doing, how long the job has left, what's queued, and what finished today. When a job finishes, or a machine is stuck waiting for someone, the phone gets an alert, even with the app closed.
 
-The phones get the app, and the machines' news, from the **Monitor hub**: one always-on PC or Pi on the same network, set up once.
+There is one **Monitor server**, on the company's own server. Each machine's Pathline Run reports to it, and each phone opens it.
 
 ```
-Pathline Run (each machine) ◀──HTTP 8470──  Monitor hub              ──https 8443──▶  the app, on phones
-                                             (one workshop PC or Pi)  ──http 8480───▶  (setup, and as a web page)
+Pathline Run (each machine) ──https, outgoing only──▶  Monitor server  ◀──https──  the app, on phones
+                                                       (monitor.<your domain>)
 ```
 
-It only watches. Nothing on the phone starts, pauses or moves a machine on: a laser is started by someone standing at it. The machines' data never leaves the workshop network.
+- **It only watches.** Nothing on the phone starts, pauses or moves a machine on, and the server never sends a machine anything: a report is answered with an empty "received".
+- **Nothing is opened at the workshop.** Each Run connects out to the server, the way a browser does. No port is opened on the workshop network.
+- **It's small.** The server is about 500 lines of Node.js with no packages to install, and keeps its data in a few JSON files.
+
+Machines report from the Pathline Run version that has **Settings → Pathline Monitor** (the brief for it is [hmi/RUN-REPORT-BRIEF.md](../hmi/RUN-REPORT-BRIEF.md)). Until a machine's Run has that, it can't be added.
 
 ## What makes an alert
 
@@ -18,100 +22,122 @@ It only watches. Nothing on the phone starts, pauses or moves a machine on: a la
 | A job finishes | **Laser A finished Coasters**: how long it took, and what's waiting (lasers need Start at the machine) |
 | The last queued job finishes | The same alert, which also counts as "a queue runs out" |
 | A registration mark can't be found | **Laser C needs you** |
-| An error, a stopped job, or a machine not answering for 20 s | **Laser E stopped answering** and so on |
+| An error, a stopped job, or a laser its Run can't reach | **Laser E has an error** and so on |
+| A machine stops reporting for about a minute | **Laser E stopped reporting**: its PC is off, Run is closed, or it lost the internet |
+| Every machine stops reporting together | One alert, **The workshop stopped reporting**, not one per machine |
 | Lid opened, or Pause pressed at the machine | None. It's shown in the app, but someone is already there |
-| A machine answers again | Listed in Alerts, without a tone |
+| A machine reports again | Listed in Alerts, without a notification |
 
 Each phone chooses which of these it gets (Settings), can mute single machines, and can set quiet hours (18:00 to 07:00, no sound).
 
 ## Get it on a phone
 
-1. On the hub PC, open `http://localhost:8480`. It shows a QR code.
-2. On the phone, on the workshop Wi-Fi, scan it with the camera. It opens **Set up this phone** (`http://<hub>:8480/setup`), which walks through the rest and checks each step as it goes:
-   - **Download the workshop certificate**: a profile on iPhone, a certificate file on Android.
-   - **Install and trust it**:
-     - **iPhone**: Settings → Profile Downloaded → Install, then Settings → General → About → Certificate Trust Settings → turn on **Pathline Monitor workshop**.
-     - **Android**: Settings → Security & privacy → More security settings → Encryption & credentials → Install a certificate → CA certificate.
-   - **Open the app** (`https://<hub>:8443`). The page turns this step green as soon as the phone trusts the certificate.
-   - **Add it to the Home Screen** (iPhone: Share → Add to Home Screen; Android: Chrome offers **Install app**).
-   - **Turn on notifications** in the app's Settings, then **Send a test**.
+1. Open the server's address (`https://monitor.<your domain>`) in the phone's browser: Safari on iPhone, Chrome on Android.
+2. Sign in with the **workshop password**. The phone stays signed in.
+3. Add it to the Home Screen (iPhone: Share → Add to Home Screen; Android: Chrome offers **Install app**), and open it from there.
+4. In its Settings, turn on notifications, then **Send a test**.
 
-That takes a few minutes, once per phone. From then on it's an app on the Home Screen: full screen, it opens without the network (showing the last it saw), and alerts arrive with it closed. iPhones need iOS 16.4 or newer, with the app opened from the Home Screen.
+From then on it's an app on the Home Screen: full screen, it opens even without a connection (and says it's reconnecting), and alerts arrive with it closed. iPhones need iOS 16.4 or newer, and notifications only work from the Home Screen app, so sign in there.
 
-A phone can skip the setup and use `http://<hub>:8480` as a web page instead. It's the same app, but it alerts only while it's open (a banner, a tone and a buzz).
+## Add a machine
 
-### The workshop certificate
+1. In the app: **Settings → Add a machine**. It shows a 6-character code that works once, for 10 minutes.
+2. At the machine, in Pathline Run: **Settings → Pathline Monitor**. Type the server's address and the code, and press **Connect**.
 
-Phones only treat a web page as an app (installable, offline, notifications) when it comes from an `https://` address they trust. On a local network nobody issues certificates for, the hub makes its own the first time it starts:
+The machine appears in the app straight away. Run gets its own key from the server and reports with it from then on. To take a machine off, open it in the app and choose **Remove from Pathline Monitor**: its key stops working and its Run stops reporting.
 
-- `data/workshop-ca.crt` is the workshop's certificate authority, which each phone trusts once. It can **only** vouch for private network addresses (10.x, 172.16–31.x, 192.168.x), `.local` names and `localhost`, because of X.509 name constraints. A phone that trusts it can't be fooled about any real website. Keep `data/workshop-ca.key` private all the same.
-- `data/monitor.crt` is the hub's own certificate, for its current addresses. It lasts 397 days and is renewed automatically when the hub's address changes or a month before it runs out. Phones don't need to do anything when that happens.
+## Put it on the server (once)
 
-If IT issues certificates on your network, use theirs instead: put the files next to `config.json` and add `"tls": { "cert": "cert.pem", "key": "key.pem" }`. `"https": false` turns https off.
+For an Amazon Linux 2023 server with nothing else on ports 80 and 443. Before starting:
 
-Notifications to a closed app go through the phone maker's push service (Apple or Google), so the hub needs internet access for those, and only for those. The machines' data stays on the workshop network.
+- **A web address pointing at the server**: an A record such as `monitor.<your domain>` with the server's public IP address.
+- **Ports 80 and 443 open** to the server in its AWS security group. 443 is the app; 80 is only used to get and renew the certificate.
 
-## Set up the hub (once)
-
-On a PC or Raspberry Pi that's always on, on the same network as the machines:
-
-| For | Download | Then |
-|---|---|---|
-| **Windows PC** | **[⬇ Pathline-Monitor-Windows.zip](https://github.com/AESGlobalEngineering/Pathline/releases/download/pathlinemonitor/Pathline-Monitor-Windows.zip)** | Right-click it, **Extract All**, then double-click **Start Pathline Monitor.cmd** in the folder it makes, and leave its window open. Node.js is inside: nothing else to install |
-| **Raspberry Pi**, Linux or Mac | [Pathline-Monitor.zip](https://github.com/AESGlobalEngineering/Pathline/releases/download/pathlinemonitor/Pathline-Monitor.zip) | Unzip it, then `sh start.sh` (needs Node.js 18 or newer: `sudo apt install nodejs`) |
-
-To update the hub, unzip a newer download over the old folder. `monitor/data` (the machines it found, the workshop certificate, phones' choices, alerts) and `monitor/config.json` are kept, so phones don't need setting up again. Phones get the new app the next time they open it.
-
-From a copy of this repository instead (Node.js 18 or newer; Monitor uses Pathline Prepare's machine finder, `src/main/discover.js`, so keep the whole folder):
+Then, on the server:
 
 ```bash
-cd monitor
-npm install
-node server.js
+curl -LO https://github.com/AESGlobalEngineering/Pathline/releases/download/pathlinemonitor/Pathline-Monitor.zip
+unzip -o Pathline-Monitor.zip
+sudo sh pathline-monitor/install.sh monitor.example.com
 ```
 
-### Finding the machines
+`install.sh` does five things, and says which it's on:
 
-Monitor finds machines the way Pathline Prepare's **Add machine → Find machines** does. It looks when it starts, every 10 minutes, and when **Look now** is pressed in the app's Settings:
+1. installs Node.js and certbot (`dnf`);
+2. copies the files to `/opt/pathline-monitor`;
+3. asks for the **workshop password** (8 characters or more; a few words is better than one) and keeps it in `/etc/pathline-monitor/password`, readable by root only;
+4. gets a certificate for the address from Let's Encrypt (certbot asks for an email address and for agreement to its terms). It renews by itself;
+5. installs and starts the `pathline-monitor` service ([pathline-monitor.service](pathline-monitor.service)), which also starts with the server.
 
-- it asks the network for Pathline Run's announcement (`_pathline._tcp.local`), and
-- it tries port 8470 on every address of this computer's own network.
+After that:
 
-Machines it finds are kept in `data/found.json`, so a machine that's switched off still shows (as Offline). A machine on another network, or on a port other than 8470, can be listed in `config.json` (copy `config.example.json`):
+| To | Do |
+|---|---|
+| Update | Download and unzip the newer zip, and run `install.sh` again. The password, certificate, machines, phones and alerts are kept. Phones get the new app the next time they open it |
+| Change the password | Edit `/etc/pathline-monitor/password`, then `sudo systemctl restart pathline-monitor`. Every phone signs in again and turns notifications on again. Machines aren't affected |
+| See what it's doing | `journalctl -u pathline-monitor -f` |
+| Back it up | `/var/lib/pathline-monitor` (below) and `/etc/pathline-monitor/password` |
 
-```json
-{
-  "port": 8480,
-  "httpsPort": 8443,
-  "machines": [{ "name": "Laser A", "host": "192.168.1.40", "port": 8470 }]
+### On a server that already hosts a website
+
+Don't use `install.sh`: the web server already there (nginx, Apache) has ports 80 and 443. Run Monitor on a local port behind it instead. Copy `config.example.json` to `config.json`, set the password, and start `node server.js` as a service. Then give the web server a site for Monitor's address, with its own certificate, that passes everything on. For nginx:
+
+```nginx
+location / {
+  proxy_pass http://127.0.0.1:8480;
+  proxy_set_header X-Forwarded-For $remote_addr;
+  proxy_set_header X-Forwarded-Proto $scheme;
+  proxy_set_header Host $host;
+  proxy_read_timeout 1h;
 }
 ```
 
-`"find": false` turns the network search off.
+### To try it on your own PC
 
-### Keep it running
+```bash
+cd monitor
+node test.js --demo
+```
 
-- **Windows**: Task Scheduler → Create Task → "Run whether user is logged on or not", trigger **At startup**, action **Start Pathline Monitor.cmd** from the unzipped folder. The first time it runs, Windows Firewall asks about Node.js: allow private networks, so phones can connect (ports 8480 and 8443) and the search hears Pathline Run's answers.
-- **Raspberry Pi**: a systemd service with `WorkingDirectory=/home/pi/Pathline-Monitor/monitor` and `ExecStart=/usr/bin/node server.js`, `Restart=always`.
+That starts a server on `http://127.0.0.1:8480` with three pretend machines (the password is `workshop demo`). `npm test` runs the self-test.
 
-Give the hub a fixed address (a DHCP reservation on the router), so the phones' Home Screen app keeps finding it.
+## What the server keeps
 
-## What it keeps
+In `/var/lib/pathline-monitor` (or `monitor/data/` when started by hand):
 
-In `monitor/data/` (left out of git):
-
-- `workshop-ca.crt` / `.key`, `monitor.crt` / `.key`: the workshop certificate and the hub's own. Keep them: a new authority means setting every phone up again.
-- `found.json`: the machines found on the network.
-- `devices.json`: each phone's alert choices and its push subscription.
+- `keys.json`: the push keys and the server's own secret. Keep it: without it every phone signs in and turns notifications on again.
+- `machines.json`: the machines added, each with a fingerprint of its key (not the key itself).
+- `devices.json`: each signed-in phone's alert choices and its push subscription.
 - `alerts.json`: the last 14 days of alerts (300 at most).
-- `vapid.json`: the push keys. Keep them too, or every phone has to turn notifications on again.
+- `state.json`: what each machine last showed, so a job that finishes while the server restarts still alerts.
+
+Job names, materials and times are stored there and nowhere else. Notifications to a closed app go through the phone maker's push service (Apple or Google), encrypted so that only the phone can read them.
+
+## How it's kept safe
+
+- **Phones** sign in with the workshop password. Five wrong tries from one address pause sign-in from that address (1 minute, doubling to an hour). Signing out, or changing the password, ends a phone's access.
+- **Machines** each have their own key, given once in exchange for a one-time code that a signed-in phone made. Removing a machine ends its key.
+- **Reports are cut down to what's shown** and to sane lengths before they're kept or sent on, so a broken or pretend report can't do more than show wrong text.
+- **A phone's push subscription** is only accepted if it points at Apple's, Google's, Mozilla's or Microsoft's push service.
+- **No packages**: nothing to install from npm, so nothing to keep patched but Node.js itself.
+
+## What a machine sends
+
+Two calls, both to the Monitor server over https. Pathline Run's side is described in [hmi/RUN-REPORT-BRIEF.md](../hmi/RUN-REPORT-BRIEF.md).
+
+| Call | Body | Answer |
+|---|---|---|
+| `POST /api/v1/enrol` | `{ "code": "K7M2QX", "id": "run-3f9c2a71", "name": "Laser A" }` | `200 { "key": "…" }`, once. `403` for a wrong or used code, `429` after too many tries |
+| `POST /api/v1/report` with `Authorization: Bearer <key>` | Run's `GET /api/v1/monitor` answer ([PROTOCOL.md](../PROTOCOL.md) *Watching*) | `204`, nothing else. `401` when the machine has been removed |
+
+Run reports when something changes and at least every 10 seconds. After 35 seconds without a report the machine shows as not reporting.
 
 ## How it works
 
-- `lib/watch.js` listens to each machine. Pathline Run 0.7.12 and later send a live stream (`GET /api/v1/events`) of their watcher answer (`GET /api/v1/monitor`, [PROTOCOL.md](../PROTOCOL.md) *Watching*): when each state began, Run's own time left, the queue with which jobs start by themselves, and today's jobs. A change reaches the phones within a second, and `/api/v1/monitor` is asked every 2 s while the stream is down. Older Runs are asked every 2 s for what their own screen reads (`GET /api/local/state`, and `GET /api/v1/info` once a minute). Either way the answers become one view per machine, and each one is compared with the last to make the alerts in the table above. Run's machine `id` is kept with each machine, so one whose address changes is followed.
-- `lib/certs.js` makes the workshop certificate authority (with name constraints) and the hub's certificate, renews it, and writes the iPhone profile.
-- `server.js` serves http (8480: the setup page, the certificate downloads, and the app as a web page) and https (8443: the full app). It finds machines (`../src/main/discover.js`), keeps the alerts, streams machines and alerts to the app (`GET /api/events`) and sends Web Push.
-- `app/` is the phone app: `app.js` (screens, and the banner and tone for new alerts), `setup.html` (Set up this phone), `sw.js` (service worker: opens without the network, shows notifications), `manifest.webmanifest` and the icons. `tools/make-icons.js` redraws the icons from the Pathline mark (run it with Electron).
-- `tools/package.js` lays out the download (`dist/Pathline-Monitor/`: the starters, `monitor/`, the machine finder, and with `--node <node.exe>` Node.js itself). The release workflow ([../.github/workflows/release-monitor.yml](../.github/workflows/release-monitor.yml)) zips it whenever `package.json` has a new version.
+- `server.js` is the whole server: sign-in, the machines' two calls, the phones' live stream (`GET /api/events`: everything once, then each machine as it changes) and the app's files. With a certificate it serves https itself; without one, plain http for a web server in front.
+- `lib/machines.js` turns each report into one view per machine and compares it with the last to make the alerts in the table above. Phones count a running job down themselves, so they're only told when something else changes, and every 15 seconds while a job runs.
+- `lib/push.js` is Web Push with Node's own crypto: the message is encrypted for one phone and signed as coming from this server.
+- `app/` is the phone app: `app.js` (screens, sign-in, and the banner and tone for new alerts), `sw.js` (service worker: opens without the network, shows notifications), `manifest.webmanifest` and the icons. `tools/make-icons.js` redraws the icons from the Pathline mark (run it with Electron).
+- `install.sh` and `pathline-monitor.service` put it on a server. The release workflow ([../.github/workflows/release-monitor.yml](../.github/workflows/release-monitor.yml)) zips the folder whenever `package.json` has a new version.
 
-`npm test` puts a stand-in Pathline Run through each case and checks which alerts come out, then checks the workshop certificate.
+`npm test` checks which alerts each kind of report makes, the notification encryption against a message made by the `web-push` library, and the server itself: sign-in, adding and removing a machine, reporting, and what survives a restart.

@@ -185,13 +185,24 @@ img{max-width:100%}
 .steps li{display:flex;gap:10px;align-items:flex-start;font-size:14px;line-height:1.4}
 .steps .ord{width:24px;height:24px;border-radius:7px;background:var(--sunken);display:inline-flex;align-items:center;justify-content:center;font:500 12px var(--mono);color:var(--text-2);flex:none}
 .steps svg.i{vertical-align:-4px;color:var(--accent-fg)}
-/* a PC's view: the QR code to the right of the phone frame (the frame stays centred, as its tab bar is) */
+/* a PC's view: the address to open on a phone, to the right of the phone frame (the frame stays centred, as its tab bar is) */
 .desk{position:fixed;top:50%;left:calc(50% + 215px + 56px);transform:translateY(-50%);width:320px;display:flex;flex-direction:column;align-items:flex-start;gap:12px;color:var(--text)}
 .desk h2{margin:4px 0 0;font-size:22px;font-weight:600;line-height:1.25;text-wrap:balance}
 .desk p{margin:0;color:var(--text-2);line-height:1.5}
-.desk .qr{width:220px;height:220px;padding:10px;background:#FFFFFF;border-radius:14px;box-shadow:0 0 0 1px var(--line-strong)}
-.desk .qr svg{display:block;width:100%;height:100%}
-.desk .qr.empty{display:flex;align-items:center;justify-content:center;color:#5B6370;font-size:13px;text-align:center}
-.desk .url{font-size:15px;color:var(--text);user-select:all}
+.desk .url{font-size:17px;color:var(--text);user-select:all;padding:10px 14px;background:var(--surface);border:1px solid var(--line-strong);border-radius:10px}
 .desk .small{font-size:13px;color:var(--text-3)}
 @media (max-width:1199px),(pointer:coarse){.desk{display:none}}
+
+/* ---- signing in, and adding a machine ---- */
+.signin{justify-content:center;align-items:flex-start;gap:14px;padding-block:calc(32px + env(safe-area-inset-top,0px)) calc(32px + env(safe-area-inset-bottom,0px))}
+.signin img{border-radius:14px;box-shadow:0 0 0 1px var(--line-strong)}
+.signin h1{margin:6px 0 0;font-size:26px;font-weight:600;letter-spacing:-.01em;line-height:1.15}
+.signin p{margin:0;color:var(--text-2);line-height:1.45}
+.signin .small{font-size:13px;color:var(--text-3)}
+.signin form{margin-top:10px;align-self:stretch}
+.field{display:flex;flex-direction:column;gap:6px;padding:14px 14px 4px;font-size:13px;font-weight:500;color:var(--text-2)}
+.field input{height:48px;padding:0 12px;border:1px solid var(--line-strong);border-radius:10px;background:var(--surface);color:var(--text);font:16px var(--font);width:100%}
+.field input:focus-visible{outline:2px solid var(--accent);outline-offset:1px;border-color:var(--accent)}
+#signmsg{color:var(--err);font-size:13px}
+.addm{display:flex;flex-direction:column;gap:14px;align-items:flex-start}
+.code{align-self:stretch;text-align:center;font-size:34px;font-weight:500;letter-spacing:.12em;padding:14px 8px;background:var(--sunken);border-radius:12px;color:var(--text);user-select:all}

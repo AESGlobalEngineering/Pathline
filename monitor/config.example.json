@@ -1,7 +1,6 @@
 {
+  "password": "the workshop password, 8 characters or more",
   "port": 8480,
-  "find": true,
-  "machines": [
-    { "name": "Laser on another network", "host": "10.0.5.40", "port": 8470 }
-  ]
+  "host": "127.0.0.1",
+  "address": "https://monitor.example.com"
 }
