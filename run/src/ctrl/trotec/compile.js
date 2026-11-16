@@ -385,4 +385,4 @@ function engraveRows(pkg, cfg) {
   return out;
 }
 
-module.exports = { compile, exportFiles, settings, units, PLANNER, runTime, cutProfile, engraveRows };
+module.exports = { compile, exportFiles, settings, units, PLANNER, runTime, cutProfile, engraveRows, MARK_SEC };

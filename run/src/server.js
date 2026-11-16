@@ -369,6 +369,12 @@ function start(opts = {}) {
   let discovery = null;
   // what watchers read (GET /api/v1/monitor, /api/v1/events)
   const monitor = require('./monitor').createMonitor({ machine, store, dataDir: DATA, info: () => ({ id: deviceId, ...infoView() }) });
+  // Setup → Pathline Monitor: the same answer, reported out to the Monitor server (one way:
+  // report.js reads back only the key at enrolment and each report's status code)
+  const reporter = require('./report').createReporter({
+    dataDir: DATA, view: () => monitor.view(), onChange: monitor.onChange, running: () => !!machine.run,
+    info: () => ({ id: deviceId, name: cfg.name }), log, scale: Number(process.env.PATHLINE_RUN_REPORT_SCALE) || 1
+  });
   // who has been watching (ip → when): the Pathline Monitor hub asks every 2 s or keeps a stream
   const watchers = new Map();
   // streams still open (ip → how many): a hub holding /api/v1/events open is watching now, however
@@ -615,7 +621,12 @@ function start(opts = {}) {
     // isn't announced; it's whoever has been watching this machine (GET /api/v1/monitor or
     // /events) lately, or the address typed in (monitorHub: "host" or "host:port")
     'GET /monitor-hub': () => findMonitorHub(),
+    // Setup → Pathline Monitor: { address, code } from the app's Settings → Add a machine
+    'GET /monitor-report': () => reporter.status(),
+    'POST /monitor-report/connect': (b) => reporter.connect(b || {}),
+    'POST /monitor-report/disconnect': () => reporter.disconnect(),
     'GET /state': (b, req) => ({
+      monitorReport: reporter.status(),
       app: pkgJson.version, update: updates.status(), here: isLocalReq(req), config: cfg, status: machine.status(), info: machine.info, ruidaModels: ruidaModels.MODELS,
       fromController: machine.ctrl || null,
       // a test grid's camera check: the screen opens its results when one is done
@@ -938,6 +949,7 @@ function start(opts = {}) {
         close: async () => {
           try { if (discovery) await discovery.close(); } catch (e) { /* closing anyway */ }
           try { await machine.zaxis.close(); } catch (e) { /* closing anyway */ }
+          try { reporter.close(); } catch (e) { /* closing anyway */ }
           try { monitor.close(); } catch (e) { /* closing anyway */ }
           try { await machine.stop('Pathline Run was closed'); } catch (e) { /* closing anyway */ }
           try { if (machine.link) await machine.link.close(); } catch (e) { /* closing anyway */ }

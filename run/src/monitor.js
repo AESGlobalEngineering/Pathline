@@ -76,7 +76,10 @@ function createMonitor(o) {
 
   // ---- watching: the times things began, and the event stream
   const clients = new Set();
-  let lastKey = '', lastSent = 0, todayIds = null;
+  // told when the answer changes, other than a running job's clock (the report to Pathline
+  // Monitor, report.js): the same test the event stream uses
+  const listeners = new Set();
+  let lastKey = '', lastSent = 0, todayIds = null, heardKey = '';
   const send = (res, event, data) => { try { res.write((event ? 'event: ' + event + '\n' : '') + 'data: ' + JSON.stringify(data) + '\n\n'); } catch (e) { clients.delete(res); } };
   function tick() {
     const st = machine.st, now = Date.now();
@@ -86,16 +89,19 @@ function createMonitor(o) {
     const mk = st.markWait ? st.job + ':' + st.markWait.mark + ':' + (st.markWait.again ? 1 : 0) : null;
     if (mk !== t.markKey) { t.markKey = mk; t.markSince = mk ? now : null; }
     if (changed) save();
-    if (!clients.size) { todayIds = null; return; }
+    if (!clients.size && !listeners.size) { todayIds = null; return; }
     const v = view();
+    const key = JSON.stringify({ ...v, job: v.job ? { ...v.job, elapsed: 0, remaining: 0, progress: 0 } : null });
+    if (key !== heardKey) { heardKey = key; for (const fn of listeners) { try { fn(v); } catch (e) { /* not the monitor's problem */ } } }
+    if (!clients.size) { todayIds = null; return; }
     // a job finished: its own event, once
     const ids = new Set(v.today.map((x) => x.id + '@' + x.finishedAt));
     if (todayIds) for (const x of v.today) if (!todayIds.has(x.id + '@' + x.finishedAt)) for (const c of clients) send(c, 'finished', x);
     todayIds = ids;
     // the whole answer when something in it changed (the running clock alone at most once a second)
-    const key = JSON.stringify({ ...v, job: v.job ? { ...v.job, elapsed: 0, remaining: 0 } : null });
-    if (key !== lastKey || (v.job && now - lastSent >= 1000)) {
-      lastKey = key; lastSent = now;
+    const sk = JSON.stringify({ ...v, job: v.job ? { ...v.job, elapsed: 0, remaining: 0 } : null });
+    if (sk !== lastKey || (v.job && now - lastSent >= 1000)) {
+      lastKey = sk; lastSent = now;
       for (const c of clients) send(c, null, v);
     }
   }
@@ -114,7 +120,8 @@ function createMonitor(o) {
     req.on('close', () => clients.delete(res));
   }
 
-  return { view, stream, tick, close: () => { clearInterval(timer); clearInterval(keepAlive); for (const c of clients) { try { c.end(); } catch (e) { /* closed */ } } clients.clear(); } };
+  const onChange = (fn) => { listeners.add(fn); return () => listeners.delete(fn); };
+  return { view, stream, tick, onChange, close: () => { clearInterval(timer); clearInterval(keepAlive); for (const c of clients) { try { c.end(); } catch (e) { /* closed */ } } clients.clear(); } };
 }
 
 module.exports = { createMonitor };

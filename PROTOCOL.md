@@ -50,6 +50,24 @@ For watchers that only read, such as Pathline Monitor, the workshop's phone app 
 
 `GET /events` (`text/event-stream`) sends the same object as a `data:` line straight away, then again whenever anything in it changes: at most once a second while only a job's `elapsed` and `remaining` move. When a job finishes it also sends `event: finished` with that job's `today` entry. A comment line every 25 s keeps the connection open.
 
+## Reporting (to Pathline Monitor)
+
+From Pathline Monitor 0.5, the device sends its status out instead of being asked for it: Monitor is one server on the internet (monitor/README.md) and can't reach into the workshop. Pathline Run does this from 0.7.13 (hmi/RUN-REPORT-BRIEF.md). It's set up in Run's **Setup → Pathline Monitor** with the server's address and a one-time code from the app's **Settings → Add a machine**.
+
+**It's one way.** The device reads back only the key, once, from `/api/v1/enrol`, and each report's status code. A report's answer body is never read. Nothing the server answers changes the machine, a job, the settings or how often the device reports.
+
+| Method | Path (on the Monitor server) | Body | Answer |
+|---|---|---|---|
+| POST | `/api/v1/enrol` | `{ "code": "K7M2QX", "id": "<GET /info id>", "name": "Laser A" }` | `200 { "key" }`; `403 { "error" }` code wrong, used or older than 10 minutes; `429 { "error" }` too many tries |
+| POST | `/api/v1/report` | Exactly what `GET /monitor` answers, with `authorization: Bearer <key>` | `204`; `401` the machine was removed in Monitor |
+
+- **When:** straight away when anything changes other than a running job's `progress`, `elapsed` and `remaining` (at most once a second); every 5 s while a job runs; every 10 s otherwise. Monitor shows a machine as not reporting after 35 s of silence.
+- **How:** one request at a time, given up after 8 s, on a kept-open connection. A report that's due while one is on its way waits, then sends the newest state: old ones aren't queued (`today` carries the finished jobs). Under 64 KB (the server reads the first 20 of `today` and 100 of `queue`). https only, with the certificate checked; plain http only to `localhost` or `127.0.0.1`, for testing.
+- **Answers:** `2xx` notes the time ("Last sent"). `401`: stop, forget the key, show "Removed in Pathline Monitor". Anything else, a timeout or no connection: note since when ("Can't reach it since …") and try again on the normal schedule, no faster.
+- The key is kept in Run's data folder (`monitor-report.json`), apart from the config, and is never logged or shown. **Disconnect** forgets it without calling the server. A key saved when Run starts starts the reporting.
+
+`GET /monitor` and `GET /events` stay as they are, for anything else that watches.
+
 ## Send a job
 
 `POST /jobs` with a **job package** (below). Respond `{ id, status: "queued" }`. The app may then call `POST /start`.
@@ -136,11 +154,11 @@ Any subset of these. Missing keys keep their current value.
 {
   "bed": [813, 508], "speed": 3550, "acc": 50000, "origin": "tl", "units": "mm", "home": true, "prefix": "TRO-",
   "source": "CO2", "power": 80, "lens": "2.0\"", "pwm": 5000, "minPower": 8, "focus": "0.0", "airDefault": "High",
-  "markType": "Dot", "markD": "5.0", "camX": "-42.15", "camY": "18.60", "calibrated": "12 Oct 2026",
+  "markType": "Dot", "markD": "5.0", "camX": "-42.15", "camY": "18.60", "calibrated": "12 Oct 2026", "markTime": 4.7,
   "heads": [{ "slot": "T1", "tool": "Knife", "x": "0.00", "y": "0.00", "loaded": true }],
   "feedLen": 1000, "timing": { "toolDown": 0.15, "toolUp": 0.12, "toolChange": 8, "feedSpeed": 200, "feedSettle": 3 },
   "f": { "camera": true, "autofocus": true, "rotary": false, "air": true, "conveyor": false, "vacuum": false }
 }
 ```
 
-`speed`, `acc` and (for plotters) `timing` feed the time estimate, so the more accurately the device reports them, the closer the simulation gets.
+`speed`, `acc` and (for plotters) `timing` feed the time estimate, so the more accurately the device reports them, the closer the simulation gets. `markTime` is the seconds the device takes per registration mark (Pathline Run 0.7.13 on: learnt from the jobs it ran, including the short move between marks); without it Pathline uses 1.5 s. On a Trotec, `acc` is the acceleration that times a short travel hop (see `travelAcc` and `jerk` for the real figures): it's for travel only, not for an engraving line's turnaround.

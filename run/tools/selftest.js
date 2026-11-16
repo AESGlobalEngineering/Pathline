@@ -227,6 +227,8 @@ console.log('Trotec job stream');
   ok(mv.markArea === undefined, 'camera off: no markArea');
   const mvC = config.machineView({ ...cfg, configured: true, bed: [1300, 900], vision: { enabled: true, offset: [-41.735, -12.9854] } });
   ok(JSON.stringify(mvC.markArea) === '[26.9,3.5,1300,900]', 'camera on: Pathline is told where marks can be read (the Q500: 26.9 mm from the left, 3.5 from the back)', JSON.stringify(mvC.markArea));
+  const mvM = config.machineView({ ...cfg, configured: true, markSec: 4.6667, vision: { enabled: true } });
+  ok(mvC.markTime === 8 && mvM.markTime === 4.7 && mv.markTime === undefined, 'camera on: Pathline is told the seconds per mark, as learnt (4.7), else 8; camera off: none', mvC.markTime + ', ' + mvM.markTime);
 }
 
 console.log('Ruida encoding');
@@ -1493,6 +1495,149 @@ async function monitorTests() {
   ok(small && !small.big && big && big.big && Math.abs(big.lean + 0.187) < 0.001 && bm.byAt(dataB, '2026-11-04T10:00:00.000Z'), 'bed maps: a small change passes, a jump like 3 → 12 Nov (Y ' + (big && big.scaleY) + ' ‰, ' + (big && big.lean) + '°) is flagged', JSON.stringify({ small, big }));
 }
 
+// ---------------------------------------------------------------- reporting to Pathline Monitor
+// Setup → Pathline Monitor (hmi/RUN-REPORT-BRIEF.md), against a stand-in Monitor server. Run's
+// times are run 5× faster here (PATHLINE_RUN_REPORT_SCALE 0.2): every 2 s idle, 1 s while a job
+// runs, at most every 0.2 s on a change, a report given up after 1.6 s.
+async function reportTests() {
+  console.log('Reporting to Pathline Monitor');
+  const R = require('../src/report');
+  const throws = (f) => { try { f(); return null; } catch (e) { return e.message; } };
+  ok(R.address('monitor.example.com/').base === 'https://monitor.example.com' && R.address('https://Monitor.example.com').base === 'https://monitor.example.com' && R.address('http://127.0.0.1:9/').base === 'http://127.0.0.1:9' && R.code(' k7m-2qx ') === 'K7M2QX' && R.code('K7M 2QX') === 'K7M2QX',
+    'address with or without https:// and a trailing slash; code in any case, with or without the dash');
+  ok(/https only/.test(throws(() => R.address('http://monitor.example.com')) || '') && throws(() => R.code('K7M2Q')), 'an http:// address that isn\'t localhost is refused, and a code that isn\'t 6 characters');
+
+  // the stand-in: enrol K7M2QX → key; reports kept; mode: ok (204) | removed (401) | down (no answer) | orders (200 with made-up instructions)
+  const got = [];
+  let mode = 'ok', enrolled = null;
+  const mon = http.createServer((rq, rs) => {
+    let s = '';
+    rq.on('data', (c) => { s += c; });
+    rq.on('end', () => {
+      if (rq.url === '/api/v1/enrol') {
+        const b = JSON.parse(s || '{}');
+        if (b.code !== 'K7M2QX') { rs.writeHead(403, { 'content-type': 'application/json' }); return rs.end(JSON.stringify({ error: 'That code isn\'t right, or it has run out.' })); }
+        enrolled = b;
+        rs.writeHead(200, { 'content-type': 'application/json' }); return rs.end(JSON.stringify({ key: 'stand-in-key-1' }));
+      }
+      if (rq.url === '/api/v1/report') {
+        if (mode === 'down') return rq.socket.destroy();
+        got.push({ at: Date.now(), auth: rq.headers.authorization, body: JSON.parse(s), mode });
+        if (mode === 'removed') { rs.writeHead(401, { 'content-type': 'application/json' }); return rs.end('{"error":"removed"}'); }
+        if (mode === 'orders') { rs.writeHead(200, { 'content-type': 'application/json' }); return rs.end(JSON.stringify({ start: 'J0031', stop: true, config: { name: 'Hijacked', httpPort: 1, removeDone: false }, interval: 0, key: 'other' })); }
+        rs.writeHead(204); return rs.end();
+      }
+      rs.writeHead(404); rs.end();
+    });
+  });
+  await new Promise((r) => mon.listen(0, '127.0.0.1', r));
+  const monAddr = 'http://127.0.0.1:' + mon.address().port + '/';
+
+  const data = fs.mkdtempSync(path.join(os.tmpdir(), 'pathline-report-'));
+  fs.writeFileSync(path.join(data, 'config.json'), JSON.stringify({ controller: 'trotec', regMarks: 'ignore', bed: [813, 508], sim: { speedup: 30 } }));
+  const port = 19670 + Math.floor(Math.random() * 300);
+  const srv = spawn(process.execPath, [path.join(__dirname, '..', 'src', 'server.js'), '--sim', '--port', String(port), '--data', data], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, PATHLINE_RUN_REPORT_SCALE: '0.2' } });
+  let out = '';
+  srv.stdout.on('data', (d) => { out += d; }); srv.stderr.on('data', (d) => { out += d; });
+  const base = 'http://127.0.0.1:' + port + '/api/';
+  const call = async (m, r, b) => { const res = await fetch(base + r, { method: m, headers: b ? { 'content-type': 'application/json' } : {}, body: b ? JSON.stringify(b) : undefined }); return { status: res.status, data: await res.json().catch(() => null) }; };
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  const gaps = (list) => list.slice(1).map((g, i) => g.at - list[i].at);
+  const med = (a) => { const s = a.slice().sort((x, y) => x - y); return s.length ? s[Math.floor(s.length / 2)] : NaN; };
+  const keyFile = path.join(data, 'monitor-report.json');
+  try {
+    for (let i = 0; i < 60; i++) { try { await call('GET', 'v1/info'); break; } catch (e) { await wait(100); } }
+    // a wrong code: the server's own words, nothing saved
+    const bad = await call('POST', 'local/monitor-report/connect', { address: monAddr, code: 'AAA-111' });
+    ok(bad.status === 400 && /code isn't right/.test(bad.data.error) && !fs.existsSync(keyFile) && !(await call('GET', 'local/monitor-report')).data.connected, 'a wrong code shows the server\'s error and saves nothing', JSON.stringify(bad));
+    const plain = await call('POST', 'local/monitor-report/connect', { address: 'http://monitor.example.com', code: 'K7M-2QX' });
+    ok(plain.status === 400 && /https/.test(plain.data.error), 'an http:// address that isn\'t localhost is refused by Connect', JSON.stringify(plain));
+    // Connect: the key saved (not in the config, nor shown), the first report with it straight away
+    const t0 = Date.now();
+    const c = await call('POST', 'local/monitor-report/connect', { address: monAddr, code: 'k7m 2qx' });
+    for (let i = 0; i < 40 && !got.length; i++) await wait(50);
+    const saved = JSON.parse(fs.readFileSync(keyFile, 'utf8'));
+    const st = (await call('GET', 'local/state')).data;
+    ok(c.status === 200 && c.data.connected && saved.key === 'stand-in-key-1' && enrolled && enrolled.id === (await call('GET', 'v1/info')).data.id && got.length && got[0].auth === 'Bearer stand-in-key-1' && got[0].at - t0 < 1500 &&
+      !JSON.stringify(st.config).includes('stand-in-key') && !JSON.stringify(st.monitorReport).includes('stand-in-key'),
+    'Connect with a code: the key saved in its own file, the first report arrives with it as the bearer (' + (got[0] ? got[0].at - t0 : '-') + ' ms), the key not in the config or the panel', JSON.stringify({ c, n: got.length }));
+    // the body is GET /api/v1/monitor's answer
+    await wait(300);
+    const mv = (await call('GET', 'v1/monitor')).data;
+    ok(JSON.stringify(got[got.length - 1].body) === JSON.stringify(mv), 'the report\'s body equals GET /api/v1/monitor', JSON.stringify(got[got.length - 1].body).slice(0, 200));
+    // idle: about every 10 s (2 s here)
+    const n0 = got.length;
+    await wait(6500);
+    const idleGaps = gaps(got.slice(n0 - 1));
+    ok(idleGaps.length >= 2 && idleGaps.every((g) => g > 1700 && g < 2600), 'nothing changing: a report about every 10 s (here every ' + idleGaps.join(', ') + ' ms, scaled 0.2)', JSON.stringify(idleGaps));
+    ok((await call('GET', 'local/monitor-report')).data.lastSent >= got[got.length - 1].at - 50, 'the panel shows when it was last sent');
+    // a change: straight away (the lid opened)
+    const n1 = got.length, tLid = Date.now();
+    await call('POST', 'local/sim/lid', { open: true });
+    for (let i = 0; i < 40 && !got.slice(n1).some((g) => g.body.interlock); i++) await wait(25);
+    const lidAt = got.slice(n1).find((g) => g.body.interlock);
+    ok(lidAt && lidAt.at - tLid < 1000, 'a change (the lid opened) arrives within a second (' + (lidAt ? lidAt.at - tLid : '-') + ' ms)', JSON.stringify(got.slice(n1).map((g) => g.body.interlock)));
+    await call('POST', 'local/sim/lid', { open: false });
+    // a job running: about every 5 s (1 s here)
+    const q = await call('POST', 'v1/jobs', example);
+    await call('POST', 'local/jobs/' + q.data.id + '/anchor', { clear: true });
+    await wait(300);
+    await call('POST', 'v1/start', { id: q.data.id });
+    for (let i = 0; i < 40 && (await call('GET', 'v1/status')).data.state !== 'running'; i++) await wait(100);
+    await wait(500);
+    const n2 = got.length;
+    await wait(4200);
+    const runGaps = gaps(got.slice(n2).filter((g) => g.body.state === 'running' && g.body.job));
+    ok(runGaps.length >= 3 && med(runGaps) > 700 && med(runGaps) < 1300 && got.slice(n2).every((g) => g.body.job ? Number.isFinite(g.body.job.remaining) : true), 'a job running: a report about every 5 s (here ' + runGaps.join(', ') + ' ms)', JSON.stringify(runGaps));
+    // the server can't be reached: the job carries on untouched, the panel says so, and reports
+    // come back when it's back (on the schedule, no faster)
+    const p0 = (await call('GET', 'v1/status')).data.progress;
+    mode = 'down';
+    await wait(2600);
+    const down = (await call('GET', 'local/monitor-report')).data, sDown = (await call('GET', 'v1/status')).data;
+    ok(down.connected && down.failingSince && sDown.state === 'running' && sDown.progress > p0, 'the server unreachable: the job carries on (' + (p0 * 100).toFixed(0) + ' → ' + (sDown.progress * 100).toFixed(0) + ' %), the panel says since when', JSON.stringify({ down, state: sDown.state }));
+    mode = 'ok';
+    const n3 = got.length;
+    for (let i = 0; i < 50 && got.length === n3; i++) await wait(50);
+    await wait(100);
+    const back = (await call('GET', 'local/monitor-report')).data;
+    ok(got.length > n3 && !back.failingSince && back.lastSent, 'reports resume when it\'s back', JSON.stringify(back));
+    await call('POST', 'v1/stop');
+    for (let i = 0; i < 40 && (await call('GET', 'v1/status')).data.state !== 'idle'; i++) await wait(100);
+    // the one-way rule: a report answered with made-up instructions changes nothing
+    const before = (await call('GET', 'local/state')).data;
+    const queued0 = before.jobs.filter((j) => j.status === 'queued').map((j) => j.id).join();
+    await wait(1000);
+    mode = 'orders';
+    const n4 = got.length;
+    await wait(9500);
+    const after = (await call('GET', 'local/state')).data;
+    // (the first gap can be short: the job's stop still settling is a change, sent straight away)
+    const oGaps = gaps(got.slice(n4).filter((g) => g.mode === 'orders')).slice(1);
+    ok(oGaps.length >= 2 && oGaps.every((g) => g > 1700 && g < 2600) && JSON.stringify(after.config) === JSON.stringify(before.config) && after.status.state === 'idle' &&
+      after.jobs.filter((j) => j.status === 'queued').map((j) => j.id).join() === queued0 && JSON.parse(fs.readFileSync(keyFile, 'utf8')).key === 'stand-in-key-1',
+    'one way: a report answered with { start, stop, config, interval: 0, key } changes nothing in Run, and the rate stays (' + oGaps.join(', ') + ' ms)', JSON.stringify({ oGaps, name: after.config.name, state: after.status.state }));
+    // removed in Pathline Monitor: 401 → reporting stops, the key is gone, the panel says so
+    mode = 'removed';
+    for (let i = 0; i < 60 && (await call('GET', 'local/monitor-report')).data.connected; i++) await wait(100);
+    const rm = (await call('GET', 'local/monitor-report')).data;
+    const n5 = got.length;
+    await wait(2600);
+    ok(!rm.connected && rm.removed && !JSON.parse(fs.readFileSync(keyFile, 'utf8')).key && got.length === n5, 'the server answers 401: reporting stops, the key is forgotten, the panel says "Removed in Pathline Monitor"', JSON.stringify({ rm, more: got.length - n5 }));
+    // Disconnect forgets the key and doesn't call the server
+    mode = 'ok';
+    await call('POST', 'local/monitor-report/connect', { address: monAddr, code: 'K7M2QX' });
+    await wait(300);
+    const n6 = got.length;
+    const dis = await call('POST', 'local/monitor-report/disconnect', {});
+    await wait(2600);
+    ok(dis.status === 200 && !dis.data.connected && !dis.data.removed && !JSON.parse(fs.readFileSync(keyFile, 'utf8')).key && got.length <= n6 + 1, 'Disconnect forgets the key and stops reporting', JSON.stringify(dis.data));
+  } catch (e) { ok(false, 'reporting', e.stack + '\n' + out.slice(-1500)); } finally {
+    srv.kill();
+    mon.close();
+  }
+}
+
 async function discoveryTests() {
   console.log('Found on the network (mDNS)');
   const disc = require('../src/discovery');
@@ -1670,7 +1815,7 @@ async function zaxisTests() {
   ok(zf.state === 'up', 'paused or stopped: the nozzle goes up');
 }
 
-jogTests().then(linkTests).then(serverTests).then(editTests).then(upkeepTests).then(monitorTests).then(gridTests).then(discoveryTests).then(followFitTests).then(zaxisTests).then(materialsTests).then(visionTests).then(() => {
+jogTests().then(linkTests).then(serverTests).then(editTests).then(upkeepTests).then(monitorTests).then(reportTests).then(gridTests).then(discoveryTests).then(followFitTests).then(zaxisTests).then(materialsTests).then(visionTests).then(() => {
   console.log(failed ? '\n' + failed + ' FAILED' : '\nAll passed');
   process.exit(failed ? 1 : 0);
 });

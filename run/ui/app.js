@@ -854,12 +854,12 @@ function setupView() {
   // in the order they're set up and used: the machine (with its bed), what jobs do, the
   // materials, the camera's calibrations in turn, the Z axis, then this computer's network and
   // the controller's factory values. A tab with nothing in it for this machine isn't shown.
-  const tabs = { Machine: [], Jobs: [], Materials: [], Camera: [], 'Z axis': [], Network: [], Controller: [] };
+  const tabs = { Machine: [], Jobs: [], Materials: [], Camera: [], 'Z axis': [], Network: [], 'Pathline Monitor': [], Controller: [] };
   tabs.Network.push(networkCard(card), card('Pathline connection', num('HTTP port', 'httpPort', '', 'Takes effect after a restart') +
     '<div class="row"><span>This screen is showing</span><span class="mono">' + esc(location.host) + '</span></div>',
   'Use the same port in Pathline\'s machine setup.'));
-  if (S.here) tabs.Network.push(card('Pathline Monitor', '<span style="line-height:1.5">The workshop\'s phone app: every machine\'s progress, queue and alerts on a phone. It runs on one always-on PC or Pi and finds this machine by itself.</span>' +
-    '<div style="display:flex;justify-content:flex-end"><button class="tb" data-a="monitorQr">Show the QR code for a phone</button></div>'));
+  // Pathline Monitor's app sends people here: "open Pathline Run's Setup, then Pathline Monitor"
+  tabs['Pathline Monitor'].push(monitorReportCard(card));
   // Ruida: which controller model (sets laser or plotter, and the swizzle magic)
   const models = S.ruidaModels || [];
   const model = models.find((m) => m.id === d.ruida.model) || models.find((m) => m.id === 'OTHER') || { kind: 'laser', note: '' };
@@ -1039,6 +1039,30 @@ function setupView() {
     '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));gap:12px;align-items:start">' + tabs[tab].join('') + '</div></div>';
 }
 
+// Setup → Pathline Monitor: report this machine to the workshop's Pathline Monitor server, so
+// phones see it from anywhere. Address and code come from the app's Settings → Add a machine.
+function monitorReportCard(card) {
+  const r = S.monitorReport || {};
+  const clock = (ms) => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  const about = '<span style="line-height:1.5">Pathline Monitor shows every machine\'s progress, queue and alerts on phones, from anywhere. Pathline Run sends it this machine\'s status; it never takes instructions from it.</span>';
+  if (r.connected) {
+    const how = r.failingSince
+      ? '<div class="warnbox" style="line-height:1.5">Can\'t reach it since ' + clock(r.failingSince).slice(0, 5) + '. Still trying.' + (r.failure ? '<br><span class="lbl">' + esc(r.failure) + '</span>' : '') + '</div>'
+      : r.lastSent ? '<div class="row"><span>Last sent</span><span class="mono">' + clock(r.lastSent) + '</span></div>'
+        : '<div class="row"><span>Last sent</span><span class="lbl">Sending…</span></div>';
+    return card('Pathline Monitor', about +
+      '<div class="row"><span>Reporting to</span><span class="mono" style="word-break:break-all">' + esc(r.address) + '</span></div>' + how +
+      '<div style="display:flex;align-items:center;justify-content:flex-end;gap:12px;padding-top:6px;border-top:1px solid var(--line-soft)"><span class="lbl" style="flex:1">Disconnect stops reporting. Remove the machine in the app too, or it shows there as not reporting.</span>' +
+      '<button class="tb" data-a="mrDisconnect">Disconnect</button></div>');
+  }
+  if (!ui.mr) ui.mr = { address: r.address || '', code: '' };
+  const fld = (l, k, ph, hint) => '<label class="row"><span>' + l + (hint ? '<span class="hint">' + hint + '</span>' : '') + '</span><span class="fld"><input class="mono" data-mr="' + k + '" value="' + esc(ui.mr[k] || '') + '" placeholder="' + ph + '" autocomplete="off" autocapitalize="off" spellcheck="false"></span></label>';
+  return card('Pathline Monitor', (r.removed ? '<div class="warnbox" style="line-height:1.5"><strong>Removed in Pathline Monitor.</strong> This machine no longer reports. To add it again, get a new code in the app.</div>' : '') + about +
+    '<span style="line-height:1.5">In the Pathline Monitor app: <strong>Settings</strong>, then <strong>Add a machine</strong>. Type the address and the code it shows.</span>' +
+    fld('Address', 'address', 'monitor.example.com', 'The Pathline Monitor server') + fld('Code', 'code', 'K7M-2QX', '6 letters and digits, lasts 10 minutes') +
+    '<div style="display:flex;justify-content:flex-end"><button class="btn-primary" data-a="mrConnect"' + (ui.mrBusy ? ' disabled' : '') + '>' + (ui.mrBusy ? 'Connecting…' : 'Connect') + '</button></div>');
+}
+
 // Setup → Camera → 4 · Check with a cut rectangle: cut it, measure it with a rule, see how far out
 // the machine is with the bed map as it is, and correct the map by it
 function accuracyCard() {
@@ -1169,6 +1193,16 @@ function dialog() {
       '<div style="display:flex;justify-content:flex-end"><button class="tb" data-a="close">Close</button></div></div></div>';
   }
   // ☰ → Pathline Monitor on a phone: the hub's setup page as a QR code for a phone's camera
+  if (ui.dlg.kind === 'monitorQr' && ui.dlg.r && ui.dlg.r.server) {
+    // the Monitor server this machine reports to (Setup → Pathline Monitor): phones open it anywhere
+    const r = ui.dlg.r;
+    return '<div class="scrim"><div role="dialog" aria-label="Pathline Monitor on a phone" class="dlg"><span class="h-sec" style="font-size:18px">Pathline Monitor on a phone</span>' +
+      '<div style="display:flex;flex-wrap:wrap;gap:18px;align-items:center"><div style="flex:none;padding:10px;border-radius:12px;background:#fff;box-shadow:inset 0 0 0 1px var(--line)">' + qrSvg(r.setup, 220) + '</div>' +
+      '<div style="flex:1 1 220px;min-width:0;display:flex;flex-direction:column;gap:10px;line-height:1.5"><span style="font-size:16px">Scan this with a phone\'s camera. It opens Pathline Monitor: sign in with the workshop password, then add it to the Home Screen for alerts.</span>' +
+      '<span class="lbl">Address</span><span class="mono" style="font-size:14px;word-break:break-all">' + esc(r.setup) + '</span>' +
+      '<span class="lbl">This machine reports to it (Setup → Pathline Monitor)</span></div></div>' +
+      '<div style="display:flex;justify-content:flex-end;gap:8px"><button class="btn-primary" data-a="close">Close</button></div></div></div>';
+  }
   if (ui.dlg.kind === 'monitorQr') {
     const r = ui.dlg.r || {};
     const field = '<label style="display:flex;flex-direction:column;gap:6px"><span class="lbl">Hub address (the PC or Pi running Pathline Monitor)</span>' +
@@ -1180,8 +1214,9 @@ function dialog() {
         '<span class="lbl">Setup page</span><span class="mono" style="font-size:14px;word-break:break-all">' + esc(r.setup) + '</span>' +
         (r.app ? '<span class="lbl">The app, once set up</span><span class="mono" style="font-size:14px;word-break:break-all">' + esc(r.app) + '</span>' : '') +
         '<span class="lbl">Found ' + (r.typed ? 'at the address typed in' : 'watching this machine') + ' (' + esc(r.host) + ')</span></div></div>'
-      : '<div class="warnbox" style="line-height:1.5">No Pathline Monitor hub has looked at this machine in the last 10 minutes.</div>' +
-        '<span style="color:var(--text-2);line-height:1.5">Pathline Monitor runs on one always-on PC or Raspberry Pi in the workshop and finds the machines by itself. Start it there (Start Pathline Monitor.cmd, or sh start.sh), wait a minute, then Look again. If it\'s on another network, type its address.</span>';
+      : '<div class="warnbox" style="line-height:1.5">This machine isn\'t connected to Pathline Monitor yet.</div>' +
+        '<span style="color:var(--text-2);line-height:1.5">Connect it in <strong>Setup → Pathline Monitor</strong> with the address and code from the app (Settings, Add a machine). The QR code then shows here.<br>An older Pathline Monitor hub on the workshop network (before 0.5) is found by itself, or type its address below.</span>' +
+        '<div style="display:flex;justify-content:flex-start"><button class="tb" data-a="mrOpen">Open Setup → Pathline Monitor</button></div>';
     return '<div class="scrim"><div role="dialog" aria-label="Pathline Monitor on a phone" class="dlg"><span class="h-sec" style="font-size:18px">Pathline Monitor on a phone</span>' + body + field +
       '<div style="display:flex;justify-content:flex-end;gap:8px"><button class="btn-primary" data-a="close">Close</button></div></div></div>';
   }
@@ -1296,7 +1331,7 @@ function render() {
   const focused = ae && /^(INPUT|SELECT|TEXTAREA)$/.test(ae.tagName) && ae.dataset && (ae.dataset.f || ae.dataset.n);
   if (ui.view === 'setup' && focused) { const h = $app.querySelector('header'); if (h) h.outerHTML = header(); markOpened(true); return; }
   // nor a job's power and speed while one is being typed (Queue → Edit)
-  if (ae && ae.tagName === 'INPUT' && ae.dataset && (ae.dataset.pe || ae.dataset.mh || ae.dataset.acc)) { const h = $app.querySelector('header'); if (h) h.outerHTML = header(); markOpened(true); return; }
+  if (ae && ae.tagName === 'INPUT' && ae.dataset && (ae.dataset.pe || ae.dataset.mh || ae.dataset.acc || ae.dataset.mr)) { const h = $app.querySelector('header'); if (h) h.outerHTML = header(); markOpened(true); return; }
   // nor anything while a finger drags a list, or it glides on after: redrawing under the finger
   // ends the scroll (a touch screen); the next redraw catches up
   if (ui.drawn === ui.view && (ui.dragging || Date.now() < (ui.glideUntil || 0))) {
@@ -1634,7 +1669,26 @@ const H = {
     ui.draft = null;
     toast('Bed map corrected' + (r.since ? ' (X ' + r.since.scaleX + ' ‰, Y ' + r.since.scaleY + ' ‰, ' + r.since.lean + '° against the one before)' : '') + '. Cut another rectangle to check it.', { ms: 9000 });
   }),
-  monitorQr: act(async () => { ui.navOpen = false; ui.dlg = { kind: 'monitorQr', r: await call('GET', LOCAL('/monitor-hub')) }; }),
+  // Setup → Pathline Monitor
+  mrConnect: async () => {
+    if (ui.mrBusy) return;
+    const el = document.activeElement; if (el && el.dataset && el.dataset.mr) el.blur();
+    ui.mrBusy = true; render();
+    try {
+      S.monitorReport = await call('POST', LOCAL('/monitor-report/connect'), { address: (ui.mr || {}).address, code: (ui.mr || {}).code });
+      ui.mr = null;
+      toast('Connected to Pathline Monitor. This machine shows in the app once its first report arrives.', { ms: 7000 });
+    } catch (e) { toast(e.message, { ms: 9000, err: true }); } finally { ui.mrBusy = false; render(); }
+  },
+  mrOpen: () => { ui.dlg = null; ui.view = 'setup'; ui.setTab = 'Pathline Monitor'; render(); },
+  mrDisconnect: act(async () => { S.monitorReport = await call('POST', LOCAL('/monitor-report/disconnect'), {}); ui.mr = null; }),
+  // ☰ → Pathline Monitor on a phone: the Monitor server this machine reports to, or else a hub
+  // on the workshop network (Pathline Monitor before 0.5)
+  monitorQr: act(async () => {
+    ui.navOpen = false;
+    const m = S.monitorReport || {};
+    ui.dlg = { kind: 'monitorQr', r: m.connected ? { found: true, server: true, host: m.address, setup: /^https?:\/\//.test(m.address) ? m.address + '/' : 'https://' + m.address + '/' } : await call('GET', LOCAL('/monitor-hub')) };
+  }),
   monitorHubSave: act(async () => {
     const el = document.querySelector('[data-mh]');
     const v = el ? el.value.trim() : '';
@@ -1819,8 +1873,8 @@ $app.addEventListener('change', (e) => {
 });
 $app.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.dataset && (e.target.dataset.f || e.target.dataset.n)) e.target.blur(); });
 // a job's power and speed being typed (Queue → Edit): kept as typed, Enter saves, Escape cancels
-$app.addEventListener('input', (e) => { const k = e.target.dataset && e.target.dataset.pe; if (k && ui.pe) ui.pe[k] = e.target.value; if (e.target.dataset && e.target.dataset.mh && ui.dlg) ui.dlg.typed = e.target.value; if (e.target.dataset && e.target.dataset.acc) ui.acc = { ...(ui.acc || {}), [e.target.dataset.acc]: e.target.value.trim() }; });
-$app.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.dataset && e.target.dataset.mh) H.monitorHubSave(); });
+$app.addEventListener('input', (e) => { const k = e.target.dataset && e.target.dataset.pe; if (k && ui.pe) ui.pe[k] = e.target.value; if (e.target.dataset && e.target.dataset.mh && ui.dlg) ui.dlg.typed = e.target.value; if (e.target.dataset && e.target.dataset.acc) ui.acc = { ...(ui.acc || {}), [e.target.dataset.acc]: e.target.value.trim() }; if (e.target.dataset && e.target.dataset.mr) ui.mr = { ...(ui.mr || {}), [e.target.dataset.mr]: e.target.value }; });
+$app.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.dataset && e.target.dataset.mh) H.monitorHubSave(); if (e.key === 'Enter' && e.target.dataset && e.target.dataset.mr) H.mrConnect(); });
 $app.addEventListener('keydown', (e) => {
   if (!(e.target.dataset && e.target.dataset.pe)) return;
   if (e.key === 'Enter') { e.preventDefault(); H.procSave(); }

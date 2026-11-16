@@ -120,6 +120,15 @@ The Trotec's camera is an Allied Vision **Alvium 1800 U-500c** on the head. It p
 
 Everything is in `src/vision/`: `camera.js` (Vimba X and the simulated camera), `detect.js` (dots and checkerboard corners, plain JS), `fit.js` (the corrections from `TROTEC_PROTOCOL.md` §7.5 and the bed map) and `vision.js` (the workflows). `npm test` runs them all end to end on the simulated camera with `--sim`.
 
+## Pathline Monitor (the phone app)
+
+From 0.7.13, Pathline Run reports this machine's status to the workshop's Pathline Monitor server, so phones see it from anywhere (`monitor/README.md`).
+
+1. In the Monitor app: **Settings → Add a machine**. It shows the server's address and a code that works once, for 10 minutes.
+2. In Pathline Run: **Setup → Pathline Monitor**. Type the address and the code, and press **Connect**.
+
+Run then sends what `GET /api/v1/monitor` answers to the server over https: straight away when anything changes, every 5 s while a job runs, every 10 s otherwise. The panel shows when it last sent, or since when it can't reach the server. Reporting is one way: Run reads back only its key (once) and each report's status code, never instructions, and it runs on its own timer, apart from the machine. A machine removed in the app shows "Removed in Pathline Monitor" and stops. **Disconnect** forgets the key. The key is kept in `data/monitor-report.json`, not in the config. Details: *Reporting* in `PROTOCOL.md`. Once connected, ☰ → **Pathline Monitor on a phone** shows the server's address as a QR code.
+
 ## Layout
 
 - `src/server.js`: HTTP server, Pathline protocol (`/api/v1`) and the screen's own calls (`/api/local`)
@@ -127,5 +136,6 @@ Everything is in `src/vision/`: `camera.js` (Vimba X and the simulated camera), 
 - `src/job/`: package checks and the controller-neutral plan
 - `src/ctrl/trotec`, `src/ctrl/ruida`: converters, links and decoders. `src/ctrl/sim.js`: simulated link
 - `src/vision/`: the Trotec's head camera (print and cut, calibration, checkerboard bed map)
+- `src/monitor.js`, `src/report.js`: the status for watchers (`GET /api/v1/monitor`, `/events`), and its report out to Pathline Monitor
 - `electron/`: the app window and updates (`electron-updater`, as in Pathline). `src/changelog.js`: What's new
 - `ui/`: touchscreen page (plain JS). `tools/`: convert, decode, self-test. `deploy/pi/install-pi.sh`: Raspberry Pi install
