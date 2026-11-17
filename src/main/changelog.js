@@ -8,7 +8,8 @@ module.exports = [
     version: '1.6.13', date: '16 Nov 2026',
     added: [],
     fixed: [
-      'Engraving time on a Trotec was about 16 times too long (the Etch Calibration job showed 1 h 55 min; it is now 9 min 48 s). It now uses how the Q500 really engraves, as measured by Pathline Run: lines 0.048 mm apart at 500 DPI, each sweeping the island\'s full width plus 10 mm each side, with about 0.1 s to turn round. The thermal map follows, so engraving heats as fast as it really does.'
+      'Engraving time on a Trotec was about 16 times too long (the Etch Calibration job showed 1 h 55 min; it is now 9 min 48 s). It now uses how the Q500 really engraves, as measured by Pathline Run: lines 0.048 mm apart at 500 DPI, each sweeping the island\'s full width plus 10 mm each side, with about 0.1 s to turn round. The thermal map follows, so engraving heats as fast as it really does.',
+      'Cutting and travel time on a Trotec were up to about 10 % too long. Cuts are now timed the way Pathline Run times them (within about 1 % of the real Q500): curves as arcs at nearly full speed, corners slowing by their angle, and the head speeding up and slowing at the rate it really does. Travel uses Run\'s measured timing too. On three cutting jobs Prepare and Run now agree to within 1 %.'
     ]
   },
   {

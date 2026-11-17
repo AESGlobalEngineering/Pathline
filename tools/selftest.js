@@ -407,6 +407,26 @@ async function main() {
       const tro = (acc) => { const m = { ...laser, ctrl: 'Trotec', info: { ...laser.info, acc } }; return CC.estimate(engr, m, { timeline: true }).timeline.find((o) => o.kind === 'op' && o.mode === 'raster'); };
       const t352 = tro(352), t5000 = tro(5000);
       ok(near(t352.dur, t5000.dur, 1e-9) && near(t352.dur, CC.rasterModelTime(M, { x0: 20, y0: 20, x1: 35, y1: 35 }, 500, 400, false).t, 0.01), 'a Trotec\'s engraving time doesn\'t come from its travel acc (' + t352.dur.toFixed(1) + ' s at 352 and 5000 mm/s²)');
+      // a Trotec cuts as measured (Pathline Run's cut model): 2000 mm/s², radii as arcs, corners by angle
+      const P = CC.TROTEC_CUT;
+      const circ = CC.shapes.ellipse(50, 50, 10, 10);
+      const arcs = CC.fitArcs(circ.concat([circ[0]]));
+      ok(arcs.length <= 4 && arcs.every((x) => x.c && near(x.r, 10, 0.05)), 'a circle drawn as ' + circ.length + ' segments is cut as ' + arcs.length + ' arcs');
+      ok(near(CC.cutModelTime([[0, 0], [100, 0]], false, 35, P), 100 / 35 + 35 / 2000, 1e-6), 'a straight cut holds the set speed, speeding up and slowing at 2000 mm/s²');
+      ok(near(CC.cutModelTime(circ, true, 35, P), (2 * Math.PI * 10) / 35, 0.05), 'a 10 mm radius runs at full speed (up to √(1000·r) mm/s)');
+      const sq = CC.cutModelTime(CC.shapes.rect(0, 0, 10, 10, 0), true, 35, P);
+      ok(sq > 40 / 35 + 0.03 && sq < 40 / 35 + 0.1, 'square corners slow the head to √(20·c/(1−c)) ≈ 7 mm/s (' + sq.toFixed(2) + ' s for a 10 mm square at 35 mm/s)');
+      const runCompile = path.join(__dirname, '..', 'run', 'src', 'ctrl', 'trotec', 'compile.js');
+      if (fs.existsSync(runCompile)) {
+        const rc = require(runCompile), ra = require(path.join(__dirname, '..', 'run', 'src', 'ctrl', 'trotec', 'arcs.js'));
+        const shapes = [circ.concat([circ[0]]), CC.shapes.rect(0, 0, 10, 10, 2).concat([[2, 0]]), [[0, 0], [30, 0], [30, 5], [60, 40]]];
+        const diff = Math.max(...shapes.map((p) => Math.abs(CC.cutModelTime(p, false, 35, P) - rc.runTime(p[0], ra.fitArcs(p), 35, rc.cutProfile(rc.PLANNER.Standard)))));
+        ok(diff < 1e-9, 'Prepare\'s Trotec cut time is Pathline Run\'s (largest difference ' + diff.toExponential(1) + ' s)');
+      }
+      const trotec = { ...laser, ctrl: 'Trotec', info: { ...laser.info, travelSpeed: 700, travelAcc: 500, jerk: 5000 } };
+      const hops = CC.estimate({ ...engr, processes: [{ name: 'Cut', proc: 'Cut', power: 80, speed: 35, f: 5000, passes: 1, out: true, aci: [7] }], entities: [{ id: 'a', aci: 7, paths: [{ p: [[10, 10], [20, 10]], c: false }] }, { id: 'b', aci: 7, paths: [{ p: [[27, 10], [37, 10]], c: false }] }] }, trotec, { timeline: true }).timeline.filter((o) => o.kind === 'travel' && o.leg === 'between');
+      ok(hops.length === 1 && near(hops[0].dur, CC.travelTime(7, 700, 2000, 5000) + 0.03, 1e-6), 'Trotec travel: 4 × the planner\'s acceleration and 0.03 s a move, as Run times it (' + hops[0].dur.toFixed(3) + ' s for 7 mm)');
+      ok(CC.cutModelOf({ ...laser, ctrl: 'Ruida' }) === null, 'other controllers cut segment by segment from acc');
       ok(CC.rasterModelOf({ ...laser, ctrl: 'Ruida' }) === null && CC.rasterModelOf({ ...laser, ctrl: 'Ruida', info: { raster: { over: 5, turn: 0.05 } } }).turn === 0.05, 'other controllers time lines from acc, unless the machine sends its own raster model');
     }
     const steel = CC.thermalSim(job, laser, { name: 'Stainless Steel', g: 'Metal', t: 0.9 }, est.timeline).to(est.total);
@@ -597,8 +617,10 @@ async function main() {
       ok(['running', 'idle'].includes(st.state), 'start job (' + st.state + ')');
       const dir = fs.readdirSync(path.join(tmp, 'received'));
       ok(dir.length === 1 && fs.existsSync(path.join(tmp, 'received', dir[0], 'job.dxf')), 'device stored the job files');
-      // the machine's queue: list, reorder, remove
-      await new Promise((r) => setTimeout(r, 400));
+      // the machine's queue: list, reorder, remove. Wait for the job to finish and
+      // the emulator to stop looking for the next one (it does 0.5 s after a job ends)
+      for (let i = 0; i < 50 && (await device.status(m)).state !== 'idle'; i++) await new Promise((r) => setTimeout(r, 100));
+      await new Promise((r) => setTimeout(r, 800));
       const a = await device.sendPackage(m, ex.buildPackage({ ...job, name: 'A' }, m, null, est));
       const b = await device.sendPackage(m, ex.buildPackage({ ...job, name: 'B' }, m, null, est));
       let q = (await device.jobs(m)).filter((j) => j.status === 'queued').map((j) => j.name).join(',');

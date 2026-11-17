@@ -250,6 +250,118 @@
     const vp = Math.sqrt(Math.max(v0 * v0, v1 * v1, (2 * a * L + v0 * v0 + v1 * v1) / 2));
     return Math.max(0, (vp - v0) / a) + Math.max(0, (vp - v1) / a);
   }
+  // How a Trotec really moves along a cut (Pathline Run's measured model,
+  // run/src/ctrl/trotec/compile.js cutProfile + runTime and arcs.js fitArcs;
+  // Run's estimate is within ≈ 1 % of Ruby's real runs, where Prepare's
+  // segment-by-segment time at the travel acc ran ≈ 10 % long):
+  //  - it holds the set speed on straight lines and speeds up and slows down
+  //    at 2000 mm/s² (not the 352 mm/s² GET /machine sends, which is travel);
+  //  - Run sends radii (chains of short segments on one circle) as true
+  //    arcs, taken at up to √(1000 · r) mm/s;
+  //  - at a corner turning by φ the speed is √(20 · c / (1 − c)), c = cos(φ/2)
+  //    (20: the Standard planner's vector setting);
+  //  - it stops at each end of a cut;
+  //  - travel between cuts accelerates about 4× harder than the planner's
+  //    travel setting (GET /machine travelAcc) and each move costs 0.03 s
+  //    more (stopping, the beam off and on): Run's travelTiming, fitted on 18 runs.
+  // A machine may send its own (info.cutModel).
+  const TROTEC_CUT = { acc: 2000, arc: 1000, corner: 20, travelAccScale: 4, moveExtra: 0.03 };
+  function cutModelOf(machine) {
+    const info = (machine && machine.info) || {};
+    const own = info.cutModel;
+    if (own && typeof own === 'object' && Number(own.acc) > 0) return { ...TROTEC_CUT, ...own };
+    return machine && /trotec/i.test(machine.ctrl || info.ctrl || '') ? TROTEC_CUT : null;
+  }
+  // Stretches of a polyline that lie on one circle, as arcs (Run's arcs.js):
+  // [{ to }] straight segments and [{ to, c, r, sweep }] arcs after pts[0]
+  const ARC_LIMITS = { tol: 0.01, sag: 0.1, turn: (16 * Math.PI) / 180, minSegs: 3, maxR: 1000, minR: 0.05, maxSweep: Math.PI };
+  function circle3(a, b, c) {
+    const bx = b[0] - a[0], by = b[1] - a[1], cx = c[0] - a[0], cy = c[1] - a[1];
+    const d = 2 * (bx * cy - by * cx);
+    if (Math.abs(d) < 1e-12) return null;
+    const b2 = bx * bx + by * by, c2 = cx * cx + cy * cy;
+    const ux = (cy * b2 - by * c2) / d, uy = (bx * c2 - cx * b2) / d;
+    return { c: [a[0] + ux, a[1] + uy], r: Math.hypot(ux, uy) };
+  }
+  const turnAngle = (ux, uy, vx, vy) => Math.atan2(ux * vy - uy * vx, ux * vx + uy * vy);
+  function fitArcs(pts) {
+    const L = ARC_LIMITS;
+    const p = [];
+    for (const q of pts) if (!p.length || Math.hypot(q[0] - p[p.length - 1][0], q[1] - p[p.length - 1][1]) > 1e-6) p.push(q);
+    const n = p.length;
+    const turn = new Float64Array(n);
+    for (let k = 1; k < n - 1; k++) turn[k] = turnAngle(p[k][0] - p[k - 1][0], p[k][1] - p[k - 1][1], p[k + 1][0] - p[k][0], p[k + 1][1] - p[k][1]);
+    const arcOf = (i, j) => {
+      if (j - i < L.minSegs) return null;
+      const sg = Math.sign(turn[i + 1]);
+      if (!sg) return null;
+      for (let k = i + 1; k < j; k++) if (Math.sign(turn[k]) !== sg || Math.abs(turn[k]) > L.turn) return null;
+      const C = circle3(p[i], p[(i + j) >> 1], p[j]);
+      if (!C || C.r > L.maxR || C.r < L.minR) return null;
+      let sweep = 0;
+      for (let k = i; k <= j; k++) {
+        if (Math.abs(Math.hypot(p[k][0] - C.c[0], p[k][1] - C.c[1]) - C.r) > L.tol) return null;
+        if (k === j) break;
+        const chord = Math.hypot(p[k + 1][0] - p[k][0], p[k + 1][1] - p[k][1]);
+        if (chord > 2 * C.r || C.r - Math.sqrt(C.r * C.r - (chord * chord) / 4) > L.sag) return null;
+        const a = turnAngle(p[k][0] - C.c[0], p[k][1] - C.c[1], p[k + 1][0] - C.c[0], p[k + 1][1] - C.c[1]);
+        if (Math.sign(a) !== sg) return null;
+        sweep += a;
+      }
+      if (Math.abs(sweep) > L.maxSweep + 1e-9) return null;
+      return { to: p[j], c: C.c, r: C.r, sweep };
+    };
+    const out = [];
+    let i = 0;
+    while (i < n - 1) {
+      let best = null, bj = i;
+      for (let j = i + L.minSegs; j < n; j++) {
+        const a = arcOf(i, j);
+        if (!a) break;
+        best = a; bj = j;
+      }
+      if (best) { out.push(best); i = bj; } else { out.push({ to: p[i + 1] }); i++; }
+    }
+    return out;
+  }
+  // Seconds to cut the polyline p (closed: back to its start) at speed v with a measured model
+  function cutModelTime(p, closed, v, prof) {
+    const pts = closed && p.length > 2 ? p.concat([p[0]]) : p;
+    if (pts.length < 2) return 0;
+    const pc = [];
+    let at = pts[0];
+    for (const m of fitArcs(pts)) {
+      if (m.c) {
+        const L = Math.abs(m.sweep) * m.r;
+        const a0 = Math.atan2(at[1] - m.c[1], at[0] - m.c[0]), sg = Math.sign(m.sweep);
+        if (L > 1e-6) pc.push({ L, cap: Math.min(v, Math.sqrt(prof.arc * m.r)), d0: a0 + (sg * Math.PI) / 2, d1: a0 + m.sweep + (sg * Math.PI) / 2 });
+      } else {
+        const L = Math.hypot(m.to[0] - at[0], m.to[1] - at[1]);
+        if (L > 1e-6) { const d = Math.atan2(m.to[1] - at[1], m.to[0] - at[0]); pc.push({ L, cap: v, d0: d, d1: d }); }
+      }
+      at = m.to;
+    }
+    if (!pc.length) return 0;
+    const vj = new Array(pc.length + 1).fill(0);
+    for (let i = 1; i < pc.length; i++) {
+      let th = Math.abs(pc[i].d0 - pc[i - 1].d1) % (2 * Math.PI);
+      if (th > Math.PI) th = 2 * Math.PI - th;
+      const c = Math.cos(th / 2);
+      const lim = th < 1e-3 ? Infinity : c <= 1e-4 ? 0 : c >= 0.9999 ? Infinity : Math.sqrt((prof.corner * c) / (1 - c));
+      vj[i] = Math.min(pc[i].cap, pc[i - 1].cap, lim);
+    }
+    for (let i = 0; i < pc.length; i++) vj[i + 1] = Math.min(vj[i + 1], Math.sqrt(vj[i] * vj[i] + 2 * prof.acc * pc[i].L));
+    for (let i = pc.length - 1; i >= 0; i--) vj[i] = Math.min(vj[i], Math.sqrt(vj[i + 1] * vj[i + 1] + 2 * prof.acc * pc[i].L));
+    let t = 0;
+    for (let i = 0; i < pc.length; i++) {
+      const u0 = vj[i], u1 = vj[i + 1], L = pc[i].L, a = prof.acc;
+      const peak = Math.max(1e-6, Math.min(pc[i].cap, Math.sqrt((2 * a * L + u0 * u0 + u1 * u1) / 2)));
+      const s1 = (peak * peak - u0 * u0) / (2 * a), s2 = (peak * peak - u1 * u1) / (2 * a);
+      t += (peak - u0) / a + (peak - u1) / a + Math.max(0, L - s1 - s2) / peak;
+    }
+    return t;
+  }
+
   const JUNCTION_DEV = 0.05; // mm, how far the head may round a corner at speed
 
   // Time to follow a polyline at feed speed v with acceleration a, slowing
@@ -1425,8 +1537,12 @@
     // travel between cuts: top speed, acceleration and, when known, jerk (an
     // S-curve; short hops then cost ~0.35 s each however fast the top speed)
     const accTravel = Number(info.travelAcc) || acc;
+    // how a Trotec really cuts (measured), else segment by segment from acc
+    const cModel = isLaser ? cutModelOf(machine) : null;
     const jerk = Number(info.jerk) || (info.acc ? 0 : D.jerk || 0);
-    const moveT = (d) => travelTime(d, vTravel, accTravel, jerk);
+    const moveT = cModel
+      ? (d) => (d > 0 ? travelTime(d, vTravel, accTravel * (cModel.travelAccScale || 1), jerk) + (cModel.moveExtra || 0) : 0)
+      : (d) => travelTime(d, vTravel, accTravel, jerk);
     // the route itself is chosen to travel as little as possible: distance,
     // plus a fixed charge for every move so carrying straight on into the next
     // cut always wins (moveT still gives the time)
@@ -1624,7 +1740,8 @@
         if (p.length < 2) return;
         travelTo(p[0], bed, pi);
         const L = polyLen(p, it.path.c);
-        let dur = polyTime(p, it.path.c, speed, acc);
+        // a Trotec as measured (cutModelOf), else from acc segment by segment
+        let dur = cModel ? cutModelTime(p, it.path.c, speed, cModel) : polyTime(p, it.path.c, speed, acc);
         if (!isLaser) {
           dur += plot.toolDown + plot.toolUp;
           if (proc.dash) dur += Math.floor(L / Math.max(0.5, (Number(proc.dl) || 5) + (Number(proc.gl) || 2))) * plot.dashLift;
@@ -2192,6 +2309,6 @@
     processOrder, processOfAci, engraveHoles, toolSlot, toolRank, polyTime, travelTime, rasterSpans, orderPaths,
     estimate, headAt, fmtDuration, fmtLen, fmtArea, checkJob, regMarks, regMarkAci, camReach, marksOutOfReach, reachShift, regProcess, withPresets, ensureRegProcess, isRegProc, REG_PROC, REG_NEEDED,
     cutOrderOf, CUT_ORDER_DEFAULT, START_CLEAR, commonLines, bedOf, bedCount, defaultPresets, DEFAULTS,
-    rasterIslands, engraveScan, ENGRAVE_DIRS, DPI_STEPS, starterPresets, nestRects, THERMAL, thermalKey, thermalOf, colourOf, absorptionOf, thermalSim, bendLimit, rasterModelOf, rasterPitch, rasterModelTime, TROTEC_RASTER, isBareMetal, markingSprayOf, SPRAY_ABSORB, metalPresets, presetsFor
+    rasterIslands, engraveScan, ENGRAVE_DIRS, DPI_STEPS, starterPresets, nestRects, THERMAL, thermalKey, thermalOf, colourOf, absorptionOf, thermalSim, bendLimit, cutModelOf, cutModelTime, fitArcs, TROTEC_CUT, rasterModelOf, rasterPitch, rasterModelTime, TROTEC_RASTER, isBareMetal, markingSprayOf, SPRAY_ABSORB, metalPresets, presetsFor
   };
 });

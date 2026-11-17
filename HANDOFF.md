@@ -21,7 +21,11 @@ Version 1.6.13 (16 Nov):
   - Used for islands and shared scans (the whole art box per line), and as the overscan for travel to an island (10 mm). `info.acc` is travel only for a Trotec. Other controllers keep `lineTime`. The beam-on time `on` is scaled to the real line count, so the thermal map heats at the real rate.
   - Etch Calibration: 1 h 55 min → 9 min 48 s, travel 17.5 → 6.5 s. Heat with the real timing: bare +12 °C (10 % of the bending limit), spray +83 °C (68 %), nearly all from the 11 × 53 mm frames island (189 s).
   - **Banded/interleaved engraving was simulated and not built**: 5 / 2 / 1 mm bands round-robin give 65 / 62 / 57 % for +6 / +16 / +33 % time. The local heat settles within seconds, about one band's time, so stepping away between bands lets little escape. Prototype: scratchpad `band-proto.js` (not in the repo).
-  - Not done from the findings: cutting is +10 % on J0087 (cause not worked out; Run slows on curves and sends arcs).
+- **Trotec cutting and travel timed as Run times them** (the findings' +10 % on J0087). `cutModelOf(machine)` → `TROTEC_CUT` { acc 2000, arc 1000, corner 20, travelAccScale 4, moveExtra 0.03 } for ctrl Trotec, or `info.cutModel`.
+  - `fitArcs` and `cutModelTime` are ports of Run's `arcs.js fitArcs` and `compile.js runTime`; the self-test checks they give Run's numbers exactly when `run/` is there. Travel: `travelTime(d, vTravel, travelAcc·4, jerk) + 0.03` (Run's `travelTiming`). Other controllers keep `polyTime` / `travelTime`.
+  - Cause: Prepare cut at the travel acc (352 mm/s²), segment by segment, so it slowed at every arc vertex and took 0.1 s at each start and stop.
+  - Against Run's estimator on the same package (Ruby's GET /machine values): X28 2004 vs 2002 s, sample 462 vs 461 s, PCB Cover 356 vs 353 s (were +6–11 % on the cutting). J0087's own data is on Ruby's PC and wasn't checked directly.
+  - The emulator queue test now waits for the emulator to settle (it starts the next job 0.5 s after one ends, and the test job is now quicker).
 
 Version 1.6.12 (12 Nov):
 - **Engraving holes across objects** (owner's bug report "Etch issue": the magnifying glass lens was engraved). Run fills even-odd per object, then merges, so a hole drawn as its own object was filled. `CC.engraveHoles(job)` maps each closed-only object of an Engrave process that lies inside another object of the same process (`insideOf` on every ring) to the outermost one.
