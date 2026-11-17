@@ -5,6 +5,14 @@
 
 module.exports = [
   {
+    version: '1.6.14', date: '17 Nov 2026',
+    added: [],
+    fixed: [
+      'Binary DXF files (AutoCAD\'s "Save as DXF, binary") now import. Before, they came in as errors.',
+      'A line drawn twice, one copy on top of the other (common in older drawings), is now kept once, so the shape it belongs to closes properly and isn\'t cut twice.'
+    ]
+  },
+  {
     version: '1.6.13', date: '16 Nov 2026',
     added: [],
     fixed: [

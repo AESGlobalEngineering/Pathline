@@ -492,6 +492,30 @@ async function main() {
 
   console.log('Importers');
   {
+    // binary DXF (AutoCAD can save DXF as binary): a 30 × 20 square drawn as
+    // four lines, one of them twice (as older drawings often have), and a circle
+    {
+      const parts = [Buffer.from('AutoCAD Binary DXF' + String.fromCharCode(13, 10, 26, 0), 'latin1')];
+      const code = (c) => { const b = Buffer.alloc(2); b.writeUInt16LE(c); parts.push(b); };
+      const str = (c, v) => { code(c); parts.push(Buffer.from(v + String.fromCharCode(0), 'latin1')); };
+      const dbl = (c, v) => { code(c); const b = Buffer.alloc(8); b.writeDoubleLE(v); parts.push(b); };
+      const i16 = (c, v) => { code(c); const b = Buffer.alloc(2); b.writeInt16LE(v); parts.push(b); };
+      str(0, 'SECTION'); str(2, 'HEADER'); str(9, '$ACADVER'); str(1, 'AC1014'); str(9, '$INSUNITS'); i16(70, 4); str(0, 'ENDSEC');
+      str(0, 'SECTION'); str(2, 'ENTITIES');
+      const line = (x1, y1, x2, y2) => { str(0, 'LINE'); str(8, 'CUT'); i16(62, 1); dbl(10, x1); dbl(20, y1); dbl(30, 0); dbl(11, x2); dbl(21, y2); dbl(31, 0); };
+      line(0, 0, 30, 0); line(30, 0, 30, 20); line(30, 20, 0, 20); line(0, 20, 0, 0); line(30, 0, 0, 0);
+      str(0, 'CIRCLE'); str(8, 'CUT'); i16(62, 1); dbl(10, 15); dbl(20, 10); dbl(30, 0); dbl(40, 4);
+      str(0, 'ENDSEC'); str(0, 'EOF');
+      fs.writeFileSync(path.join(tmp, 'bin.dxf'), Buffer.concat(parts));
+      const b = await importFile(path.join(tmp, 'bin.dxf'));
+      ok(b.entities.length === 2 && b.entities.every((e) => e.paths.every((p) => p.c)) && near(b.width, 30, 0.01) && near(b.height, 20, 0.01), 'binary DXF imports: a closed 30 × 20 square and a circle (' + b.entities.length + ' shapes, ' + b.width.toFixed(1) + ' × ' + b.height.toFixed(1) + ')');
+      const sq = b.entities.find((e) => CC.boxW(CC.entityBox(e)) > 25);
+      ok(sq && near(CC.polyLen(sq.paths[0].p, true), 100, 0.01), 'a line drawn twice is kept once (outline ' + (sq ? CC.polyLen(sq.paths[0].p, true).toFixed(1) : '?') + ' mm, not 130)');
+      fs.writeFileSync(path.join(tmp, 'cut.dxf'), Buffer.concat(parts).subarray(0, 200));
+      let err = null;
+      try { await importFile(path.join(tmp, 'cut.dxf')); } catch (e) { err = e; }
+      ok(err && /ends early|group code/.test(err.message), 'a damaged binary DXF says so (' + (err && err.message) + ')');
+    }
     const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="100mm" height="50mm" viewBox="0 0 100 50"><rect x="0" y="0" width="40" height="20" stroke="#FF0000" fill="none"/><path d="M50 0 l10 0 l0 10 z" stroke="blue"/><g transform="translate(70 10)"><circle r="5" stroke="#00FF00" fill="none"/></g></svg>';
     fs.writeFileSync(path.join(tmp, 'a.svg'), svg);
     const r = await importFile(path.join(tmp, 'a.svg'));

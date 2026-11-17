@@ -8,6 +8,7 @@ const { importDxf } = require('./dxf');
 const { importSvg } = require('./svg');
 const { importPdf } = require('./pdf');
 const { importHpgl } = require('./hpgl');
+const { isBinaryDxf, binaryDxfToText } = require('./dxfbin');
 
 const EXTENSIONS = ['dxf', 'svg', 'pdf', 'plt', 'hpgl', 'hpg'];
 
@@ -16,7 +17,11 @@ async function importFile(file, opts) {
   const baseName = path.basename(file);
   const text = () => fs.readFileSync(file, 'utf8').replace(/^﻿/, '');
   let res;
-  if (ext === 'dxf') res = importDxf(text(), opts);
+  if (ext === 'dxf') {
+    // AutoCAD can save DXF as binary: turned into the text form first
+    const buf = fs.readFileSync(file);
+    res = importDxf(isBinaryDxf(buf) ? binaryDxfToText(buf) : buf.toString('utf8').replace(/^﻿/, ''), opts);
+  }
   else if (ext === 'svg') res = importSvg(text(), opts);
   else if (ext === 'pdf') res = await importPdf(fs.readFileSync(file), opts);
   else if (['plt', 'hpgl', 'hpg'].includes(ext)) res = importHpgl(fs.readFileSync(file, 'latin1'), opts);

@@ -15,6 +15,11 @@ Latest round (28 Oct, final):
 - **Dark mode bed is grey** (`--bed`, `--sheet`, `--bed-grid*` in theme.css). **ACI 7 shows as white in dark mode** (black in light), as in CAD, and so do the marks drawn on the bed (registration marks, engrave hatching, arrows, start points): see the `--aci7*` and `--ink` tokens, and `LRC.aci.hex/fg/stroke` in app.js. Exports (DXF/SVG/PDF) still use real black.
 - **Sample machines and materials from earlier builds are removed on first start** (main.js, tracked by `settings.samplesRemoved`). This is by exact id (trotec, flatbed, laser2, acr-print-3 … brass-1); anything the operator created stays.
 
+Version 1.6.14 (17 Nov):
+- **Binary DXF import** (owner: "BFT HK panel face trim v2 (BFT-HBK-BFP).dxf" gave errors; it is an AC1014 binary DXF). `src/main/importers/dxfbin.js` turns a binary DXF (sentinel "AutoCAD Binary DXF\r\n\x1a\0") into text group-code pairs for dxf-parser.
+  - Group codes are 2 bytes (R13+) or 1 byte with 255 escaping (R12), detected from the first pair. Values are typed by group code (strings 0-terminated, ANSI before AC1021 and UTF-8 after, doubles, int16/32/64, bool, binary chunks as hex). A file that ends early or has an unknown code gives a clear error.
+- **Duplicate lines dropped before joining** (`joinPaths` in importers/common.js): open pieces of the same colour with the same points, either way round (to the join tolerance), are kept once. That BFT drawing has every keypad edge twice, so 12 keypad holes came in as open shapes and loose lines; now all 30 shapes are closed.
+
 Version 1.6.13 (16 Nov):
 - **Trotec engraving timed as measured** (from Pathline Run 0.7.13's PREPARE-ESTIMATE-FINDINGS: Prepare was +1574 % / +1429 % on J0093/J0094). `rasterModelOf(machine)` returns `TROTEC_RASTER` for ctrl Trotec, or the machine's own `info.raster` when it sends one.
   - `rasterModelTime`: pitch = floor(25.4/dpi / 0.006)·0.006; lines = round(boxH / pitch); W = boxW + 2·10; t = lines·(0.955·W/v + 0.077 + 4.58e-5·v) + 0.32. One way adds the return stroke across W, from acc (not measured yet).

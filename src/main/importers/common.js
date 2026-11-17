@@ -24,7 +24,21 @@ function joinPaths(raw, tol) {
   }
 
   const key = (p) => Math.round(p[0] / tol) + ',' + Math.round(p[1] / tol);
-  for (const [aci, items] of byAci) {
+  // a line drawn twice, one copy on top of the other (common in older
+  // drawings), is kept once: joining both copies walks back along the edge,
+  // so the shape never closes and the laser would cut it twice
+  const once = (items) => {
+    const seen = new Set();
+    return items.filter((it) => {
+      const f = it.pts.map(key).join(';'), b = it.pts.slice().reverse().map(key).join(';');
+      const k = f < b ? f : b;
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    });
+  };
+  for (const [aci, all] of byAci) {
+    const items = once(all);
     // endpoint index: grid cell -> list of [item, end]
     const grid = new Map();
     const add = (it, end) => {
