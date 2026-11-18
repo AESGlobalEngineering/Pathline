@@ -16,7 +16,7 @@ Run reads `r` (PROTOCOL.md). Where §3.3 differs from this, Prepare 1.6.16 is wh
 
 Then: "build both up, then the handover document for pathline prepare".
 
-The work is unprinted steel plates on Ruby, a Trotec Q500 with the head camera. Today the only kind of mark is a printed dark dot on white. The owner wants to locate the plate either by:
+The work is unprinted steel plates on the shop's Trotec Q500 with its head camera, driven by Pathline Run (not Trotec's own Ruby software). Today the only kind of mark is a printed dark dot on white. The owner wants to locate the plate either by:
 
 - **holes already cut through it**, with white card or paper under the plate; or
 - **the plate's own corners**, with the plate lying on a white background.
@@ -137,9 +137,9 @@ Run's finders were tested on the simulator only. Simulated frames covered:
 - brushed streaks and holes near the corners;
 - the real camera's pixel size.
 
-Corners came within 0.025 mm and holes within 0.001 mm. The corner finder also found no false corners in Ruby's three real mark photos from J0106.
+Corners came within 0.025 mm and holes within 0.001 mm. The corner finder also found no false corners in the three real mark photos the Q500's camera took for J0106.
 
-These haven't been tried on Ruby with real steel:
+These haven't been tried on the Q500 with real steel:
 
 - **How brushed stainless looks under the head lamp.** If it shines as brightly as the card, the hole or the edge loses contrast. Run accepts either way round, plate darker or lighter, but needs a clear difference.
 - **Shadows from the plate's thickness.** If the lamp is off to one side, the 0.9 mm wall of a hole can shade part of the card under it, and a plate edge can shade the background beside it. That would move every mark by the same small amount (probably 0.1–0.4 mm). Holes would move the whole job slightly; corners on opposite sides of the plate would move in opposite directions.
