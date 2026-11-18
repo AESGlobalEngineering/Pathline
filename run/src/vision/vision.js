@@ -761,4 +761,24 @@ function fitInfo(ov, bed, anchored, after) {
   return { kind: 'reach', title: 'The job doesn\'t fit on the bed where the sheet is', moves, why, wide: '', then, text: head + ' ' + why.join(' ') + ' ' + then };
 }
 
-module.exports = { Vision, DEFAULTS, reach, reachInfo, reachMessage, fitInfo };
+// How far the sheet lies turned from the job as drawn, from the marks' fit (rotation, ° from +X
+// towards +Y: Y runs to the front, so seen from above a positive angle is clockwise), against
+// cfg.placementAngle. Only for a job that engraves: the engraving lines run along the bed's X
+// whatever way the sheet lies, so a sheet turned 45° (J0094) engraves its lines 45° across the
+// part, and parts placed at different angles come out with their lines different ways.
+//   → { act: 'run' | 'ask' | 'stop', angle (°, signed), text }
+function placementCheck(info, pkg, cfg) {
+  const lim = { ask: 5, stop: 10, ...((cfg && cfg.placementAngle) || {}) };
+  let a = info && Number.isFinite(info.rotation) ? info.rotation : 0;
+  a = ((((a + 180) % 360) + 360) % 360) - 180;
+  const engraves = (pkg.toolpath || []).some((s) => s.type === 'engrave');
+  const by = Math.abs(a);
+  const turned = by.toFixed(1) + '° ' + (a > 0 ? 'clockwise' : 'anticlockwise');
+  if (!engraves || !(by > lim.ask)) return { act: 'run', angle: a, text: '' };
+  if (by <= lim.stop) {
+    return { act: 'ask', angle: a, text: 'The sheet is turned ' + turned + ' from the job as drawn, so the engraving lines will cross the parts at ' + by.toFixed(1) + '° to the usual direction. Up to ' + lim.ask + '° runs without asking.' };
+  }
+  return { act: 'stop', angle: a, text: 'The sheet is turned ' + turned + ' from the job as drawn (more than ' + lim.stop + '°): the engraving lines would cross the parts ' + by.toFixed(0) + '° from the usual direction. Turn the sheet so it lies within ' + lim.ask + '° of the job, then start again. Nothing was cut.' };
+}
+
+module.exports = { Vision, DEFAULTS, reach, reachInfo, reachMessage, fitInfo, placementCheck };

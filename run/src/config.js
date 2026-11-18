@@ -45,6 +45,10 @@ const BASE = {
   regMarks: 'refuse',            // 'refuse' or 'ignore' (run without print-and-cut correction)
   removeDone: true,              // completed jobs leave the queue for History
   returnHead: true,              // after a completed job the head goes back to where it was at Start
+  // print and cut with engraving: how far the sheet may lie turned from the job as drawn (°). The
+  // engraving lines run along the bed's X whatever way the sheet lies, so a turned sheet engraves
+  // its lines at that angle across the part. Up to `ask` runs; up to `stop` asks; beyond stops
+  placementAngle: { ask: 5, stop: 10 },
   monitorHub: '',                // Pathline Monitor hub ("host" or "host:port"), when it isn't found by itself
   manual: [],                    // settings typed in Setup over the controller's own ('bed.0', 'speed' …)
   knifeHome: null,               // RDD6584: where the head homes and parks, controller mm (learnt)
@@ -61,7 +65,7 @@ const BASE = {
 };
 
 // settings that belong to Pathline Run, not to the machine (kept when a machine is removed)
-const APP_PREFS = ['httpPort', 'regMarks', 'removeDone', 'returnHead', 'prefix', 'sim', 'monitorHub'];
+const APP_PREFS = ['httpPort', 'regMarks', 'removeDone', 'returnHead', 'placementAngle', 'prefix', 'sim', 'monitorHub'];
 
 // the setup with the machine removed
 function withoutMachine(cfg) {

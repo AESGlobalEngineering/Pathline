@@ -1173,6 +1173,16 @@ function qrSvg(text, px) {
 }
 
 function dialog() {
+  // print and cut: the sheet lies 5–10° turned from the job. The job waits for Continue or Stop
+  // (over every other dialog and page: nothing moves until it's answered)
+  const aw = S && S.status && S.status.angleWait;
+  if (aw) {
+    return '<div class="scrim"><div role="alertdialog" aria-label="Sheet turned" class="dlg"><span class="h-sec" style="font-size:18px">The sheet is turned ' + Math.abs(aw.angle).toFixed(1) + '°</span>' +
+      '<div class="warnbox" style="line-height:1.5">' + esc(aw.text) + '</div>' +
+      '<span style="color:var(--text-2);line-height:1.5">Continue runs it as it lies. Stop leaves it uncut, to straighten the sheet and start again.</span>' +
+      '<div style="display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap"><button class="tb" data-a="stop" style="height:52px;padding:0 20px;color:var(--err)">Stop job</button>' +
+      '<button class="btn-primary" data-a="angleOk" style="height:52px;padding:0 24px">Continue</button></div></div></div>';
+  }
   if (!ui.dlg) return '';
   if (ui.dlg.kind === 'import') {
     return '<div class="scrim"><div role="dialog" aria-label="Import file" class="dlg"><span class="h-sec" style="font-size:18px">Import job</span>' +
@@ -1457,6 +1467,8 @@ const H = {
   camGoto: act(async (v) => call('POST', LOCAL('/camera/goto'), { to: v })),
   // print and cut: the waiting mark is under the crosshair; back to the queue to watch the job
   markAccept: act(async () => { await call('POST', API('/marks/accept'), {}); ui.view = 'queue'; }),
+  // print and cut: run with the sheet as it lies, turned 5–10°
+  angleOk: act(async () => { await call('POST', API('/marks/angle-ok'), {}); }),
   // the head Z axis: Setup → Z axis buttons (v: jog:±mm, up, home, read, focus, clear)
   z: act(async (v) => {
     const [what, arg] = String(v).split(':');

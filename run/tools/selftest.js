@@ -1131,6 +1131,43 @@ async function visionTests() {
     const rot = Number((fitLine.match(/rotation (-?[\d.]+)°/) || [])[1]);
     ok(st.status === 200 && s.state === 'idle' && s.progress === 1 && Math.abs(rot - 0.3) < 0.1, 'print and cut: 3 marks read, sheet turned ' + rot + '° (0.3), job run', fitLine + ' / ' + JSON.stringify(s));
 
+    // the placement angle: the sim's sheet lies 0.3° turned, so with the limits brought down to
+    // 0.1° (ask) and 10° (stop) the job waits for Continue, and with 0.2° (stop) it stops
+    const { placementCheck } = require('../src/vision/vision');
+    const eng = { toolpath: [{ type: 'engrave' }] }, cutOnly = { toolpath: [{ type: 'cut' }] };
+    const pc = (a, p = eng, c = {}) => placementCheck({ rotation: a }, p, c).act;
+    ok(pc(4.9) === 'run' && pc(-5) === 'run' && pc(5.1) === 'ask' && pc(-9.9) === 'ask' && pc(10) === 'ask' && pc(10.1) === 'stop' && pc(-46) === 'stop' && pc(359) === 'run' && pc(46, cutOnly) === 'run',
+      'placement angle: within 5° runs, 5–10° asks, over 10° stops (either way round); cutting only is never asked');
+    ok(/12\.0° clockwise/.test(placementCheck({ rotation: 12 }, eng, {}).text) && /anticlockwise/.test(placementCheck({ rotation: -7 }, eng, {}).text) && pc(3, eng, { placementAngle: { ask: 2, stop: 4 } }) === 'ask',
+      'placement angle: says which way the sheet is turned; the limits come from the config');
+    const runAngled = async (lim) => {
+      await call('PUT', 'local/config', { placementAngle: lim });
+      const qa = await unanchored(example);
+      await new Promise((r) => setTimeout(r, 300));
+      await call('POST', 'v1/start', { id: qa.data.id });
+      for (let i = 0; i < 300; i++) { await new Promise((r) => setTimeout(r, 100)); const x = (await call('GET', 'v1/status')).data; if (x.angleWait || x.state === 'idle' || x.state === 'alarm') return x; }
+      return null;
+    };
+    let wa = await runAngled({ ask: 0.1, stop: 10 });
+    const okA = await call('POST', 'v1/marks/angle-ok');
+    let da;
+    for (let i = 0; i < 200; i++) { await new Promise((r) => setTimeout(r, 250)); da = (await call('GET', 'v1/status')).data; if (da.state === 'idle' || da.state === 'alarm') break; }
+    ok(wa && wa.angleWait && Math.abs(wa.angleWait.angle - 0.3) < 0.1 && wa.state === 'running' && /Continue or Stop/.test(wa.message) && okA.status === 200 && da.state === 'idle' && da.progress === 1 && !da.angleWait,
+      'sheet turned 0.3° with "ask" at 0.1°: the job waits for Continue, then runs', JSON.stringify({ wa, da }));
+    const late2 = await call('POST', 'v1/marks/angle-ok');
+    ok(late2.status === 409, 'Continue with nothing waiting is refused', JSON.stringify(late2.data));
+    wa = await runAngled({ ask: 0.1, stop: 10 });
+    await call('POST', 'v1/stop');
+    for (let i = 0; i < 100; i++) { await new Promise((r) => setTimeout(r, 100)); da = (await call('GET', 'v1/status')).data; if (da.state === 'idle' || da.state === 'alarm') break; }
+    const hist = (await call('GET', 'local/state')).data.history || [];
+    ok(wa && wa.angleWait && da.state === 'idle' && da.message === 'Stopped' && !da.angleWait && hist[0] && /asked about the sheet turned/.test(hist[0].reason || ''),
+      'Stop while asked about the angle: stopped, not an alarm, and History says why', JSON.stringify({ da, reason: hist[0] && hist[0].reason }));
+    wa = await runAngled({ ask: 0.1, stop: 0.2 });
+    ok(wa && wa.state === 'alarm' && /turned 0\.3° clockwise from the job as drawn.*Turn the sheet.*Nothing was cut/.test(wa.message) && !wa.progress,
+      'sheet turned 0.3° with "stop" at 0.2°: stopped before anything was cut, told to turn the sheet', JSON.stringify(wa));
+    await call('POST', 'local/alarm/clear');
+    await call('PUT', 'local/config', { placementAngle: { ask: 5, stop: 10 } });
+
     // the sheet laid 40 mm away from where the job expects it: mark 1 isn't found, the job waits,
     // the camera is jogged over the real mark by hand (jogs and the camera picture allowed
     // meanwhile), Accept, the dot finder takes it from there, and marks 2 and 3 follow by themselves

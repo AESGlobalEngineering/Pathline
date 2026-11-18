@@ -466,6 +466,8 @@ function start(opts = {}) {
     'POST /jog': (b) => machine.jog(b),
     // print and cut: the mark the job is waiting for is under the camera's crosshair
     'POST /marks/accept': () => machine.markAccept(),
+    // print and cut: run with the sheet turned 5–10° from the job (the screen asked)
+    'POST /marks/angle-ok': () => machine.angleAccept(),
     'POST /home': () => machine.home(),
     'POST /frame': (b) => machine.frame(b.box),
     'POST /io': (b) => machine.io(b),

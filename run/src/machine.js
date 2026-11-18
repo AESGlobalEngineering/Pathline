@@ -10,7 +10,7 @@ const validate = require('./job/validate');
 const anchorJob = require('./job/anchor');
 const fitting = require('./vision/fit');
 const config = require('./config');
-const { Vision, reach, reachInfo, fitInfo } = require('./vision/vision');
+const { Vision, reach, reachInfo, fitInfo, placementCheck } = require('./vision/vision');
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const busyErr = (msg) => Object.assign(new Error(msg), { code: 409 });
@@ -516,6 +516,15 @@ class Machine {
         this.st.marks = r.found;
         // kept with the run: where the marks were expected and found (follow-fit.js rebuilds the job as cut)
         if (this.run && this.run.job === job) this.run.placement = { ...(this.run.placement || {}), marks: { expected: r.expected, found: r.found, type: r.info && r.info.type, height: r.height || null } };
+        // the sheet turned from the job as drawn: the engraving lines would cross the parts at that
+        // angle. Up to 5° runs, up to 10° asks (Continue or Stop), more stops before anything is cut
+        const turn = placementCheck(r.info, pkg, this.cfg);
+        if (turn.act !== 'run') this.log(job.name + ': sheet turned ' + turn.angle.toFixed(2) + '°: ' + (turn.act === 'ask' ? 'asking' : 'stopped'));
+        if (turn.act === 'stop') throw new Error(turn.text);
+        if (turn.act === 'ask') {
+          await this.waitForAngle(turn, ctl);
+          this.log(job.name + ': run with the sheet turned ' + turn.angle.toFixed(2) + '° (Continue pressed)');
+        }
         // the job as moved onto the marks: the screen follows the head along this one (the
         // package as sent sat ~150 mm away on the X8 sheet: no position fitted it, the head jumped)
         const placed = Vision.corrected(pkg, r.f);
@@ -786,6 +795,31 @@ class Machine {
     return w.at;
   }
 
+  // The sheet lies 5–10° turned from the job (placementCheck): the job waits, beam off, until
+  // Continue (angleAccept) or Stop
+  async waitForAngle(turn, ctl) {
+    const w = { ok: false };
+    this.angleWait = w;
+    this.st.angleWait = { angle: +turn.angle.toFixed(1), text: turn.text };
+    this.st.message = 'The sheet is turned ' + Math.abs(turn.angle).toFixed(1) + '°: Continue or Stop';
+    try {
+      while (!w.ok) {
+        if (ctl.aborted) throw busyErr('Stopped');
+        await sleep(150);
+      }
+    } finally {
+      this.angleWait = null;
+      this.st.angleWait = null;
+    }
+    this.st.message = 'Reading registration marks';
+  }
+
+  angleAccept() {
+    if (!this.angleWait) throw busyErr('No job is waiting for its sheet\'s angle to be accepted');
+    this.angleWait.ok = true;
+    return { accepted: true };
+  }
+
   // Accept (Jog page): the mark is under the camera's crosshair
   async markAccept() {
     const w = this.markWait;
@@ -808,7 +842,7 @@ class Machine {
     if (this.run) {
       // why, for History: who pressed Stop, and what the machine was doing then
       if (!this.run.ctl.aborted) {
-        const doing = this.st.markWait ? ', waiting for registration mark ' + this.st.markWait.mark + ' to be found by hand' : this.st.interlock ? ', with the lid open' : this.st.state === 'paused' ? ', while paused' : '';
+        const doing = this.st.markWait ? ', waiting for registration mark ' + this.st.markWait.mark + ' to be found by hand' : this.st.angleWait ? ', asked about the sheet turned ' + Math.abs(this.st.angleWait.angle) + '°' : this.st.interlock ? ', with the lid open' : this.st.state === 'paused' ? ', while paused' : '';
         this.run.stopReason = (by || 'Stop pressed') + doing;
       }
       this.run.ctl.aborted = true;
