@@ -482,7 +482,7 @@ function start(opts = {}) {
     // print and cut: run with the sheet turned 5–10° from the job (the screen asked)
     'POST /marks/angle-ok': () => machine.angleAccept(),
     'POST /home': () => machine.home(),
-    'POST /frame': (b) => machine.frame(b.box),
+    'POST /frame': (b) => machine.frame(b.box, { path: b.path, speed: b.speed }),
     'POST /io': (b) => machine.io(b),
     'POST /autofocus': () => { throw err(409, 'This machine has no auto-focus'); },
     'POST /testfire': () => { throw err(409, 'Test fire isn\'t supported by Pathline Run yet'); },

@@ -7,6 +7,7 @@
 //   { op: 'toolchange', i, slot, tool } and { op: 'feed', i, bed })
 // steps, in run order, one per toolpath step:
 //   { op: 'cut',     i, proc, runs: [[[x, y]…]…], seconds }   beam on along each run, travel between runs (links already applied)
+//   { op: 'punch',   i, proc, pts: [[x, y]…], seconds }       plotters / routers: move with the tool up, strike once at each point
 //   { op: 'engrave', i, proc, paths, box, dpi, down, bidi, seconds }
 //   { op: 'dwell',   i, seconds }
 //   { op: 'inspect', i, at, d, mark, of, seconds }
@@ -23,6 +24,8 @@ function normProc(p) {
     return {
       index: p.index, name: p.name || p.tool, kind: 'tool',
       tool: p.tool, slot: String(p.tool).split(' · ')[0].trim(),
+      // mode 'punch': the tool strikes at points instead of cutting (none: cutting)
+      mode: p.mode === 'punch' ? 'punch' : 'cut', punchSpace: num(p.punchSpace, 5), centre: !!p.centre,
       power: 100, speed: num(p.speed, 100), freq: null, dpi: null, air: false,
       dash: !!p.dash && num(p.dl, 0) > 0 && num(p.gl, 0) > 0, dl: num(p.dl, 0), gl: num(p.gl, 0),
       aci: Array.isArray(p.aci) ? p.aci : [], powerCorrection: null, planning: 'Standard', overshoot: 0
@@ -95,6 +98,12 @@ function build(pkg) {
       }
       if (pts.length < 2) return;
       steps.push({ op: 'cut', i, proc, runs: proc.dash ? dashRuns(pts, proc.dl, proc.gl) : [pts], seconds, name: s.name });
+    } else if (s.type === 'punch') {
+      // strike points in order, head up between them; passes: the whole list again
+      const pts = (s.p || []).filter((q) => Array.isArray(q) && Number.isFinite(q[0]) && Number.isFinite(q[1])).map((q) => [q[0], q[1]]);
+      if (!pts.length) return;
+      const passes = Math.max(1, Math.round(num(s.passes, 1)));
+      steps.push({ op: 'punch', i, proc: procs[s.process], pts: [].concat(...new Array(passes).fill(pts)), seconds, name: s.name });
     } else if (s.type === 'engrave') {
       const proc = procs[s.process];
       const paths = [];
@@ -194,6 +203,7 @@ function merge(spans) {
 // Points along the plan for the on-screen head trace (sim mode and preview).
 function trace(step) {
   if (step.op === 'cut') return [].concat(...step.runs);
+  if (step.op === 'punch') return step.pts;
   if (step.op === 'engrave') {
     const [x0, y0, x1, y1] = step.box;
     return step.down ? [[x0, y0], [x1, y0], [x0, y1], [x1, y1]] : [[x0, y1], [x1, y1], [x0, y0], [x1, y0]];

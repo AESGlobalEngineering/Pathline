@@ -2,7 +2,9 @@
 // problem) and before it runs. Messages are written for the operator.
 'use strict';
 
-const STEP_TYPES = new Set(['inspect', 'engrave', 'cut', 'dwell', 'toolchange', 'feed']);
+const STEP_TYPES = new Set(['inspect', 'engrave', 'cut', 'punch', 'dwell', 'toolchange', 'feed']);
+// steps that do work (a job with none of these has nothing to run)
+const WORK = new Set(['cut', 'engrave', 'punch']);
 const ok = (v) => typeof v === 'number' && Number.isFinite(v);
 
 function bad(msg) {
@@ -42,10 +44,16 @@ function check(pkg, cfg) {
   pkg.toolpath.forEach((s, i) => {
     const where = 'Step ' + (i + 1) + ' (' + (s.name || s.type) + ')';
     if (!STEP_TYPES.has(s.type)) throw bad(where + ': unknown step type ' + JSON.stringify(s.type));
-    if (!plotter && (s.type === 'toolchange' || s.type === 'feed')) throw bad(where + ': plotter steps can\'t run on a laser');
+    if (!plotter && (s.type === 'toolchange' || s.type === 'feed' || s.type === 'punch')) throw bad(where + ': plotter steps can\'t run on a laser');
     if (plotter && (s.type === 'engrave' || s.type === 'inspect')) throw bad(where + ': laser steps can\'t run on a plotter');
     if (plotter && s.type === 'feed' && !cfg.f.conveyor) throw bad(where + ': the job feeds the conveyor, but this plotter has no conveyor (Setup → Machine)');
-    if ((s.type === 'cut' || s.type === 'engrave') && !procs.has(s.process)) throw bad(where + ': unknown process ' + s.process);
+    if (WORK.has(s.type) && !procs.has(s.process)) throw bad(where + ': unknown process ' + s.process);
+    // punch: p lists the strike points (Prepare has spaced them, or one at a shape's centre)
+    if (s.type === 'punch') {
+      if (!Array.isArray(s.p) || s.p.length < 1) throw bad(where + ': the punch step has no points');
+      for (const q of s.p) if (!Array.isArray(q) || !inBed(q[0], q[1])) throw bad(where + ': a punch point is off the bed (' + W + ' × ' + H + ' mm)');
+      if (s.passes !== undefined && !(Number.isInteger(s.passes) && s.passes >= 1 && s.passes <= 20)) throw bad(where + ': passes must be 1–20');
+    }
     if (s.type === 'cut') {
       if (!Array.isArray(s.p) || s.p.length < 2) throw bad(where + ': the path has no points');
       for (const [x, y] of s.p) if (!inBed(x, y)) throw bad(where + ': the path leaves the bed (' + W + ' × ' + H + ' mm)');
@@ -73,7 +81,7 @@ function check(pkg, cfg) {
   }
   const blocked = (pkg.checks || []).find((c) => c && c.block);
   if (blocked) throw bad('Pathline blocked this job: ' + blocked.l);
-  if (!pkg.toolpath.some((s) => s.type === 'cut' || s.type === 'engrave')) throw bad(nothingToRun(pkg));
+  if (!pkg.toolpath.some((s) => WORK.has(s.type))) throw bad(nothingToRun(pkg));
   return warnings;
 }
 
@@ -92,4 +100,4 @@ function fromCjob(cjob) {
   return { ...cjob.run, entities: cjob.run.entities || cjob.entities || [], files: { cjob } };
 }
 
-module.exports = { check, fromCjob, bad, nothingToRun };
+module.exports = { check, fromCjob, bad, nothingToRun, WORK };

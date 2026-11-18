@@ -213,6 +213,14 @@ function artSlot(pkg, big) {
         s += '<path d="' + d + '" fill="none" ' + (col ? 'stroke="' + col + '"' : 'class="ink"') + ' stroke-width="' + sw + '" vector-effect="non-scaling-stroke" style="stroke-width:' + (big ? 1.5 : 1) + 'px"/>';
       }
     }
+    // punch steps (plotters / routers): a ring at each strike point
+    const rr = Math.max(0.8, W / 600);
+    for (const t of pkg.toolpath || []) {
+      if (t.type !== 'punch' || !Array.isArray(t.p)) continue;
+      for (const q of t.p) if (Array.isArray(q) && Number.isFinite(q[0]) && Number.isFinite(q[1])) {
+        s += '<circle cx="' + q[0].toFixed(2) + '" cy="' + q[1].toFixed(2) + '" r="' + rr.toFixed(2) + '" fill="none" class="ink" vector-effect="non-scaling-stroke" style="stroke-width:' + (big ? 1.5 : 1) + 'px"/>';
+      }
+    }
     art.html.set(key, s);
     // (the last few jobs' only)
     while (art.html.size > 24) art.html.delete(art.html.keys().next().value);

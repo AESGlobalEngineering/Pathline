@@ -315,25 +315,32 @@ class Machine {
     return { ok: true };
   }
 
-  async frame(box) {
+  // opts.path: the corners to trace, in order (Prepare 1.6.18); none: the box from its top right
+  // corner, down, left, up and right again (bed Y runs to the front, so y0 is the top).
+  // opts.speed: mm/s, capped at the machine's travel speed; none: the link's own default
+  async frame(box, opts = {}) {
     this.guard();
     if (!Array.isArray(box) || box.length !== 4 || !box.every(Number.isFinite)) throw Object.assign(new Error('box must be [x0, y0, x1, y1]'), { code: 400 });
-    const [x0, y0, x1, y1] = [this.clampX(box[0]), this.clampY(box[1]), this.clampX(box[2]), this.clampY(box[3])];
+    const [x0, y0, x1, y1] = [Math.min(box[0], box[2]), Math.min(box[1], box[3]), Math.max(box[0], box[2]), Math.max(box[1], box[3])];
+    const okPath = Array.isArray(opts.path) && opts.path.length >= 2 && opts.path.every((q) => Array.isArray(q) && Number.isFinite(q[0]) && Number.isFinite(q[1]));
+    const corners = (okPath ? opts.path : [[x1, y0], [x1, y1], [x0, y1], [x0, y0], [x1, y0]]).map((q) => [this.clampX(q[0]), this.clampY(q[1])]);
+    const max = Number(this.cfg.speed) > 0 ? Number(this.cfg.speed) : Infinity;
+    const speed = Number(opts.speed) > 0 ? Math.min(Number(opts.speed), max) : undefined;
     const start = { x: this.st.pos.x, y: this.st.pos.y };
     this.framing = true;
     this.st.state = 'framing';
     this.st.message = 'Framing';
     (async () => {
       try {
-        for (const [x, y] of [[x0, y0], [x1, y0], [x1, y1], [x0, y1], [x0, y0]]) {
+        for (const [x, y] of corners) {
           if (!this.framing) break;
           const [cx, cy] = this.corrected([x, y]);
-          await this.link.moveTo(cx, cy, { light: true });
-          await this.waitIdle(30000, 150);
+          await this.link.moveTo(cx, cy, speed ? { light: true, speed } : { light: true });
+          await this.waitIdle(60000, 150);
         }
         // then back to where the head was
         if (this.framing && Number.isFinite(start.x) && Number.isFinite(start.y)) {
-          await this.link.moveTo(start.x, start.y);
+          await this.link.moveTo(start.x, start.y, speed ? { speed } : {});
           await this.waitIdle(30000, 150);
         }
       } catch (e) { this.log('frame: ' + e.message); }
@@ -481,7 +488,7 @@ class Machine {
     // as placed: moved to the head if the operator anchored it there
     const pkg = this.store.runPkg(job.id);
     // queued before Pathline Run checked for this: don't "complete" a job that does nothing
-    if (!(pkg.toolpath || []).some((s) => s.type === 'cut' || s.type === 'engrave')) throw busyErr('"' + job.name + '": ' + validate.nothingToRun(pkg));
+    if (!(pkg.toolpath || []).some((s) => validate.WORK.has(s.type))) throw busyErr('"' + job.name + '": ' + validate.nothingToRun(pkg));
     if (job.anchor) {
       try { validate.check(pkg, this.cfg); } catch (e) { throw busyErr('"' + job.name + '" anchored at the head: ' + e.message); }
     }

@@ -72,7 +72,7 @@ function bedFile(layers, opts = {}) {
     body.push(0xca, 0x00, TOOL[l.tool] | (k ? 0x40 : 0), 0xca, 0x02, k, ...RD.speed(l.speed));
     for (const p of l.runs) {
       if (l.tool === 'punch') {
-        for (const [x, y] of holes(p, opts.punchStep || 5)) body.push(0x80, ...abs(um(x)), ...abs(um(y)), ...abs(0), 0xca, 0x0a, ...abs(5000));
+        for (const [x, y] of holes(p, l.punchStep || opts.punchStep || 5)) body.push(0x80, ...abs(um(x)), ...abs(um(y)), ...abs(0), 0xca, 0x0a, ...abs(5000));
         continue;
       }
       let i = 0;
@@ -162,7 +162,10 @@ function compile(plan, cfg, opts = {}) {
     bed.steps.push(step);
     // one layer per process, in the order Pathline runs them
     const key = step.proc.index;
-    if (!bed.layers.has(key)) bed.layers.set(key, { tool: toolOf(step.proc, cfg), speed: step.proc.speed, runs: [] });
+    const punching = step.op === 'punch' || step.proc.mode === 'punch';
+    if (!bed.layers.has(key)) bed.layers.set(key, { tool: punching ? 'punch' : toolOf(step.proc, cfg), speed: step.proc.speed, runs: [], punchStep: step.proc.punchSpace });
+    // punch step: Prepare's strike points, one hole each (a one-point run is punched exactly there)
+    if (step.op === 'punch') { for (const q of map(step.pts)) bed.layers.get(key).runs.push([q]); continue; }
     for (const run of step.runs) if (run.length > 1) bed.layers.get(key).runs.push(map(run));
   }
   close(0);

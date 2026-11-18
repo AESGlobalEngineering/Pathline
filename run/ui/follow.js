@@ -102,6 +102,12 @@
         }
         return;
       }
+      // punch: travel to each point, then the strike (Prepare's time spread over the strikes)
+      if (s.type === 'punch' && Array.isArray(s.p) && s.p.length) {
+        const per = (Number(s.seconds) || 0.3 * s.p.length) / s.p.length;
+        for (const q of s.p) { go(q, i); add(q, q, per, 'strike', i); }
+        return;
+      }
       if (Array.isArray(s.p) && s.p.length > 1) pts = s.closed ? s.p.concat([s.p[0]]) : s.p;
       else if (s.type === 'engrave' && Array.isArray(s.box) && s.box.length === 4) {
         // the scan lines (at most 200 of them here: enough to follow and draw)

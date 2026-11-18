@@ -18,6 +18,8 @@ The owner corrected me for calling the laser "Ruby". Don't.
 - **Never restart Run while a job is running.** Check first that `GET http://127.0.0.1:8470/api/v1/status` shows `state: idle` with no `job`.
 - **Speed matters.** The owner has twice asked to cancel or skip the full self-test (about 10 minutes). Run quick, targeted checks instead and say what wasn't run.
 - Explain in plain words. Don't give them commands to run themselves.
+- **Be concise** in text and explanations.
+- **Routers** = Run's plotter machine type (`type: 'plotter'`). Punch is for routers.
 
 ## 3. Where things are
 

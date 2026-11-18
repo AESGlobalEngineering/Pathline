@@ -80,7 +80,7 @@ All are `POST` with a JSON body and return a small JSON object.
 |---|---|---|
 | `/jog` | `{ axis: "x" \| "y" \| "z", distance }` or `{ x, y }` | Relative jog, or absolute move |
 | `/home` | `{}` | Home all axes |
-| `/frame` | `{ box: [x0, y0, x1, y1] }` | Trace the job outline (laser pointer / low power) |
+| `/frame` | `{ box: [x0, y0, x1, y1], path?: [[x, y]…], speed?: mm/s }` | Trace the job outline (laser pointer / low power). `path`: the corners in order; none: the box from top right, down, left, up, right. `speed`: capped at the machine's own speed |
 | `/start`, `/pause`, `/resume`, `/stop` | `{}` | Job control. `/stop` must always be accepted. |
 | `/io` | `{ air?, pointer?, vacuum? }` | Switch outputs |
 | `/autofocus` | `{}` | Laser auto-focus |
@@ -124,6 +124,7 @@ All are `POST` with a JSON body and return a small JSON object.
 - `processes` are in **run order** (engrave → mark → cut on lasers; marking tools → V-cut → crease → knife on plotters). Each process lists the colour indexes (`aci`) it applies to.
 - `entities[].paths` are polylines in mm (`c: true` = closed). Curves are already flattened.
 - Plotter processes use `tool: "T1 · Knife"` in place of `proc/power/f`, and `dash/dl/gl` for perforation or bridges.
+- A plotter (router) process with `mode: "punch"` punches instead of cutting (`punchSpace` mm, default 5; `centre` true/false). Its shapes come as `punch` steps, one per shape: `{ "type": "punch", "process": 1, "name": "Holes", "tool": "T3", "ent": "e12", "centre": true, "passes": 1, "seconds": 0.3, "p": [[40, 60]] }`. `p` is the strike points in order, already worked out (spaced at most `punchSpace` apart along the line, or the one centre of the shape's box). Run moves to each with the tool up and strikes once (Pathline Run 0.7.13 and later). No `mode`: cutting. Lasers refuse punch steps.
 - Laser cuts with `dash: true` are cut in links: `dl` mm cut, `gl` mm left uncut, repeated along the path.
 - Engrave processes carry `dir` (`"down"` top down, `"up"` bottom up, `"fastest"`) and `uni` (`true`: every scan line left to right, with the beam off on the return stroke; `false`: both ways). Each `engrave` step gives the result for that step: `direction` (`"down"` or `"up"`, so "fastest" is already decided) and `bidirectional`.
 - `regMarks.marks` are the objects the operator drew in a **Registration marks** colour (`regMarks.aci`), given by their centre and size. Nothing is placed automatically, and they are not in `processes`, so they are never cut. They're still in `entities` and on the `REGMARKS` layer of the DXF.
