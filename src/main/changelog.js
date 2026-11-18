@@ -5,6 +5,16 @@
 
 module.exports = [
   {
+    version: '1.6.17', date: '18 Nov 2026',
+    added: [
+      'Several jobs can be open at once, a tab each under the app bar. New (Ctrl+N or +) and Open each open a new tab; a file that\'s already open comes to the front instead. Each tab keeps its own undo history, selection and zoom.',
+      'Ctrl+Tab and Ctrl+Shift+Tab move between tabs; Ctrl+W or the × closes one (a middle-click does too). A tab with unsaved changes has a dot, and closing it asks first. Quitting asks about every tab with unsaved changes.'
+    ],
+    fixed: [
+      'A material test grid no longer replaces the job you have open: it opens in a new tab.'
+    ]
+  },
+  {
     version: '1.6.16', date: '18 Nov 2026',
     added: [
       'Plate corners now come from a box you draw: draw the plate\'s outline as a rectangle and give it the Registration marks colour, instead of using the sheet. Rounded corners are fine: the corner read is where the straight edges meet, and the radius is sent to Pathline Run with it.'

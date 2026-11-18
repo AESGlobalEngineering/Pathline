@@ -13,6 +13,7 @@ const ex = require('../src/main/exporters');
 const device = require('../src/main/device');
 const discover = require('../src/main/discover');
 const seed = require('../src/main/seed');
+const { createTabs } = require('../src/main/tabs');
 
 let failed = 0;
 const ok = (cond, msg) => {
@@ -50,6 +51,58 @@ function testJob() {
 }
 
 async function main() {
+  console.log('Open jobs (tabs)');
+  {
+    let n = 0;
+    const tabs = createTabs({ newJob: (mid) => ({ id: 'j' + (++n), name: 'Untitled job', machineId: mid || 'm1', entities: [], processes: [], path: null, dirty: false }) });
+    const first = tabs.job();
+    ok(tabs.info().tabs.length === 1 && tabs.info().active === tabs.current().id, 'the app starts with one tab holding a new job');
+    const sq = { id: 'e1', paths: [] };
+    tabs.set({ ...first, entities: [sq], dirty: true }, { record: true });
+    const t1 = tabs.current().id;
+    const second = tabs.create();
+    ok(tabs.info().tabs.length === 2 && second.id !== first.id && second.machineId === 'm1' && tabs.job() === second, 'New opens a second tab in front, on the same machine');
+    ok(tabs.history().undo === 0, 'each tab has its own undo history');
+    tabs.set({ ...second, name: 'B', entities: [sq], dirty: true }, { record: true });
+    tabs.set({ ...tabs.job(), name: 'B2' }, { record: true }, tabs.byId(t1));
+    ok(tabs.job().name === 'B' && tabs.byId(t1).job.name === 'B2', 'an edit handed over late goes to the tab it was made in, not the one in front');
+    tabs.switchTo(t1);
+    ok(tabs.job().name === 'B2' && tabs.history().undo === 2 && tabs.undo().entities.length === 1 && tabs.history().redo === 1, 'switching tabs brings that job and its own undo steps to the front');
+    ok(tabs.info().tabs.every((t) => t.dirty), 'tabs with unsaved drawings are marked');
+    // opening files
+    const fileJob = (p, name) => ({ id: 'f' + name, name, entities: [sq], processes: [], path: p, dirty: false });
+    tabs.open(fileJob('C:\\jobs\\a.cjob', 'A'));
+    ok(tabs.info().tabs.length === 3 && tabs.job().name === 'A', 'a job file opens in a new tab when the tab in front has work in it');
+    const before = tabs.current().id;
+    tabs.switchTo(t1);
+    tabs.open(fileJob('c:/jobs/A.cjob', 'A again'));
+    ok(tabs.info().tabs.length === 3 && tabs.current().id === before && tabs.job().name === 'A', 'opening a file that is already open brings its tab to the front');
+    tabs.create();
+    const blankId = tabs.current().id;
+    tabs.open(fileJob('C:\\jobs\\c.cjob', 'C'));
+    ok(tabs.info().tabs.length === 4 && tabs.current().id === blankId && tabs.job().name === 'C', 'a job file opens in the front tab when that is still an empty new job');
+    // closing
+    const order = tabs.info().tabs.map((t) => t.id);
+    tabs.switchTo(order[1]);
+    tabs.close(order[1]);
+    ok(tabs.info().tabs.length === 3 && tabs.current().id === order[2], 'closing the front tab brings the tab to its right to the front');
+    tabs.close(order[0]);
+    ok(tabs.current().id === order[2], 'closing a tab at the back leaves the front tab in front');
+    tabs.close(order[3]);
+    ok(tabs.current().id === order[2], 'closing the last tab brings the one to its left to the front');
+    tabs.close(order[2]);
+    ok(tabs.info().tabs.length === 1 && !tabs.job().entities.length && tabs.job().machineId === 'm1', 'closing the only tab leaves one new job on the same machine');
+    tabs.create(); tabs.create();
+    const ids = tabs.info().tabs.map((t) => t.id);
+    ok(tabs.move(ids[2], 0).tabs.map((t) => t.id).join() === [ids[2], ids[0], ids[1]].join(), 'a tab can be moved');
+    // saving and quitting
+    const t = tabs.byId(ids[1]);
+    tabs.set({ ...t.job, entities: [sq], dirty: true }, null, t);
+    ok(tabs.unsavedTabs().length === 1 && tabs.unsavedTabs()[0] === t, 'quitting asks about each tab with unsaved changes');
+    tabs.set({ ...t.job, path: 'C:/jobs/d.cjob', dirty: false }, null, tabs.ofJob(t.job));
+    ok(!tabs.unsavedTabs().length && tabs.byId(ids[1]).job.path === 'C:/jobs/d.cjob', 'saving updates the tab the job is in, even when it is not in front');
+  }
+
   console.log('Estimator');
   {
     // a straight 100 mm line at 10 mm/s with huge acceleration ≈ 10 s

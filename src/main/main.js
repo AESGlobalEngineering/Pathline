@@ -11,6 +11,7 @@ const { importFile, EXTENSIONS } = require('./importers');
 const ex = require('./exporters');
 const device = require('./device');
 const discover = require('./discover');
+const { createTabs } = require('./tabs');
 const { Reports } = require('./reports');
 const updates = require('./updates');
 const changelog = require('./changelog');
@@ -110,23 +111,10 @@ function newJob(machineId) {
   };
 }
 
-// The job being edited lives in memory so it survives moving between pages.
-// It is not kept between runs: every launch starts with a clean job.
-const session = { job: null, undo: [], redo: [] };
-function setJob(job, opts) {
-  if (opts && opts.record && session.job) {
-    session.undo.push(session.job);
-    if (session.undo.length > 60) session.undo.shift();
-    session.redo = [];
-  }
-  // registration marks on always come with their process (whatever replaced the processes)
-  session.job = CC.ensureRegProcess(job);
-  return session.job;
-}
-function currentJob() {
-  if (!session.job) session.job = newJob();
-  return session.job;
-}
+// The jobs being edited: a tab each on the Job page, with its own undo history
+// (in memory only; every launch starts with one clean job)
+const tabs = createTabs({ newJob: (machineId) => newJob(machineId), prepare: (job) => CC.ensureRegProcess(job) });
+const currentJob = () => tabs.job();
 
 function addRecent(file, name) {
   const s = store.get('settings');
@@ -415,14 +403,15 @@ function registerIpc() {
     if (fields.screenshot && win) {
       try { files['screenshot.png'] = (await win.webContents.capturePage()).toPNG(); } catch (e) { /* window hidden */ }
     }
-    if (fields.includeJob && session.job) {
-      try { files['job.cjob'] = JSON.stringify(jobFileContent(session.job), null, 2); } catch (e) { files['job-error.txt'] = e.stack; }
+    const front = tabs.job();
+    if (fields.includeJob && front) {
+      try { files['job.cjob'] = JSON.stringify(jobFileContent(front), null, 2); } catch (e) { files['job-error.txt'] = e.stack; }
     }
-    const m = session.job ? machineById(session.job.machineId) : null;
+    const m = front ? machineById(front.machineId) : null;
     const report = {
       title: fields.title || '', description: fields.description || '', steps: fields.steps || '', page: fields.page || '',
       machine: m ? { name: m.name, type: m.type, ctrl: m.ctrl, conn: m.conn, sim: !!m.sim } : null,
-      job: session.job ? { name: session.job.name, objects: (session.job.entities || []).length, processes: (session.job.processes || []).length } : null
+      job: front ? { name: front.name, objects: (front.entities || []).length, processes: (front.processes || []).length, tabs: tabs.info().tabs.length } : null
     };
     // a copy stays in the reports folder; the operator chooses where the .zip goes
     const folder = reports.bug(report, files);
@@ -542,23 +531,20 @@ function registerIpc() {
 
   // current job
   handle('job:current', () => currentJob());
-  handle('job:update', (job, opts) => setJob({ ...job, dirty: true }, opts));
-  handle('job:undo', () => {
-    if (!session.undo.length) return null;
-    session.redo.push(session.job);
-    return setJob(session.undo.pop());
-  });
-  handle('job:redo', () => {
-    if (!session.redo.length) return null;
-    session.undo.push(session.job);
-    return setJob(session.redo.pop());
-  });
-  handle('job:history', () => ({ undo: session.undo.length, redo: session.redo.length }));
-  handle('job:new', async (machineId) => {
-    session.undo = []; session.redo = [];
-    return setJob(newJob(machineId || (session.job && session.job.machineId)));
-  });
-  handle('job:replace', (job) => { session.undo = []; session.redo = []; return setJob(job); });
+  // opts.tab: the tab the edit was made in (it may have gone to the back since)
+  handle('job:update', (job, opts) => tabs.set({ ...job, dirty: true }, opts, (opts && opts.tab && tabs.byId(opts.tab)) || null));
+  handle('job:undo', () => tabs.undo());
+  handle('job:redo', () => tabs.redo());
+  handle('job:history', () => tabs.history());
+  // a new job opens in a new tab
+  handle('job:new', (machineId) => tabs.create(machineId));
+  handle('job:replace', (job) => tabs.replace(job));
+  // tabs: the open jobs in order, and which is in front
+  handle('job:tabs', () => tabs.info());
+  handle('job:switchTab', (id) => tabs.switchTo(id));
+  // the page has asked about unsaved changes first
+  handle('job:closeTab', (id) => tabs.close(id));
+  handle('job:moveTab', (id, to) => tabs.move(id, to));
   handle('job:open', async (file) => {
     if (!file) {
       const r = await dialog.showOpenDialog(win, { title: 'Open job', filters: [{ name: 'Job file', extensions: ['cjob'] }], properties: ['openFile'] });
@@ -567,15 +553,14 @@ function registerIpc() {
     }
     const job = readJobFile(file);
     addRecent(file, job.name);
-    session.undo = []; session.redo = [];
-    return setJob(job);
+    return tabs.open(job);
   });
   handle('job:save', async (job, as) => {
     const file = (!as && job.path) || (await askJobFile(job, 'Save job'));
     if (!file) return null;
     writeJobFile(job, file);
     addRecent(file, job.name);
-    return setJob({ ...job, path: file, dirty: false });
+    return tabs.set({ ...job, path: file, dirty: false }, null, tabs.ofJob(job));
   });
   // Save a copy as the same .cjob file (the open job keeps its own file)
   handle('job:saveToComputer', async (job) => {
@@ -685,15 +670,22 @@ function createWindow() {
   });
   win.on('close', async (e) => {
     if (win.forceClose) return;
-    const job = session.job;
-    if (job && job.dirty && job.entities && job.entities.length) {
+    const open = tabs.unsavedTabs();
+    if (open.length) {
       e.preventDefault();
-      const r = await dialog.showMessageBox(win, { type: 'question', buttons: ['Save', "Don't save", 'Cancel'], defaultId: 0, cancelId: 2, message: 'Save changes to "' + job.name + '"?', detail: 'The app starts with a new job next time, so unsaved changes are lost.' });
+      const one = open.length === 1;
+      const r = await dialog.showMessageBox(win, { type: 'question', buttons: [one ? 'Save' : 'Save all', "Don't save", 'Cancel'], defaultId: 0, cancelId: 2,
+        message: one ? 'Save changes to "' + open[0].job.name + '"?' : open.length + ' jobs have unsaved changes. Save them?',
+        detail: (one ? '' : open.map((d) => '• ' + d.job.name).join('\n') + '\n\n') + 'The app starts with a new job next time, so unsaved changes are lost.' });
       if (r.response === 2) return;
       if (r.response === 0) {
-        const file = job.path || (await askJobFile(job, 'Save job'));
-        if (!file) return;
-        writeJobFile(job, file);
+        for (const d of open) {
+          const file = d.job.path || (await askJobFile(d.job, 'Save job · ' + d.job.name));
+          if (!file) return; // cancelled: nothing closes
+          writeJobFile(d.job, file);
+          addRecent(file, d.job.name);
+          d.job = { ...d.job, path: file, dirty: false };
+        }
       }
       win.forceClose = true;
       win.close();
@@ -770,8 +762,7 @@ function openFromArgs(argv) {
   try {
     const job = readJobFile(f);
     addRecent(f, job.name);
-    session.undo = []; session.redo = [];
-    setJob(job);
+    tabs.open(job);
     return true;
   } catch (e) { return false; }
 }

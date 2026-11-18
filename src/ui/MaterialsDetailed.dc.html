@@ -608,7 +608,7 @@ class Component extends DCLogic {
   async makeGrid(base, A, B, cellOf, what) {
     const mat = this.mat();
     const machine = this.tabMachine();
-    if (!(await LRC.confirm('Create a test grid job?', 'This replaces the job on the Job page with a ' + A.vals.length + ' × ' + B.vals.length + ' grid of 10 mm squares (' + what.toLowerCase() + ') for ' + base.proc.toLowerCase() + ' on ' + mat.name + ' (' + machine.name + '). Save your current job first if you need it.', 'Create grid'))) return;
+    if (!(await LRC.confirm('Create a test grid job?', 'This opens a new job tab on the Job page with a ' + A.vals.length + ' × ' + B.vals.length + ' grid of 10 mm squares (' + what.toLowerCase() + ') for ' + base.proc.toLowerCase() + ' on ' + mat.name + ' (' + machine.name + ').', 'Create grid'))) return;
     const job = await window.api.job.create(machine.id);
     const processes = [], entities = [];
     const cell = 10, gap = 4, x0 = 30, y0 = 20;
