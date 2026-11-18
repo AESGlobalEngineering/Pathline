@@ -1600,7 +1600,7 @@
     marks.forEach((m, i) => {
       travelTo([m.x, m.y], 0, -1);
       inspectTime += markTime;
-      push({ kind: 'inspect', proc: regIdx, bed: 0, dur: markTime, at: [m.x, m.y], d: m.d, mark: i + 1, of: marks.length });
+      push({ kind: 'inspect', proc: regIdx, bed: 0, dur: markTime, at: [m.x, m.y], d: m.d, mark: i + 1, of: marks.length, markKind: m.kind, toward: m.toward });
     });
     for (let bed = 0; bed < nBeds; bed++) {
       const bedEnts = isLaser ? ents : ents.filter((e) => (e.bed || 0) === bed);
@@ -2143,16 +2143,78 @@
     if (!job.regMode || job.regMode === 'off') return new Set();
     return new Set(job.processes.filter(isRegProc).flatMap((p) => p.aci || []));
   }
+  // What the camera looks for (job.regKind; Pathline Run reads it as each
+  // inspect step's kind, from Run 0.7.13):
+  //  - 'dot': a printed dark dot on white (the default, and what older jobs mean);
+  //  - 'hole': a hole already cut through the plate, white card under it;
+  //  - 'corner': the plate's own corners, on a white background. They come
+  //    from the sheet rectangle (the plate), not from objects.
+  const REG_KINDS = ['dot', 'hole', 'corner'];
+  const regKindOf = (job) => (job && REG_KINDS.includes(job.regKind) ? job.regKind : 'dot');
+  // plate corners read: job.regCorners (1–3), else from the mode (2 for
+  // Position & rotation, 3 otherwise). Run fits corners by shift and turn
+  // only, whatever the mode, and one corner is enough (its two edges give the turn)
+  const regCornersOf = (job) => {
+    const n = Math.round(Number(job && job.regCorners));
+    return n >= 1 && n <= 3 ? n : job && job.regMode === 'pos' ? 2 : 3;
+  };
+  // what the operator has to do for each kind (job sheet and the marks menu)
+  const REG_TIPS = {
+    hole: 'Put white card or paper under the plate, so the holes show light.',
+    corner: 'Lay the plate on white, with at least 10 mm of white showing past both edges at each corner that\'s read. Don\'t push those corners against a fence.'
+  };
+  // which corners, by count: the diagonal for two (the longest baseline)
+  const CORNER_SETS = { 1: ['tl'], 2: ['tl', 'br'], 3: ['tl', 'tr', 'bl'] };
+  // toward: which way the plate lies from the corner, along X and Y
+  const CORNERS = { tl: { fx: 0, fy: 0, toward: [1, 1] }, tr: { fx: 1, fy: 0, toward: [-1, 1] }, bl: { fx: 0, fy: 1, toward: [1, -1] }, br: { fx: 1, fy: 1, toward: [-1, -1] } };
   // Print-and-cut registration marks: the objects drawn in a reg-mark colour
-  // (nothing is placed automatically). Each mark is reported by its centre.
+  // (nothing is placed automatically), each reported by its centre; or, for
+  // plate corners, the sheet's corners. { id, x, y, d, kind, toward? }
   function regMarks(job, machine) {
     if (machine && machine.type === 'plotter') return [];
+    if (!job.regMode || job.regMode === 'off') return [];
+    const kind = regKindOf(job);
+    if (kind === 'corner') {
+      const sh = job.sheet;
+      if (!sh || !sh.on || !(sh.w > 0) || !(sh.h > 0)) return [];
+      return CORNER_SETS[regCornersOf(job)].map((k) => {
+        const c = CORNERS[k];
+        return { id: 'corner-' + k, x: sh.x + c.fx * sh.w, y: sh.y + c.fy * sh.h, d: 0, kind, toward: c.toward.slice() };
+      });
+    }
     const acis = regMarkAci(job);
     if (!acis.size) return [];
     return (job.entities || []).filter((e) => !e.hidden && acis.has(e.aci)).map((e) => {
       const b = entityBox(e);
-      return { id: e.id, x: (b.x0 + b.x1) / 2, y: (b.y0 + b.y1) / 2, d: Math.max(b.x1 - b.x0, b.y1 - b.y0) };
+      return { id: e.id, x: (b.x0 + b.x1) / 2, y: (b.y0 + b.y1) / 2, d: Math.max(b.x1 - b.x0, b.y1 - b.y0), kind };
     });
+  }
+  // Hole marks have to be holes before the job runs: the marks a cut in this
+  // same job goes through (within the mark, or right round it), numbered from 1
+  function marksCutByJob(job, machine) {
+    if (regKindOf(job) !== 'hole') return [];
+    const cutAci = new Set(job.processes.filter((p) => p.proc === 'Cut' && p.out !== false && !isRegProc(p)).flatMap((p) => p.aci || []));
+    const cuts = (job.entities || []).filter((e) => !e.hidden && cutAci.has(e.aci));
+    const segDist = (x, y, a, b) => {
+      const dx = b[0] - a[0], dy = b[1] - a[1], l2 = dx * dx + dy * dy;
+      const t = l2 ? Math.max(0, Math.min(1, ((x - a[0]) * dx + (y - a[1]) * dy) / l2)) : 0;
+      return Math.hypot(x - a[0] - t * dx, y - a[1] - t * dy);
+    };
+    const out = [];
+    regMarks(job, machine).forEach((m, i) => {
+      const r = m.d / 2 + 0.5;
+      const hit = cuts.some((e) => {
+        const b = entityBox(e);
+        if (m.x < b.x0 - r || m.x > b.x1 + r || m.y < b.y0 - r || m.y > b.y1 + r) return false;
+        return e.paths.some((p) => {
+          const q = p.c ? p.p.concat([p.p[0]]) : p.p;
+          for (let k = 1; k < q.length; k++) if (segDist(m.x, m.y, q[k - 1], q[k]) <= r) return true;
+          return false;
+        });
+      });
+      if (hit) out.push(i + 1);
+    });
+    return out;
   }
   // Where the head camera can read a registration mark: the machine's
   // markArea [x0, y0, x1, y1] (bed mm, from Pathline Run's GET /machine; Run
@@ -2279,13 +2341,28 @@
           : { ok: true, l: open ? 'Cut paths OK · ' + open + ' open line' + (open > 1 ? 's' : '') : 'All cut paths closed' });
       }
       if (job.regMode && job.regMode !== 'off') {
-        const need = REG_NEEDED[job.regMode] || 3;
-        const have = regMarks(job, machine).length;
-        const name = { pos: 'Position & rotation', linear: 'Full linear', nonlinear: 'Non-linear' }[job.regMode] || job.regMode;
-        // too many marks is ambiguous for the camera, so the job can't be sent
-        if (have > need) out.push({ ok: false, block: true, l: 'Registration marks · ' + have + ' found, ' + name + ' uses ' + need + ' — remove ' + (have - need) });
-        else out.push(have === need ? { ok: true, l: 'Registration marks · ' + have + ' · ' + name }
-          : { ok: false, warn: true, l: 'Registration marks · ' + have + ' of ' + need + ' — give the marks a Registration marks colour' });
+        const kind = regKindOf(job);
+        if (kind === 'corner') {
+          // the plate's corners come from the sheet: without it there's nothing to read
+          const n = regMarks(job, machine).length;
+          if (!n) out.push({ ok: false, block: true, sheet: true, l: 'Plate corners need the sheet (Sheet, in the toolbar) to show where the plate lies' });
+          else out.push({ ok: true, l: 'Registration marks · ' + n + ' plate corner' + (n > 1 ? 's' : '') });
+          const acis = regMarkAci(job);
+          const stray = ents.filter((e) => acis.has(e.aci)).length;
+          if (stray) out.push({ ok: false, warn: true, l: stray + ' object' + (stray > 1 ? 's' : '') + ' in the Registration marks colour won\'t be read: the camera reads the plate\'s corners' });
+        } else {
+          const need = REG_NEEDED[job.regMode] || 3;
+          const have = regMarks(job, machine).length;
+          const name = { pos: 'Position & rotation', linear: 'Full linear', nonlinear: 'Non-linear' }[job.regMode] || job.regMode;
+          const what = kind === 'hole' ? 'holes' : 'marks';
+          // too many marks is ambiguous for the camera, so the job can't be sent
+          if (have > need) out.push({ ok: false, block: true, l: 'Registration ' + what + ' · ' + have + ' found, ' + name + ' uses ' + need + ' — remove ' + (have - need) });
+          else out.push(have === need ? { ok: true, l: 'Registration ' + what + ' · ' + have + ' · ' + name }
+            : { ok: false, warn: true, l: 'Registration ' + what + ' · ' + have + ' of ' + need + ' — give the ' + (kind === 'hole' ? 'hole circles' : 'marks') + ' a Registration marks colour' });
+          // a hole mark must already be in the plate: the camera reads it before any cutting
+          const cutHere = marksCutByJob(job, machine);
+          if (cutHere.length) out.push({ ok: false, warn: true, l: (cutHere.length > 1 ? 'Holes ' + cutHere.join(', ') + ' are' : 'Hole ' + cutHere[0] + ' is') + ' cut by this job; the camera reads ' + (cutHere.length > 1 ? 'them' : 'it') + ' before cutting starts — cut the holes in a job of their own first' });
+        }
         // the head camera has to reach every mark (it sits beside the beam):
         // the job can't be sent until they're in reach; Move into reach fixes it
         const far = marksOutOfReach(job, machine);
@@ -2307,7 +2384,7 @@
     uid, EMPTY_BOX, growBox, entityBox, boxOf, boxValid, boxW, boxH,
     mapEntity, translate, scaleAbout, rotateAbout, polyLen, polyArea, pointInPoly, distToEntity, isClosedPts, cleanPath, shapes,
     processOrder, processOfAci, engraveHoles, toolSlot, toolRank, polyTime, travelTime, rasterSpans, orderPaths,
-    estimate, headAt, fmtDuration, fmtLen, fmtArea, checkJob, regMarks, regMarkAci, camReach, marksOutOfReach, reachShift, regProcess, withPresets, ensureRegProcess, isRegProc, REG_PROC, REG_NEEDED,
+    estimate, headAt, fmtDuration, fmtLen, fmtArea, checkJob, regMarks, regMarkAci, regKindOf, regCornersOf, marksCutByJob, REG_KINDS, REG_TIPS, camReach, marksOutOfReach, reachShift, regProcess, withPresets, ensureRegProcess, isRegProc, REG_PROC, REG_NEEDED,
     cutOrderOf, CUT_ORDER_DEFAULT, START_CLEAR, commonLines, bedOf, bedCount, defaultPresets, DEFAULTS,
     rasterIslands, engraveScan, ENGRAVE_DIRS, DPI_STEPS, starterPresets, nestRects, THERMAL, thermalKey, thermalOf, colourOf, absorptionOf, thermalSim, bendLimit, cutModelOf, cutModelTime, fitArcs, TROTEC_CUT, rasterModelOf, rasterPitch, rasterModelTime, TROTEC_RASTER, isBareMetal, markingSprayOf, SPRAY_ABSORB, metalPresets, presetsFor
   };

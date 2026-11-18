@@ -551,6 +551,51 @@ async function main() {
     ok(near(pd.width, 25.4, 0.01), 'PDF: points converted to mm (' + pd.width.toFixed(2) + ')');
   }
 
+  console.log('Registration mark kinds');
+  {
+    // a plate with a part, three marks drawn in the Registration marks colour and the sheet as the plate
+    const { laser } = testJob();
+    const cam = { ...laser, info: { ...laser.info, f: { ...(laser.info.f || {}), camera: true } } };
+    const base = { ...testJob().job, regMode: 'linear', sheet: { on: true, x: 50, y: 40, w: 300, h: 200 }, cutOrder: { order: 'speed', inside: 'part' },
+      processes: [{ name: 'Cut', proc: 'Cut', power: 90, speed: 20, f: 5000, passes: 1, out: true, aci: [1] }, { ...CC.regProcess(), aci: [5] }],
+      entities: [{ id: 'part', aci: 1, paths: [{ p: CC.shapes.rect(120, 90, 150, 100, 0), c: true }] },
+        ...[[60, 50], [340, 50], [60, 230]].map(([x, y], i) => ({ id: 'm' + i, aci: 5, paths: [{ p: CC.shapes.ellipse(x, y, 3, 3), c: true }] }))] };
+    const inspect = (job) => ex.buildPackage(job, cam, null, CC.estimate(job, cam, { timeline: true })).toolpath.filter((x) => x.type === 'inspect');
+    // older jobs and printed dots: exactly as before
+    const dots = inspect(base);
+    ok(CC.regKindOf(base) === 'dot' && dots.length === 3 && dots.every((x) => x.kind === undefined && x.toward === undefined && x.d === 6), 'a job without a mark type reads printed dots, and its package is unchanged (no kind, no toward)');
+    // holes: the same marks, with kind hole
+    const holes = { ...base, regKind: 'hole' };
+    const hs = inspect(holes);
+    ok(hs.length === 3 && hs.every((x) => x.kind === 'hole' && x.d === 6), 'hole marks: every inspect step says kind hole, with the hole\'s size');
+    ok(ex.buildPackage(holes, cam, null, CC.estimate(holes, cam)).regMarks.kind === 'hole', 'the package\'s regMarks says the kind too');
+    const cutting = { ...holes, entities: holes.entities.concat([{ id: 'drill', aci: 1, paths: [{ p: CC.shapes.ellipse(60, 50, 3, 3), c: true }] }]) };
+    ok(CC.checkJob(cutting, cam).some((c) => c.warn && /Hole 1 is cut by this job/.test(c.l)) && !CC.checkJob(holes, cam).some((c) => /cut by this job/.test(c.l)), 'a hole this same job cuts is flagged (it has to be there before the camera looks)');
+    // plate corners: from the sheet, with toward, by count
+    const corners = { ...base, regKind: 'corner' };
+    const cs = CC.regMarks(corners, cam);
+    const want = { 'corner-tl': [50, 40, 1, 1], 'corner-tr': [350, 40, -1, 1], 'corner-bl': [50, 240, 1, -1] };
+    ok(cs.length === 3 && cs.every((m) => { const w = want[m.id]; return w && m.x === w[0] && m.y === w[1] && m.toward[0] === w[2] && m.toward[1] === w[3] && m.d === 0 && m.kind === 'corner'; }), 'three plate corners from the sheet: top left, top right, bottom left, each with the way the plate lies');
+    ok(CC.regMarks({ ...corners, regMode: 'pos' }, cam).map((m) => m.id).join() === 'corner-tl,corner-br' && CC.regMarks({ ...corners, regCorners: 1 }, cam).map((m) => m.id).join() === 'corner-tl', 'two corners are the diagonal; one corner is the top left');
+    const cst = inspect(corners);
+    ok(cst.length === 3 && cst.every((x) => x.kind === 'corner' && Array.isArray(x.toward) && x.d === 0) && cst.map((x) => x.at.join(',')).join(' ') === '50,40 50,240 350,40', 'corner inspect steps carry kind and toward, read top left, bottom left, top right');
+    const noSheet = { ...corners, sheet: { ...corners.sheet, on: false } };
+    ok(CC.regMarks(noSheet, cam).length === 0 && CC.checkJob(noSheet, cam).some((c) => c.block && /need the sheet/.test(c.l)), 'plate corners without the sheet can\'t be sent');
+    ok(CC.checkJob(corners, cam).some((c) => c.warn && /3 objects in the Registration marks colour won\'t be read/.test(c.l)), 'objects in the mark colour are flagged as not read when the corners are');
+    const sheetText = ex.jobSheet(corners, cam, null, CC.estimate(corners, cam));
+    ok(/plate corners/.test(sheetText) && /10 mm of white/.test(sheetText) && /white card or paper/.test(ex.jobSheet(holes, cam, null, CC.estimate(holes, cam))), 'the job sheet says the mark type and what to put under or around the plate');
+    // Pathline Run's own check, once its mark kinds are in this repository
+    const validateFile = path.join(__dirname, '..', 'run', 'src', 'job', 'validate.js');
+    if (fs.existsSync(validateFile) && /toward/.test(fs.readFileSync(validateFile, 'utf8'))) {
+      const v = require(validateFile);
+      for (const [name, job] of [['corner', corners], ['hole', holes]]) {
+        let err = null;
+        try { v.check(ex.buildPackage(job, cam, null, CC.estimate(job, cam, { timeline: true }))); } catch (e) { err = e; }
+        ok(!err, 'Pathline Run accepts a ' + name + ' package' + (err ? ' (' + err.message + ')' : ''));
+      }
+    }
+  }
+
   console.log('Engraving holes');
   {
     // a magnifying glass: the lens circle is its own object inside the ring-and-handle shape

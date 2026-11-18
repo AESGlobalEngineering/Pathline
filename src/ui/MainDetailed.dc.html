@@ -293,6 +293,19 @@
                 <sc-if value="{{r.on}}" hint-placeholder-val="{{false}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="color: var(--accent-fg)"><path d="{{icons.check}}"></path></svg></sc-if>
               </button>
             </sc-for>
+            <sc-if value="{{regOn}}" hint-placeholder-val="{{false}}">
+              <div class="h-sec" style="padding: 10px 10px 4px">Mark type</div>
+              <div style="padding: 0 6px 6px">
+                <div role="radiogroup" aria-label="Mark type" class="seg fill sm">
+                  <sc-for list="{{regKinds}}" as="k" hint-placeholder-count="3">
+                    <button role="radio" aria-checked="{{k.on}}" onClick="{{k.pick}}" style="background: {{k.bg}}; box-shadow: {{k.sh}}; color: {{k.fg}}">{{k.l}}</button>
+                  </sc-for>
+                </div>
+              </div>
+              <sc-if value="{{regTipOn}}" hint-placeholder-val="{{false}}">
+                <div class="lbl" style="padding: 2px 10px 8px; line-height: 1.4">{{regTip}}</div>
+              </sc-if>
+            </sc-if>
           </div>
         </sc-if>
       </div>
@@ -1078,7 +1091,7 @@ class Component extends DCLogic {
   }
   // Registration marks on: add a "Registration marks" process whose colours mark the objects the
   // camera looks for. Nothing is placed automatically.
-  setRegMode(mode) {
+  setRegMode(mode, n) {
     const job = this.state.job;
     let processes = job.processes;
     let regIdx = processes.findIndex(CC.isRegProc);
@@ -1091,9 +1104,20 @@ class Component extends DCLogic {
       processes = processes.filter((_, k) => k !== regIdx);
       regIdx = -1;
     }
-    this.setState({ reg: false, ...(mode !== 'off' ? { procSel: regIdx, picker: true, tab: 'Processes', edit: {} } : { procSel: 0, edit: {} }) });
-    this.commit({ ...job, regMode: mode, processes }, { record: true });
-    if (mode !== 'off') LRC.toast('Registration marks on — pick the colour(s) your mark objects use for "Registration marks", or right-click the marks and choose a colour', { ms: 7000 });
+    // plate corners come from the sheet: no mark objects, no colour to pick
+    const corners = CC.regKindOf(job) === 'corner';
+    this.setState({ reg: false, ...(mode !== 'off' && !corners ? { procSel: regIdx, picker: true, tab: 'Processes', edit: {} } : { procSel: 0, edit: {} }) });
+    this.commit({ ...job, regMode: mode, processes, ...(corners && n ? { regCorners: n } : {}) }, { record: true });
+    if (mode !== 'off' && !corners) LRC.toast('Registration marks on — pick the colour(s) your mark objects use for "Registration marks", or right-click the marks and choose a colour', { ms: 7000 });
+  }
+  // What the camera looks for: printed dots, holes already in the plate, or the plate's corners
+  setRegKind(kind) {
+    const job = this.state.job;
+    if (CC.regKindOf(job) === kind) return;
+    const next = { ...job, regKind: kind };
+    if (kind === 'corner' && !job.regCorners) next.regCorners = CC.regCornersOf(job);
+    this.commit(next, { record: true });
+    if (kind === 'corner' && !(job.sheet && job.sheet.on)) LRC.toast('Plate corners come from the sheet: turn on Sheet and set it to the plate\'s size and place', { ms: 7000 });
   }
   // Give every selected object a colour (and so a process).
   recolour(n, ids) {
@@ -1644,14 +1668,35 @@ class Component extends DCLogic {
       { id: 'linear', l: 'Full linear', n: '3 dots', dots: ['tl', 'tr', 'bl'] },
       { id: 'nonlinear', l: 'Non-linear', n: '3 dots', dots: ['tl', 'tr', 'bl'] }
     ];
+    const regKind = CC.regKindOf(job);
     const mode = MODES.find((x) => x.id === (job.regMode || 'off')) || MODES[0];
-    const regModes = MODES.map((x) => ({
-      ...x, on: x.id === mode.id, bg: x.id === mode.id ? accentSoft : 'transparent',
-      dots: x.dots.map((k) => DOT[k]),
-      pick: () => this.setRegMode(x.id)
-    }));
-    const regLabel = mode.id === 'off' ? 'Off' : mode.l + ' · ' + mode.n;
     const regOn = mode.id !== 'off';
+    // plate corners are counted, not fitted by mode (Run turns and shifts the
+    // job only): Off / 1 / 2 / 3 corners, each kept as a mode plus regCorners
+    const nCorners = CC.regCornersOf(job);
+    const CORNER_MODES = [
+      { id: 'off', n: 0, l: 'Off', s: 'No marks', dots: [] },
+      { id: 'pos', n: 1, l: '1 corner', s: 'Top left', dots: ['tl'] },
+      { id: 'pos', n: 2, l: '2 corners', s: 'Top left and bottom right', dots: ['tl', 'br'] },
+      { id: 'linear', n: 3, l: '3 corners', s: 'Top left, top right and bottom left', dots: ['tl', 'tr', 'bl'] }
+    ];
+    const regModes = regKind === 'corner'
+      ? CORNER_MODES.map((x) => {
+        const on = x.id === 'off' ? !regOn : regOn && x.n === nCorners;
+        // corners drawn as small Ls at the box's corners
+        return { l: x.l, n: x.s, on, bg: on ? accentSoft : 'transparent', dots: x.dots.map((k) => DOT[k]), pick: () => this.setRegMode(x.id, x.n) };
+      })
+      : MODES.map((x) => ({
+        ...x, n: regKind === 'hole' ? x.n.replace('dots', 'holes') : x.n, on: x.id === mode.id, bg: x.id === mode.id ? accentSoft : 'transparent',
+        dots: x.dots.map((k) => DOT[k]),
+        pick: () => this.setRegMode(x.id)
+      }));
+    const regLabel = !regOn ? 'Off'
+      : regKind === 'corner' ? 'Plate corners · ' + nCorners
+        : regKind === 'hole' ? 'Holes · ' + (CC.REG_NEEDED[mode.id] || 3) : mode.l + ' · ' + mode.n;
+    const KINDS = [['dot', 'Printed dots'], ['hole', 'Holes'], ['corner', 'Plate corners']];
+    const regKinds = KINDS.map(([id, l]) => ({ l, on: regKind === id, bg: regKind === id ? 'var(--seg-on)' : 'transparent', sh: regKind === id ? 'var(--shadow-1)' : 'none', fg: regKind === id ? 'var(--text)' : 'var(--text-3)', pick: () => this.setRegKind(id) }));
+    const regTip = CC.REG_TIPS[regKind] || '';
 
     // ---- processes
     const ACI = [1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => ({ n, name: CC.aciName(n), hex: LRC.aci.hex(n), fg: LRC.aci.fg(n) }));
@@ -1678,7 +1723,7 @@ class Component extends DCLogic {
         chips, none: chips.length === 0, name: p.name, badge,
         badgeBg: badge === 'Edited' ? 'var(--warn-soft)' : accent, badgeFg: badge === 'Edited' ? 'var(--warn)' : 'var(--on-accent)',
         proc: (isReg ? 'Camera marks, not cut' : isLaser ? p.proc : p.tool) + (nObj ? ' · ' + nObj + ' object' + (nObj > 1 ? 's' : '') : ''),
-        summary: isReg ? nObj + ' / ' + (CC.REG_NEEDED[job.regMode] || 3) + ' marks' : isLaser ? p.power + '% · ' + p.speed + ' mm/s' : p.speed + ' mm/s',
+        summary: isReg ? (regKind === 'corner' ? 'plate corners' : nObj + ' / ' + (CC.REG_NEEDED[job.regMode] || 3) + (regKind === 'hole' ? ' holes' : ' marks')) : isLaser ? p.power + '% · ' + p.speed + ' mm/s' : p.speed + ' mm/s',
         dashOn: !!p.dash, on: i === selIdx,
         bg: i === selIdx ? accentSoft : 'var(--surface)', bd: i === selIdx ? accent : 'var(--line)', op: out && shown ? 1 : 0.55,
         // the eye only hides the objects here (still sent and simulated)
@@ -2151,6 +2196,7 @@ class Component extends DCLogic {
       job, machine, sel: selIds, tool: S.tool, accent, snap: S.snap, drawAci: this.drawAci(),
       // camera machine: where registration marks can go (shown fainter while they're off)
       reach: isLaser ? CC.camReach(machine) : null, reachOn: isLaser && !!job.regMode && job.regMode !== 'off',
+      corners: isLaser && regKind === 'corner' ? CC.regMarks(job, machine) : null,
       canvasRef: (c) => { this.canvas = c; },
       onSelect: (sel) => this.setState({ sel }),
       onCommit: (j, opts, sel) => { this.commit(j, opts, sel); if (S.tool !== 'select' && S.tool !== 'measure') this.setState({ tool: 'select' }); },
@@ -2176,7 +2222,7 @@ class Component extends DCLogic {
       toggleMenu: machine.placeholder ? () => this.flushJob().then(() => { location.href = 'MachineSetupDetailed.dc.html#add'; }) : () => this.setState((s) => ({ menu: !s.menu, reg: false, fill: false, bar: null })),
       regOpen: S.reg, regBd: regOn ? accent : 'var(--line-strong)', regSh: regOn ? 'inset 0 0 0 1px ' + accent : 'none', regIc: regOn ? accentFg : 'var(--text-3)',
       toggleReg: () => this.setState((s) => ({ reg: !s.reg, menu: false, fill: false })),
-      regModes, regLabel, regAvail: isLaser && feat('camera'),
+      regModes, regLabel, regAvail: isLaser && feat('camera'), regOn, regKinds, regTip, regTipOn: !!regTip,
       fillOpen: S.fill, fillBd: S.fill ? accent : 'var(--line-strong)', toggleFill: () => this.setState((s) => ({ fill: !s.fill, menu: false, reg: false, sheetOpen: false })), fill,
       sheetFields, sheetPresets,
       saveName: job.name, savedLabel: fmtSaved, renameJob: R(() => this.renameJob()),

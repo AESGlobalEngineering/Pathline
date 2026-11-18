@@ -1529,6 +1529,14 @@
           (selSet.has(e.id) ? selected : normal).push(el);
         }
         kids.push(h('g', { key: 'ents' }, normal));
+        // plate corners the camera reads (registration marks: Plate corners):
+        // an L along the plate's two edges at each corner, 12 mm each way
+        if (p.corners && p.corners.length) {
+          const L = 12;
+          const d = p.corners.map((c) => 'M' + (c.x + c.toward[0] * L) + ' ' + c.y + 'L' + c.x + ' ' + c.y + 'L' + c.x + ' ' + (c.y + c.toward[1] * L)).join('');
+          kids.push(h('path', { key: 'corners-halo', d, fill: 'none', strokeWidth: 5, strokeLinecap: 'round', strokeLinejoin: 'round', vectorEffect: 'non-scaling-stroke', style: { stroke: 'var(--ink-halo)' }, pointerEvents: 'none' }));
+          kids.push(h('path', { key: 'corners', d, fill: 'none', strokeWidth: 2.5, strokeLinecap: 'round', strokeLinejoin: 'round', vectorEffect: 'non-scaling-stroke', style: { stroke: 'var(--ink)' }, pointerEvents: 'none' }, h('title', null, 'Plate corner the camera reads')));
+        }
         let selXf;
         if (moving) selXf = 'translate(' + drag.dx + ' ' + drag.dy + ')';
         if (scaling) selXf = 'translate(' + drag.ax + ' ' + drag.ay + ') scale(' + drag.kx + ' ' + drag.ky + ') translate(' + -drag.ax + ' ' + -drag.ay + ')';

@@ -5,6 +5,16 @@
 
 module.exports = [
   {
+    version: '1.6.15', date: '18 Nov 2026',
+    added: [
+      'Registration marks → Mark type: Printed dots, Holes or Plate corners. Holes are holes already cut through the plate, with white card under it; draw each as a circle the size of the hole, in the Registration marks colour. Plate corners are the plate\'s own corners on a white background: they come from the sheet (turn Sheet on and set it to the plate), and you choose 1, 2 or 3 corners. Needs Pathline Run 0.7.13 or later.',
+      'Warnings: a hole this same job cuts (the camera reads it before cutting starts), plate corners without the sheet (blocks Send), and objects in the Registration marks colour that won\'t be read when the corners are. The job sheet and the marks menu say what to put under or around the plate.'
+    ],
+    fixed: [
+      'Setup → Machines no longer shows a Mark type (Dot / Cross) that nothing used.'
+    ]
+  },
+  {
     version: '1.6.14', date: '17 Nov 2026',
     added: [],
     fixed: [
