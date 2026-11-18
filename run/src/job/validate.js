@@ -59,6 +59,8 @@ function check(pkg, cfg) {
     if (s.type === 'inspect') {
       if (s.kind !== undefined && !['dot', 'hole', 'corner'].includes(s.kind)) throw bad(where + ': unknown registration mark kind ' + JSON.stringify(s.kind) + ' (dot, hole or corner)');
       if (s.kind === 'corner' && !(Array.isArray(s.toward) && s.toward.length === 2 && s.toward.every((v) => v === 1 || v === -1))) throw bad(where + ': a plate corner needs toward: [±1, ±1], which way the plate lies from the corner along X and Y');
+      // r: a rounded corner's radius (mm; none or 0: square)
+      if (s.kind === 'corner' && s.r !== undefined && s.r !== null && !(ok(s.r) && s.r >= 0)) throw bad(where + ': a plate corner\'s radius r must be 0 or more (mm)');
     }
     if (s.type === 'dwell' && (!ok(s.seconds) || s.seconds < 0 || s.seconds > 3600)) throw bad(where + ': dwell must be 0–3600 s');
   });

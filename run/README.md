@@ -125,6 +125,8 @@ The Trotec's camera is an Allied Vision **Alvium 1800 U-500c** on the head. It p
 
    Holes use `detect.findDots(…, { light: true })`. Corners use `detect.findPlateCorner`: the two straight edges, each found across lines a few tenths of a mm apart and fitted straight, and where they meet. A job with corners is fitted rigid (shift and turn only), or from one corner's position and edge angle (`fit.pose`). `status.markWait.kind` tells the jog dialog what to look for.
 
+   Rounded corners carry `r`, and `at` is where the straight edges meet. `Vision.cornerAim` puts the camera up to `r` inside the plate (less if an edge would leave the picture). The finder starts its lines `r` + 1 mm past the expected corner and drops points within `r` + 0.5 mm of the fitted one. When it can't see 3.5 mm of straight edge past the rounding, `status.markWait.why` says so.
+
 Everything is in `src/vision/`: `camera.js` (Vimba X and the simulated camera), `detect.js` (dots and checkerboard corners, plain JS), `fit.js` (the corrections from `TROTEC_PROTOCOL.md` §7.5 and the bed map) and `vision.js` (the workflows). `npm test` runs them all end to end on the simulated camera with `--sim`.
 
 ## Pathline Monitor (the phone app)

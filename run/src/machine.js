@@ -781,7 +781,8 @@ class Machine {
     const w = { accepted: false, at: null };
     this.markWait = w;
     // kind: 'dot' (printed), 'hole' (in the plate) or 'corner' (the plate's corner)
-    this.st.markWait = { mark: info.mark, of: info.of, near: info.near.map((v) => +v.toFixed(2)), again: !!info.again, kind: info.kind || 'dot' };
+    // (r: a rounded corner's radius; why: what the camera couldn't see, when moving it may help)
+    this.st.markWait = { mark: info.mark, of: info.of, near: info.near.map((v) => +v.toFixed(2)), again: !!info.again, kind: info.kind || 'dot', r: info.r || 0, why: info.why || null };
     this.st.message = 'Mark ' + info.mark + ' of ' + info.of + (info.again ? ' still not found' : ' not found') + ': jog the camera over ' + (info.kind === 'corner' ? 'the plate\'s corner' : 'it') + ', then Accept';
     try {
       while (!w.accepted) {

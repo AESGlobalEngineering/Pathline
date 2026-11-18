@@ -967,6 +967,26 @@ async function visionTests() {
     const plain = detect.findDots(ai, { minD: 30, maxD: 100 })[0], clean = detect.findDots(ai, { minD: 30, maxD: 100, whiteRing: true })[0];
     // the clean dot (107, 80) is 6.5 mm right of the middle: 81 px
     ok(plain && clean && Math.abs(clean.x - (239.5 + 81.25)) < 1 && Math.abs(plain.x - (239.5 + 81.25)) > 20, 'marks sit in white: a dot against dark artwork is passed over for the clean one', JSON.stringify({ plain, clean }));
+    // plate corners with an 8 mm radius, the plate turned 2°: each corner is where the straight edges
+    // meet, the camera aimed 8 mm inside the plate (as Vision.cornerAim does), within 0.05 mm
+    {
+      const rr = (x0, y0, x1, y1, r) => { const pts = [], arc = (cx, cy, a0) => { for (let k = 0; k <= 24; k++) { const a = ((a0 + (k / 24) * 90) * Math.PI) / 180; pts.push([cx + r * Math.cos(a), cy + r * Math.sin(a)]); } }; arc(x1 - r, y0 + r, -90); arc(x1 - r, y1 - r, 0); arc(x0 + r, y1 - r, 90); arc(x0 + r, y0 + r, 180); return pts; };
+      const turn = (p) => { const a = (2 * Math.PI) / 180, dx = p[0] - 500, dy = p[1] - 100; return [500 + dx * Math.cos(a) - dy * Math.sin(a), 100 + dx * Math.sin(a) + dy * Math.cos(a)]; };
+      const pl = { pts: rr(500, 100, 700, 250, 8).map(turn), v: 100 };
+      const M = [0, -0.05, 0.05, 0];
+      const errs = [];
+      for (const [c, tw] of [[[500, 100], [1, 1]], [[700, 100], [-1, 1]], [[700, 250], [-1, -1]], [[500, 250], [1, -1]]]) {
+        const t = turn(c), look = [t[0] + 0.7 + 8 * tw[0], t[1] - 0.6 + 8 * tw[1]];
+        const fr = await new SimCamera({ size: 700, truth: { offset: [0, 0], pixel: 0.05, rotation: 90 }, scene: { plates: [pl] }, headAt: () => ({ x: look[0], y: look[1] }) }).grab();
+        const h = detect.findPlateCorner(fr, { M, toward: tw, r: 8, c0: [-8 * tw[0], -8 * tw[1]] });
+        errs.push(h ? +Math.hypot(look[0] + h.bed[0] - t[0], look[1] + h.bed[1] - t[1]).toFixed(3) : null);
+      }
+      ok(errs.every((e) => e !== null && e < 0.05), 'rounded plate corners (r 8, turned 2°): found where the straight edges meet, ' + errs.join(', ') + ' mm off', JSON.stringify(errs));
+      // too round for the picture: says so, and why.view marks it as something the camera can't see
+      const why = {};
+      const big = await new SimCamera({ size: 700, truth: { offset: [0, 0], pixel: 0.05, rotation: 90 }, scene: { plates: [pl] }, headAt: () => ({ x: 510, y: 110 }) }).grab();
+      ok(!detect.findPlateCorner(big, { M, toward: [1, 1], r: 40, c0: [-10, -10], why }) && why.view && /straight edge/.test(why.reason), 'a corner radius too big for the picture: not found, and says the camera can\'t see enough straight edge', JSON.stringify(why));
+    }
     // (the angle only aims the scan at the next corner; the board's angle comes from the corners found)
     ok(c && Math.abs(c.x - (239.5 - 25)) < 0.5 && Math.abs(c.y - (239.5 + 12.5)) < 0.5 && Math.abs(c.angle - 25) < 3, 'checkerboard corner at 25°: found to a fraction of a pixel, angle ' + (c && c.angle.toFixed(1)) + '° (a hint, within 3°)', JSON.stringify(c));
   }
@@ -1171,8 +1191,14 @@ async function visionTests() {
     // marks that aren't printed: holes cut in a steel plate (white under it), and the plate's own
     // corners on a white background. The sim's plate (server.js) is drawn from (430, 60), 200 × 190
     // mm, and lies turned 0.6° with that corner at (431.2, 59.3)
-    const onPlate = (marks) => {
+    // (move: the example's own artwork moved that far, [dx, dy], to lie by the plate)
+    const onPlate = (marks, move) => {
       const p = JSON.parse(JSON.stringify(example));
+      if (move) {
+        const mv = (q) => [q[0] + move[0], q[1] + move[1]];
+        for (const t of p.toolpath) { if (Array.isArray(t.p)) t.p = t.p.map(mv); if (Array.isArray(t.box)) t.box = [t.box[0] + move[0], t.box[1] + move[1], t.box[2] + move[0], t.box[3] + move[1]]; }
+        for (const e of p.entities || []) for (const q of e.paths || []) if (Array.isArray(q.p)) q.p = q.p.map(mv);
+      }
       p.toolpath = marks.map((m, i) => ({ type: 'inspect', mark: i + 1, of: marks.length, ...m })).concat(p.toolpath.filter((t) => t.type !== 'inspect'));
       return p;
     };
@@ -1204,6 +1230,23 @@ async function visionTests() {
     const one = await runMarks(onPlate([{ at: [430, 60], kind: 'corner', toward: [1, 1] }]));
     ok(one.s.state === 'idle' && one.s.progress === 1 && Math.abs(one.rot - 0.6) < 0.1 && /print and cut: corner/.test(one.fitL),
       'one plate corner: its edges give the turn, ' + one.rot + '° (0.6)', one.fitL + ' / ' + JSON.stringify(one.s));
+    // rounded corners (Prepare 1.6.16 sends r, and `at` where the straight edges meet): the sim's
+    // second plate, r 8, drawn from (1120, 350), lies turned 2° with that point at (1120.9, 349.4)
+    const rounded = await runMarks(onPlate([{ at: [1120, 350], d: 0, kind: 'corner', toward: [1, 1], r: 8 }, { at: [1240, 350], d: 0, kind: 'corner', toward: [-1, 1], r: 8 }, { at: [1120, 600], d: 0, kind: 'corner', toward: [1, -1], r: 8 }], [880, 360]));
+    ok(rounded.s.state === 'idle' && rounded.s.progress === 1 && Math.abs(rounded.rot - 2) < 0.05 && /plate corners r 8 mm, edges off square by/.test(rounded.fitL) && rounded.log.filter((l) => /plate corner \(rounded, r 8 mm/.test(l)).length === 3 && Math.hypot(rounded.found1[0] - 1120.9, rounded.found1[1] - 349.4) < 0.15,
+      'rounded plate corners (r 8): read where the straight edges meet, ' + rounded.rot + '° (2), first at ' + rounded.found1.join(', ') + ' (1120.9, 349.4)', rounded.fitL + ' / ' + rounded.log.slice(0, 4).join(' | '));
+    // a radius the camera can't see past: the jog dialog says why
+    const tooRound = onPlate([{ at: [1120, 350], d: 0, kind: 'corner', toward: [1, 1], r: 40 }], [880, 360]);
+    const qr = await unanchored(tooRound);
+    await new Promise((r) => setTimeout(r, 300));
+    await call('POST', 'v1/start', { id: qr.data.id });
+    let wr;
+    for (let i = 0; i < 300; i++) { await new Promise((r) => setTimeout(r, 100)); wr = (await call('GET', 'v1/status')).data; if (wr.markWait || wr.state === 'idle' || wr.state === 'alarm') break; }
+    ok(wr.markWait && wr.markWait.r === 40 && /straight edge/.test(wr.markWait.why || ''), 'a corner radius too big for the camera\'s view: the job waits, and says the camera can\'t see enough straight edge', JSON.stringify(wr.markWait));
+    await call('POST', 'v1/stop');
+    for (let i = 0; i < 100; i++) { await new Promise((r) => setTimeout(r, 100)); if ((await call('GET', 'v1/status')).data.state !== 'running') break; }
+    const badR = await call('POST', 'v1/jobs', onPlate([{ at: [430, 60], kind: 'corner', toward: [1, 1], r: -2 }]));
+    ok(badR.status >= 400 && /radius/.test(JSON.stringify(badR.data)), 'a corner with a negative radius is refused', JSON.stringify(badR.data));
     // a corner job where the camera finds no corner (told the plate lies the other way): it waits to
     // be found by hand, and the dialog says it's the plate's corner
     const wrongWay = onPlate([{ at: [430, 60], kind: 'corner', toward: [-1, -1] }]);

@@ -115,13 +115,22 @@ function start(opts = {}) {
   // and a steel plate on white: drawn 200 × 190 mm from (430, 60) with 8 mm holes at (450, 80),
   // (610, 80) and (450, 230); laid turned 0.6° about its corner and moved 1.2, −0.7 mm
   const plateAt = (p) => { const a = (0.6 * Math.PI) / 180, dx = p[0] - 430, dy = p[1] - 60; return [431.2 + dx * Math.cos(a) - dy * Math.sin(a), 59.3 + dx * Math.sin(a) + dy * Math.cos(a)]; };
+  // and one with rounded corners (8 mm), drawn 120 × 250 mm from (1120, 350), laid turned 2° about
+  // that corner (where its straight edges meet) and moved 0.9, −0.6 mm
+  const roundAt = (p) => { const a = (2 * Math.PI) / 180, dx = p[0] - 1120, dy = p[1] - 350; return [1120.9 + dx * Math.cos(a) - dy * Math.sin(a), 349.4 + dx * Math.sin(a) + dy * Math.cos(a)]; };
+  const roundRect = (x0, y0, x1, y1, r) => {
+    const pts = [], arc = (cx, cy, a0) => { for (let k = 0; k <= 24; k++) { const a = ((a0 + (k / 24) * 90) * Math.PI) / 180; pts.push([cx + r * Math.cos(a), cy + r * Math.sin(a)]); } };
+    arc(x1 - r, y0 + r, -90); arc(x1 - r, y1 - r, 0); arc(x0 + r, y1 - r, 90); arc(x0 + r, y0 + r, 180);
+    return pts;
+  };
   const simVision = opts.sim ? {
     forceSim: true,
     sim: {
       truth: { offset: [41.2, 12.9], pixel: 0.08, rotation: 90, error: (p) => [p[0] * 1.0015 + p[1] * 0.0005236, p[1]] },
       scene: {
         dots: [[40, 25], [340, 25], [40, 215]].map((p) => { const q = sheet(p); return { x: q[0], y: q[1], d: 5 }; }),
-        plates: [{ pts: [[430, 60], [630, 60], [630, 250], [430, 250]].map(plateAt), v: 100, holes: [[450, 80], [610, 80], [450, 230]].map((p) => { const q = plateAt(p); return { x: q[0], y: q[1], d: 8 }; }) }],
+        plates: [{ pts: [[430, 60], [630, 60], [630, 250], [430, 250]].map(plateAt), v: 100, holes: [[450, 80], [610, 80], [450, 230]].map((p) => { const q = plateAt(p); return { x: q[0], y: q[1], d: 8 }; }) },
+          { pts: roundRect(1120, 350, 1240, 600, 8).map(roundAt), v: 100 }],
         // the bed board's first corner covered (as one out of the camera's reach): the scan has
         // to carry on without it
         // (bigger than the picture, so no edge of it shows round the corner)

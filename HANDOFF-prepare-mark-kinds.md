@@ -4,6 +4,12 @@ For whoever picks up Pathline Prepare next, a person or an AI assistant. Pathlin
 
 Written 18 Nov 2026, with Run 0.7.13 (commit after 324795d, not pushed).
 
+**Update, same day:** Prepare 1.6.16 did this differently from §3.3 below.
+- Plate corners come from a **box drawn in the Registration marks colour**, not from the sheet. The mark ids are `<box id>-tl`, `-tr`, `-bl` and `-br`.
+- Rounded plates send **`r`**, the corner radius in mm, with `at` where the straight edges meet.
+
+Run reads `r` (PROTOCOL.md). Where §3.3 differs from this, Prepare 1.6.16 is what's built.
+
 ## 1. What the owner asked for
 
 > "can we allow registration marks to be holes in steel on a white background? or to use the plates edges on a white background"
