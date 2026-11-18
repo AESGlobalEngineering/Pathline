@@ -1261,7 +1261,7 @@ class Component extends DCLogic {
     if (m.type !== s.job.machineType) {
       const settings = await window.api.settings.get();
       const want = settings.currentMaterial && settings.currentMaterial[m.type];
-      const mat = s.materials.find((x) => x.id === want && x.m.includes(m.type)) || s.materials.find((x) => x.m.includes(m.type));
+      const mat = s.materials.find((x) => x.id === want && CC.matOnMachine(x, m)) || s.materials.find((x) => CC.matOnMachine(x, m));
       const own = CC.presetsFor(mat, m);
       const presets = own.length ? own : null;
       if (!presets) return LRC.fail(new Error('No material with ' + m.type + ' presets — add one in Setup → Materials'));
@@ -1376,7 +1376,7 @@ class Component extends DCLogic {
     let k = presets.findIndex((x) => x.name === this.state.job.processes[i].name);
     if (k < 0) k = i < presets.length ? i : presets.length;
     presets[k] = clean;
-    const saved = await window.api.materials.save({ ...mat, m: mat.m.includes(type) ? mat.m : mat.m.concat(type), presets: { ...mat.presets, [machine.id]: presets } });
+    const saved = await window.api.materials.save({ ...mat, m: mat.m.includes(type) ? mat.m : mat.m.concat(type), off: (mat.off || []).filter((id) => id !== machine.id), presets: { ...mat.presets, [machine.id]: presets } });
     const processes = this.state.job.processes.map((x, n) => (n === i ? { ...p, src: 'preset' } : x));
     this.clearEdit(i);
     this.setState({ materials: this.state.materials.map((x) => (x.id === saved.id ? saved : x)) });
@@ -1402,7 +1402,7 @@ class Component extends DCLogic {
       title: 'New process',
       fields: [
         { key: 'name', label: 'Name', value: aciFor ? 'ACI ' + aciFor : isLaser ? 'New cut' : 'New tool pass', full: true },
-        isLaser ? { key: 'proc', label: 'Process', type: 'seg', value: 'Cut', options: ['Cut', 'Engrave'] } : { key: 'proc', label: 'Tool head', type: 'seg', value: 'T1 · Knife', options: ['T1 · Knife', 'T2 · V-cut 45°', 'T3 · Crease wheel', 'T4 · Pen'] },
+        isLaser ? { key: 'proc', label: 'Process', type: 'seg', value: 'Cut', options: ['Cut', 'Engrave'] } : { key: 'proc', label: 'Tool head', type: 'select', value: CC.toolOptions(this.machine())[0], options: CC.toolOptions(this.machine()) },
         { key: 'aci', label: 'Colour (ACI)', type: 'number', value: free ? String(free) : '' }
       ],
       buttons: [{ label: 'Cancel', value: null }, { label: 'Add', value: 'ok', primary: true }]
@@ -1484,7 +1484,7 @@ class Component extends DCLogic {
   frame() {
     const b = this.jobBox();
     if (!CC.boxValid(b)) return LRC.toast('Nothing to frame');
-    this.dev('frame', { box: [b.x0, b.y0, b.x1, b.y1] }, 'Framing ' + CC.boxW(b).toFixed(0) + ' × ' + CC.boxH(b).toFixed(0) + ' mm');
+    this.dev('frame', CC.frameArgs(b, this.machine()), 'Framing ' + CC.boxW(b).toFixed(0) + ' × ' + CC.boxH(b).toFixed(0) + ' mm');
   }
   async sendDialog(andStart) {
     const s = this.state;
@@ -1848,15 +1848,23 @@ class Component extends DCLogic {
         statusBg: dirty ? 'var(--warn-soft)' : sc.src === 'job' ? accent : 'var(--sunken)',
         statusFg: dirty ? 'var(--warn)' : sc.src === 'job' ? 'var(--on-accent)' : 'var(--text-2)',
         selectLabel: isLaser ? 'Process' : 'Tool head',
-        selectValue: isLaser ? sc.proc : sc.tool,
+        selectValue: isLaser ? sc.proc : CC.toolFor(machine, sc.tool),
         sliders: isLaser
           ? [{ l: 'Power', v: sc.power, u: '%', min: 0, max: 100, step: 1, set: num('power') }, { l: 'Speed', v: sc.speed, u: 'mm/s', min: 1, max: Math.max(1000, Number(sc.speed) || 0), step: 1, set: num('speed') }]
-          : [{ l: 'Speed', v: sc.speed, u: 'mm/s', min: 10, max: Math.max(1000, Number(sc.speed) || 0), step: 10, set: num('speed') }],
+          : CC.isPunch(sc) ? [] : [{ l: 'Speed', v: sc.speed, u: 'mm/s', min: 10, max: Math.max(1000, Number(sc.speed) || 0), step: 10, set: num('speed') }],
         nums: isLaser
           ? [isCut ? { isNum: true, l: 'Frequency', v: String(sc.f), u: 'Hz', set: num('f') } : { isSel: true, l: 'DPI', el: dpiSelect(sc.f, (v) => this.setEdit('f', v)) }, { isNum: true, l: 'Passes', v: String(sc.passes), u: '×', set: num('passes') }]
             .concat(Number(sc.passes) > 1 ? [{ isNum: true, l: 'Dwell between passes', v: String(sc.dwell || 0), u: 's', set: num('dwell') }] : [])
-          : [{ isNum: true, l: 'Passes', v: String(sc.passes), u: '×', set: num('passes') }],
-        showLinks: !isLaser || isCut,
+          : [{ isSel: true, l: 'Processing mode', el: React.createElement('select', { className: 'dd', value: CC.isPunch(sc) ? 'punch' : 'cut', 'aria-label': 'Processing mode', onChange: (e) => this.setEdit('mode', e.target.value === 'punch' ? 'punch' : 'cut') },
+              React.createElement('option', { value: 'cut' }, 'Cut'), React.createElement('option', { value: 'punch' }, 'Punch')) }]
+            .concat(CC.isPunch(sc) ? [
+              { isNum: true, l: 'Punch space', v: String(sc.punchSpace != null ? sc.punchSpace : CC.PUNCH_SPACE), u: 'mm', set: num('punchSpace') },
+              { isSel: true, l: 'Centre punch', el: React.createElement('span', { style: { display: 'flex', alignItems: 'center', gap: 8, minHeight: 36 } },
+                React.createElement('input', { type: 'checkbox', checked: !!sc.centre, onChange: () => this.setEdit('centre', !sc.centre), 'aria-label': 'Centre punch', style: { width: 16, height: 16, accentColor: 'var(--accent)' } }),
+                React.createElement('span', { className: 'lbl' }, 'One in the centre of each shape')) }
+            ] : [])
+            .concat([{ isNum: true, l: 'Passes', v: String(sc.passes), u: '×', set: num('passes') }]),
+        showLinks: isLaser ? isCut : !CC.isPunch(sc),
         dashTitle: isLaser ? 'Generate links' : 'Dashed line',
         dashLenLabel: isLaser ? 'Link length' : 'Dash length',
         gapLabel: isLaser ? 'Gap length' : 'Gap',
@@ -1913,10 +1921,10 @@ class Component extends DCLogic {
         sel.adv = [];
         sel.showAdv = false;
       }
-      const selOpts = isLaser ? ['Cut', 'Engrave'].concat(regOnNow ? [CC.REG_PROC] : []) : ['T1 · Knife', 'T2 · V-cut 45°', 'T3 · Crease wheel', 'T4 · Pen'];
+      const selOpts = isLaser ? ['Cut', 'Engrave'].concat(regOnNow ? [CC.REG_PROC] : []) : CC.toolOptions(machine, sc.tool);
       sel.selectOpen = S.procOpen;
       sel.toggleSelect = () => this.setState((s) => ({ procOpen: !s.procOpen }));
-      sel.selectOpts = S.procOpen ? selOpts.map((o) => opt(o, sel.selectValue, () => { this.setEdit(isLaser ? 'proc' : 'tool', o); this.setState({ procOpen: false }); })) : [];
+      sel.selectOpts = S.procOpen ? selOpts.map((o) => opt(o, sel.selectValue, () => { this.setEdit(isLaser ? 'proc' : 'tool', o); if (!isLaser && /punch/i.test(o) && !CC.isPunch(sc)) this.setEdit('mode', 'punch'); this.setState({ procOpen: false }); })) : [];
     }
     const aci = ACI.map((a) => {
       const on = hasSel && (procs[selIdx].aci || []).includes(a.n);
@@ -2266,7 +2274,7 @@ class Component extends DCLogic {
     }));
     const outProcs = procs.filter((p) => p.out !== false && (p.aci || []).some((a) => usedAci.has(a))).length;
     const nObj = job.entities.filter((e) => !e.hidden).length;
-    const jobSummary = outProcs + ' process' + (outProcs === 1 ? '' : 'es') + ' · ' + (isLaser ? (SH.on ? SH.w + ' × ' + SH.h + ' sheet' : 'full bed') : est.beds + ' bed' + (est.beds > 1 ? 's' : '')) + ' · ' + nObj + ' object' + (nObj === 1 ? '' : 's') + (est.total ? ' · ' + CC.fmtLen(est.cutLen) + ' cut' : '') + (est.repeats > 1 ? ' · whole job ' + est.repeats + '×' : '');
+    const jobSummary = outProcs + ' process' + (outProcs === 1 ? '' : 'es') + ' · ' + (isLaser ? (SH.on ? SH.w + ' × ' + SH.h + ' sheet' : 'full bed') : est.beds + ' bed' + (est.beds > 1 ? 's' : '')) + ' · ' + nObj + ' object' + (nObj === 1 ? '' : 's') + (est.total && (est.cutLen || !est.punches) ? ' · ' + CC.fmtLen(est.cutLen) + ' cut' : '') + (est.punches ? ' · ' + est.punches + ' punch' + (est.punches === 1 ? '' : 'es') : '') + (est.repeats > 1 ? ' · whole job ' + est.repeats + '×' : '');
 
     // ---- canvas
     const canvasEl = React.createElement(LRC.JobCanvas, {
@@ -2287,7 +2295,7 @@ class Component extends DCLogic {
       const on = S.tab === l;
       return { l, on, badge: badge || false, bd: on ? accent : 'transparent', fg: on ? 'var(--text)' : 'var(--text-3)', w: on ? 600 : 500, pick: () => this.setState({ tab: l }) };
     };
-    const matList = S.materials.filter((x) => x.m.includes(m)).map((x) => ({
+    const matList = S.materials.filter((x) => CC.matOnMachine(x, machine)).map((x) => ({
       name: x.name + ' · ' + x.t + ' mm', sub: x.g + (x.locked ? ' · locked' : ''), sw: x.sw, on: material && x.id === material.id,
       bg: material && x.id === material.id ? accentSoft : 'transparent', pick: R(() => this.pickMaterial(x.id))
     }));

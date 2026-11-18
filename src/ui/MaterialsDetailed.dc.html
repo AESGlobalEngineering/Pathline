@@ -155,13 +155,18 @@ select.dd:disabled{background-color:var(--sunken);background-repeat:no-repeat;ba
       <section aria-label="Colour presets" class="card" style="display: flex; flex-direction: column; min-width: 0">
         <div role="tablist" aria-label="Machines" class="tabs" style="padding: 4px 12px 0">
           <sc-for list="{{machTabs}}" as="t" hint-placeholder-count="2">
-            <button role="tab" aria-selected="{{t.on}}" onClick="{{t.pick}}" style="height: 46px; gap: 8px">
-              <span class="badge" style="background: {{t.tbg}}">{{t.type}}</span>{{t.name}}
-            </button>
+            <span class="tab-wrap">
+              <button role="tab" aria-selected="{{t.on}}" onClick="{{t.pick}}" style="height: 46px; gap: 8px">
+                <span class="badge" style="background: {{t.tbg}}">{{t.type}}</span>{{t.name}}
+              </button>
+              <sc-if value="{{t.canRemove}}" hint-placeholder-val="{{false}}">
+                <button class="ib" onClick="{{t.remove}}" aria-label="Remove {{t.name}} from this material" title="Remove {{t.name}} from this material" style="width: 26px; height: 26px; margin-left: -4px"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width: 14px; height: 14px"><path d="{{icons.x}}"></path></svg></button>
+              </sc-if>
+            </span>
           </sc-for>
-          <sc-if value="{{canAddType}}" hint-placeholder-val="{{false}}">
+          <sc-if value="{{canAddMachine}}" hint-placeholder-val="{{false}}">
             <span style="display: flex; align-items: center; margin-left: 6px">
-              <button class="tb dashed" onClick="{{addType}}" disabled="{{locked}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width: 15px; height: 15px"><path d="{{icons.plus}}"></path></svg>{{addTypeLabel}}</button>
+              <button class="tb dashed" onClick="{{addMachine}}" disabled="{{locked}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width: 15px; height: 15px"><path d="{{icons.plus}}"></path></svg>Add machine</button>
             </span>
           </sc-if>
           <span style="flex: 1"></span>
@@ -334,12 +339,7 @@ select.dd:disabled{background-color:var(--sunken);background-repeat:no-repeat;ba
                     <sc-if value="{{r.edited}}" hint-placeholder-val="{{false}}"><span role="img" aria-label="Edited" title="Changed from the saved preset" style="width: 7px; height: 7px; flex: none; border-radius: 50%; background: var(--warn-dot)"></span></sc-if>
                   </span>
                   <span role="cell">
-                    <select class="cell dd" value="{{r.tool}}" onChange="{{r.setTool}}" disabled="{{locked}}" aria-label="{{r.name}} tool head">
-                      <option value="T1 · Knife">T1 · Knife</option>
-                      <option value="T2 · V-cut 45°">T2 · V-cut 45°</option>
-                      <option value="T3 · Crease wheel">T3 · Crease wheel</option>
-                      <option value="T4 · Pen">T4 · Pen</option>
-                    </select>
+                    {{r.toolSelect}}
                   </span>
                   <span role="cell"><input class="cell" value="{{r.speed}}" onChange="{{r.setSpeed}}" disabled="{{locked}}" aria-label="{{r.name}} speed"></span>
                   <span role="cell"><input class="cell" value="{{r.passes}}" onChange="{{r.setPasses}}" disabled="{{locked}}" aria-label="{{r.name}} passes"></span>
@@ -526,11 +526,48 @@ class Component extends DCLogic {
   }
   // Each machine has its own tab: the machines that can run this material.
   tabMachines(mat) {
-    return mat ? this.state.machines.filter((x) => mat.m.includes(x.type)) : [];
+    return mat ? this.state.machines.filter((x) => CC.matOnMachine(mat, x)) : [];
   }
   tabMachine() {
     const list = this.tabMachines(this.mat());
     return list.find((x) => x.id === this.state.tab) || list[0] || null;
+  }
+  // Take a machine off this material: its presets for it go, and the material
+  // isn't offered for it on the Job page. The last machine of a type takes the
+  // type (and its shared presets) off too.
+  async removeMachine(x) {
+    const mat = this.mat();
+    if (!mat || mat.locked) return;
+    if (!(await LRC.confirm('Remove ' + x.name + ' from ' + mat.name + '?', 'Its process settings for ' + mat.name + ' on this machine are deleted when you save. You can add the machine again later; it then starts from the shared ' + x.type + ' presets.', 'Remove'))) return;
+    this.patchMat((m) => {
+      const presets = { ...m.presets };
+      delete presets[x.id];
+      let off = (m.off || []).filter((id) => id !== x.id).concat(x.id);
+      let types = m.m;
+      // no machine of this type left on the material: the type goes
+      if (!this.state.machines.some((y) => y.type === x.type && !off.includes(y.id))) {
+        types = types.filter((k) => k !== x.type);
+        delete presets[x.type];
+        const ids = new Set(this.state.machines.filter((y) => y.type === x.type).map((y) => y.id));
+        off = off.filter((id) => !ids.has(id));
+        ids.forEach((id) => { delete presets[id]; });
+      }
+      return { ...m, m: types, off, presets };
+    });
+    const next = this.tabMachines(this.mat())[0];
+    this.setState({ tab: next ? next.id : null, picking: null, tgCell: null });
+  }
+  // Put a machine (back) on this material, starting from the shared presets for its type
+  async addMachine() {
+    const mat = this.mat();
+    if (!mat || mat.locked) return;
+    const avail = this.state.machines.filter((x) => !CC.matOnMachine(mat, x));
+    if (!avail.length) return;
+    const r = await LRC.dialog({ title: 'Add a machine to ' + mat.name, fields: [{ key: 'id', label: 'Machine', type: 'select', value: avail[0].id, options: avail.map((x) => ({ value: x.id, label: x.name + ' · ' + x.type })) }], buttons: [{ label: 'Cancel', value: null }, { label: 'Add', value: 'ok', primary: true }] });
+    const x = r && r.button === 'ok' && avail.find((y) => y.id === r.values.id);
+    if (!x) return;
+    this.patchMat((m) => ({ ...m, m: m.m.includes(x.type) ? m.m : m.m.concat(x.type), off: (m.off || []).filter((id) => id !== x.id), presets: m.m.includes(x.type) ? m.presets : { ...m.presets, [x.type]: CC.starterPresets(x.type, m.t) } }));
+    this.setState({ tab: x.id, picking: null, tgCell: null });
   }
   // edit the open machine's presets (a machine still on the shared list gets its own copy)
   patchRows(fn) {
@@ -635,6 +672,7 @@ class Component extends DCLogic {
     const accentSoft = 'var(--accent-soft)';
     const noop = () => {};
     const icons = {
+      x: 'M6 6l12 12 M18 6L6 18',
       import: 'M12 3v12 M7 10l5 5 5-5 M4 20h16',
       export: 'M12 15V3 M7 8l5-5 5 5 M4 20h16',
       search: 'M11 4a7 7 0 1 0 0 14a7 7 0 1 0 0-14z M20 20l-4-4',
@@ -711,7 +749,7 @@ class Component extends DCLogic {
     const savedRows = machine ? CC.presetsFor(savedMat, machine) : [];
     const machTabs = this.tabMachines(mat).map((x) => {
       const on = machine && x.id === machine.id;
-      return { ...MACH[x.type], name: x.name, on, bd: on ? accent : 'transparent', fg: on ? 'var(--text)' : 'var(--text-3)', w: on ? 600 : 500, pick: () => this.setState({ tab: x.id, picking: null, tgCell: null }) };
+      return { ...MACH[x.type], name: x.name, on, bd: on ? accent : 'transparent', fg: on ? 'var(--text)' : 'var(--text-3)', w: on ? 600 : 500, pick: () => this.setState({ tab: x.id, picking: null, tgCell: null }), canRemove: !locked, remove: R(() => this.removeMachine(x)) };
     });
     const otherType = ['laser', 'plotter'].find((k) => !mat.m.includes(k) && S.machines.some((x) => x.type === k));
 
@@ -816,7 +854,14 @@ class Component extends DCLogic {
         setProc: setF(i, 'proc'), setPower: setF(i, 'power', true), setF: setF(i, 'f', true), setSource: setF(i, 'source')
       };
     }) : [];
-    const plotRows = !isLaser ? rows.map((b, i) => ({ ...common(b, i), tool: b.tool, setTool: setF(i, 'tool') })) : [];
+    // tool heads: the ones this machine has (as read from it)
+    const plotRows = !isLaser ? rows.map((b, i) => {
+      const opts = CC.toolOptions(machine, b.tool);
+      const toolSelect = React.createElement('select', { className: 'cell dd', value: CC.toolFor(machine, b.tool), disabled: locked, 'aria-label': b.name + ' tool head',
+        onChange: (e) => { const v = e.target.value; this.patchRows((list) => { list[i] = { ...list[i], tool: v, ...(/punch/i.test(v) ? { mode: 'punch' } : {}) }; return list; }); } },
+        opts.map((o) => React.createElement('option', { key: o, value: o }, o)));
+      return { ...common(b, i), tool: b.tool, toolSelect };
+    }) : [];
 
     // test grid (laser): cut or engrave, centred on this machine's first
     // preset of that kind (or the standard starting values)
@@ -904,9 +949,9 @@ class Component extends DCLogic {
     const groupSelect = React.createElement('select', { className: 'dd', value: mat.g, disabled: locked, 'aria-label': 'Group', onChange: (e) => { const v = e.target.value; this.patchMat((m) => ({ ...m, g: v })); } },
       groupNames.map((g) => React.createElement('option', { key: g, value: g }, g)));
     // tool heads (plotter) from the first plotter machine
-    const plotter = S.machines.find((m) => m.type === 'plotter');
+    const plotter = machine && machine.type === 'plotter' ? machine : null;
     const HEADS = (plotter && plotter.info && plotter.info.heads) || [];
-    const heads = HEADS.map((hd) => ({ slot: hd.slot, name: hd.tool + (hd.loaded ? '' : ' · empty'), colours: plotRows.filter((r) => CC.toolSlot(r.tool) === hd.slot).map((r) => ({ c: r.chips.length ? r.chips[0].hex : 'var(--track)', name: r.name })) }));
+    const heads = HEADS.map((hd) => ({ slot: hd.slot, name: hd.tool + (hd.loaded === false ? ' · empty' : ''), colours: plotRows.filter((r) => CC.toolSlot(r.tool) === hd.slot).map((r) => ({ c: r.chips.length ? r.chips[0].hex : 'var(--track)', name: r.name })) }));
 
     return {
       ...base,
@@ -923,7 +968,8 @@ class Component extends DCLogic {
       lockBg: locked ? accent : 'var(--track)', lockJ: locked ? 'flex-end' : 'flex-start',
       toggleLock: () => this.patchMat((m) => ({ ...m, locked: !m.locked })),
       duplicate: () => this.duplicate(), remove: R(() => this.remove()),
-      machTabs, canAddType: !!otherType, addTypeLabel: otherType ? MACH[otherType].name : '',
+      machTabs, canAddMachine: S.machines.some((x) => !CC.matOnMachine(mat, x)), addMachine: R(() => this.addMachine()),
+      canAddType: !!otherType, addTypeLabel: otherType ? MACH[otherType].name : '',
       addType: () => { this.patchMat((m) => ({ ...m, m: m.m.concat(otherType), presets: { ...m.presets, [otherType]: CC.starterPresets(otherType, m.t) } })); const first = S.machines.find((x) => x.type === otherType); this.setState({ tab: first ? first.id : null }); },
       isLaser, isPlotter: !isLaser,
       rowCount: machine && !Array.isArray(mat.presets[machine.id]) ? 'Starting values' : '',

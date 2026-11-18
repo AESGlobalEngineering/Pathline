@@ -180,7 +180,8 @@ const routes = {
     const box = b.box || [0, 0, 100, 100];
     log('frame', box.map((v) => Number(v).toFixed(1)).join(', '));
     st.state = 'framing';
-    const corners = [[box[0], box[1]], [box[2], box[1]], [box[2], box[3]], [box[0], box[3]], [box[0], box[1]]];
+    // the path Prepare sends (top right: down, left, up, right), else that order round the box
+    const corners = Array.isArray(b.path) && b.path.length > 1 ? b.path : [[box[2], box[1]], [box[2], box[3]], [box[0], box[3]], [box[0], box[1]], [box[2], box[1]]];
     let k = 0;
     const t = setInterval(() => {
       [st.pos.x, st.pos.y] = corners[k++];

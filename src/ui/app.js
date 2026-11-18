@@ -1446,7 +1446,9 @@
         // drawn on the viewport, outside the bed, so it follows the theme
         kids.push(h('text', { key: 'l', x, y: -8 / v.s, fontSize: 13 / v.s, fontWeight: 600, style: { fill: now ? 'var(--accent-fg)' : 'var(--text)' }, fontFamily: 'IBM Plex Sans, sans-serif' }, 'Bed ' + (k + 1) + (now ? ' · on the table now' : ' · after feed ' + k)));
       }
-      kids.push(h('circle', { key: 'o', cx: x, cy: 0, r: 5 / v.s, strokeWidth: 2, vectorEffect: 'non-scaling-stroke', style: { fill: 'var(--bed)', stroke: this.accent() } }));
+      // the machine's origin corner (Machine setup → Origin)
+      const o = ((this.props.machine && this.props.machine.info) || {}).origin || 'tl';
+      kids.push(h('circle', { key: 'o', cx: x + (o.includes('r') ? bw : 0), cy: o.includes('b') ? bh : 0, r: 5 / v.s, strokeWidth: 2, vectorEffect: 'non-scaling-stroke', style: { fill: 'var(--bed)', stroke: this.accent() } }, h('title', null, 'Machine origin')));
       return h('g', { key: 'bed' + k }, kids);
     }
     // Screen-space rulers along the top and left, labelled in bed millimetres.
@@ -1501,7 +1503,7 @@
         const drag = this.state.drag;
         const moving = drag && drag.kind === 'move';
         const scaling = drag && drag.kind === 'scale';
-        const normal = [], selected = [];
+        const normal = [], selected = [], punchD = [];
         // engraving fills even-odd: a shape inside another engraved shape is a
         // hole in it (CC.engraveHoles), so the host is filled with its holes
         // cut out and the hole itself is drawn as an outline
@@ -1530,8 +1532,26 @@
             style: { fill: regSolid ? 'var(--ink)' : isEng && !isHole && !isReg ? col : 'none', stroke: col }
           });
           (selSet.has(e.id) ? selected : normal).push(el);
+          if (pr && CC.isPunch(pr) && this.isPlot()) {
+            const key = pr.mode + '|' + pr.punchSpace + '|' + !!pr.centre;
+            let pts = this._punch && this._punch.get(e);
+            if (!pts || pts.key !== key) {
+              pts = { key, list: e.paths.flatMap((q) => CC.punchPoints(q, pr)) };
+              (this._punch || (this._punch = new WeakMap())).set(e, pts);
+            }
+            punchD.push({ bed: e.bed || 0, list: pts.list, col });
+          }
         }
         kids.push(h('g', { key: 'ents' }, normal));
+        // punch strikes: a ring at each
+        if (punchD.length) {
+          const r = 2.6 / v.s;
+          punchD.forEach((pd, k) => {
+            const ox = this.isPlot() && pd.bed ? this.bedX(pd.bed) : 0;
+            const d = pd.list.slice(0, 5000).map(([x, y]) => 'M' + (x + ox - r) + ' ' + y + 'a' + r + ' ' + r + ' 0 1 0 ' + 2 * r + ' 0a' + r + ' ' + r + ' 0 1 0 ' + -2 * r + ' 0').join('');
+            kids.push(h('path', { key: 'punch' + k, d, strokeWidth: 1.4, vectorEffect: 'non-scaling-stroke', style: { fill: 'var(--bed)', stroke: pd.col }, pointerEvents: 'none' }));
+          });
+        }
         // plate corners the camera reads (registration marks: Plate corners):
         // an L along the plate's two edges at each corner, 12 mm each way
         if (p.corners && p.corners.length) {

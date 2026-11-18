@@ -103,6 +103,40 @@ async function main() {
     ok(!tabs.unsavedTabs().length && tabs.byId(ids[1]).job.path === 'C:/jobs/d.cjob', 'saving updates the tab the job is in, even when it is not in front');
   }
 
+  console.log('Punch, frame, tool heads');
+  {
+    const { plotter } = testJob();
+    const pt = (q) => q.map((v) => +v.toFixed(3)).join(',');
+    const ring = CC.punchPoints({ p: CC.shapes.rect(0, 0, 20, 10, 0), c: true }, { mode: 'punch', punchSpace: 5 });
+    ok(ring.length === 12 && pt(ring[0]) === '0,0' && pt(ring[1]) === '5,0' && pt(ring[6]) === '20,10', 'punch: a closed line is struck every punch space, evenly, once at the seam (' + ring.length + ' strikes)');
+    const line = CC.punchPoints({ p: [[0, 0], [12, 0]], c: false }, { mode: 'punch', punchSpace: 5 });
+    ok(line.length === 4 && pt(line[0]) === '0,0' && pt(line[3]) === '12,0', 'punch: an open line is struck at both ends, never further apart than the punch space');
+    const centre = CC.punchPoints({ p: CC.shapes.ellipse(30, 40, 4, 4), c: true }, { mode: 'punch', centre: true });
+    ok(centre.length === 1 && near(centre[0][0], 30, 0.01) && near(centre[0][1], 40, 0.01), 'centre punch: one strike at the centre of each closed shape');
+    const holes = [[20, 20], [60, 20], [100, 20], [20, 60]].map(([x, y], i) => ({ id: 'h' + i, name: 'Hole', aci: 2, paths: [{ p: CC.shapes.ellipse(x, y, 3, 3), c: true }] }));
+    const pj = { format: 'cjob', id: 'pj', name: 'Punch', machineId: plotter.id, machineType: 'plotter', entities: holes, sheet: { on: false }, regMode: 'off', beds: 1, cutOrder: { order: 'speed', inside: 'all' },
+      processes: [{ name: 'Holes', tool: 'T2 · V-cut 45°', speed: 300, passes: 1, aci: [2], mode: 'punch', centre: true, punchSpace: 5, adv: {} }] };
+    const est = CC.estimate(pj, plotter, { timeline: true });
+    const ops = est.timeline.filter((o) => o.kind === 'op');
+    ok(est.punches === 4 && ops.length === 4 && ops.every((o) => o.mode === 'punch' && o.hits === 1), 'a centre-punch process strikes once per shape (' + est.punches + ' punches, ' + CC.fmtDuration(est.total, true) + ')');
+    const tp = ex.toolpath(pj, est).filter((x) => x.type === 'punch');
+    ok(tp.length === 4 && tp.every((x) => x.tool === 'T2' && x.centre === true && x.p.length === 1) && ex.processSummary(pj.processes[0], false).includes('centre punch'), 'the package has a punch step per shape, with the tool slot and the strike points');
+    const spaced = { ...pj, processes: [{ ...pj.processes[0], centre: false, punchSpace: 2 }] };
+    const e2 = CC.estimate(spaced, plotter, { timeline: true });
+    ok(e2.punches > 4 * 5 && e2.total > est.total, 'punching along the line strikes every punch space round each shape (' + e2.punches + ' punches)');
+    // frame: from the top-right corner down, left, up and right, at travel speed
+    const fa = CC.frameArgs({ x0: 10, y0: 20, x1: 110, y1: 70 }, plotter);
+    ok(fa.path.map(pt).join(' ') === '110,20 110,70 10,70 10,20 110,20' && fa.box.join() === '10,20,110,70', 'frame runs down, then left, up and right, from the top-right corner');
+    ok(fa.speed >= 500, 'frame goes at the machine\'s travel speed (' + fa.speed + ' mm/s), not the slow default');
+    // tool heads: the machine's own
+    const custom = { ...plotter, info: { ...plotter.info, heads: [{ slot: 'T1', tool: 'Drag knife' }, { slot: 'T2', tool: 'Punch 4 mm' }] } };
+    ok(CC.toolOptions(custom).join('|') === 'T1 · Drag knife|T2 · Punch 4 mm' && CC.toolFor(custom, 'T2 · V-cut 45°') === 'T2 · Punch 4 mm', 'tool head lists show the heads on the machine, matched by slot');
+    ok(CC.toolOptions(custom, 'T4 · Pen').includes('T4 · Pen') && CC.toolOptions({ type: 'plotter', info: {} }).length === 4, 'a tool not on the machine stays listed; a machine that reports no heads gets the standard four');
+    // machines on a material
+    const mat = { id: 'm', m: ['laser', 'plotter'], off: ['trotec'] };
+    ok(!CC.matOnMachine(mat, { id: 'trotec', type: 'laser' }) && CC.matOnMachine(mat, { id: 'laser2', type: 'laser' }) && CC.matOnMachine(mat, plotter), 'a machine taken off a material isn\'t offered it; other machines still are');
+  }
+
   console.log('Estimator');
   {
     // a straight 100 mm line at 10 mm/s with huge acceleration ≈ 10 s

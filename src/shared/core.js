@@ -218,6 +218,74 @@
     return i < 0 ? 99 : i;
   }
   const toolSlot = (tool) => (String(tool || '').match(/T\d+/) || ['T?'])[0];
+
+  // The tool heads a plotter process can use: the machine's own heads (slot
+  // and tool, as read from it), else the standard four. toolFor gives the
+  // machine's head in the same slot as a process's tool (or the tool as is).
+  const STD_TOOLS = ['T1 · Knife', 'T2 · V-cut 45°', 'T3 · Crease wheel', 'T4 · Pen'];
+  function toolOptions(machine, current) {
+    const heads = ((machine && machine.info && machine.info.heads) || []).filter((h) => h && h.slot);
+    const list = heads.length ? heads.map((h) => h.slot + ' · ' + (h.tool || 'Tool')) : STD_TOOLS.slice();
+    if (current && !list.some((o) => toolSlot(o) === toolSlot(current))) list.push(current);
+    return list;
+  }
+  const toolFor = (machine, tool) => toolOptions(machine, tool).find((o) => toolSlot(o) === toolSlot(tool)) || tool;
+  // A material is offered on a machine when it has that machine's type and
+  // the machine hasn't been taken off it (mat.off: machine ids)
+  const matOnMachine = (mat, machine) => !!mat && !!machine && (mat.m || []).includes(machine.type) && !(mat.off || []).includes(machine.id);
+
+  // Frame: the job's box traced from its top-right corner down, left, up and
+  // right (path), at the machine's travel speed (the controller's own frame
+  // speed is slow on a plotter). PROTOCOL.md /frame.
+  function frameArgs(b, machine) {
+    const info = (machine && machine.info) || {};
+    const d = DEFAULTS[machine && machine.type === 'plotter' ? 'plotter' : 'laser'] || {};
+    const speed = Number(info.travelSpeed) || Number(info.speed) || d.speed || 1000;
+    return { box: [b.x0, b.y0, b.x1, b.y1], path: [[b.x1, b.y0], [b.x1, b.y1], [b.x0, b.y1], [b.x0, b.y0], [b.x1, b.y0]], speed };
+  }
+
+  // ---------------------------------------------------------------- punch (plotter)
+  // A plotter process can punch instead of cutting (mode 'punch'): the punch
+  // head strikes along each line every punchSpace mm, or with centre punch on,
+  // once at the centre of each closed shape.
+  const PUNCH_SPACE = 5;
+  const isPunch = (p) => !!p && p.mode === 'punch';
+  const punchSpaceOf = (p) => Math.max(0.5, Number(p && p.punchSpace) || PUNCH_SPACE);
+  // Where a punch process strikes on one path, in order. A closed line is
+  // divided evenly, so there's no double hit where it starts and ends; an open
+  // line is struck at both ends. Centre punch: the middle of a closed shape's
+  // box (an open line is still struck along its length).
+  function punchPoints(path, proc) {
+    const p = path && path.p;
+    if (!p || !p.length) return [];
+    if (proc && proc.centre && path.c && p.length > 2) {
+      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      for (const [x, y] of p) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+      return [[(x0 + x1) / 2, (y0 + y1) / 2]];
+    }
+    const pts = path.c ? p.concat([p[0]]) : p;
+    let L = 0;
+    for (let i = 1; i < pts.length; i++) L += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
+    if (L < 1e-9) return [p[0].slice()];
+    const sp = punchSpaceOf(proc);
+    const n = path.c ? Math.max(1, Math.round(L / sp)) : Math.max(1, Math.ceil(L / sp - 1e-9));
+    const count = path.c ? n : n + 1;
+    const step = L / n;
+    const out = [];
+    let seg = 1, before = 0;
+    for (let k = 0; k < count; k++) {
+      const want = k * step;
+      while (seg < pts.length - 1 && before + Math.hypot(pts[seg][0] - pts[seg - 1][0], pts[seg][1] - pts[seg - 1][1]) < want - 1e-9) {
+        before += Math.hypot(pts[seg][0] - pts[seg - 1][0], pts[seg][1] - pts[seg - 1][1]);
+        seg++;
+      }
+      const a = pts[seg - 1], b = pts[seg];
+      const l = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      const f = l > 0 ? Math.max(0, Math.min(1, (want - before) / l)) : 0;
+      out.push([a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f]);
+    }
+    return out;
+  }
   // Laser jobs engrave first, then mark, then cut (so parts don't move before
   // they're engraved); plotter jobs run marking tools first and through-cuts last.
   // With the "By process" cut order they run in the job's own process order.
@@ -1385,7 +1453,7 @@
     // a machine that doesn't report its motion is taken as slow: the Trotec's measured
     // travel (Ruby's Standard: 700 mm/s, 500 mm/s², jerk 5000 mm/s³)
     laser: { speed: 700, acc: 500, jerk: 5000 },
-    plotter: { speed: 1000, acc: 8000, toolDown: 0.15, toolUp: 0.12, toolChange: 8, feedSpeed: 200, feedSettle: 3, dashLift: 0.08 }
+    plotter: { speed: 1000, acc: 8000, toolDown: 0.15, toolUp: 0.12, toolChange: 8, feedSpeed: 200, feedSettle: 3, dashLift: 0.08, punch: 0.3 }
   };
 
   /**
@@ -1526,7 +1594,7 @@
 
     const per = job.processes.map((p, i) => ({ idx: i, name: p.name, time: 0, cut: 0, travel: 0, area: 0, ops: 0 }));
     const timeline = [];
-    let t = 0, travel = 0, travelT = 0, cutLen = 0, engArea = 0, toolChanges = 0, feeds = 0;
+    let t = 0, travel = 0, travelT = 0, cutLen = 0, engArea = 0, toolChanges = 0, feeds = 0, punches = 0;
     const trav = { fromOrigin: 0, between: 0, toOrigin: 0 };
     const cut = cutOrderOf(job);
     // the head starts (and ends) at the machine's origin corner
@@ -1660,6 +1728,49 @@
         curTool = slot;
       }
 
+      if (!isLaser && isPunch(proc)) {
+        // each line's strikes in a row; lines nearest next. A ring of strikes
+        // starts at its strike nearest the head, an open line at its nearer end.
+        let items = cache.get(key);
+        if (!items) {
+          const left = [];
+          mine.forEach((e) => e.paths.forEach((path) => {
+            if (only && !only.has(path)) return;
+            const pts = punchPoints(path, proc);
+            if (pts.length) left.push({ ent: e.id, pts, ring: !!path.c && !(proc.centre && path.p.length > 2) && pts.length > 1 });
+          }));
+          items = [];
+          let p0 = at;
+          const d2 = (a, b) => (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2;
+          while (left.length) {
+            let bi = 0, bk = 0, bd = Infinity;
+            left.forEach((it, i) => {
+              const cand = it.ring ? it.pts.map((_, k) => k) : it.pts.length > 1 ? [0, it.pts.length - 1] : [0];
+              for (const k of cand) { const d = d2(it.pts[k], p0); if (d < bd) { bd = d; bi = i; bk = k; } }
+            });
+            const it = left.splice(bi, 1)[0];
+            const pts = it.ring ? it.pts.slice(bk).concat(it.pts.slice(0, bk)) : bk ? it.pts.slice().reverse() : it.pts;
+            items.push({ ent: it.ent, pts });
+            p0 = pts[pts.length - 1];
+          }
+          cache.set(key, items);
+        }
+        const hit = Math.max(0, Number(plot.punch) || 0);
+        const punchOne = (it, k) => {
+          travelTo(it.pts[0], bed, pi);
+          let dur = it.pts.length * hit, len = 0;
+          for (let i = 1; i < it.pts.length; i++) { const l = Math.hypot(it.pts[i][0] - it.pts[i - 1][0], it.pts[i][1] - it.pts[i - 1][1]); len += l; dur += moveT(l); }
+          per[pi].time += dur;
+          per[pi].ops++;
+          per[pi].hits = (per[pi].hits || 0) + it.pts.length;
+          punches += it.pts.length;
+          push({ kind: 'op', mode: 'punch', proc: pi, bed, dur, ent: it.ent, path: { p: it.pts, c: false }, len, hits: it.pts.length, passes: 1, pass: passNo(k) });
+          at = it.pts[it.pts.length - 1];
+        };
+        for (let k = 1; k <= passes; k++) items.forEach((it) => punchOne(it, k));
+        return;
+      }
+
       if (isLaser && proc.proc === 'Engrave') {
         // each separate island of artwork is engraved on its own, unless one
         // side-to-side scan across islands at the same height is quicker
@@ -1768,7 +1879,7 @@
       total: t,
       perProcess: per.filter((p) => p.ops > 0),
       travel, travelTime: travelT, travelLegs: trav, home, cutOrder: cut, inspectTime, dwellTime, marks: marks.length,
-      cutLen, engArea, toolChanges, feeds, beds: nBeds, procOrder: order, repeats, moves,
+      cutLen, engArea, toolChanges, feeds, punches, beds: nBeds, procOrder: order, repeats, moves,
       machine: { speed: vMax, acc, travelSpeed: vTravel, travelAcc: accTravel, jerk },
       timeline: opts.timeline ? timeline : undefined
     };
@@ -1789,7 +1900,7 @@
     if (op.kind === 'travel') {
       x = op.from[0] + (op.to[0] - op.from[0]) * f;
       y = op.from[1] + (op.to[1] - op.from[1]) * f;
-    } else if (op.kind === 'op' && op.mode === 'vector') {
+    } else if (op.kind === 'op' && (op.mode === 'vector' || op.mode === 'punch')) {
       const p = op.path.c ? op.path.p.concat([op.path.p[0]]) : op.path.p;
       let want = f * (op.len || polyLen(op.path.p, op.path.c));
       x = p[0][0]; y = p[0][1];
@@ -2413,7 +2524,7 @@
     ACI_HEX, ACI_NAMES, aciHex, aciName, aciFg, aciStroke, rgbToAci, hexToRgb,
     uid, EMPTY_BOX, growBox, entityBox, boxOf, boxValid, boxW, boxH,
     mapEntity, translate, scaleAbout, rotateAbout, polyLen, polyArea, pointInPoly, distToEntity, isClosedPts, cleanPath, shapes,
-    processOrder, processOfAci, engraveHoles, toolSlot, toolRank, polyTime, travelTime, rasterSpans, orderPaths,
+    processOrder, processOfAci, engraveHoles, toolSlot, isPunch, punchPoints, punchSpaceOf, PUNCH_SPACE, toolOptions, toolFor, STD_TOOLS, matOnMachine, frameArgs, toolRank, polyTime, travelTime, rasterSpans, orderPaths,
     estimate, headAt, fmtDuration, fmtLen, fmtArea, checkJob, regMarks, regMarkAci, regKindOf, regCornersOf, marksCutByJob, plateOutline, REG_KINDS, REG_TIPS, camReach, marksOutOfReach, reachShift, regProcess, withPresets, ensureRegProcess, isRegProc, REG_PROC, REG_NEEDED,
     cutOrderOf, CUT_ORDER_DEFAULT, START_CLEAR, commonLines, bedOf, bedCount, defaultPresets, DEFAULTS,
     rasterIslands, engraveScan, ENGRAVE_DIRS, DPI_STEPS, starterPresets, nestRects, THERMAL, thermalKey, thermalOf, colourOf, absorptionOf, thermalSim, bendLimit, cutModelOf, cutModelTime, fitArcs, TROTEC_CUT, rasterModelOf, rasterPitch, rasterModelTime, TROTEC_RASTER, isBareMetal, markingSprayOf, SPRAY_ABSORB, metalPresets, presetsFor
