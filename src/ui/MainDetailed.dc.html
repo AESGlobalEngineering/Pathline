@@ -1104,11 +1104,12 @@ class Component extends DCLogic {
       processes = processes.filter((_, k) => k !== regIdx);
       regIdx = -1;
     }
-    // plate corners come from the sheet: no mark objects, no colour to pick
     const corners = CC.regKindOf(job) === 'corner';
-    this.setState({ reg: false, ...(mode !== 'off' && !corners ? { procSel: regIdx, picker: true, tab: 'Processes', edit: {} } : { procSel: 0, edit: {} }) });
+    const wasOn = job.regMode && job.regMode !== 'off';
+    // turning marks on: pick the colour the marks (or the plate's outline) use
+    this.setState({ reg: false, ...(mode !== 'off' && !wasOn ? { procSel: regIdx, picker: true, tab: 'Processes', edit: {} } : mode === 'off' ? { procSel: 0, edit: {} } : {}) });
     this.commit({ ...job, regMode: mode, processes, ...(corners && n ? { regCorners: n } : {}) }, { record: true });
-    if (mode !== 'off' && !corners) LRC.toast('Registration marks on — pick the colour(s) your mark objects use for "Registration marks", or right-click the marks and choose a colour', { ms: 7000 });
+    if (mode !== 'off' && !wasOn) LRC.toast(corners ? 'Registration marks on — draw the plate\'s outline as a box and give it the colour you pick for "Registration marks"' : 'Registration marks on — pick the colour(s) your mark objects use for "Registration marks", or right-click the marks and choose a colour', { ms: 7000 });
   }
   // What the camera looks for: printed dots, holes already in the plate, or the plate's corners
   setRegKind(kind) {
@@ -1117,7 +1118,7 @@ class Component extends DCLogic {
     const next = { ...job, regKind: kind };
     if (kind === 'corner' && !job.regCorners) next.regCorners = CC.regCornersOf(job);
     this.commit(next, { record: true });
-    if (kind === 'corner' && !(job.sheet && job.sheet.on)) LRC.toast('Plate corners come from the sheet: turn on Sheet and set it to the plate\'s size and place', { ms: 7000 });
+    if (kind === 'corner') LRC.toast('Plate corners: draw the plate\'s outline as a box (rounded corners are fine) in the Registration marks colour', { ms: 7000 });
   }
   // Give every selected object a colour (and so a process).
   recolour(n, ids) {
@@ -1723,7 +1724,7 @@ class Component extends DCLogic {
         chips, none: chips.length === 0, name: p.name, badge,
         badgeBg: badge === 'Edited' ? 'var(--warn-soft)' : accent, badgeFg: badge === 'Edited' ? 'var(--warn)' : 'var(--on-accent)',
         proc: (isReg ? 'Camera marks, not cut' : isLaser ? p.proc : p.tool) + (nObj ? ' · ' + nObj + ' object' + (nObj > 1 ? 's' : '') : ''),
-        summary: isReg ? (regKind === 'corner' ? 'plate corners' : nObj + ' / ' + (CC.REG_NEEDED[job.regMode] || 3) + (regKind === 'hole' ? ' holes' : ' marks')) : isLaser ? p.power + '% · ' + p.speed + ' mm/s' : p.speed + ' mm/s',
+        summary: isReg ? (regKind === 'corner' ? (nObj === 1 ? 'plate outline' : nObj + ' / 1 plate outline') : nObj + ' / ' + (CC.REG_NEEDED[job.regMode] || 3) + (regKind === 'hole' ? ' holes' : ' marks')) : isLaser ? p.power + '% · ' + p.speed + ' mm/s' : p.speed + ' mm/s',
         dashOn: !!p.dash, on: i === selIdx,
         bg: i === selIdx ? accentSoft : 'var(--surface)', bd: i === selIdx ? accent : 'var(--line)', op: out && shown ? 1 : 0.55,
         // the eye only hides the objects here (still sent and simulated)

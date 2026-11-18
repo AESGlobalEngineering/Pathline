@@ -571,19 +571,26 @@ async function main() {
     ok(ex.buildPackage(holes, cam, null, CC.estimate(holes, cam)).regMarks.kind === 'hole', 'the package\'s regMarks says the kind too');
     const cutting = { ...holes, entities: holes.entities.concat([{ id: 'drill', aci: 1, paths: [{ p: CC.shapes.ellipse(60, 50, 3, 3), c: true }] }]) };
     ok(CC.checkJob(cutting, cam).some((c) => c.warn && /Hole 1 is cut by this job/.test(c.l)) && !CC.checkJob(holes, cam).some((c) => /cut by this job/.test(c.l)), 'a hole this same job cuts is flagged (it has to be there before the camera looks)');
-    // plate corners: from the sheet, with toward, by count
-    const corners = { ...base, regKind: 'corner' };
+    // plate corners: the corners of a box drawn in the mark colour (the plate), with toward, by count
+    const plateBox = (r) => ({ id: 'plate', aci: 5, paths: [{ p: CC.shapes.rect(50, 40, 300, 200, r), c: true }] });
+    const corners = { ...base, regKind: 'corner', sheet: { on: false }, entities: [base.entities[0], plateBox(0)] };
     const cs = CC.regMarks(corners, cam);
-    const want = { 'corner-tl': [50, 40, 1, 1], 'corner-tr': [350, 40, -1, 1], 'corner-bl': [50, 240, 1, -1] };
-    ok(cs.length === 3 && cs.every((m) => { const w = want[m.id]; return w && m.x === w[0] && m.y === w[1] && m.toward[0] === w[2] && m.toward[1] === w[3] && m.d === 0 && m.kind === 'corner'; }), 'three plate corners from the sheet: top left, top right, bottom left, each with the way the plate lies');
-    ok(CC.regMarks({ ...corners, regMode: 'pos' }, cam).map((m) => m.id).join() === 'corner-tl,corner-br' && CC.regMarks({ ...corners, regCorners: 1 }, cam).map((m) => m.id).join() === 'corner-tl', 'two corners are the diagonal; one corner is the top left');
-    const cst = inspect(corners);
-    ok(cst.length === 3 && cst.every((x) => x.kind === 'corner' && Array.isArray(x.toward) && x.d === 0) && cst.map((x) => x.at.join(',')).join(' ') === '50,40 50,240 350,40', 'corner inspect steps carry kind and toward, read top left, bottom left, top right');
-    const noSheet = { ...corners, sheet: { ...corners.sheet, on: false } };
-    ok(CC.regMarks(noSheet, cam).length === 0 && CC.checkJob(noSheet, cam).some((c) => c.block && /need the sheet/.test(c.l)), 'plate corners without the sheet can\'t be sent');
-    ok(CC.checkJob(corners, cam).some((c) => c.warn && /3 objects in the Registration marks colour won\'t be read/.test(c.l)), 'objects in the mark colour are flagged as not read when the corners are');
-    const sheetText = ex.jobSheet(corners, cam, null, CC.estimate(corners, cam));
-    ok(/plate corners/.test(sheetText) && /10 mm of white/.test(sheetText) && /white card or paper/.test(ex.jobSheet(holes, cam, null, CC.estimate(holes, cam))), 'the job sheet says the mark type and what to put under or around the plate');
+    const want = { 'plate-tl': [50, 40, 1, 1], 'plate-tr': [350, 40, -1, 1], 'plate-bl': [50, 240, 1, -1] };
+    ok(cs.length === 3 && cs.every((m) => { const w = want[m.id]; return w && near(m.x, w[0], 1e-6) && near(m.y, w[1], 1e-6) && m.toward[0] === w[2] && m.toward[1] === w[3] && m.d === 0 && m.kind === 'corner' && m.r === 0; }), 'three plate corners from the box: top left, top right, bottom left, each with the way the plate lies');
+    ok(CC.regMarks({ ...corners, regMode: 'pos' }, cam).map((m) => m.id).join() === 'plate-tl,plate-br' && CC.regMarks({ ...corners, regCorners: 1 }, cam).map((m) => m.id).join() === 'plate-tl', 'two corners are the diagonal; one corner is the top left');
+    // rounded corners: the corner is where the straight edges meet, and the radius goes along
+    const rounded = { ...corners, entities: [base.entities[0], plateBox(8)] };
+    const rs = CC.regMarks(rounded, cam);
+    ok(rs.length === 3 && rs.every((m) => near(m.r, 8, 0.15)) && near(rs[0].x, 50, 1e-6) && near(rs[0].y, 40, 1e-6), 'a box with rounded corners gives the corners where its straight edges meet, and the radius (' + rs.map((m) => m.r).join(', ') + ' mm)');
+    const cst = inspect(rounded);
+    ok(cst.length === 3 && cst.every((x) => x.kind === 'corner' && Array.isArray(x.toward) && x.d === 0 && near(x.r, 8, 0.15)) && cst.map((x) => x.at.join(',')).join(' ') === '50,40 50,240 350,40', 'corner inspect steps carry kind, toward and the radius, read top left, bottom left, top right');
+    ok(CC.checkJob(rounded, cam).some((c) => c.ok && /3 plate corners · rounded, r 8 mm/.test(c.l)), 'the check says the plate\'s corners are rounded');
+    const none = { ...corners, entities: [base.entities[0]] };
+    ok(CC.regMarks(none, cam).length === 0 && CC.checkJob(none, cam).some((c) => c.block && /draw the plate\'s outline/.test(c.l)), 'plate corners without a box in the mark colour can\'t be sent');
+    ok(CC.checkJob({ ...corners, entities: corners.entities.concat(base.entities.slice(1)) }, cam).some((c) => c.block && /one box/.test(c.l)), 'more than one object in the mark colour can\'t be sent with plate corners');
+    ok(CC.checkJob({ ...corners, entities: [base.entities[0], { id: 'disc', aci: 5, paths: [{ p: CC.shapes.ellipse(200, 140, 90, 90), c: true }] }] }, cam).some((c) => c.block && /rectangle along X and Y/.test(c.l)), 'a plate outline that isn\'t a rectangle can\'t be sent');
+    const sheetText = ex.jobSheet(rounded, cam, null, CC.estimate(rounded, cam));
+    ok(/plate corners/.test(sheetText) && /r 8 mm/.test(sheetText) && /10 mm of white/.test(sheetText) && /white card or paper/.test(ex.jobSheet(holes, cam, null, CC.estimate(holes, cam))), 'the job sheet says the mark type, the corner radius and what to put under or around the plate');
     // Pathline Run's own check, once its mark kinds are in this repository
     const validateFile = path.join(__dirname, '..', 'run', 'src', 'job', 'validate.js');
     if (fs.existsSync(validateFile) && /toward/.test(fs.readFileSync(validateFile, 'utf8'))) {

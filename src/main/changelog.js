@@ -5,6 +5,15 @@
 
 module.exports = [
   {
+    version: '1.6.16', date: '18 Nov 2026',
+    added: [
+      'Plate corners now come from a box you draw: draw the plate\'s outline as a rectangle and give it the Registration marks colour, instead of using the sheet. Rounded corners are fine: the corner read is where the straight edges meet, and the radius is sent to Pathline Run with it.'
+    ],
+    fixed: [
+      'A box (or any shape) set as a registration mark is no longer drawn filled bright white. Only printed dots are drawn solid, as the camera sees them; holes and plate outlines are outlines, and a click inside one picks what\'s inside, not the outline.'
+    ]
+  },
+  {
     version: '1.6.15', date: '18 Nov 2026',
     added: [
       'Registration marks → Mark type: Printed dots, Holes or Plate corners. Holes are holes already cut through the plate, with white card under it; draw each as a circle the size of the hole, in the Registration marks colour. Plate corners are the plate\'s own corners on a white background: they come from the sheet (turn Sheet on and set it to the plate), and you choose 1, 2 or 3 corners. Needs Pathline Run 0.7.13 or later.',

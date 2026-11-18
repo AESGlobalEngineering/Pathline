@@ -1073,14 +1073,14 @@
     hit(wx, wy) {
       const tol = 5 / this.state.view.s;
       const list = this.pickable();
-      const reg = CC.regMarkAci(this.props.job);
+      // printed dots are drawn solid: a click anywhere inside one picks it
+      const reg = CC.regKindOf(this.props.job) === 'dot' ? CC.regMarkAci(this.props.job) : new Set();
       let best = null, bd = tol, ba = Infinity;
       for (let i = list.length - 1; i >= 0; i--) {
         const e = list[i];
         const ox = this.off(e);
         const b = CC.entityBox(e);
         if (wx < b.x0 + ox - tol || wx > b.x1 + ox + tol || wy < b.y0 - tol || wy > b.y1 + tol) continue;
-        // reg marks are drawn solid, so a click anywhere inside one picks it
         const solid = reg.has(e.aci) && e.paths.some((q) => q.c && CC.pointInPoly(wx - ox, wy, q.p));
         const d = solid ? 0 : CC.distToEntity(e, wx - ox, wy);
         const a = CC.boxW(b) * CC.boxH(b);
@@ -1497,6 +1497,7 @@
         const procByAci = new Map();
         p.job.processes.forEach((pr) => (pr.aci || []).forEach((a) => { if (!procByAci.has(a)) procByAci.set(a, pr); }));
         const regAci = CC.regMarkAci(p.job);
+        const regKind = CC.regKindOf(p.job);
         const drag = this.state.drag;
         const moving = drag && drag.kind === 'move';
         const scaling = drag && drag.kind === 'scale';
@@ -1516,15 +1517,17 @@
           const col = aci.stroke(e.aci);
           const isEng = pr && pr.proc === 'Engrave';
           const isReg = regAci.has(e.aci);
+          // printed dots are drawn solid, as the camera sees them; holes and a plate outline aren't
+          const regSolid = isReg && regKind === 'dot';
           const dash = pr && pr.dash && !isReg ? (pr.dl * v.s).toFixed(1) + ' ' + (pr.gl * v.s).toFixed(1) : null;
           const isHole = isEng && holes.has(e.id);
           const el = h('path', {
             key: e.id, d: entityD(e) + (isEng && hostD.has(e.id) ? hostD.get(e.id) : ''), transform: this.isPlot() && e.bed ? 'translate(' + this.bedX(e.bed) + ' 0)' : undefined,
-            fillOpacity: isReg ? 1 : isEng ? 0.22 : undefined, fillRule: 'evenodd',
+            fillOpacity: regSolid ? 1 : isEng ? 0.22 : undefined, fillRule: 'evenodd',
             strokeWidth: selSet.has(e.id) ? 2 : 1.3, strokeDasharray: dash || undefined,
             vectorEffect: 'non-scaling-stroke', opacity: pr && pr.hidden ? 0.2 : !pr || pr.out === false ? 0.35 : e.locked ? 0.7 : 1,
             // colours as CSS so ACI 7 and reg marks follow the theme; reg marks are drawn solid, the way the camera sees them
-            style: { fill: isReg ? 'var(--ink)' : isEng && !isHole ? col : 'none', stroke: col }
+            style: { fill: regSolid ? 'var(--ink)' : isEng && !isHole && !isReg ? col : 'none', stroke: col }
           });
           (selSet.has(e.id) ? selected : normal).push(el);
         }

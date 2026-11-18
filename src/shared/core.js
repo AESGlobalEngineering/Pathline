@@ -1600,7 +1600,7 @@
     marks.forEach((m, i) => {
       travelTo([m.x, m.y], 0, -1);
       inspectTime += markTime;
-      push({ kind: 'inspect', proc: regIdx, bed: 0, dur: markTime, at: [m.x, m.y], d: m.d, mark: i + 1, of: marks.length, markKind: m.kind, toward: m.toward });
+      push({ kind: 'inspect', proc: regIdx, bed: 0, dur: markTime, at: [m.x, m.y], d: m.d, mark: i + 1, of: marks.length, markKind: m.kind, toward: m.toward, cornerR: m.r || 0 });
     });
     for (let bed = 0; bed < nBeds; bed++) {
       const bedEnts = isLaser ? ents : ents.filter((e) => (e.bed || 0) === bed);
@@ -2147,8 +2147,9 @@
   // inspect step's kind, from Run 0.7.13):
   //  - 'dot': a printed dark dot on white (the default, and what older jobs mean);
   //  - 'hole': a hole already cut through the plate, white card under it;
-  //  - 'corner': the plate's own corners, on a white background. They come
-  //    from the sheet rectangle (the plate), not from objects.
+  //  - 'corner': the plate's own corners, on a white background. The plate is
+  //    a box (rectangle along X and Y, corners square or rounded) drawn in the
+  //    Registration marks colour; its corners are where its straight edges meet.
   const REG_KINDS = ['dot', 'hole', 'corner'];
   const regKindOf = (job) => (job && REG_KINDS.includes(job.regKind) ? job.regKind : 'dot');
   // plate corners read: job.regCorners (1–3), else from the mode (2 for
@@ -2161,25 +2162,54 @@
   // what the operator has to do for each kind (job sheet and the marks menu)
   const REG_TIPS = {
     hole: 'Put white card or paper under the plate, so the holes show light.',
-    corner: 'Lay the plate on white, with at least 10 mm of white showing past both edges at each corner that\'s read. Don\'t push those corners against a fence.'
+    corner: 'Draw the plate\'s outline as a box in the Registration marks colour. Lay the plate on white, with at least 10 mm of white showing past both edges at each corner that\'s read. Don\'t push those corners against a fence.'
   };
   // which corners, by count: the diagonal for two (the longest baseline)
   const CORNER_SETS = { 1: ['tl'], 2: ['tl', 'br'], 3: ['tl', 'tr', 'bl'] };
   // toward: which way the plate lies from the corner, along X and Y
   const CORNERS = { tl: { fx: 0, fy: 0, toward: [1, 1] }, tr: { fx: 1, fy: 0, toward: [-1, 1] }, bl: { fx: 0, fy: 1, toward: [1, -1] }, br: { fx: 1, fy: 1, toward: [-1, -1] } };
+  // The plate for plate corners: the biggest closed shape in the mark colour.
+  // { e, box, r: corner radius (0 for square corners), square: it is a
+  // rectangle along X and Y, count: objects in the mark colour } or null
+  function plateOutline(job) {
+    const acis = regMarkAci(job);
+    const ents = (job.entities || []).filter((e) => !e.hidden && acis.has(e.aci));
+    let best = null;
+    for (const e of ents) {
+      const p = e.paths.find((q) => q.c && q.p.length > 2);
+      if (!p) continue;
+      const a = Math.abs(polyArea(p.p));
+      if (!best || a > best.a) best = { e, p, a };
+    }
+    if (!best) return ents.length ? { e: null, count: ents.length } : null;
+    const b = entityBox({ paths: [best.p] });
+    const W = b.x1 - b.x0, H = b.y1 - b.y0;
+    // a rounded corner of radius r leaves its arc r·(√2 − 1) from the box's
+    // corner along the diagonal: the nearest outline point gives r
+    const near = (x, y) => best.p.p.reduce((m, q) => Math.min(m, Math.hypot(q[0] - x, q[1] - y)), Infinity);
+    const rs = [[b.x0, b.y0], [b.x1, b.y0], [b.x0, b.y1], [b.x1, b.y1]].map(([x, y]) => near(x, y) / (Math.SQRT2 - 1));
+    let r = Math.min(...rs);
+    if (r < 0.2) r = 0;
+    r = Math.round(r * 10) / 10;
+    // a rectangle along X and Y fills its box, less the rounded corners
+    const square = Math.abs(best.a - (W * H - (4 - Math.PI) * r * r)) <= 0.02 * W * H && W > 2 * r && H > 2 * r;
+    return { e: best.e, box: b, r, square, count: ents.length };
+  }
   // Print-and-cut registration marks: the objects drawn in a reg-mark colour
   // (nothing is placed automatically), each reported by its centre; or, for
-  // plate corners, the sheet's corners. { id, x, y, d, kind, toward? }
+  // plate corners, the corners of the plate's outline (where its straight
+  // edges meet, so outside a rounded corner). { id, x, y, d, kind, toward?, r? }
   function regMarks(job, machine) {
     if (machine && machine.type === 'plotter') return [];
     if (!job.regMode || job.regMode === 'off') return [];
     const kind = regKindOf(job);
     if (kind === 'corner') {
-      const sh = job.sheet;
-      if (!sh || !sh.on || !(sh.w > 0) || !(sh.h > 0)) return [];
+      const pl = plateOutline(job);
+      if (!pl || !pl.e) return [];
+      const b = pl.box;
       return CORNER_SETS[regCornersOf(job)].map((k) => {
         const c = CORNERS[k];
-        return { id: 'corner-' + k, x: sh.x + c.fx * sh.w, y: sh.y + c.fy * sh.h, d: 0, kind, toward: c.toward.slice() };
+        return { id: pl.e.id + '-' + k, x: b.x0 + c.fx * (b.x1 - b.x0), y: b.y0 + c.fy * (b.y1 - b.y0), d: 0, kind, toward: c.toward.slice(), r: pl.r };
       });
     }
     const acis = regMarkAci(job);
@@ -2343,13 +2373,13 @@
       if (job.regMode && job.regMode !== 'off') {
         const kind = regKindOf(job);
         if (kind === 'corner') {
-          // the plate's corners come from the sheet: without it there's nothing to read
+          // the plate is one box in the mark colour: none, or several, and the camera can't be told where to look
+          const pl = plateOutline(job);
           const n = regMarks(job, machine).length;
-          if (!n) out.push({ ok: false, block: true, sheet: true, l: 'Plate corners need the sheet (Sheet, in the toolbar) to show where the plate lies' });
-          else out.push({ ok: true, l: 'Registration marks · ' + n + ' plate corner' + (n > 1 ? 's' : '') });
-          const acis = regMarkAci(job);
-          const stray = ents.filter((e) => acis.has(e.aci)).length;
-          if (stray) out.push({ ok: false, warn: true, l: stray + ' object' + (stray > 1 ? 's' : '') + ' in the Registration marks colour won\'t be read: the camera reads the plate\'s corners' });
+          if (!pl || !pl.e) out.push({ ok: false, block: true, l: 'Plate corners: draw the plate\'s outline as a box in the Registration marks colour' });
+          else if (pl.count > 1) out.push({ ok: false, block: true, l: 'Plate corners use one box in the Registration marks colour; ' + pl.count + ' objects have it' });
+          else if (!pl.square) out.push({ ok: false, block: true, l: 'The plate outline must be a rectangle along X and Y (square or rounded corners)' });
+          else out.push({ ok: true, l: 'Registration marks · ' + n + ' plate corner' + (n > 1 ? 's' : '') + (pl.r ? ' · rounded, r ' + pl.r + ' mm' : '') });
         } else {
           const need = REG_NEEDED[job.regMode] || 3;
           const have = regMarks(job, machine).length;
@@ -2384,7 +2414,7 @@
     uid, EMPTY_BOX, growBox, entityBox, boxOf, boxValid, boxW, boxH,
     mapEntity, translate, scaleAbout, rotateAbout, polyLen, polyArea, pointInPoly, distToEntity, isClosedPts, cleanPath, shapes,
     processOrder, processOfAci, engraveHoles, toolSlot, toolRank, polyTime, travelTime, rasterSpans, orderPaths,
-    estimate, headAt, fmtDuration, fmtLen, fmtArea, checkJob, regMarks, regMarkAci, regKindOf, regCornersOf, marksCutByJob, REG_KINDS, REG_TIPS, camReach, marksOutOfReach, reachShift, regProcess, withPresets, ensureRegProcess, isRegProc, REG_PROC, REG_NEEDED,
+    estimate, headAt, fmtDuration, fmtLen, fmtArea, checkJob, regMarks, regMarkAci, regKindOf, regCornersOf, marksCutByJob, plateOutline, REG_KINDS, REG_TIPS, camReach, marksOutOfReach, reachShift, regProcess, withPresets, ensureRegProcess, isRegProc, REG_PROC, REG_NEEDED,
     cutOrderOf, CUT_ORDER_DEFAULT, START_CLEAR, commonLines, bedOf, bedCount, defaultPresets, DEFAULTS,
     rasterIslands, engraveScan, ENGRAVE_DIRS, DPI_STEPS, starterPresets, nestRects, THERMAL, thermalKey, thermalOf, colourOf, absorptionOf, thermalSim, bendLimit, cutModelOf, cutModelTime, fitArcs, TROTEC_CUT, rasterModelOf, rasterPitch, rasterModelTime, TROTEC_RASTER, isBareMetal, markingSprayOf, SPRAY_ABSORB, metalPresets, presetsFor
   };

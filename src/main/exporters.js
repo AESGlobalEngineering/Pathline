@@ -133,7 +133,8 @@ function jobSheet(job, machine, material, est) {
     const kind = CC.regKindOf(job);
     if (on && kind === 'corner') {
       const n = regMarks(job, machine).length;
-      line('Reg marks: plate corners · ' + n + ' read' + (n ? '' : ' (the sheet must be on)'));
+      const pl = CC.plateOutline(job);
+      line('Reg marks: plate corners · ' + n + ' read' + (pl && pl.e && pl.r ? ' · rounded corners, r ' + pl.r + ' mm' : '') + (n ? '' : ' (draw the plate\'s outline in the Registration marks colour)'));
     } else {
       line('Reg marks: ' + ({ off: 'Off', pos: 'Position & rotation (2 marks)', linear: 'Full linear (3 marks)', nonlinear: 'Non-linear (3 marks)' }[job.regMode || 'off']) + (on ? ' · ' + (kind === 'hole' ? 'holes in the plate' : 'printed dots') + ' · ' + regMarks(job, machine).length + ' in job' : ''));
     }
@@ -203,7 +204,7 @@ function toolpath(job, est) {
       out.push({ type: 'engrave', process: o.proc, name: p.name, ents: engraveEnts(o.ents), bed: o.bed, dpi: o.dpi, passes: o.passes || 1, pass: o.pass || undefined, round: o.round, lines: o.rows, scan: o.shared ? 'across' : 'island', direction: o.dir || 'down', bidirectional: !o.uni, seconds: +o.dur.toFixed(3), box: [r3(o.box.x0), r3(o.box.y0), r3(o.box.x1), r3(o.box.y1)] });
     } else if (o.kind === 'inspect') {
       // kind: what the camera looks for (PROTOCOL.md, inspect); toward: which way a plate corner's plate lies
-      out.push({ type: 'inspect', mark: o.mark, of: o.of, at: [r3(o.at[0]), r3(o.at[1])], d: r3(o.d), seconds: +o.dur.toFixed(3), ...(o.markKind && o.markKind !== 'dot' ? { kind: o.markKind } : {}), ...(o.toward ? { toward: o.toward.slice() } : {}) });
+      out.push({ type: 'inspect', mark: o.mark, of: o.of, at: [r3(o.at[0]), r3(o.at[1])], d: r3(o.d), seconds: +o.dur.toFixed(3), ...(o.markKind && o.markKind !== 'dot' ? { kind: o.markKind } : {}), ...(o.toward ? { toward: o.toward.slice() } : {}), ...(o.cornerR ? { r: o.cornerR } : {}) });
     } else if (o.kind === 'dwell') {
       out.push({ type: 'dwell', process: o.proc, name: p.name, pass: o.pass, seconds: +o.dur.toFixed(3) });
     } else if (o.kind === 'change') {

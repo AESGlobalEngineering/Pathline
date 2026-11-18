@@ -15,6 +15,15 @@ Latest round (28 Oct, final):
 - **Dark mode bed is grey** (`--bed`, `--sheet`, `--bed-grid*` in theme.css). **ACI 7 shows as white in dark mode** (black in light), as in CAD, and so do the marks drawn on the bed (registration marks, engrave hatching, arrows, start points): see the `--aci7*` and `--ink` tokens, and `LRC.aci.hex/fg/stroke` in app.js. Exports (DXF/SVG/PDF) still use real black.
 - **Sample machines and materials from earlier builds are removed on first start** (main.js, tracked by `settings.samplesRemoved`). This is by exact id (trotec, flatbed, laser2, acr-print-3 … brass-1); anything the operator created stays.
 
+Version 1.6.16 (18 Nov):
+- **Plate corners from a drawn box, not the sheet** (owner didn't like the sheet for this; "most of our shapes are with rounded corners"). `plateOutline(job)` picks the biggest closed shape in the Registration marks colour and returns { e, box, r, square, count }.
+  - `r` is the corner radius: the smallest distance from a box corner to the outline, ÷ (√2 − 1), to 0.1 mm; under 0.2 counts as square. `square` means the area matches W·H − (4 − π)·r² within 2 %, i.e. a rectangle along X and Y.
+  - `regMarks` gives the bounding box's corners (where the straight edges meet), with ids `<box id>-tl` etc. and `r`. Inspect steps carry `r` (`cornerR` on the timeline) when it is above 0.
+  - checkJob BLOCKs when there's no box, more than one object in the mark colour, or the outline isn't a rectangle along X and Y. The OK line says "rounded, r N mm". The sheet isn't used for marks any more.
+  - Turning marks on with corners opens the colour picker again. The tip and toast say to draw the plate's outline in the mark colour.
+  - **Run needs:** to accept `r` and fit the straight edges past the radius, then intersect them: **hmi/RUN-PLATE-CORNERS-BRIEF.md**.
+- **Only printed dots are drawn solid** (owner: a box set as a reg mark turned bright white). In JobCanvas, `regSolid` = reg mark and kind dot, for both the fill and the hit test, so a click inside a hole mark or the plate outline picks what's inside it.
+
 Version 1.6.15 (18 Nov):
 - **Registration mark kinds** (from the Run session's HANDOFF-prepare-mark-kinds.md; owner: "registration marks … holes in steel on a white background, or the plate's edges"). `job.regKind` is `'dot'` (default, older jobs), `'hole'` or `'corner'`. `CC.regKindOf`, `REG_KINDS` and `REG_TIPS` hold the operator tips.
   - `regMarks` now returns `{ id, x, y, d, kind, toward? }` and nothing while regMode is off. For corners it uses the sheet (`job.sheet`, on): `CORNER_SETS` by `regCornersOf(job)` (`job.regCorners` 1–3, else 2 for pos and 3 otherwise). 1 = tl; 2 = tl + br (the diagonal); 3 = tl, tr, bl. `toward` is tl [1,1], tr [-1,1], bl [1,-1], br [-1,-1]; d = 0; ids are `corner-tl` and so on. markOrder, camReach and Move into reach work unchanged.
