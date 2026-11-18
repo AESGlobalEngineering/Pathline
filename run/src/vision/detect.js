@@ -253,30 +253,49 @@ function findPlateCorner(img, opts = {}) {
   if (!allSteps.length) return fail('no edge in view');
   const big = Math.max(...allSteps.map((p) => Math.abs(p.d)));
   const sign = Math.sign(allSteps.filter((p) => Math.abs(p.d) > 0.6 * big).reduce((s, p) => s + Math.sign(p.d), 0)) || 1;
-  // on each line, the edge is the first step into the plate coming from the background's side
+  // on each line, the edge is the first clear step coming from the background's side, whichever way
+  // it goes: the head lamp's glare makes polished steel brighter than the white background along
+  // part of an edge and darker along the rest (J0111, 18 Nov: half the plate's top edge was lit,
+  // and taking only darker steps there picked the glare's own boundary 7 mm inside the plate)
   const pick = (lines) => lines.map((l) => {
-    const c = l.steps.filter((p) => Math.sign(p.d) === sign && Math.abs(p.d) > 0.4 * big).sort((p, q) => p.t * l.tSide - q.t * l.tSide)[0];
+    const c = l.steps.filter((p) => Math.abs(p.d) > Math.max(0.08, 0.3 * big)).sort((p, q) => p.t * l.tSide - q.t * l.tSide)[0];
     return c ? { s: l.s, t: c.t, d: c.d } : null;
   }).filter(Boolean);
   const A = pick(LA0), B = pick(LB0);
   if (A.length < 5 || B.length < 5) return fail('not two edges meeting at a corner (' + A.length + ' and ' + B.length + ' points along them)');
-  // a straight line t = k0 + k1·s through the points, the worst dropped one at a time until all lie
-  // within 0.15 mm (a line that grazed the other edge, a scratch)
+  // a straight line t = k0 + k1·s through the points. The line through two of them that the most
+  // others lie within 0.1 mm of is taken first (a glare boundary, a scratch, a line that grazed the
+  // other edge can be a third of the points and pull a plain fit away; on J0111's plate a hazy
+  // stretch of edge read 0.3–0.8 mm off, and a 0.2 mm band took some of it in, turning the edge
+  // 1°), then fitted through those
+  const tol = Math.max(0.1, 3 * px);
+  const lsq = (Q) => {
+    const m = Q.length, ss = Q.reduce((a, p) => a + p.s, 0), st = Q.reduce((a, p) => a + p.t, 0);
+    const sss = Q.reduce((a, p) => a + p.s * p.s, 0), sst = Q.reduce((a, p) => a + p.s * p.t, 0);
+    const dd = m * sss - ss * ss;
+    if (!dd) return null;
+    const k1 = (m * sst - ss * st) / dd;
+    return { k0: (st - k1 * ss) / m, k1 };
+  };
   const line = (P) => {
-    let Q = P.slice(), f = null;
-    while (Q.length >= 4) {
-      const m = Q.length, ss = Q.reduce((a, p) => a + p.s, 0), st = Q.reduce((a, p) => a + p.t, 0);
-      const sss = Q.reduce((a, p) => a + p.s * p.s, 0), sst = Q.reduce((a, p) => a + p.s * p.t, 0);
-      const dd = m * sss - ss * ss;
-      if (!dd) return null;
-      const k1 = (m * sst - ss * st) / dd;
-      f = { k0: (st - k1 * ss) / m, k1, n: m, span: Math.max(...Q.map((p) => p.s)) - Math.min(...Q.map((p) => p.s)) };
-      const res = Q.map((p) => Math.abs(p.t - (f.k0 + f.k1 * p.s)));
-      const worst = res.indexOf(Math.max(...res));
-      if (res[worst] < Math.max(0.15, 3 * px)) break;
-      Q.splice(worst, 1);
+    if (P.length < 4) return null;
+    let best = null, bestErr = Infinity;
+    for (let i = 0; i < P.length; i++) for (let j = i + 1; j < P.length; j++) {
+      if (Math.abs(P[j].s - P[i].s) < 1) continue;
+      const k1 = (P[j].t - P[i].t) / (P[j].s - P[i].s);
+      if (Math.abs(k1) > 0.27) continue; // more than 15° from the job's axes: not this edge
+      const k0 = P[i].t - k1 * P[i].s;
+      const inl = P.filter((p) => Math.abs(p.t - (k0 + k1 * p.s)) < tol);
+      const e = inl.reduce((a, p) => a + Math.abs(p.t - (k0 + k1 * p.s)), 0);
+      if (!best || inl.length > best.length || (inl.length === best.length && e < bestErr)) { best = inl; bestErr = e; }
     }
-    if (f) f.rms = Math.sqrt(Q.reduce((a, p) => a + (p.t - (f.k0 + f.k1 * p.s)) ** 2, 0) / Q.length);
+    if (!best || best.length < 4) return null;
+    let Q = best, f = lsq(Q);
+    for (let k = 0; f && k < 2; k++) { const next = P.filter((p) => Math.abs(p.t - (f.k0 + f.k1 * p.s)) < tol); if (next.length < 4) break; Q = next; f = lsq(Q); }
+    if (!f) return null;
+    f.n = Q.length;
+    f.span = Math.max(...Q.map((p) => p.s)) - Math.min(...Q.map((p) => p.s));
+    f.rms = Math.sqrt(Q.reduce((a, p) => a + (p.t - (f.k0 + f.k1 * p.s)) ** 2, 0) / Q.length);
     return f;
   };
   // the edges meet at the corner; lines at or past it (near the corner a line along one edge can
@@ -292,8 +311,12 @@ function findPlateCorner(img, opts = {}) {
     if (nA.length === A1.length && nB.length === B1.length && nA.every((p, i) => p === A1[i]) && nB.every((p, i) => p === B1[i])) break;
     A1 = nA; B1 = nB;
   }
-  if (LA.n < 5 || LB.n < 5 || LA.span < 3 || LB.span < 3) return fail('only ' + Math.min(LA.span, LB.span).toFixed(1) + ' mm of straight edge found past the corner' + (R ? ' (radius ' + R + ' mm)' : '') + ', and 3 are needed', R > 0);
+  if (LA.n < 5 || LB.n < 5) return fail('too few points on a straight line along an edge (' + LA.n + ' and ' + LB.n + ', 5 needed)');
+  if (LA.span < 3 || LB.span < 3) return fail('only ' + Math.min(LA.span, LB.span).toFixed(1) + ' mm of straight edge found past the corner' + (R ? ' (radius ' + R + ' mm)' : '') + ', and 3 are needed', R > 0);
   const angX = (Math.atan(LA.k1) * 180) / Math.PI, angY = (-Math.atan(LB.k1) * 180) / Math.PI;
+  // a plate's corner is square to well within a degree; two lines further off that are something
+  // else (a glare band's side and an edge, told the wrong corner)
+  if (Math.abs(angX - angY) > 3) return fail('the two edges found meet ' + Math.abs(angX - angY).toFixed(1) + '° off square: not the plate\'s corner');
   const [u, v] = toPx(X, Y);
   if (u < 0 || v < 0 || u > w - 1 || v > h - 1) return fail('the corner the edges meet at is outside the picture');
   return { x: u, y: v, bed: [X, Y], r: R, angles: [angX, angY], rotation: (angX + angY) / 2, squareness: angX - angY, contrast: Math.abs(big), plateBrighter: sign > 0, points: LA.n + LB.n, rms: Math.max(LA.rms, LB.rms) };
