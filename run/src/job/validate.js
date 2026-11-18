@@ -54,6 +54,12 @@ function check(pkg, cfg) {
       const b = s.box;
       if (!Array.isArray(b) || b.length !== 4 || !inBed(b[0], b[1]) || !inBed(b[2], b[3])) throw bad(where + ': the engraving leaves the bed (' + W + ' × ' + H + ' mm)');
     }
+    // registration marks: kind 'dot' (printed; the default), 'hole' (cut in the plate, white under
+    // it) or 'corner' (the plate's corner on white, toward: which way the plate lies from it)
+    if (s.type === 'inspect') {
+      if (s.kind !== undefined && !['dot', 'hole', 'corner'].includes(s.kind)) throw bad(where + ': unknown registration mark kind ' + JSON.stringify(s.kind) + ' (dot, hole or corner)');
+      if (s.kind === 'corner' && !(Array.isArray(s.toward) && s.toward.length === 2 && s.toward.every((v) => v === 1 || v === -1))) throw bad(where + ': a plate corner needs toward: [±1, ±1], which way the plate lies from the corner along X and Y');
+    }
     if (s.type === 'dwell' && (!ok(s.seconds) || s.seconds < 0 || s.seconds > 3600)) throw bad(where + ': dwell must be 0–3600 s');
   });
   if (pkg.toolpath.some((s) => s.type === 'inspect')) {

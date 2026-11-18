@@ -302,6 +302,16 @@ function toGrey(raw, w, h, fmt) {
 }
 
 // ---------------------------------------------------------------- simulated
+// is p inside the polygon pts (even-odd)
+function inPoly(p, pts) {
+  let inside = false;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    const [xi, yi] = pts[i], [xj, yj] = pts[j];
+    if ((yi > p[1]) !== (yj > p[1]) && p[0] < ((xj - xi) * (p[1] - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
 // opts.truth: the real camera, as calibration should find it:
 //   { offset: [x, y] laser − camera (mm), pixel (mm/px), rotation (deg, image vs bed),
 //     error(p) → where the head really is when sent to p (machine inaccuracy) }
@@ -348,6 +358,13 @@ class SimCamera {
       }
     }
     for (const m of this.scene.dots.concat(this.scene.marks)) if (Math.hypot(p[0] - m.x, p[1] - m.y) <= m.d / 2) return 25;
+    // plates (steel, brushed along X: fine streaks) lying on the bed: { pts: corners, v, holes:
+    // [{ x, y, d }] }; through a hole, whatever is under it
+    for (const pl of this.scene.plates || []) {
+      if (!inPoly(p, pl.pts)) continue;
+      if ((pl.holes || []).some((o) => Math.hypot(p[0] - o.x, p[1] - o.y) <= o.d / 2)) break;
+      return (pl.v || 100) + 14 * Math.sin(p[1] * 11.3 + 2 * Math.sin(p[0] * 0.21));
+    }
     // printed artwork: dark rectangles { x0, y0, x1, y1 }
     for (const r of this.scene.rects || []) if (p[0] >= r.x0 && p[0] <= r.x1 && p[1] >= r.y0 && p[1] <= r.y1) return 40;
     // the bed checkerboard, and any others (scene.boards: e.g. the small 10 mm one for stage 1)

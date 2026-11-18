@@ -118,6 +118,12 @@ The Trotec's camera is an Allied Vision **Alvium 1800 U-500c** on the head. It p
    - **Checkerboard:** lay the 50 mm board anywhere, at any angle. Jog the laser head over its top-left inner corner, then **Calibrate bed**. The board's position and angle are fitted out, and the rest is saved as a bed map applied to every job. **Check bed** measures again with the map on.
 4. Jobs with registration marks: the camera reads each mark (re-centring if it's more than 1 mm out) and fits Pathline's mode. `pos` is shift + rotation, `linear` is affine, `nonlinear` is triangles. The job is then moved onto the marks. A mark not found near where it's expected doesn't stop the job: it waits with the beam off (`status.markWait`), the screen opens Jog with the camera picture, and jogging is allowed. `POST /api/v1/marks/accept` (the Accept button) has the camera look again from where it now is, taking the dot nearest the crosshair; Stop ends the job. Dots are found in the camera's full picture (the whole sensor).
 5. A job that engraves also checks how far its sheet lies turned from the job as drawn: engraving lines run along the machine's X, so a turned sheet gets them at that angle across the parts. Up to 5° runs. Between 5° and 10° the job waits with the beam off (`status.angleWait`: `{ angle, text }`) and the screen asks: `POST /api/v1/marks/angle-ok` (Continue) runs it, Stop ends it. More than 10° stops before anything is cut. The limits are `placementAngle: { ask: 5, stop: 10 }` in the config.
+6. A mark needn't be printed. Each `inspect` step's `kind` (PROTOCOL.md) can be:
+   - `"dot"` (the default): a printed dark dot. Where none is found, Run looks for a light one.
+   - `"hole"`: a hole in the plate with white under it.
+   - `"corner"`: the plate's corner on white, with `toward: [±1, ±1]`, which way the plate lies from the corner.
+
+   Holes use `detect.findDots(…, { light: true })`. Corners use `detect.findPlateCorner`: the two straight edges, each found across lines a few tenths of a mm apart and fitted straight, and where they meet. A job with corners is fitted rigid (shift and turn only), or from one corner's position and edge angle (`fit.pose`). `status.markWait.kind` tells the jog dialog what to look for.
 
 Everything is in `src/vision/`: `camera.js` (Vimba X and the simulated camera), `detect.js` (dots and checkerboard corners, plain JS), `fit.js` (the corrections from `TROTEC_PROTOCOL.md` §7.5 and the bed map) and `vision.js` (the workflows). `npm test` runs them all end to end on the simulated camera with `--sim`.
 

@@ -697,8 +697,11 @@ function jogView() {
   const mw = st.markWait;
   // print and cut waiting for a mark: what to do, Accept and Stop
   const markBox = mw ? '<div role="alert" class="warnbox" style="display:flex;flex-wrap:wrap;align-items:center;gap:12px 16px">' +
-    '<div style="flex:1 1 260px;min-width:0;display:flex;flex-direction:column;gap:4px"><strong>Registration mark ' + mw.mark + ' of ' + mw.of + (mw.again ? ' still not found' : ' not found') + '</strong>' +
-    '<span>' + (mw.again ? 'There was no mark under the crosshair. ' : 'It wasn\'t near X ' + mw.near[0].toFixed(1) + ', Y ' + mw.near[1].toFixed(1) + ' mm. ') + 'Jog the camera until the mark is in the red circle, then press Accept: the camera finds its centre from there.</span></div>' +
+    '<div style="flex:1 1 260px;min-width:0;display:flex;flex-direction:column;gap:4px"><strong>' + (mw.kind === 'corner' ? 'Plate corner ' : mw.kind === 'hole' ? 'Registration hole ' : 'Registration mark ') + mw.mark + ' of ' + mw.of + (mw.again ? ' still not found' : ' not found') + '</strong>' +
+    '<span>' + (mw.again ? 'There was no ' + (mw.kind === 'corner' ? 'corner' : mw.kind === 'hole' ? 'hole' : 'mark') + ' under the crosshair. ' : 'It wasn\'t near X ' + mw.near[0].toFixed(1) + ', Y ' + mw.near[1].toFixed(1) + ' mm. ') +
+    (mw.kind === 'corner'
+      ? 'Jog the camera until the plate\'s corner is in the red circle, with white background showing past both edges, then press Accept: the camera finds the corner from its edges.'
+      : 'Jog the camera until the ' + (mw.kind === 'hole' ? 'hole' : 'mark') + ' is in the red circle, then press Accept: the camera finds its centre from there.') + '</span></div>' +
     '<button class="tb" data-a="markAccept" style="height:56px;padding:0 28px;background:var(--go);border-color:var(--go);color:#fff;font-weight:600">Accept</button>' +
     '<button class="tb" data-a="stop" style="height:56px;padding:0 20px;color:var(--err)">Stop job</button></div>' : '';
   const coords = '<div style="display:flex;flex-wrap:wrap;gap:36px">' + [['X', shownPos(st).x], ['Y', shownPos(st).y]].map(([l, v]) => '<div style="display:flex;flex-direction:column;gap:2px"><span class="lbl">' + l + ' <span class="mono">mm</span></span><span class="mono" style="font-size:' + (mw ? 24 : 36) + 'px;font-weight:500">' + (Number.isFinite(v) ? v.toFixed(1) : '—') + '</span></div>').join('') + '</div>';

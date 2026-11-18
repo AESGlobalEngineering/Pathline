@@ -125,6 +125,16 @@ function fit(E, D, type) {
   return f;
 }
 
+// One point and a known turn (a plate's corner, whose edges give the angle): turned by deg about
+// the point and moved onto where it was found
+function pose(e, d, deg) {
+  const a = (deg * Math.PI) / 180, c = Math.cos(a), s = Math.sin(a);
+  const m = [c, -s, d[0] - (c * e[0] - s * e[1]), s, c, d[1] - (s * e[0] + c * e[1])];
+  const f = (p) => apply(m, p);
+  f.info = { type: 'corner', shift: [m[2], m[5]], rotation: deg, scaleX: 1, scaleY: 1, residual: 0 };
+  return f;
+}
+
 // Pathline's regMarks.mode → fit type (HMI-BRIEF §4.6): pos = position and rotation, linear =
 // affine, nonlinear = triangles. One mark: shift only.
 function typeFor(mode, n) {
@@ -268,4 +278,4 @@ function transformPkg(pkg, f) {
   return out;
 }
 
-module.exports = { fit, typeFor, similarity, affine, delaunay, lsq, errorModel, anchorError, bedMap, gridMap, mapError, correct, transformPkg };
+module.exports = { fit, pose, typeFor,similarity, affine, delaunay, lsq, errorModel, anchorError, bedMap, gridMap, mapError, correct, transformPkg };

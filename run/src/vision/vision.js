@@ -172,12 +172,20 @@ class Vision {
   }
 
   // the thing nearest the middle of the frame: kind 'dot' (d mm across) or 'corner'
+  // kind 'hole': a hole in a plate with white under it, so a light dot in a darker surround (or,
+  // where the steel shines brighter than the card, a dark one); 'plate': a plate's corner on a white
+  // background (opts.toward: which way the plate lies from it, [±1, ±1] in bed X and Y).
+  // opts.alsoLight: a registration mark not found as a dark dot is looked for as a hole too
   find(img, kind, d, opts = {}) {
     if (kind === 'corner') return detect.findCorner(img);
+    if (kind === 'plate') return detect.findPlateCorner(img, { M: this.cfg.matrix, toward: opts.toward || [1, 1] });
     const px = this.pixelSize();
     // registration marks (d given) sit in plain white: only those count; calibration targets
     // (the cut mark on scrap, a dot under the camera) may have darker surroundings
-    const dots = detect.findDots(img, d ? { minD: (d * 0.5) / px, maxD: (d * 1.6) / px, whiteRing: !!opts.whiteRing, fillHoles: !!opts.fillHoles } : {});
+    const o = d ? { minD: (d * 0.5) / px, maxD: (d * 1.6) / px, whiteRing: !!opts.whiteRing, fillHoles: !!opts.fillHoles } : {};
+    if (kind === 'hole') return detect.findDots(img, { ...o, light: true })[0] || detect.findDots(img, o)[0] || null;
+    const dots = detect.findDots(img, o);
+    if (!dots.length && opts.alsoLight && d) return detect.findDots(img, { ...o, light: true })[0] || null;
     return dots[0] || null;
   }
 
@@ -197,7 +205,7 @@ class Vision {
       const found = [at[0] + off[0], at[1] + off[1]];
       // a dot's size as the camera's calibration measures it (mm): against the size printed it
       // shows whether the sheet is at the height the camera was calibrated at
-      const dotMm = kind === 'dot' && hit.d ? hit.d * this.pixelSize() : null;
+      const dotMm = (kind === 'dot' || kind === 'hole') && hit.d ? hit.d * this.pixelSize() : null;
       if (Math.hypot(off[0], off[1]) <= v.tolerance || k === v.recentre) return { found, off, tries: k + 1, hit, dotMm };
       at = found;
     }
@@ -242,9 +250,14 @@ class Vision {
     const steps = (pkg.toolpath || []).filter((s) => s.type === 'inspect');
     const E = [], D = [];
     const sizes = []; // each mark's measured diameter against the printed one
+    const turns = []; // each plate corner's edges: how the plate lies (degrees)
     let byHand = false;
     this.clearMarkFrames();
     for (const s of steps) {
+      // what the mark is (PROTOCOL.md): a printed dot (the default), a hole in the plate (white under
+      // it), or the plate's corner on a white background
+      const kind = s.kind === 'corner' ? 'plate' : s.kind === 'hole' ? 'hole' : 'dot';
+      const what = { kind, toward: s.toward, alsoLight: kind === 'dot' };
       // predict from the marks found so far: the shift from one; shift and rotation from two (their
       // scale is one distance, and carried 740 mm out to the third mark it put a 6 % stretch's
       // worth, 45 mm, into the prediction); the full fit from three
@@ -253,15 +266,15 @@ class Vision {
       // where each mark's time goes (logged): sending the move, the head travelling and settling,
       // the pictures and finding the dot
       const times = { send: 0, travel: 0, look: 0 }, tm0 = Date.now();
-      let r = await this.measure(pred, 'dot', { d: s.d, ctl, whiteRing: true, times });
-      this.saveMarkFrame('mark' + s.mark, { mark: s.mark, design: s.at, expected: pred, d: s.d, found: r ? r.found : null, hit: r ? r.hit : null });
+      let r = await this.measure(pred, kind, { d: s.d, ctl, whiteRing: true, times, ...what });
+      this.saveMarkFrame('mark' + s.mark, { mark: s.mark, kind, toward: s.toward, design: s.at, expected: pred, d: s.d, found: r ? r.found : null, hit: r ? r.hit : null });
       // Anchored, and the first mark isn't there: the camera may have been put over the dot at
       // Start in place of the laser (J0064: every mark 42, 19 mm off, the camera's offset). Look
       // one offset over before asking for the camera to be jogged by hand
       if (!r && !E.length && opts.anchored) {
         const o = this.cfg.offset, alt = [pred[0] - o[0], pred[1] - o[1]];
         status('Reading mark ' + s.mark + ' of ' + s.of + ' (as if the camera was put over the dot)');
-        r = await this.measure(alt, 'dot', { d: s.d, ctl, whiteRing: true }).catch((e) => { if (ctl.aborted) throw e; return null; });
+        r = await this.measure(alt, kind, { d: s.d, ctl, whiteRing: true, ...what }).catch((e) => { if (ctl.aborted) throw e; return null; });
         if (r) this.log('mark ' + s.mark + ': found one camera offset from where it should be: the camera, not the laser, was put over the dot at Start. Put the laser over it next time');
       }
       // not where it should be: the job waits while the user jogs the camera over it (Jog page),
@@ -270,17 +283,22 @@ class Vision {
       for (let again = false; !r; again = true) {
         byHand = true;
         this.log('mark ' + s.mark + (again ? ' still not found' : ' not found near ' + pred.map((v) => v.toFixed(1)).join(', ') + ' mm') + ': waiting for the camera to be jogged over it');
-        const at = await this.m.waitForMark({ mark: s.mark, of: s.of, near: pred, again }, ctl);
+        const at = await this.m.waitForMark({ mark: s.mark, of: s.of, near: pred, again, kind: s.kind === 'corner' || s.kind === 'hole' ? s.kind : 'dot' }, ctl);
         status('Reading mark ' + s.mark + ' of ' + s.of + ' where the camera was put');
-        r = await this.measure(at, 'dot', { d: s.d, ctl, whiteRing: false });
-        this.saveMarkFrame('mark' + s.mark + '-hand' + (again ? '2' : ''), { mark: s.mark, design: s.at, expected: pred, camera: at, d: s.d, found: r ? r.found : null, hit: r ? r.hit : null });
+        r = await this.measure(at, kind, { d: s.d, ctl, whiteRing: false, ...what });
+        this.saveMarkFrame('mark' + s.mark + '-hand' + (again ? '2' : ''), { mark: s.mark, kind, toward: s.toward, design: s.at, expected: pred, camera: at, d: s.d, found: r ? r.found : null, hit: r ? r.hit : null });
         if (r) this.log('mark ' + s.mark + ': found by hand, ' + Math.hypot(r.found[0] - pred[0], r.found[1] - pred[1]).toFixed(2) + ' mm from where it was expected; the camera was put ' + Math.hypot(r.found[0] - at[0], r.found[1] - at[1]).toFixed(2) + ' mm from it');
       }
       E.push(s.at); D.push(r.found);
-      if (r.dotMm && s.d) sizes.push(r.dotMm / s.d);
+      // (printed dots only: a hole's size is the cut's, not the camera's height)
+      if (kind === 'dot' && !r.hit.light && r.dotMm && s.d) sizes.push(r.dotMm / s.d);
+      if (kind === 'plate') turns.push(r.hit.rotation);
       const sec = (ms) => (ms / 1000).toFixed(2) + ' s';
+      const seen = kind === 'plate'
+        ? '; plate corner, edges at ' + r.hit.angles.map((v) => v.toFixed(2) + '°').join(' and ') + ' (' + Math.abs(r.hit.squareness).toFixed(2) + '° off square), plate ' + (r.hit.plateBrighter ? 'lighter' : 'darker') + ' than the background'
+        : r.dotMm ? '; ' + (r.hit.light ? (kind === 'hole' ? 'hole ' : 'found as a hole (light, in a darker surround) ') : kind === 'hole' ? 'hole (darker than the plate round it) ' : 'dot ') + r.dotMm.toFixed(2) + ' mm across (' + s.d + ' expected)' : '';
       this.log('mark ' + s.mark + ': expected ' + s.at.map((v) => v.toFixed(2)).join(', ') + ', found ' + r.found.map((v) => v.toFixed(3)).join(', ') + ' (' + r.tries + ' frame' + (r.tries > 1 ? 's' : '') + '); ' +
-        sec(Date.now() - tm0) + ': sending ' + sec(times.send) + ', travel and settle ' + sec(times.travel) + ', pictures ' + sec(times.look) + (r.dotMm ? '; dot ' + r.dotMm.toFixed(2) + ' mm across (' + s.d + ' expected)' : ''));
+        sec(Date.now() - tm0) + ': sending ' + sec(times.send) + ', travel and settle ' + sec(times.travel) + ', pictures ' + sec(times.look) + seen);
     }
     // the marks found must be as far apart as the job's: a dot that isn't the mark (a hole in the
     // bed through clear acrylic, artwork) bent the job 5 % one way and 6 % the other, and it was cut
@@ -301,10 +319,19 @@ class Vision {
         }
       }
     }
-    const type = fitting.typeFor(pkg.regMarks && pkg.regMarks.mode, E.length);
-    const f = fitting.fit(E, D, type);
+    // a plate's corners: the plate is its own size, so it's only moved and turned (never stretched
+    // to the corners, whatever the job's mode); one corner gives the turn from its edges
+    let type = fitting.typeFor(pkg.regMarks && pkg.regMarks.mode, E.length);
+    if (turns.length) type = E.length === 1 ? 'corner' : 'rigid';
+    const f = type === 'corner' ? fitting.pose(E[0], D[0], turns[0]) : fitting.fit(E, D, type);
     const i = f.info;
     this.log('print and cut: ' + i.type + ', shift ' + i.shift.map((v) => v.toFixed(3)).join(', ') + ' mm, rotation ' + i.rotation.toFixed(3) + '°, scale ' + ((i.scaleX - 1) * 1000).toFixed(2) + ' / ' + ((i.scaleY - 1) * 1000).toFixed(2) + ' mm/m');
+    // the plate's edges against the corners' positions: more than 1° apart, a corner found may be
+    // something else's edge, or the plate isn't straight-sided (only logged)
+    if (turns.length && E.length > 1) {
+      const off = turns.map((t) => t - i.rotation), worst = Math.max(...off.map(Math.abs));
+      if (worst > 1) this.log('print and cut: the plate\'s edges lie ' + turns.map((t) => t.toFixed(2) + '°').join(', ') + ', the corners together ' + i.rotation.toFixed(2) + '°: a corner may not be the plate\'s, or its edges aren\'t straight');
+    }
     const height = await this.heightCheck(sizes);
     return { f, expected: E, found: D, info: i, byHand, height };
   }

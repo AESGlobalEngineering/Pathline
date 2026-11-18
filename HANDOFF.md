@@ -320,6 +320,7 @@ These are rules the owner set over many rounds. Keep them unless the owner chang
 - Switching marks on adds a **"Registration marks"** process. Objects in its colours ARE the marks; nothing is auto-placed. The old "Mark" process type was removed.
 - Marks are drawn filled black and go on the `REGMARKS` DXF layer. **More marks than the mode needs blocks sending** (Position 2, Linear 3, Non-linear 3).
 - Marks are read first. The reading order is chosen to travel least and **end nearest where the work starts** (so the job then runs from that end, normally the top).
+- **To do (18 Nov 2026): marks that are holes in the plate, or the plate's own corners.** Run already reads them (`kind` on `inspect` steps, PROTOCOL.md). What Prepare needs is in `HANDOFF-prepare-mark-kinds.md`.
 
 ### Run order, passes, cut order (estimator: `src/shared/core.js`)
 - Order: **registration-mark inspection → engraving → cutting**.

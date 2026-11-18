@@ -1168,6 +1168,58 @@ async function visionTests() {
     await call('POST', 'local/alarm/clear');
     await call('PUT', 'local/config', { placementAngle: { ask: 5, stop: 10 } });
 
+    // marks that aren't printed: holes cut in a steel plate (white under it), and the plate's own
+    // corners on a white background. The sim's plate (server.js) is drawn from (430, 60), 200 × 190
+    // mm, and lies turned 0.6° with that corner at (431.2, 59.3)
+    const onPlate = (marks) => {
+      const p = JSON.parse(JSON.stringify(example));
+      p.toolpath = marks.map((m, i) => ({ type: 'inspect', mark: i + 1, of: marks.length, ...m })).concat(p.toolpath.filter((t) => t.type !== 'inspect'));
+      return p;
+    };
+    const runMarks = async (pkg) => {
+      const qm = await unanchored(pkg);
+      await new Promise((r) => setTimeout(r, 300));
+      const started = await call('POST', 'v1/start', { id: qm.data.id });
+      let sm;
+      for (let i = 0; i < 300; i++) { await new Promise((r) => setTimeout(r, 100)); sm = (await call('GET', 'v1/status')).data; if (sm.state === 'idle' || sm.state === 'alarm' || sm.markWait) break; }
+      if (sm.markWait) await call('POST', 'v1/stop');
+      const all = (await call('GET', 'local/log')).data;
+      let from = 0;
+      all.forEach((l, k) => { if (/mark 1: expected/.test(l)) from = k; });
+      const lg = all.slice(from);
+      const fitL = lg.find((l) => /print and cut: /.test(l)) || '';
+      return { started, s: sm, log: lg, rot: Number((fitL.match(/rotation (-?[\d.]+)°/) || [])[1]), found1: ((lg[0] || '').match(/found (-?[\d.]+), (-?[\d.]+)/) || []).slice(1).map(Number), fitL };
+    };
+    const holes = await runMarks(onPlate([{ at: [450, 80], d: 8, kind: 'hole' }, { at: [610, 80], d: 8, kind: 'hole' }, { at: [450, 230], d: 8, kind: 'hole' }]));
+    ok(holes.s.state === 'idle' && holes.s.progress === 1 && Math.abs(holes.rot - 0.6) < 0.05 && holes.log.filter((l) => /; hole [\d.]+ mm across/.test(l)).length === 3,
+      'holes in a steel plate on white: 3 found as light dots, plate turned ' + holes.rot + '° (0.6), job run', holes.fitL + ' / ' + JSON.stringify(holes.s) + ' / ' + holes.log.slice(0, 4).join(' | '));
+    // the same holes given as plain registration marks (a job from a Pathline without mark kinds):
+    // no dark dot there, so each is found as a hole
+    const plain = await runMarks(onPlate([{ at: [450, 80], d: 8 }, { at: [610, 80], d: 8 }, { at: [450, 230], d: 8 }]));
+    ok(plain.s.state === 'idle' && plain.s.progress === 1 && Math.abs(plain.rot - 0.6) < 0.05 && plain.log.filter((l) => /found as a hole/.test(l)).length === 3 && !plain.log.some((l) => /smaller than printed|larger than printed/.test(l)),
+      'holes given as ordinary marks: found as holes (no size warning), plate turned ' + plain.rot + '°', plain.fitL + ' / ' + plain.log.slice(0, 4).join(' | '));
+    const corners = await runMarks(onPlate([{ at: [430, 60], kind: 'corner', toward: [1, 1] }, { at: [630, 60], kind: 'corner', toward: [-1, 1] }, { at: [430, 250], kind: 'corner', toward: [1, -1] }]));
+    ok(corners.s.state === 'idle' && corners.s.progress === 1 && Math.abs(corners.rot - 0.6) < 0.05 && /print and cut: rigid/.test(corners.fitL) && corners.log.filter((l) => /plate corner, edges at/.test(l)).length === 3 && Math.hypot(corners.found1[0] - 431.2, corners.found1[1] - 59.3) < 0.15,
+      'plate corners on white: 3 read from their edges, moved and turned only (rigid), ' + corners.rot + '° (0.6), first corner at ' + corners.found1.join(', ') + ' (431.2, 59.3)', corners.fitL + ' / ' + corners.log.slice(0, 4).join(' | '));
+    const one = await runMarks(onPlate([{ at: [430, 60], kind: 'corner', toward: [1, 1] }]));
+    ok(one.s.state === 'idle' && one.s.progress === 1 && Math.abs(one.rot - 0.6) < 0.1 && /print and cut: corner/.test(one.fitL),
+      'one plate corner: its edges give the turn, ' + one.rot + '° (0.6)', one.fitL + ' / ' + JSON.stringify(one.s));
+    // a corner job where the camera finds no corner (told the plate lies the other way): it waits to
+    // be found by hand, and the dialog says it's the plate's corner
+    const wrongWay = onPlate([{ at: [430, 60], kind: 'corner', toward: [-1, -1] }]);
+    const qw = await unanchored(wrongWay);
+    await new Promise((r) => setTimeout(r, 300));
+    await call('POST', 'v1/start', { id: qw.data.id });
+    let ww;
+    for (let i = 0; i < 300; i++) { await new Promise((r) => setTimeout(r, 100)); ww = (await call('GET', 'v1/status')).data; if (ww.markWait || ww.state === 'idle' || ww.state === 'alarm') break; }
+    ok(ww.markWait && ww.markWait.kind === 'corner' && /over the plate's corner/.test(ww.message), 'a plate corner not found: waits for the camera to be jogged over the plate\'s corner', JSON.stringify(ww));
+    await call('POST', 'v1/stop');
+    for (let i = 0; i < 100; i++) { await new Promise((r) => setTimeout(r, 100)); if ((await call('GET', 'v1/status')).data.state !== 'running') break; }
+    const badKind = await call('POST', 'v1/jobs', onPlate([{ at: [430, 60], kind: 'corner' }]));
+    const badKind2 = await call('POST', 'v1/jobs', onPlate([{ at: [430, 60], kind: 'star' }]));
+    ok(badKind.status >= 400 && /toward/.test(JSON.stringify(badKind.data)) && badKind2.status >= 400 && /unknown registration mark kind/.test(JSON.stringify(badKind2.data)),
+      'a corner without toward, or an unknown mark kind: the job is refused', JSON.stringify([badKind.data, badKind2.data]));
+
     // the sheet laid 40 mm away from where the job expects it: mark 1 isn't found, the job waits,
     // the camera is jogged over the real mark by hand (jogs and the camera picture allowed
     // meanwhile), Accept, the dot finder takes it from there, and marks 2 and 3 follow by themselves

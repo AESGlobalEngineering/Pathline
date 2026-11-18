@@ -112,12 +112,16 @@ function start(opts = {}) {
   // that's shifted and turned a little, all lit unevenly (25 … 100 % across the picture); the
   // machine itself is 1.5 mm/m long in X and 0.03° out of square
   const sheet = (p) => { const a = (0.3 * Math.PI) / 180; return [0.8 + p[0] * Math.cos(a) - p[1] * Math.sin(a), -0.5 + p[0] * Math.sin(a) + p[1] * Math.cos(a)]; };
+  // and a steel plate on white: drawn 200 × 190 mm from (430, 60) with 8 mm holes at (450, 80),
+  // (610, 80) and (450, 230); laid turned 0.6° about its corner and moved 1.2, −0.7 mm
+  const plateAt = (p) => { const a = (0.6 * Math.PI) / 180, dx = p[0] - 430, dy = p[1] - 60; return [431.2 + dx * Math.cos(a) - dy * Math.sin(a), 59.3 + dx * Math.sin(a) + dy * Math.cos(a)]; };
   const simVision = opts.sim ? {
     forceSim: true,
     sim: {
       truth: { offset: [41.2, 12.9], pixel: 0.08, rotation: 90, error: (p) => [p[0] * 1.0015 + p[1] * 0.0005236, p[1]] },
       scene: {
         dots: [[40, 25], [340, 25], [40, 215]].map((p) => { const q = sheet(p); return { x: q[0], y: q[1], d: 5 }; }),
+        plates: [{ pts: [[430, 60], [630, 60], [630, 250], [430, 250]].map(plateAt), v: 100, holes: [[450, 80], [610, 80], [450, 230]].map((p) => { const q = plateAt(p); return { x: q[0], y: q[1], d: 8 }; }) }],
         // the bed board's first corner covered (as one out of the camera's reach): the scan has
         // to carry on without it
         // (bigger than the picture, so no edge of it shows round the corner)
