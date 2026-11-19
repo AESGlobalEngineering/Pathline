@@ -508,7 +508,8 @@ class Machine {
     try {
       for (const [k, seg] of files.entries()) {
         this.st.message = 'Sending ' + job.name + ' to the machine' + (files.length > 1 ? ' (' + (k + 1) + ' of ' + files.length + ')' : '');
-        const n = await this.link.storeFile(seg.data, names[k]);
+        const label = this.st.message;
+        const n = await this.link.storeFile(seg.data, names[k], { progress: (f) => { this.st.message = label + ' · ' + Math.round(f * 100) + ' %'; } });
         this.log('sent ' + job.name + ' to the machine as ' + names[k] + ' (file ' + n + ', ' + seg.data.length + ' bytes), not started');
       }
     } catch (e) {
@@ -755,7 +756,10 @@ class Machine {
             if (this.zaxis) this.zaxis.position(p, this.st.progress);
             if (p.state === 'paused' && !ctl.paused) this.st.message = p.interlock ? 'Paused: lid open' : 'Paused on the machine';
           };
-          await this.link.send(seg, { ...ctl, get aborted() { return ctl.aborted; }, onReply: follow });
+          // a knife job goes into the controller's memory first, then runs: the screen shows how far the upload is
+          const upload = seg.kind === 'file' ? (f) => { this.st.message = 'Sending ' + job.name + ' to the controller · ' + Math.round(f * 100) + ' %'; } : undefined;
+          await this.link.send(seg, { ...ctl, get aborted() { return ctl.aborted; }, onReply: follow, progress: upload });
+          if (upload) this.st.message = 'Running ' + job.name;
           const sentAt = Date.now();
           let idle = 0, idleSince = null;
           // the wait between status checks (cfg.trotec.pollMs, 300 ms; a test setting): the laser

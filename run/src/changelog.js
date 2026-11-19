@@ -5,6 +5,13 @@
 
 module.exports = [
   {
+    version: '0.7.15', date: '19 Nov 2026',
+    added: [
+      'Ruida uploads are quicker. The controller\'s list of files is kept after the first look, so later uploads read one file name (or none) instead of every file\'s name again, which slowed down as Send to machine filled its memory; the whole list is read again only when files were added or deleted on the panel. A file name that doesn\'t come back costs 1.5 s, not 4. The job\'s name and end go in the same packets as the job itself.',
+      'While a knife job goes into the controller, the screen shows how far it has got ("Sending … to the controller · 40 %"), for Start and Send to machine. Each upload is logged with its size, packets and time: looking for the old file, sending and checking.'
+    ]
+  },
+  {
     version: '0.7.14', date: '19 Nov 2026',
     added: [
       'Punching on plotters and routers (Pathline Prepare 1.6.18): a process set to Punch strikes once at each point Prepare sends, with the tool up in between (spaced along a line, or one at a shape\'s centre). The queue preview shows each strike as a ring. Lasers refuse punch jobs.',

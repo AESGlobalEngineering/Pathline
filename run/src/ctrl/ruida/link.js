@@ -160,16 +160,19 @@ class RuidaLink {
     this.NAK = swizzleByte(0xcf, m);
   }
 
-  // splits raw commands into packets on command boundaries
+  // splits raw commands into packets on command boundaries; returns how many packets went.
+  // ctl.progress(fraction), if given, follows the bytes sent (at most every 2 %)
   async sendRaw(raw, ctl = {}) {
     const cmds = commands(raw);
     let chunk = [];
-    let size = 0;
+    let size = 0, sent = 0, packets = 0, told = 0;
+    const tell = () => { if (ctl.progress && raw.length && (sent / raw.length - told >= 0.02 || sent === raw.length)) { told = sent / raw.length; ctl.progress(told); } };
     for (const c of cmds) {
-      if (ctl.aborted) return;
+      if (ctl.aborted) return packets;
       if (size + c.length > MAX_PACKET && chunk.length) {
         const b = Buffer.concat(chunk);
         await this.serial(() => this.packetNow(b));
+        packets++; sent += b.length; tell();
         chunk = []; size = 0;
       }
       chunk.push(c); size += c.length;
@@ -177,7 +180,9 @@ class RuidaLink {
     if (chunk.length && !ctl.aborted) {
       const b = Buffer.concat(chunk);
       await this.serial(() => this.packetNow(b));
+      packets++; sent += b.length; tell();
     }
+    return packets;
   }
 
   query(addr) {
@@ -230,7 +235,8 @@ class RuidaLink {
       const answer = new Promise((resolve, reject) => {
         const a = { n, resolve };
         this.names.push(a);
-        setTimeout(() => { const i = this.names.indexOf(a); if (i >= 0) { this.names.splice(i, 1); reject(new Error('No answer')); } }, 4000);
+        // 1.5 s, as for any other answer (it was 4 s: each name that didn't come back cost that)
+        setTimeout(() => { const i = this.names.indexOf(a); if (i >= 0) { this.names.splice(i, 1); reject(new Error('No answer')); } }, 1500);
       });
       await this.packetNow(Buffer.from([0xe8, 0x01, (n >> 7) & 0x7f, n & 0x7f]));
       return answer;
@@ -256,32 +262,66 @@ class RuidaLink {
   // E8 02 · E7 01 name · the file · E7 00 · DA 01 06 20 …. A file already there with that name
   // is deleted first; nothing else is touched. Returns the file's number. Names are kept to
   // 8 capitals and digits (the panel's file list; MeerK40t's emulator answers 8 capitals).
+  // ctl.progress(fraction): called as the file goes (the screen shows it)
   async storeFile(body, name, ctl = {}) {
     const NAME = fileNameFor(name);
     const idx = (n) => [(n >> 7) & 0x7f, n & 0x7f];
+    const t0 = Date.now();
     await this.sendRaw(Buffer.from([0xd8, 0x6b]));
     await this.sendRaw(Buffer.from([0xd8, 0x6a]));
+    // the file already there with this name: from the list kept since the last look (one name
+    // read to confirm it) rather than every file's name read again; the whole list is read only
+    // when the number of files has changed since (files added or deleted on the panel)
     const count = await this.query(MEM.files);
-    // a name that doesn't come back is skipped, not fatal (one lost answer stopped whole jobs)
-    for (let n = count; n >= 1; n--) {
-      if (ctl.aborted) return null;
-      const got = await this.fileName(n).catch(() => null);
-      if (got === null || got.trim().toUpperCase() !== NAME) continue;
-      await this.sendRaw(Buffer.from([0xe8, 0x00, ...idx(n), ...idx(n)]));
-      this.log('ruida: replaced file ' + n + ' (' + NAME + ')');
-      break;
+    const n0 = await this.findFile(NAME, count, ctl);
+    if (ctl.aborted) return null;
+    let files = count;
+    if (n0) {
+      await this.sendRaw(Buffer.from([0xe8, 0x00, ...idx(n0), ...idx(n0)]));
+      this.log('ruida: replaced file ' + n0 + ' (' + NAME + ')');
+      files--;
+      if (this.fileList) this.fileList.splice(n0 - 1, 1);
     }
-    if (ctl.aborted) return null;
-    await this.sendRaw(Buffer.from([0xe8, 0x02, 0xe7, 0x01, ...Buffer.from(NAME + '\0', 'latin1')]));
-    await this.sendRaw(body, ctl);
-    if (ctl.aborted) return null;
-    await this.sendRaw(Buffer.from([0xe7, 0x00, 0xda, 0x01, 0x06, 0x20, ...new Array(10).fill(0), 0xd7]));
+    const t1 = Date.now();
+    // name, file and end in one go: the controller's acknowledgement is waited for per packet,
+    // so the start and end ride along with the file's own packets
+    const head = Buffer.from([0xe8, 0x02, 0xe7, 0x01, ...Buffer.from(NAME + '\0', 'latin1')]);
+    const tail = Buffer.from([0xe7, 0x00, 0xda, 0x01, 0x06, 0x20, ...new Array(10).fill(0), 0xd7]);
+    const packets = await this.sendRaw(Buffer.concat([head, body, tail]), ctl);
+    if (ctl.aborted) { this.fileList = null; return null; }
+    const t2 = Date.now();
     // it's the last file now: check its name (asked twice: the controller may still be saving)
     const n = await this.query(MEM.files);
     let got = await this.fileName(n).catch(() => null);
     if (got === null) { await sleep(500); got = await this.fileName(n).catch(() => null); }
-    if (got === null || got.trim().toUpperCase() !== NAME) throw new Error('The job didn\'t arrive in the controller\'s memory (file ' + n + ' is ' + (got === null ? 'not answering' : JSON.stringify(got)) + ', not ' + NAME + ')');
+    if (got === null || got.trim().toUpperCase() !== NAME) { this.fileList = null; throw new Error('The job didn\'t arrive in the controller\'s memory (file ' + n + ' is ' + (got === null ? 'not answering' : JSON.stringify(got)) + ', not ' + NAME + ')'); }
+    if (this.fileList && n === files + 1) this.fileList.push(NAME); else this.fileList = null;
+    const s = (ms) => (ms / 1000).toFixed(1) + ' s';
+    this.log('ruida: ' + NAME + ' stored as file ' + n + ': ' + (body.length / 1024).toFixed(1) + ' KB in ' + packets + ' packets, ' + s(Date.now() - t0) +
+      ' (looking for the old one ' + s(t1 - t0) + ', sending ' + s(t2 - t1) + ', checking ' + s(Date.now() - t2) + ')');
     return n;
+  }
+
+  // the number of the file called NAME in the controller's memory, or 0. Keeps the list of names
+  // (this.fileList) for next time. A name that doesn't come back is skipped, not fatal.
+  async findFile(NAME, count, ctl = {}) {
+    const read = async (n) => { const g = await this.fileName(n).catch(() => null); return g === null ? null : g.trim().toUpperCase(); };
+    if (this.fileList && this.fileList.length === count) {
+      const k = this.fileList.lastIndexOf(NAME);
+      if (k < 0) return 0;
+      if ((await read(k + 1)) === NAME) return k + 1;
+      // not where it was: read them all again
+    }
+    const list = new Array(count).fill(null);
+    let found = 0;
+    for (let n = count; n >= 1; n--) {
+      if (ctl.aborted) return 0;
+      list[n - 1] = await read(n);
+      if (!found && list[n - 1] === NAME) found = n;
+    }
+    // kept only when every name came back
+    this.fileList = list.every((x) => x !== null) ? list : null;
+    return found;
   }
 
   // start file n from the controller's memory (E8 03 n)
