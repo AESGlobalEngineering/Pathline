@@ -126,8 +126,15 @@ function markArea(offset, bed, travel) {
 }
 
 // What Pathline sees in GET /machine
+// The machine's origin corner as Pathline Prepare draws it (tl, tr, bl, br): a Ruida's is the one
+// set in Setup → Controller → Machine origin (top right on a YC-1610), the Trotec's top left
+function originOf(cfg) {
+  const o = cfg.controller === 'ruida' ? (cfg.ruida || {}).origin : cfg.origin;
+  return ['tl', 'tr', 'bl', 'br'].includes(o) ? o : 'tl';
+}
+
 function machineView(cfg) {
-  const base = { bed: cfg.bed, speed: cfg.speed, acc: cfg.acc, origin: cfg.origin, units: cfg.units, home: cfg.home, prefix: cfg.prefix };
+  const base = { bed: cfg.bed, speed: cfg.speed, acc: cfg.acc, origin: originOf(cfg), units: cfg.units, home: cfg.home, prefix: cfg.prefix };
   if (machineType(cfg) === 'plotter') {
     return {
       ...base,
@@ -167,4 +174,4 @@ function machineView(cfg) {
   };
 }
 
-module.exports = { dataDir, defaults, load, save, merge, machineView, machineType, withoutMachine, travelBox, markArea, PRESETS, PLOTTER_HEADS };
+module.exports = { dataDir, defaults, load, save, merge, machineView, originOf, machineType, withoutMachine, travelBox, markArea, PRESETS, PLOTTER_HEADS };
