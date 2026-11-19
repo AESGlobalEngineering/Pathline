@@ -80,7 +80,8 @@ All are `POST` with a JSON body and return a small JSON object.
 |---|---|---|
 | `/jog` | `{ axis: "x" \| "y" \| "z", distance }` or `{ x, y }` | Relative jog, or absolute move |
 | `/home` | `{}` | Home all axes |
-| `/frame` | `{ box: [x0, y0, x1, y1], path: [[x, y]…], speed }` | Trace the job outline (laser pointer / low power). `path` is the box's corners in order: from the top-right corner down, left, up and back right (Prepare 1.6.18+). `speed` is mm/s (the machine's travel speed); Run caps it at the machine's own speed. Older Prepare sends `box` only: Run then traces the box in that same order at its default speed. |
+| `/frame` | `{ box: [x0, y0, x1, y1], path: [[x, y]…], speed }` | Trace the job outline (laser pointer / low power). `path` is the box's corners in order: from the top-right corner down, left, up and back right (Prepare 1.6.18+). `speed` is mm/s (the machine's travel speed); Run caps it at the machine's own speed. Run always traces the box in that order and goes back to where the head was; `path` only gives the box when `box` is missing. Older Prepare sends `box` only: Run uses its default speed. |
+| `/send` | `{ id: "J0111" }` | Ruida only: store the queued job in the controller's memory under its number, not started, to run later from the machine's panel (`/start` runs it now) |
 | `/start`, `/pause`, `/resume`, `/stop` | `{}` | Job control. `/stop` must always be accepted. |
 | `/io` | `{ air?, pointer?, vacuum? }` | Switch outputs |
 | `/autofocus` | `{}` | Laser auto-focus |

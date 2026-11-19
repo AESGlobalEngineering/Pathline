@@ -227,30 +227,47 @@ class RuidaLink {
     });
   }
 
-  // RDD6584 knife job (knife.js): as VCutWorks does it, replace the file called START in the
-  // controller's memory with this one, then start it. Only a file named exactly START is
-  // ever deleted: the operator's own stored files are left alone.
-  async runFile(body, ctl = {}) {
-    const NAME = 'START';
+  // A file into the controller's memory under `name` (as RDWorks' Download and VCutWorks do):
+  // E8 02 · E7 01 name · the file · E7 00 · DA 01 06 20 …. A file already there with that name
+  // is deleted first; nothing else is touched. Returns the file's number. Names are kept to
+  // 8 capitals and digits (the panel's file list; MeerK40t's emulator answers 8 capitals).
+  async storeFile(body, name, ctl = {}) {
+    const NAME = fileNameFor(name);
     const idx = (n) => [(n >> 7) & 0x7f, n & 0x7f];
     await this.sendRaw(Buffer.from([0xd8, 0x6b]));
     await this.sendRaw(Buffer.from([0xd8, 0x6a]));
     const count = await this.query(MEM.files);
+    // a name that doesn't come back is skipped, not fatal (one lost answer stopped whole jobs)
     for (let n = count; n >= 1; n--) {
-      if ((await this.fileName(n)) !== NAME) continue;
+      if (ctl.aborted) return null;
+      const got = await this.fileName(n).catch(() => null);
+      if (got === null || got.trim().toUpperCase() !== NAME) continue;
       await this.sendRaw(Buffer.from([0xe8, 0x00, ...idx(n), ...idx(n)]));
       this.log('ruida: replaced file ' + n + ' (' + NAME + ')');
       break;
     }
-    if (ctl.aborted) return;
+    if (ctl.aborted) return null;
     await this.sendRaw(Buffer.from([0xe8, 0x02, 0xe7, 0x01, ...Buffer.from(NAME + '\0', 'latin1')]));
     await this.sendRaw(body, ctl);
+    if (ctl.aborted) return null;
     await this.sendRaw(Buffer.from([0xe7, 0x00, 0xda, 0x01, 0x06, 0x20, ...new Array(10).fill(0), 0xd7]));
-    // it's the last file now: check its name before starting it
+    // it's the last file now: check its name (asked twice: the controller may still be saving)
     const n = await this.query(MEM.files);
-    if ((await this.fileName(n)) !== NAME) throw new Error('The job didn\'t arrive in the controller\'s memory (file ' + n + ' isn\'t ' + NAME + ')');
-    if (ctl.aborted) return;
-    await this.sendRaw(Buffer.from([0xe8, 0x03, ...idx(n)]));
+    let got = await this.fileName(n).catch(() => null);
+    if (got === null) { await sleep(500); got = await this.fileName(n).catch(() => null); }
+    if (got === null || got.trim().toUpperCase() !== NAME) throw new Error('The job didn\'t arrive in the controller\'s memory (file ' + n + ' is ' + (got === null ? 'not answering' : JSON.stringify(got)) + ', not ' + NAME + ')');
+    return n;
+  }
+
+  // start file n from the controller's memory (E8 03 n)
+  startFile(n) { return this.sendRaw(Buffer.from([0xe8, 0x03, (n >> 7) & 0x7f, n & 0x7f])); }
+
+  // Run now (RDD6584 knife job, knife.js): as VCutWorks does it, the file called START is
+  // replaced with this one, then started. Only a file named exactly START is deleted.
+  async runFile(body, ctl = {}) {
+    const n = await this.storeFile(body, 'START', ctl);
+    if (n === null || ctl.aborted) return;
+    await this.startFile(n);
   }
   // Moves by hand go one axis at a time (D9 00 / D9 01): the two-axis D9 10 isn't the same
   // command on every controller (see rd.js). o.axis: only that axis moves (jogging).
@@ -260,12 +277,14 @@ class RuidaLink {
     for (const [i, a] of axes.entries()) {
       if (i > 0) await this.waitStill();
       if (!this.relMoves) { await this.sendRaw(Buffer.from(a === 'x' ? RD.rapidX(to.x, o.light) : RD.rapidY(to.y, o.light))); continue; }
-      // RDD6584: speed, then the distance from where the head is (or is already going)
+      // RDD6584: speed, then the distance from where the head is (or is already going). Always
+      // the plain move (02), as VCutWorks sends: the "with red light" option (03) is a laser's,
+      // was only ever sent by Frame, and framing went wrong on the YC-1610
       const from = await this.movingFrom(a);
       const d = Math.round(to[a] - from);
       if (Math.abs(d) < 1) continue;
       const mm = Math.max(1, Math.min(this.cfg.speed || 200, o.speed || 100));
-      await this.sendRaw(Buffer.from([...RD.speed(mm), ...(a === 'x' ? RD.rapidX(d, o.light) : RD.rapidY(d, o.light))]));
+      await this.sendRaw(Buffer.from([...RD.speed(mm), ...(a === 'x' ? RD.rapidX(d, false) : RD.rapidY(d, false))]));
       this.cmd = { ...(this.cmd || {}), [a]: to[a], at: Date.now() };
     }
   }
@@ -382,5 +401,12 @@ async function find(log, targets) {
   return list;
 }
 
+// a job's name as the controller keeps it: capitals and digits, at most 8 ("J0111")
+function fileNameFor(name) {
+  const s = String(name || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
+  return s || 'JOB';
+}
+
 module.exports = RuidaLink;
 module.exports.find = find;
+module.exports.fileNameFor = fileNameFor;

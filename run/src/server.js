@@ -472,6 +472,8 @@ function start(opts = {}) {
     'POST /jobs/order': (b) => { store.order(Array.isArray(b.ids) ? b.ids : []); return { ok: true }; },
     'POST /jobs': (b) => { const j = queueJob(b, 'pathline'); return { id: j.id, status: 'queued' }; },
     'POST /start': (b) => machine.start(b || {}),
+    // Ruida: put a queued job into the controller's memory, to run later from its panel
+    'POST /send': (b) => machine.sendToMachine(b && b.id),
     'POST /pause': () => machine.pause(),
     'POST /resume': () => machine.resume(),
     // (who stopped it goes into History: this screen, or Pathline on another computer)

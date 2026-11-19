@@ -671,6 +671,8 @@ function queueView() {
     '<button class="run-btn" data-a="startPause" aria-label="' + (st.state === 'running' ? 'Pause' : st.state === 'paused' ? 'Resume' : 'Start') + '"' + (!isRun && cantStart ? ' disabled' : '') + ' style="background:' + (st.state === 'running' ? 'var(--pause)' : 'var(--go)') + ';cursor:pointer">' + ic(st.state === 'running' ? ICON.pause : ICON.play, 28) + '</button>' +
     '<button class="run-btn stop" data-a="stop" aria-label="Stop" style="color:var(--err)">' + ic(ICON.stop, 24) + '</button>' +
     '<button class="tb" data-a="frame" style="height:64px;padding:0 18px"' + (!shown || isRun ? ' disabled' : '') + '>' + ic(ICON.frame) + 'Frame</button>' +
+    // Ruida: Start runs the job now; Send to machine stores it on the controller, to run from its panel
+    (cfg().controller === 'ruida' ? '<button class="tb" data-a="sendJob" style="height:64px;padding:0 18px"' + (!job || job.status !== 'queued' || isRun ? ' disabled' : '') + ' title="Store the job in the controller\'s memory, to run later from the machine\'s panel">' + ic('M12 4v11 M7 10l5 5 5-5 M5 20h14') + 'Send to machine</button>' : '') +
     // the head Z axis: scan the sheet's height under the chosen job
     (S.zaxis && S.zaxis.enabled ? '<button class="tb" data-a="zScan" style="height:64px;padding:0 18px"' + (!shown || isRun || S.zaxis.state !== 'ready' ? ' disabled' : '') + ' title="The ultrasonic sensor measures the sheet under this job, so the nozzle follows it">' + ic('M4 17c3-4 5-4 8 0s5 4 8 0 M4 11c3-4 5-4 8 0s5 4 8 0') + 'Scan height</button>' : '') +
     '<div style="flex:1 1 280px;min-width:0;display:flex;flex-direction:column;gap:8px">' +
@@ -1456,6 +1458,12 @@ const H = {
     if (r.message) toast(r.message);
   },
   stop: act(async () => call('POST', API('/stop'), {})),
+  sendJob: act(async () => {
+    if (!ui.sel) throw new Error('Select a job to send');
+    toast('Sending to the machine…');
+    const r = await call('POST', API('/send'), { id: ui.sel });
+    if (r.message) toast(r.message);
+  }),
   frame: act(async () => {
     const id = running() ? S.status.job : ui.sel;
     let b = jobBox(ui.pkgs[id]);

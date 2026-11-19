@@ -7,6 +7,7 @@
 const { makeLink, controller } = require('./ctrl');
 const plan = require('./job/plan');
 const validate = require('./job/validate');
+const { fileNameFor } = require('./ctrl/ruida/link');
 const anchorJob = require('./job/anchor');
 const fitting = require('./vision/fit');
 const config = require('./config');
@@ -315,18 +316,27 @@ class Machine {
     return { ok: true };
   }
 
-  // opts.path: the corners to trace, in order (Prepare 1.6.18); none: the box from its top right
-  // corner, down, left, up and right again (bed Y runs to the front, so y0 is the top).
+  // Always the same way round, as the owner asked: from the box's top right corner down, left, up
+  // and right again (bed Y runs to the front, so y0 is the top), then back to where the head was
+  // (read from the machine now, not the last screen refresh). A path Prepare sends only gives the
+  // box when `box` is missing; its order isn't followed.
   // opts.speed: mm/s, capped at the machine's travel speed; none: the link's own default
   async frame(box, opts = {}) {
     this.guard();
+    const okPath = Array.isArray(opts.path) && opts.path.length >= 2 && opts.path.every((q) => Array.isArray(q) && Number.isFinite(q[0]) && Number.isFinite(q[1]));
+    if (!(Array.isArray(box) && box.length === 4 && box.every(Number.isFinite)) && okPath) {
+      const xs = opts.path.map((q) => q[0]), ys = opts.path.map((q) => q[1]);
+      box = [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
+    }
     if (!Array.isArray(box) || box.length !== 4 || !box.every(Number.isFinite)) throw Object.assign(new Error('box must be [x0, y0, x1, y1]'), { code: 400 });
     const [x0, y0, x1, y1] = [Math.min(box[0], box[2]), Math.min(box[1], box[3]), Math.max(box[0], box[2]), Math.max(box[1], box[3])];
-    const okPath = Array.isArray(opts.path) && opts.path.length >= 2 && opts.path.every((q) => Array.isArray(q) && Number.isFinite(q[0]) && Number.isFinite(q[1]));
-    const corners = (okPath ? opts.path : [[x1, y0], [x1, y1], [x0, y1], [x0, y0], [x1, y0]]).map((q) => [this.clampX(q[0]), this.clampY(q[1])]);
+    const corners = [[x1, y0], [x1, y1], [x0, y1], [x0, y0], [x1, y0]].map((q) => [this.clampX(q[0]), this.clampY(q[1])]);
     const max = Number(this.cfg.speed) > 0 ? Number(this.cfg.speed) : Infinity;
     const speed = Number(opts.speed) > 0 ? Math.min(Number(opts.speed), max) : undefined;
+    if (this.st.link === 'online') { try { this.apply(await this.link.poll()); } catch (e) { /* the last position */ } }
     const start = { x: this.st.pos.x, y: this.st.pos.y };
+    this.log('frame: X ' + x0.toFixed(1) + '–' + x1.toFixed(1) + ', Y ' + y0.toFixed(1) + '–' + y1.toFixed(1) + ' mm' + (speed ? ' at ' + speed + ' mm/s' : '') +
+      (Number.isFinite(start.x) ? ', back to X ' + start.x.toFixed(1) + ' Y ' + start.y.toFixed(1) : ', head position unknown: it stays at the last corner'));
     this.framing = true;
     this.st.state = 'framing';
     this.st.message = 'Framing';
@@ -336,12 +346,12 @@ class Machine {
           if (!this.framing) break;
           const [cx, cy] = this.corrected([x, y]);
           await this.link.moveTo(cx, cy, speed ? { light: true, speed } : { light: true });
-          await this.waitIdle(60000, 150);
+          await this.waitIdle(60000, 400);
         }
         // then back to where the head was
         if (this.framing && Number.isFinite(start.x) && Number.isFinite(start.y)) {
           await this.link.moveTo(start.x, start.y, speed ? { speed } : {});
-          await this.waitIdle(30000, 150);
+          await this.waitIdle(60000, 400);
         }
       } catch (e) { this.log('frame: ' + e.message); }
       this.framing = false;
@@ -440,6 +450,46 @@ class Machine {
       this.camBusy = null; this.camCtl = null;
       if (this.st.state !== 'alarm') this.st.message = this.st.link === 'online' ? 'Ready' : this.st.message;
     }
+  }
+
+  // Send to machine (Ruida): the job goes into the controller's memory under its number (J0111),
+  // not started, to be run later from the machine's own panel, as RDWorks' Download does. Start
+  // runs it now instead. A job over several beds is one file per bed (J0111A, J0111B …, each
+  // with its feed); dwells between passes and registration marks can't go in a file.
+  async sendToMachine(id) {
+    if (this.cfg.controller !== 'ruida') throw busyErr('Only a Ruida controller keeps jobs in its memory: use Start');
+    if (this.run) throw busyErr('A job is running');
+    if (this.framing) throw busyErr('The machine is framing');
+    this.guard({ lidOpenOk: true });
+    if (!this.link.storeFile) throw busyErr('This connection can\'t store files on the controller');
+    const job = this.store.jobs.find((j) => j.id === id && j.status === 'queued');
+    if (!job) throw Object.assign(new Error('No such queued job'), { code: 404 });
+    if (job.anchorAtStart && !job.anchor) throw busyErr('"' + job.name + '" is anchored to the toolhead: that happens at Start. Turn Anchor to toolhead off to send it to the machine.');
+    const pkg = this.store.runPkg(job.id);
+    if (!(pkg.toolpath || []).some((s) => validate.WORK.has(s.type))) throw busyErr('"' + job.name + '": ' + validate.nothingToRun(pkg));
+    if (pkg.toolpath.some((s) => s.type === 'inspect') && this.cfg.regMarks !== 'ignore') throw busyErr('"' + job.name + '" uses registration marks, which need Pathline Run: use Start');
+    const opts = { file: true, card: this.info && this.info.cardId ? this.info.cardId & 0xffff : undefined };
+    let program;
+    try { program = this.compile(pkg, opts); } catch (e) { throw Object.assign(new Error('Couldn\'t convert "' + job.name + '": ' + e.message), { code: 409 }); }
+    const files = program.segments.filter((s) => s.kind === 'file' || s.kind === 'stream');
+    if (!files.length) throw busyErr('"' + job.name + '": nothing to send');
+    const base = fileNameFor(job.id).slice(0, files.length > 1 ? 7 : 8);
+    const names = files.map((s, k) => (files.length > 1 ? base + String.fromCharCode(65 + (k % 26)) : base));
+    const left = (pkg.toolpath || []).some((s) => s.type === 'dwell');
+    this.st.message = 'Sending ' + job.name + ' to the machine';
+    try {
+      for (const [k, seg] of files.entries()) {
+        this.st.message = 'Sending ' + job.name + ' to the machine' + (files.length > 1 ? ' (' + (k + 1) + ' of ' + files.length + ')' : '');
+        const n = await this.link.storeFile(seg.data, names[k]);
+        this.log('sent ' + job.name + ' to the machine as ' + names[k] + ' (file ' + n + ', ' + seg.data.length + ' bytes), not started');
+      }
+    } catch (e) {
+      this.st.message = 'Ready';
+      throw busyErr('Couldn\'t send "' + job.name + '" to the machine: ' + e.message);
+    }
+    const msg = 'Sent to the machine as ' + names.join(', ') + ': run ' + (names.length > 1 ? 'them in turn' : 'it') + ' from the machine\'s panel' + (left ? ' (dwells between passes are left out)' : '');
+    this.st.message = msg;
+    return { sent: names, message: msg };
   }
 
   // b.id: run that job; b.ids: run those jobs one after another (Queue → Select), in queue
