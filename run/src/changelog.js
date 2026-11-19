@@ -5,7 +5,7 @@
 
 module.exports = [
   {
-    version: '0.7.13', date: '18 Nov 2026',
+    version: '0.7.14', date: '19 Nov 2026',
     added: [
       'Punching on plotters and routers (Pathline Prepare 1.6.18): a process set to Punch strikes once at each point Prepare sends, with the tool up in between (spaced along a line, or one at a shape\'s centre). The queue preview shows each strike as a ring. Lasers refuse punch jobs.',
       'Frame always goes the same way round: from the job\'s top right corner down, left, up and right, then back to where the head was when Frame was pressed (read from the machine then). It runs at the speed Pathline Prepare sends, capped at the machine\'s own speed, instead of a slow 100 mm/s on knife plotters. On RDD6584 knife controllers framing now sends the plain move VCutWorks uses: it sent the laser\'s "with red light" move, which the YC-1610 didn\'t follow as expected.',
@@ -13,7 +13,12 @@ module.exports = [
       'Pathline Prepare is told the machine\'s origin corner: a Ruida\'s from Setup → Controller → Machine origin (top right on a YC-1610), the Trotec\'s top left. Prepare draws its origin dot there and times travel from it; it was always told top left.',
       'Ruida: the controller\'s own work area is read when Pathline Run connects (in the Diagnostics log). A job or frame that reaches past it is refused with where and by how much, instead of being sent: the controller ignores moves and jobs past its area without a word (on the router, two jobs reaching Y 1571 mm on the 1600 mm bed never moved, and Frame didn\'t trace them). Frame also stops, goes back and says so when the head doesn\'t reach a corner.',
       'RDD6584: a bed that should take a while but ends with the head never having moved is reported as not run, not Completed. A job was kept as Completed after 13 s with nothing cut, and home was then learnt from wherever the head stood.',
-      'Ruida uploads: a file name the controller doesn\'t answer for while looking for the old START is skipped, instead of stopping the job, and the check that the job arrived asks twice.',
+      'Ruida uploads: a file name the controller doesn\'t answer for while looking for the old START is skipped, instead of stopping the job, and the check that the job arrived asks twice.'
+    ]
+  },
+  {
+    version: '0.7.13', date: '18 Nov 2026',
+    added: [
       'Registration marks that aren\'t printed. A hole cut through a steel plate, with white card or paper under it, is found as a light disc in the darker steel (or a dark one where the steel shines brighter). Marks drawn as ordinary dots are looked for as holes too when no printed dot is there, so this works with jobs from today\'s Pathline Prepare. A plate\'s own corner, lying on a white background, is found from the two straight edges that meet there. The job is then only moved and turned, never stretched, and one corner is enough because its edges give the turn. Corners need a Pathline Prepare that sends them. When one isn\'t found, the jog dialog says to put the camera over the plate\'s corner. Rounded corners (Pathline Prepare 1.6.16 sends the radius) are found where the plate\'s straight edges would meet: the camera looks from a little inside the plate, and each edge is fitted only clear of the rounding. If the radius is too big for the camera to see 3 mm of straight edge past it, the jog dialog says so.',
       'Print and cut with engraving checks how far the sheet lies turned from the job as drawn, from its registration marks. The engraving lines always run along the machine\'s X, so a turned sheet gets its lines at that angle across the parts. Up to 5° runs as before. Between 5° and 10° the job waits, beam off, and asks: Continue runs it as it lies, Stop leaves it uncut. More than 10° stops before anything is cut and says to turn the sheet back. Jobs that only cut aren\'t asked.',
       'Trotec engraving times as Ruby really engraves: each line across the island and its overscan at the set speed, a turn of about 0.1 s at each end, and 0.2 s per island, fitted on the calibration bars and two 500 DPI stainless jobs. Those two jobs had been estimated 5–6 % long; they now come out −0.6 % and +0.9 %. The screen draws the head through each island in that time. The estimate\'s fit now works each past job out again with the current model, placed where it was cut, so it doesn\'t pull the scale back towards the old model.',
