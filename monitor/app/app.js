@@ -220,7 +220,7 @@ function addMachineCard() {
   if (Date.now() > c.until) return '<div class="set"><span class="body">That code has run out<span class="s">It lasts 10 minutes</span></span><button class="tb" data-a="addMachine">New code</button></div>';
   const step = (n, html) => '<li><span class="ord">' + n + '</span><span>' + html + '</span></li>';
   return '<div class="hint addm"><div class="code mono" aria-label="Code">' + esc(c.code.slice(0, 3) + '-' + c.code.slice(3)) + '</div>' +
-    '<ol class="steps">' + step(1, 'At the machine, open Pathline Run\'s <b>Settings</b>, then <b>Pathline Monitor</b>') +
+    '<ol class="steps">' + step(1, 'At the machine, open Pathline Run\'s <b>Setup</b>, then <b>Pathline Monitor</b>') +
     step(2, 'Type this address: <b class="mono">' + esc(location.host) + '</b>') +
     step(3, 'Type the code above and press <b>Connect</b>. It works once, until <span class="mono">' + clock(c.until) + '</span>') + '</ol>' +
     '<button class="tb" data-a="codeDone">Done</button></div>';

@@ -10,7 +10,7 @@ const validate = require('./job/validate');
 const anchorJob = require('./job/anchor');
 const fitting = require('./vision/fit');
 const config = require('./config');
-const { Vision, reach, reachInfo, fitInfo } = require('./vision/vision');
+const { Vision, reach, reachInfo, fitInfo, placementCheck } = require('./vision/vision');
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const busyErr = (msg) => Object.assign(new Error(msg), { code: 409 });
@@ -315,25 +315,32 @@ class Machine {
     return { ok: true };
   }
 
-  async frame(box) {
+  // opts.path: the corners to trace, in order (Prepare 1.6.18); none: the box from its top right
+  // corner, down, left, up and right again (bed Y runs to the front, so y0 is the top).
+  // opts.speed: mm/s, capped at the machine's travel speed; none: the link's own default
+  async frame(box, opts = {}) {
     this.guard();
     if (!Array.isArray(box) || box.length !== 4 || !box.every(Number.isFinite)) throw Object.assign(new Error('box must be [x0, y0, x1, y1]'), { code: 400 });
-    const [x0, y0, x1, y1] = [this.clampX(box[0]), this.clampY(box[1]), this.clampX(box[2]), this.clampY(box[3])];
+    const [x0, y0, x1, y1] = [Math.min(box[0], box[2]), Math.min(box[1], box[3]), Math.max(box[0], box[2]), Math.max(box[1], box[3])];
+    const okPath = Array.isArray(opts.path) && opts.path.length >= 2 && opts.path.every((q) => Array.isArray(q) && Number.isFinite(q[0]) && Number.isFinite(q[1]));
+    const corners = (okPath ? opts.path : [[x1, y0], [x1, y1], [x0, y1], [x0, y0], [x1, y0]]).map((q) => [this.clampX(q[0]), this.clampY(q[1])]);
+    const max = Number(this.cfg.speed) > 0 ? Number(this.cfg.speed) : Infinity;
+    const speed = Number(opts.speed) > 0 ? Math.min(Number(opts.speed), max) : undefined;
     const start = { x: this.st.pos.x, y: this.st.pos.y };
     this.framing = true;
     this.st.state = 'framing';
     this.st.message = 'Framing';
     (async () => {
       try {
-        for (const [x, y] of [[x0, y0], [x1, y0], [x1, y1], [x0, y1], [x0, y0]]) {
+        for (const [x, y] of corners) {
           if (!this.framing) break;
           const [cx, cy] = this.corrected([x, y]);
-          await this.link.moveTo(cx, cy, { light: true });
-          await this.waitIdle(30000, 150);
+          await this.link.moveTo(cx, cy, speed ? { light: true, speed } : { light: true });
+          await this.waitIdle(60000, 150);
         }
         // then back to where the head was
         if (this.framing && Number.isFinite(start.x) && Number.isFinite(start.y)) {
-          await this.link.moveTo(start.x, start.y);
+          await this.link.moveTo(start.x, start.y, speed ? { speed } : {});
           await this.waitIdle(30000, 150);
         }
       } catch (e) { this.log('frame: ' + e.message); }
@@ -344,13 +351,15 @@ class Machine {
   }
 
   // true once the machine is idle, false if it still isn't after ms
-  async waitIdle(ms, minMs) {
+  // every: how often to ask (ms). The camera asks every 40 ms: the Trotec answers in 1 ms when
+  // idle, and each mark waits for two or three moves
+  async waitIdle(ms, minMs, every) {
     const t0 = Date.now();
     await sleep(minMs || 0);
     while (Date.now() - t0 < ms) {
       const p = this.apply(await this.link.poll());
       if (p.state === 'idle') return true;
-      await sleep(150);
+      await sleep(every || 150);
     }
     return false;
   }
@@ -479,7 +488,7 @@ class Machine {
     // as placed: moved to the head if the operator anchored it there
     const pkg = this.store.runPkg(job.id);
     // queued before Pathline Run checked for this: don't "complete" a job that does nothing
-    if (!(pkg.toolpath || []).some((s) => s.type === 'cut' || s.type === 'engrave')) throw busyErr('"' + job.name + '": ' + validate.nothingToRun(pkg));
+    if (!(pkg.toolpath || []).some((s) => validate.WORK.has(s.type))) throw busyErr('"' + job.name + '": ' + validate.nothingToRun(pkg));
     if (job.anchor) {
       try { validate.check(pkg, this.cfg); } catch (e) { throw busyErr('"' + job.name + '" anchored at the head: ' + e.message); }
     }
@@ -505,10 +514,24 @@ class Machine {
         throw Object.assign(busyErr('"' + job.name + '": ' + far.text), { detail: { ...far, job: job.name } });
       }
       this.execute(job, null, async (ctl, status) => {
+        const t0 = Date.now();
         const r = await this.vision.readMarks(pkg, ctl, status, { anchored: !!job.anchor });
+        // how long the marks took, a mark: the estimate learns it (cfg.trotec.markSec). Not when
+        // one was found by hand (the wait is the operator's)
+        const nMarks = (r.found || []).length;
+        if (this.run && this.run.job === job && nMarks && !r.byHand) this.run.markSec = (Date.now() - t0) / 1000 / nMarks;
         this.st.marks = r.found;
         // kept with the run: where the marks were expected and found (follow-fit.js rebuilds the job as cut)
-        if (this.run && this.run.job === job) this.run.placement = { ...(this.run.placement || {}), marks: { expected: r.expected, found: r.found, type: r.info && r.info.type } };
+        if (this.run && this.run.job === job) this.run.placement = { ...(this.run.placement || {}), marks: { expected: r.expected, found: r.found, type: r.info && r.info.type, height: r.height || null } };
+        // the sheet turned from the job as drawn: the engraving lines would cross the parts at that
+        // angle. Up to 5° runs, up to 10° asks (Continue or Stop), more stops before anything is cut
+        const turn = placementCheck(r.info, pkg, this.cfg);
+        if (turn.act !== 'run') this.log(job.name + ': sheet turned ' + turn.angle.toFixed(2) + '°: ' + (turn.act === 'ask' ? 'asking' : 'stopped'));
+        if (turn.act === 'stop') throw new Error(turn.text);
+        if (turn.act === 'ask') {
+          await this.waitForAngle(turn, ctl);
+          this.log(job.name + ': run with the sheet turned ' + turn.angle.toFixed(2) + '° (Continue pressed)');
+        }
         // the job as moved onto the marks: the screen follows the head along this one (the
         // package as sent sat ~150 mm away on the X8 sheet: no position fitted it, the head jumped)
         const placed = Vision.corrected(pkg, r.f);
@@ -548,7 +571,10 @@ class Machine {
     const startedAt = new Date().toISOString();
     // placement: where the job was put (anchored at the head; print and cut adds its marks), kept
     // with the run so the follow fit replays the job exactly where it was cut
-    this.run = { job, program, ctl, startedAt, z: z || null, placement: { anchor: job.anchor ? { x: job.anchor.x, y: job.anchor.y } : null } };
+    // (and the bed map it was sent through, by when it was made: data/bedmaps.json keeps them)
+    const vm = this.cfg.vision;
+    const mapAt = this.cfg.controller === 'trotec' && vm && vm.enabled && vm.mapOn !== false && vm.map ? vm.mapAt || 'unknown' : null;
+    this.run = { job, program, ctl, startedAt, z: z || null, placement: { anchor: job.anchor ? { x: job.anchor.x, y: job.anchor.y } : null, mapAt } };
     const runRef = this.run;
     job.status = 'running';
     job.progress = 0;
@@ -678,6 +704,8 @@ class Machine {
         if (ctl.aborted) result = 'Stopped';
       } catch (e) {
         result = 'Stopped';
+        // not stopped by anyone: what went wrong is why (History shows it)
+        if (!ctl.aborted && runRef) runRef.stopReason = e.message;
         this.log((ctl.aborted ? 'job stopped: ' : 'job failed: ') + e.message);
         await this.link.abort().catch(() => {});
         // Stop pressed (while reading marks, say) is not an alarm
@@ -701,10 +729,12 @@ class Machine {
           this.log('back to the start position, X ' + back.x.toFixed(1) + ' Y ' + back.y.toFixed(1));
         } catch (e) { this.log('return to start: ' + e.message); }
       }
-      this.store.finish(job, result, startedAt, this.cfg.removeDone);
+      const reason = result === 'Stopped' ? (runRef && runRef.stopReason ? runRef.stopReason : 'Stopped') + ' at ' + Math.round((this.st.progress || 0) * 100) + ' %' : null;
+      if (reason) this.log(job.name + ': ' + reason);
+      this.store.finish(job, result, startedAt, this.cfg.removeDone, reason);
       if (timeline.length && this.store.saveRun) this.store.saveRun(job, { startedAt, result, estimate: program ? program.seconds : null, steps: program ? program.segments.filter((s) => s.kind === 'stream').flatMap((s) => s.steps) : [], timeline, placement: runRef.placement, ...(zRun ? { z: { dry: zRun.dry, log: zRun.log.map((e) => [e[0] - since, e[1], e[2], e[3]]) } } : {}) });
       // a run saved: the server fits the screen's head drawing to it (follow-fit.js)
-      if (timeline.length && this.onRunSaved) { try { this.onRunSaved(job, result); } catch (e) { /* never stops the run ending */ } }
+      if (timeline.length && this.onRunSaved) { try { this.onRunSaved(job, result, { markSec: runRef.markSec || null }); } catch (e) { /* never stops the run ending */ } }
       this.run = null;
       this.onPos = null;
       this.st.job = null;
@@ -757,8 +787,10 @@ class Machine {
   async waitForMark(info, ctl) {
     const w = { accepted: false, at: null };
     this.markWait = w;
-    this.st.markWait = { mark: info.mark, of: info.of, near: info.near.map((v) => +v.toFixed(2)), again: !!info.again };
-    this.st.message = 'Mark ' + info.mark + ' of ' + info.of + (info.again ? ' still not found' : ' not found') + ': jog the camera over it, then Accept';
+    // kind: 'dot' (printed), 'hole' (in the plate) or 'corner' (the plate's corner)
+    // (r: a rounded corner's radius; why: what the camera couldn't see, when moving it may help)
+    this.st.markWait = { mark: info.mark, of: info.of, near: info.near.map((v) => +v.toFixed(2)), again: !!info.again, kind: info.kind || 'dot', r: info.r || 0, why: info.why || null };
+    this.st.message = 'Mark ' + info.mark + ' of ' + info.of + (info.again ? ' still not found' : ' not found') + ': jog the camera over ' + (info.kind === 'corner' ? 'the plate\'s corner' : 'it') + ', then Accept';
     try {
       while (!w.accepted) {
         if (ctl.aborted) throw busyErr('Stopped');
@@ -770,6 +802,31 @@ class Machine {
     }
     await this.jogRelease();
     return w.at;
+  }
+
+  // The sheet lies 5–10° turned from the job (placementCheck): the job waits, beam off, until
+  // Continue (angleAccept) or Stop
+  async waitForAngle(turn, ctl) {
+    const w = { ok: false };
+    this.angleWait = w;
+    this.st.angleWait = { angle: +turn.angle.toFixed(1), text: turn.text };
+    this.st.message = 'The sheet is turned ' + Math.abs(turn.angle).toFixed(1) + '°: Continue or Stop';
+    try {
+      while (!w.ok) {
+        if (ctl.aborted) throw busyErr('Stopped');
+        await sleep(150);
+      }
+    } finally {
+      this.angleWait = null;
+      this.st.angleWait = null;
+    }
+    this.st.message = 'Reading registration marks';
+  }
+
+  angleAccept() {
+    if (!this.angleWait) throw busyErr('No job is waiting for its sheet\'s angle to be accepted');
+    this.angleWait.ok = true;
+    return { accepted: true };
   }
 
   // Accept (Jog page): the mark is under the camera's crosshair
@@ -786,12 +843,19 @@ class Machine {
   }
 
   // always accepted, in every state
-  async stop() {
+  async stop(by) {
     this.jogRelease();
     this.framing = false;
     this.batch = []; // Stop also ends a run of chosen jobs
     if (this.camCtl) this.camCtl.aborted = true; // and camera work
-    if (this.run) this.run.ctl.aborted = true;
+    if (this.run) {
+      // why, for History: who pressed Stop, and what the machine was doing then
+      if (!this.run.ctl.aborted) {
+        const doing = this.st.markWait ? ', waiting for registration mark ' + this.st.markWait.mark + ' to be found by hand' : this.st.angleWait ? ', asked about the sheet turned ' + Math.abs(this.st.angleWait.angle) + '°' : this.st.interlock ? ', with the lid open' : this.st.state === 'paused' ? ', while paused' : '';
+        this.run.stopReason = (by || 'Stop pressed') + doing;
+      }
+      this.run.ctl.aborted = true;
+    }
     // the head Z axis: the nozzle up at once
     if (this.zaxis && this.zaxis.link) this.zaxis.link.up().catch(() => {});
     try { if (this.link) await this.link.abort(); } catch (e) { this.log('stop: ' + e.message); }

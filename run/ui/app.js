@@ -69,6 +69,14 @@ async function refresh() {
     if (S && ui.draft && JSON.stringify(ui.draft) === JSON.stringify(S.config) && JSON.stringify(next.config) !== JSON.stringify(S.config)) ui.draft = null;
     S = next;
     S.offline = false;
+    // a test grid's camera check finished (since this screen opened): show its results once
+    const gs = S.grid;
+    if (ui.gridSeen === undefined) ui.gridSeen = gs ? gs.at : null;
+    else if (gs && gs.at !== ui.gridSeen && (gs.state === 'done' || gs.state === 'failed')) {
+      ui.gridSeen = gs.at;
+      if (gs.state === 'failed') toast('Test grid check: ' + gs.error, { ms: 8000 });
+      else if (!ui.dlg) call('GET', LOCAL('/grid')).then((g) => { if (g.result && !ui.dlg) { ui.dlg = { kind: 'grid', r: g.result }; render(); } }).catch(() => {});
+    }
     // a job anchored (at Start) or put back (after its run): show it where it now sits
     for (const j of S.jobs) {
       const p = ui.pkgs[j.id];
@@ -203,6 +211,14 @@ function artSlot(pkg, big) {
       for (const p of e.paths || []) {
         const d = 'M' + p.p.map((q) => q[0].toFixed(2) + ' ' + q[1].toFixed(2)).join('L') + (p.c ? 'Z' : '');
         s += '<path d="' + d + '" fill="none" ' + (col ? 'stroke="' + col + '"' : 'class="ink"') + ' stroke-width="' + sw + '" vector-effect="non-scaling-stroke" style="stroke-width:' + (big ? 1.5 : 1) + 'px"/>';
+      }
+    }
+    // punch steps (plotters / routers): a ring at each strike point
+    const rr = Math.max(0.8, W / 600);
+    for (const t of pkg.toolpath || []) {
+      if (t.type !== 'punch' || !Array.isArray(t.p)) continue;
+      for (const q of t.p) if (Array.isArray(q) && Number.isFinite(q[0]) && Number.isFinite(q[1])) {
+        s += '<circle cx="' + q[0].toFixed(2) + '" cy="' + q[1].toFixed(2) + '" r="' + rr.toFixed(2) + '" fill="none" class="ink" vector-effect="non-scaling-stroke" style="stroke-width:' + (big ? 1.5 : 1) + 'px"/>';
       }
     }
     art.html.set(key, s);
@@ -434,6 +450,7 @@ function header() {
     (ui.navOpen ? '<div role="menu" class="pop" style="position:absolute;left:0;top:52px;min-width:230px">' +
       '<button role="menuitem" class="opt" data-a="go" data-v="setup">' + (S && !S.config.configured ? 'Add machine' : 'Machine setup') + '</button>' +
       '<button role="menuitem" class="opt" data-a="log">Diagnostics log</button>' +
+      (S && S.here ? '<button role="menuitem" class="opt" data-a="monitorQr">Pathline Monitor on a phone…</button>' : '') +
       (S && S.here && S.config.configured ? '<button role="menuitem" class="opt" data-a="removeMachine" style="color:var(--err)">Remove machine…</button>' : '') +
       '<div class="sep"></div>' +
       '<button role="menuitem" aria-label="Dark mode ' + (ui.dark ? 'on' : 'off') + '" class="opt" data-a="theme" style="justify-content:space-between">' +
@@ -523,15 +540,31 @@ function messageWindow(title, msg) {
 
 // ---------------------------------------------------------------- queue view
 // the processes the job uses (a step of its toolpath names it): a material's others are left out
-function procRows(pkg) {
+// The job's processes. editJob: the id of a queued job whose power and speed can be changed
+// here before it runs (Edit on a row; Save sends it, POST /jobs/{id}/process)
+function procRows(pkg, editJob) {
   const used = new Set((pkg.toolpath || []).map((s) => s.process).filter((i) => i !== undefined));
+  const pe = ui.pe && ui.pe.job === editJob ? ui.pe : null;
   return (pkg.processes || []).filter((p) => !used.size || used.has(p.index)).map((p) => {
+    const laser = p.power !== undefined;
     const pv = p.tool !== undefined && p.proc === undefined
       ? String(p.tool).split(' · ')[0] + ' · ' + p.speed + ' mm/s' + (p.passes > 1 ? '  ×' + p.passes : '') // plotter: tool and speed
       : p.proc === 'Engrave' ? 'P ' + p.power + ' %  V ' + p.speed + ' mm/s  ' + p.f + ' DPI' : 'P ' + p.power + ' %  V ' + p.speed + ' mm/s' + (p.passes > 1 ? '  ×' + p.passes : '');
-    return '<div style="display:flex;align-items:center;gap:10px;min-height:34px;padding:0 2px;border-bottom:1px solid var(--line-soft)">' +
-      '<span style="display:flex;gap:3px">' + (p.aci || []).slice(0, 4).map((n) => '<span class="chip" title="ACI ' + n + '" style="background:' + (aciHex(n) || 'var(--text)') + ';color:' + (n === 7 ? 'var(--surface)' : aciFg(n)) + '">' + n + '</span>').join('') + '</span>' +
-      '<span style="flex:1;min-width:0">' + esc(p.name) + '</span><span class="mono" style="font-size:13px;color:var(--text-2)">' + pv + '</span></div>';
+    const chips = '<span style="display:flex;gap:3px">' + (p.aci || []).slice(0, 4).map((n) => '<span class="chip" title="ACI ' + n + '" style="background:' + (aciHex(n) || 'var(--text)') + ';color:' + (n === 7 ? 'var(--surface)' : aciFg(n)) + '">' + n + '</span>').join('') + '</span>';
+    // being changed: the two fields, Save and Cancel
+    if (pe && pe.index === p.index) {
+      const field = (k, label, unit) => '<label style="display:flex;align-items:center;gap:6px"><span class="lbl">' + label + '</span><input class="mono" inputmode="decimal" data-pe="' + k + '" value="' + esc(pe[k]) + '" aria-label="' + label + '" style="width:76px;height:40px;padding:0 8px;border-radius:8px;border:1px solid var(--line-strong);background:var(--surface);color:var(--text);font-size:16px"><span class="lbl">' + unit + '</span></label>';
+      return '<div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:8px 2px;border-bottom:1px solid var(--line-soft);background:var(--accent-soft);border-radius:8px">' + chips +
+        '<span style="flex:1 1 120px;min-width:0;font-weight:500">' + esc(p.name) + '</span>' +
+        (laser ? field('power', 'Power', '%') : '') + field('speed', 'Speed', 'mm/s') +
+        '<button class="tb sm" data-a="procCancel">Cancel</button><button class="btn-primary" style="height:40px" data-a="procSave">Save</button></div>';
+    }
+    // changed here: the setting in the accent colour, what Pathline sent under it
+    const was = p.was ? '<span class="lbl" title="As Pathline sent it" style="font-size:12px">was ' + (p.was.power !== undefined ? p.was.power + ' % · ' : '') + p.was.speed + ' mm/s</span>' : '';
+    return '<div style="display:flex;align-items:center;gap:10px;min-height:34px;padding:2px;border-bottom:1px solid var(--line-soft)">' + chips +
+      '<span style="flex:1;min-width:0">' + esc(p.name) + '</span>' +
+      '<span style="display:flex;flex-direction:column;align-items:flex-end;gap:1px"><span class="mono" style="font-size:13px;white-space:nowrap;color:' + (p.was ? 'var(--accent)' : 'var(--text-2)') + ';font-weight:' + (p.was ? 600 : 400) + '">' + pv + '</span>' + was + '</span>' +
+      (editJob && !pe ? '<button class="tb sm" data-a="procEdit" data-v="' + p.index + '" aria-label="Change power and speed of ' + esc(p.name) + '" title="Change power and speed">Edit</button>' : '') + '</div>';
   }).join('');
 }
 
@@ -625,7 +658,7 @@ function queueView() {
     })() +
     '<div style="display:flex;align-items:center;gap:12px;min-height:44px"><button role="switch" class="sw" aria-checked="' + !!cfg().removeDone + '" data-a="removeDone" aria-label="Remove completed job from queue"></button><span style="font-size:16px">Remove completed job from queue</span></div>' +
     '</div>' +
-    (shownPkg && shownPkg !== 'loading' ? '<div style="display:flex;flex-direction:column;gap:6px">' + procRows(shownPkg) + '</div>' : '') + warn +
+    (shownPkg && shownPkg !== 'loading' ? '<div style="display:flex;flex-direction:column;gap:6px">' + procRows(shownPkg, !runJob && job && job.status === 'queued' ? job.id : null) + '</div>' : '') + warn +
     '</div>' +
     '<div class="qbed"><div class="viewport" style="position:relative;flex:1;min-height:0;border:1px solid var(--line);border-radius:10px;overflow:hidden">' +
     '<div style="position:absolute;inset:50px 8px 8px">' + bedSvg(shownPkg, { big: true, head: true }) + '</div>' +
@@ -656,11 +689,15 @@ function jogView() {
   const pill = (l, v, ok) => '<div style="display:flex;align-items:center;justify-content:space-between;min-height:48px;border-bottom:1px solid var(--line-soft)"><span>' + l + '</span><span class="pill ' + (ok ? 'ok' : 'err') + '">' + esc(v) + '</span></div>';
   const tog = (l, k) => '<div style="display:flex;align-items:center;justify-content:space-between;min-height:48px;border-bottom:1px solid var(--line-soft)"><span>' + l + '</span><button role="switch" class="sw" aria-checked="' + !!st.io[k] + '" data-a="io" data-v="' + k + '" aria-label="' + l + '"></button></div>';
   const sim = c.connection.mode === 'sim';
-  const btn = (a, d, label) => '<button class="tb" data-a="' + a + '" aria-label="' + label + '" style="height:76px;padding:0">' + ic(d, 26) + '</button>';
-  // jog arrows: tap moves one step, press and hold keeps moving (handled by pointer events below)
-  const arrow = (v, d, label) => {
+  const btn = (a, d, label) => '<button class="tb" data-a="' + a + '" aria-label="' + label + '" style="height:88px;padding:0;flex-direction:column;gap:2px">' + ic(d, 28) + '<span style="font-size:13px;font-weight:600">' + label + '</span></button>';
+  // jog arrows: tap moves one step, press and hold keeps moving (handled by pointer events below).
+  // Each says which way the head goes on the machine (back, front, left, right: as the bed is
+  // drawn, the back at the top) and along which axis (X+, Y−…)
+  const arrow = (v, d, side) => {
     const on = ui.hold && ui.hold.held && ui.hold.axis + (ui.hold.dir < 0 ? '-' : '+') === v;
-    return '<button class="tb" data-hold="' + v + '" aria-label="' + label + '" style="height:76px;padding:0;touch-action:none;user-select:none' + (on ? ';border-color:var(--accent);background:var(--accent-soft);color:var(--accent-fg)' : '') + '">' + ic(d, 26) + '</button>';
+    const axis = v[0].toUpperCase() + (v[1] === '-' ? '−' : '+');
+    return '<button class="tb" data-hold="' + v + '" aria-label="Jog ' + side + ', ' + axis + '" style="height:88px;padding:0;flex-direction:column;gap:2px;touch-action:none;user-select:none;-webkit-user-select:none' + (on ? ';border-color:var(--accent);background:var(--accent-soft);color:var(--accent-fg)' : '') + '">' +
+      ic(d, 28) + '<span style="font-size:13px;font-weight:600;line-height:1.1">' + side + '</span><span class="mono" style="font-size:12px;line-height:1.1;color:' + (on ? 'inherit' : 'var(--text-3)') + '">' + axis + '</span></button>';
   };
   // the head outside the bed set in Setup: usually the bed is set smaller than the machine
   const [bw, bh] = c.bed;
@@ -668,16 +705,22 @@ function jogView() {
   const mw = st.markWait;
   // print and cut waiting for a mark: what to do, Accept and Stop
   const markBox = mw ? '<div role="alert" class="warnbox" style="display:flex;flex-wrap:wrap;align-items:center;gap:12px 16px">' +
-    '<div style="flex:1 1 260px;min-width:0;display:flex;flex-direction:column;gap:4px"><strong>Registration mark ' + mw.mark + ' of ' + mw.of + (mw.again ? ' still not found' : ' not found') + '</strong>' +
-    '<span>' + (mw.again ? 'There was no mark under the crosshair. ' : 'It wasn\'t near X ' + mw.near[0].toFixed(1) + ', Y ' + mw.near[1].toFixed(1) + ' mm. ') + 'Jog the camera until the mark is in the red circle, then press Accept: the camera finds its centre from there.</span></div>' +
+    '<div style="flex:1 1 260px;min-width:0;display:flex;flex-direction:column;gap:4px"><strong>' + (mw.kind === 'corner' ? 'Plate corner ' : mw.kind === 'hole' ? 'Registration hole ' : 'Registration mark ') + mw.mark + ' of ' + mw.of + (mw.again ? ' still not found' : ' not found') + '</strong>' +
+    '<span>' + (mw.again ? 'There was no ' + (mw.kind === 'corner' ? 'corner' : mw.kind === 'hole' ? 'hole' : 'mark') + ' under the crosshair. ' : 'It wasn\'t near X ' + mw.near[0].toFixed(1) + ', Y ' + mw.near[1].toFixed(1) + ' mm. ') +
+    (mw.why ? 'The camera ' + (/^the camera /.test(mw.why) ? mw.why.slice(11) : 'found ' + mw.why) + '. ' : '') +
+    (mw.kind === 'corner' && mw.r > 0
+      ? 'This plate\'s corners are rounded (radius ' + mw.r + ' mm). Jog the camera until the red circle is where its two straight edges would meet if they carried on, with white background showing past both edges, then press Accept: the camera looks a little way inside the plate and finds the corner from the straight edges.'
+      : mw.kind === 'corner'
+      ? 'Jog the camera until the plate\'s corner is in the red circle, with white background showing past both edges, then press Accept: the camera finds the corner from its edges.'
+      : 'Jog the camera until the ' + (mw.kind === 'hole' ? 'hole' : 'mark') + ' is in the red circle, then press Accept: the camera finds its centre from there.') + '</span></div>' +
     '<button class="tb" data-a="markAccept" style="height:56px;padding:0 28px;background:var(--go);border-color:var(--go);color:#fff;font-weight:600">Accept</button>' +
     '<button class="tb" data-a="stop" style="height:56px;padding:0 20px;color:var(--err)">Stop job</button></div>' : '';
   const coords = '<div style="display:flex;flex-wrap:wrap;gap:36px">' + [['X', shownPos(st).x], ['Y', shownPos(st).y]].map(([l, v]) => '<div style="display:flex;flex-direction:column;gap:2px"><span class="lbl">' + l + ' <span class="mono">mm</span></span><span class="mono" style="font-size:' + (mw ? 24 : 36) + 'px;font-weight:500">' + (Number.isFinite(v) ? v.toFixed(1) : '—') + '</span></div>').join('') + '</div>';
   // the arrows (home in the middle, not while a job waits for a mark) and the step / speed
-  const pad = '<div style="display:grid;grid-template-columns:repeat(3,76px);grid-template-rows:repeat(3,76px);gap:8px">' +
-    '<span></span>' + arrow('y-', ICON.up, 'Jog Y minus') + '<span></span>' +
-    arrow('x-', ICON.left, 'Jog X minus') + (mw ? '<span></span>' : btn('home', ICON.home, 'Home')) + arrow('x+', ICON.right, 'Jog X plus') +
-    '<span></span>' + arrow('y+', ICON.down, 'Jog Y plus') + '<span></span></div>';
+  const pad = '<div style="display:grid;grid-template-columns:repeat(3,88px);grid-template-rows:repeat(3,88px);gap:10px">' +
+    '<span></span>' + arrow('y-', ICON.up, 'Back') + '<span></span>' +
+    arrow('x-', ICON.left, 'Left') + (mw ? '<span></span>' : btn('home', ICON.home, 'Home')) + arrow('x+', ICON.right, 'Right') +
+    '<span></span>' + arrow('y+', ICON.down, 'Front') + '<span></span></div>';
   const steps = '<div style="display:flex;flex-direction:column;gap:6px"><span class="lbl">Tap: step in mm · Hold: speed in mm/s</span><div role="radiogroup" aria-label="Step size, or speed while held" class="seg">' +
     ['0.1', '1', '10', '100'].map((v) => '<button role="radio" class="mono" style="min-width:56px" aria-checked="' + (ui.step === v) + '" data-a="step" data-v="' + v + '">' + v + '</button>').join('') + '</div>' +
     '<span class="lbl" style="min-height:18px">' + (ui.hold && ui.hold.held ? 'Moving ' + ui.hold.axis.toUpperCase() + (ui.hold.dir < 0 ? '−' : '+') + ' at ' + ui.step + ' mm/s' : '') + '</span></div>';
@@ -686,7 +729,7 @@ function jogView() {
     ? '<div style="display:flex;flex-wrap:wrap;gap:20px;align-items:flex-start">' + camPicture(c) +
       '<div style="display:flex;flex-direction:column;gap:14px">' + coords + pad + steps + '</div></div>'
     : '<h2 class="h-sec">Position</h2>' +
-      (outside ? '<div class="warnbox">The head is outside the ' + bw + ' × ' + bh + ' mm bed. If the machine is bigger, set its size in Setup → Work area.</div>' : '') +
+      (outside ? '<div class="warnbox">The head is outside the ' + bw + ' × ' + bh + ' mm bed. If the machine is bigger, set its size in Setup → Machine.</div>' : '') +
       coords + '<div style="display:flex;flex-wrap:wrap;align-items:center;gap:28px">' + pad + steps + '</div>' + camCard(c, st);
   return '<div class="view fit jview">' +
     '<section aria-label="Jog" data-keep="jogpos" class="card" style="flex:1 1 auto;min-width:0;min-height:0;overflow-y:auto;padding:20px;display:flex;flex-direction:column;gap:16px">' + markBox + body + '</section>' +
@@ -731,18 +774,19 @@ function camCard(c, st) {
 function historyView() {
   const hf = ui.histFilter;
   const rows = S.history.filter((h) => hf === 'All' || h.result === hf);
-  const cols = 'grid-template-columns:minmax(200px,2fr) minmax(160px,1.4fr) 140px 110px 120px 130px';
+  const cols = 'grid-template-columns:minmax(200px,2fr) minmax(140px,1.2fr) 140px 100px minmax(170px,1.4fr) 130px';
   return '<div class="view" style="padding:12px;display:flex"><section aria-label="History" class="card" style="flex:1;min-width:0;display:flex;flex-direction:column">' +
     '<div style="display:flex;flex-wrap:wrap;align-items:center;gap:12px;padding:14px 18px;border-bottom:1px solid var(--line)"><h2 class="h-sec">History</h2><div role="radiogroup" aria-label="Filter" class="seg">' +
     ['All', 'Completed', 'Stopped'].map((l) => '<button role="radio" aria-checked="' + (hf === l) + '" data-a="hist" data-v="' + l + '">' + l + '</button>').join('') +
-    '</div><span style="flex:1"></span><span class="lbl">' + rows.length + ' jobs</span></div><div style="overflow-x:auto"><div role="table" aria-label="Job history" style="min-width:860px">' +
+    '</div><span style="flex:1"></span><span class="lbl">' + rows.length + ' jobs</span></div><div data-keep="histlist" style="overflow:auto;flex:1 1 auto;min-height:0;-webkit-overflow-scrolling:touch;overscroll-behavior:contain"><div role="table" aria-label="Job history" style="min-width:920px">' +
     '<div role="row" style="display:grid;' + cols + ';gap:12px;align-items:center;padding:10px 18px;border-bottom:1px solid var(--line)">' +
     ['Job', 'Material', 'Started', 'Duration', 'Result', ''].map((h) => '<span role="columnheader" class="lbl" style="font-weight:500">' + h + '</span>').join('') + '</div>' +
     (rows.length ? rows.map((h) => '<div role="row" style="display:grid;' + cols + ';gap:12px;align-items:center;padding:10px 18px;border-bottom:1px solid var(--line-soft)">' +
       '<span role="cell" style="font-weight:500">' + esc(h.name) + '</span><span role="cell" style="color:var(--text-2)">' + esc(h.material || '—') + '</span>' +
       '<span role="cell" class="mono" style="font-size:13px">' + stamp(h.startedAt) + '</span><span role="cell" class="mono" style="font-size:13px">' + hms(h.seconds) + '</span>' +
-      '<span role="cell"><span class="pill ' + (h.result === 'Completed' ? 'ok' : 'warn') + '">' + h.result + '</span></span>' +
-      '<span role="cell"><button class="tb sm" data-a="rerun" data-v="' + h.id + '">Run again</button></span></div>').join('')
+      '<span role="cell" style="display:flex;flex-direction:column;align-items:flex-start;gap:4px;min-width:0"><span class="pill ' + (h.result === 'Completed' ? 'ok' : 'warn') + '">' + h.result + '</span>' +
+      (h.reason ? '<span class="lbl" style="line-height:1.3;white-space:normal" title="' + esc(h.reason) + '">' + esc(h.reason.length > 90 ? h.reason.slice(0, 88) + '…' : h.reason) + '</span>' : '') + '</span>' +
+      '<span role="cell">' + (h.gone ? '<span class="lbl" title="Its files are kept 30 days">Files removed</span>' : '<button class="tb sm" data-a="rerun" data-v="' + h.id + '">Run again</button>') + '</span></div>').join('')
       : '<div style="padding:28px;text-align:center;color:var(--text-3)">No jobs have run yet</div>') +
     '</div></div></section></div>';
 }
@@ -821,10 +865,15 @@ function setupView() {
   if (!portOpts.some(([v]) => v === curPort)) portOpts.push([curPort, curPort + ' · not found now']);
   const portSelect = '<label class="row"><span>Serial port<span class="hint">' + (ui.ports.some((p) => p.trotec) ? 'Trotec found on ' + esc(ui.ports.find((p) => p.trotec).path) : 'No Trotec found on USB right now') + '</span></span><select class="cell" data-f="connection.port">' + portOpts.map(([v, l]) => '<option value="' + esc(v) + '"' + (v === curPort ? ' selected' : '') + '>' + esc(l) + '</option>').join('') + '</select></label>';
 
-  const tabs = { Machine: [], Network: [], 'Work area': [], Controller: [], Jobs: [] };
+  // in the order they're set up and used: the machine (with its bed), what jobs do, the
+  // materials, the camera's calibrations in turn, the Z axis, then this computer's network and
+  // the controller's factory values. A tab with nothing in it for this machine isn't shown.
+  const tabs = { Machine: [], Jobs: [], Materials: [], Camera: [], 'Z axis': [], Network: [], 'Pathline Monitor': [], Controller: [] };
   tabs.Network.push(networkCard(card), card('Pathline connection', num('HTTP port', 'httpPort', '', 'Takes effect after a restart') +
     '<div class="row"><span>This screen is showing</span><span class="mono">' + esc(location.host) + '</span></div>',
   'Use the same port in Pathline\'s machine setup.'));
+  // Pathline Monitor's app sends people here: "open Pathline Run's Setup, then Pathline Monitor"
+  tabs['Pathline Monitor'].push(monitorReportCard(card));
   // Ruida: which controller model (sets laser or plotter, and the swizzle magic)
   const models = S.ruidaModels || [];
   const model = models.find((m) => m.id === d.ruida.model) || models.find((m) => m.id === 'OTHER') || { kind: 'laser', note: '' };
@@ -859,9 +908,9 @@ function setupView() {
     tabs.Machine.push(card('Laser source', text('Type', 'source') + num('Rated power', 'power', 'W') + text('Lens', 'lens') + num('Minimum power', 'minPower', '%') +
       tog('Air assist', 'f.air') + tog('Lid interlock', 'f.interlock')));
   }
-  tabs['Work area'].push(card('Bed', ctl('Width', 'bed.0', 'mm') + ctl('Height', 'bed.1', 'mm') + ctl('Max speed', 'speed', 'mm/s', 'Used by Pathline\'s time estimate') + ctl('Acceleration', 'acc', 'mm/s²')));
+  tabs.Machine.push(card('Bed and motion', ctl('Width', 'bed.0', 'mm') + ctl('Height', 'bed.1', 'mm') + ctl('Max speed', 'speed', 'mm/s', 'Used by Pathline\'s time estimate') + ctl('Acceleration', 'acc', 'mm/s²')));
   if (isPlotter) {
-    tabs['Work area'].push(card('Conveyor and vacuum', tog('Conveyor', 'f.conveyor') + (d.f.conveyor ? num('Feed length', 'feedLen', 'mm', 'Material advanced per bed (U axis)') + num('Feed time', 'timing.feedSettle', 's', 'For Pathline\'s estimate') : '') + tog('Vacuum', 'f.vacuum'),
+    tabs.Machine.push(card('Conveyor and vacuum', tog('Conveyor', 'f.conveyor') + (d.f.conveyor ? num('Feed length', 'feedLen', 'mm', 'Material advanced per bed (U axis)') + num('Feed time', 'timing.feedSettle', 's', 'For Pathline\'s estimate') : '') + tog('Vacuum', 'f.vacuum'),
       'Fed between the beds of a job that uses several.'));
   }
   if (trotec) {
@@ -881,8 +930,8 @@ function setupView() {
   }
   tabs.Jobs.push(card('Job defaults', (isPlotter ? '' : seg('Registration marks without the camera', 'regMarks', [['refuse', 'Don\'t run'], ['ignore', 'Skip']])) + tog('Remove completed job from queue', 'removeDone') + (isPlotter ? '' : tog('Return head to start after a job', 'returnHead')) + text('File name prefix', 'prefix'),
     isPlotter ? '' : 'With the head camera on, registration marks are read and the job is lined up to them.'));
+  let gridCard = '';
   if (trotec) {
-    tabs.Camera = [];
     const v = d.vision || {};
     const saved = !dirty && !!(cfg().vision || {}).enabled;
     const busy = S.camera.busy;
@@ -902,7 +951,7 @@ function setupView() {
       ro('Pixel size', (pixel * 1000).toFixed(2) + ' µm') + ro('Picture turned', turned.toFixed(2) + '°' + (ma * md - mb * mc < 0 ? ' (mirrored)' : '')) +
       ro('Lens bends lines', v.cameraLens !== undefined ? (v.cameraLens * 1000).toFixed(0) + ' µm at most' : '—') + ro('Calibrated', when(v.cameraAt)) +
       '<div style="display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end"><button class="btn-primary" data-a="camCalibrate"' + need + '>Calibrate camera</button></div>',
-    'Lay the ' + (get(d, 'vision.camBoard.square') || 10) + ' mm checkerboard flat, at any angle, and jog the head until the board fills the camera view. The head moves a few mm, then goes back.'));
+    'Lay the ' + (get(d, 'vision.camBoard.square') || 10) + ' mm checkerboard flat, at any angle, focus the table on the board\'s surface as you would on material (the camera measures right only at that height), and jog the head until the board fills the camera view. The head moves a few mm, then goes back.'));
     const stage2 = !v.cameraAt ? ' disabled title="Calibrate the camera (stage 1) first"' : need;
     tabs.Camera.push(card('2 · Offset calibration (cut check)', num('Camera offset X', 'vision.offset.0', 'mm', 'Laser − camera') + num('Camera offset Y', 'vision.offset.1', 'mm') +
       num('Cut power', 'vision.mark.power', '%', 'For the check mark') + num('Cut speed', 'vision.mark.speed', 'mm/s') +
@@ -911,7 +960,12 @@ function setupView() {
     'Jog the laser head over scrap card or board. The laser cuts a 3 mm mark there, and the camera finds it to set the offset and check it.'));
     const b = ui.board;
     const map = v.map;
-    tabs.Camera.push(card('Checkerboard: bed accuracy', num('Square size', 'vision.board.square', 'mm') + num('Corners across', 'vision.board.across', '', 'Inner corners (squares − 1)') + num('Corners down', 'vision.board.down') +
+    gridCard = card('Power and speed from a test grid',
+      '<span style="line-height:1.5">Run a power × speed test grid from Pathline Prepare (Materials → Test grid) on the material. Once it\'s cut, the head camera looks at every square, works out which cut through, and picks the fastest speed that did, one power step above the lowest that did. Save puts it into the material\'s cut setting, and Pathline Prepare takes it on its next sync.</span>' +
+      (S.grid ? '<div class="row"><span>Last check</span><span>' + esc(S.grid.name || '') + ' · ' + (S.grid.state === 'done' ? (S.grid.best ? S.grid.best.power + ' % at ' + S.grid.best.speed + ' mm/s' : 'no setting found') : esc(S.grid.state)) + '</span></div>' : '') +
+      '<div style="display:flex;justify-content:flex-end"><button class="tb" data-a="gridShow"' + (S.grid ? '' : ' disabled') + '>Show results</button></div>',
+    'Needs the camera calibrated (Camera, steps 1 and 2). The check runs by itself after a test grid completes.');
+    tabs.Camera.push(card('3 · Bed accuracy (checkerboard)', num('Square size', 'vision.board.square', 'mm') + num('Corners across', 'vision.board.across', '', 'Inner corners (squares − 1)') + num('Corners down', 'vision.board.down') +
       num('Measure every', 'vision.board.every', '', '1 = every corner; 2, 3… for a quicker check') +
       seg('Correction', 'vision.board.model', [['linear', 'Scale and squareness'], ['smooth', 'Smooth'], ['full', 'Every corner']]) +
       tog('Correct jobs with the bed map', 'vision.mapOn') +
@@ -919,12 +973,12 @@ function setupView() {
       '<div style="display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end"><button class="tb" data-a="camBoard" data-v="check"' + need + '>Check bed</button><button class="btn-primary" data-a="camBoard" data-v="calibrate"' + need + '>Calibrate bed</button></div>' +
       (busy ? '<div class="warnbox">' + esc(S.status.message || busy) + '</div>' : '') +
       (b && b.points ? boardResult(b) : ''),
-    'Lay the checkerboard on the bed at any angle and jog the laser head over its top-left inner corner. Check measures with the bed map on; Calibrate saves a new map. Use Every corner only with a board that is perfectly flat.'));
+    'After steps 1 and 2. Lay the checkerboard flat on the bed at any angle and jog the laser head over its top-left inner corner (corners the camera can\'t reach are left out). Check measures with the bed map on; Calibrate saves a new map. Use Every corner only with a board that is perfectly flat.'));
+    tabs.Camera.push(card('4 · Check with a cut rectangle', accuracyCard(), 'The machine measured with a rule, not a printed board: settles whether a new bed map is the machine or the board.'));
   }
 
   // the head Z axis (an ESP32 moving the whole nozzle, an ultrasonic sensor beside it)
   if (!isPlotter && cfg().configured) {
-    tabs['Z axis'] = [];
     const z = d.zaxis || {};
     const savedOn = !dirty && !!(cfg().zaxis || {}).enabled;
     const zs = ui.zst || {};
@@ -977,7 +1031,10 @@ function setupView() {
             '<div style="display:flex;flex-direction:column;gap:6px">' + procRows({ processes: x.processes || [] }) + '</div>',
             x.updatedAt ? 'Changed ' + new Date(x.updatedAt).toLocaleString() : ''));
     if (list.length) tabs.Materials.unshift(card('Materials', '<span class="lbl">Made in Pathline Prepare. Change them there.</span>'));
+    // the test grid sets a material's cut: it belongs with the materials
+    if (gridCard) tabs.Materials.unshift(gridCard);
   }
+  for (const k of Object.keys(tabs)) if (!tabs[k].length) delete tabs[k];
 
   const tab = tabs[ui.setTab] ? ui.setTab : 'Machine';
   // no machine yet: this page adds one (name, controller and connection on the Machine tab)
@@ -987,13 +1044,64 @@ function setupView() {
   return '<div class="view" style="padding:12px;display:flex;flex-direction:column;gap:12px">' +
     '<section class="card" style="padding:16px 18px;display:flex;flex-wrap:wrap;align-items:center;gap:14px"><span class="badge" style="height:28px;padding:0 9px;border-radius:6px' + (isPlotter ? ';background:var(--badge-plotter)' : '') + '">' + (isPlotter ? 'PLOTTER' : 'LASER') + '</span>' +
     (adding
-      ? '<div style="flex:1 1 280px;min-width:0;display:flex;flex-direction:column;gap:4px"><span style="font-size:17px;font-weight:600">Add a machine</span><span class="lbl">Name it, choose the controller and connection, check the bed size under Work area, then Add machine.</span></div>' +
+      ? '<div style="flex:1 1 280px;min-width:0;display:flex;flex-direction:column;gap:4px"><span style="font-size:17px;font-weight:600">Add a machine</span><span class="lbl">Name it, choose the controller and connection, check the bed size, then Add machine.</span></div>' +
         readBtn + '<button class="btn-primary" data-a="save">Add machine</button></section>'
       : '<div style="flex:1 1 280px;min-width:0;display:flex;flex-direction:column;gap:4px"><span style="font-size:17px;font-weight:600">' + esc(d.name) + '</span><span class="lbl">' + (d.controller === 'ruida' ? 'Ruida' : 'Trotec') + ' · ' + esc(S.info.model || 'not connected') + (S.info.firmware ? ' · ' + esc(S.info.firmware) : '') + '</span></div>' +
         (dirty ? '<span class="tag warn">Unsaved changes</span><button class="tb" data-a="discard">Discard</button>' : '') +
         readBtn + '<button class="btn-primary" data-a="save"' + (dirty ? '' : ' disabled') + '>Save to machine</button></section>') +
     '<div role="tablist" aria-label="Setup sections" class="tabs">' + Object.keys(tabs).map((t) => '<button role="tab" aria-selected="' + (t === tab) + '" data-a="setTab" data-v="' + t + '">' + t + '</button>').join('') + '</div>' +
     '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));gap:12px;align-items:start">' + tabs[tab].join('') + '</div></div>';
+}
+
+// Setup → Pathline Monitor: report this machine to the workshop's Pathline Monitor server, so
+// phones see it from anywhere. Address and code come from the app's Settings → Add a machine.
+function monitorReportCard(card) {
+  const r = S.monitorReport || {};
+  const clock = (ms) => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  const about = '<span style="line-height:1.5">Pathline Monitor shows every machine\'s progress, queue and alerts on phones, from anywhere. Pathline Run sends it this machine\'s status; it never takes instructions from it.</span>';
+  if (r.connected) {
+    const how = r.failingSince
+      ? '<div class="warnbox" style="line-height:1.5">Can\'t reach it since ' + clock(r.failingSince).slice(0, 5) + '. Still trying.' + (r.failure ? '<br><span class="lbl">' + esc(r.failure) + '</span>' : '') + '</div>'
+      : r.lastSent ? '<div class="row"><span>Last sent</span><span class="mono">' + clock(r.lastSent) + '</span></div>'
+        : '<div class="row"><span>Last sent</span><span class="lbl">Sending…</span></div>';
+    return card('Pathline Monitor', about +
+      '<div class="row"><span>Reporting to</span><span class="mono" style="word-break:break-all">' + esc(r.address) + '</span></div>' + how +
+      '<div style="display:flex;align-items:center;justify-content:flex-end;gap:12px;padding-top:6px;border-top:1px solid var(--line-soft)"><span class="lbl" style="flex:1">Disconnect stops reporting. Remove the machine in the app too, or it shows there as not reporting.</span>' +
+      '<button class="tb" data-a="mrDisconnect">Disconnect</button></div>');
+  }
+  if (!ui.mr) ui.mr = { address: r.address || '', code: '' };
+  const fld = (l, k, ph, hint) => '<label class="row"><span>' + l + (hint ? '<span class="hint">' + hint + '</span>' : '') + '</span><span class="fld"><input class="mono" data-mr="' + k + '" value="' + esc(ui.mr[k] || '') + '" placeholder="' + ph + '" autocomplete="off" autocapitalize="off" spellcheck="false"></span></label>';
+  return card('Pathline Monitor', (r.removed ? '<div class="warnbox" style="line-height:1.5"><strong>Removed in Pathline Monitor.</strong> This machine no longer reports. To add it again, get a new code in the app.</div>' : '') + about +
+    '<span style="line-height:1.5">In the Pathline Monitor app: <strong>Settings</strong>, then <strong>Add a machine</strong>. Type the address and the code it shows.</span>' +
+    fld('Address', 'address', 'monitor.example.com', 'The Pathline Monitor server') + fld('Code', 'code', 'K7M-2QX', '6 letters and digits, lasts 10 minutes') +
+    '<div style="display:flex;justify-content:flex-end"><button class="btn-primary" data-a="mrConnect"' + (ui.mrBusy ? ' disabled' : '') + '>' + (ui.mrBusy ? 'Connecting…' : 'Connect') + '</button></div>');
+}
+
+// Setup → Camera → 4 · Check with a cut rectangle: cut it, measure it with a rule, see how far out
+// the machine is with the bed map as it is, and correct the map by it
+function accuracyCard() {
+  const c = cfg();
+  const [BW, BH] = c.bed;
+  if (!ui.acc) ui.acc = { w: Math.min(1000, Math.floor((BW - 40) / 50) * 50), h: Math.min(800, Math.floor((BH - 40) / 50) * 50), power: 30, speed: 50 };
+  const a = ui.acc;
+  const fld = (l, k, unit, hint) => '<label class="row"><span>' + l + (hint ? '<span class="hint">' + hint + '</span>' : '') + '</span><span class="fld"><input class="mono" inputmode="decimal" data-acc="' + k + '" value="' + esc(a[k] === undefined ? '' : a[k]) + '" autocomplete="off"><span class="lbl mono">' + (unit || '') + '</span></span></label>';
+  const r = c.accuracyCheck;
+  const sg = (x, d) => (x > 0 ? '+' : '') + Number(x).toFixed(d);
+  const result = r ? '<div class="' + (r.ok ? 'okbox' : 'warnbox') + '" style="line-height:1.5;padding:10px 12px;border-radius:8px' + (r.ok ? ';background:var(--ok-soft,var(--surface-2))' : '') + '">' +
+      '<strong>' + (r.ok ? 'Within what a rule can tell' : 'Out by more than a rule\'s reading') + '</strong> (' + r.w + ' × ' + r.h + ' mm, ' + new Date(r.at).toLocaleString() + ', ' + (r.mapOn ? 'bed map on' : 'no bed map') + ')<br>' +
+      'X ' + sg(r.scaleX, 2) + ' ‰ (' + sg((r.scaleX * r.w) / 1000, 2) + ' mm), Y ' + sg(r.scaleY, 2) + ' ‰ (' + sg((r.scaleY * r.h) / 1000, 2) + ' mm)' +
+      (r.lean !== null && r.lean !== undefined ? ', out of square ' + sg(r.lean, 3) + '° (' + sg(Math.tan((r.lean * Math.PI) / 180) * r.h, 2) + ' mm over its height)' : ', squareness not measured (both diagonals needed)') +
+      (r.misfit > 1 ? '<br>The diagonals don\'t agree with the sides by ' + r.misfit + ' mm: measure again from corner to corner.' : '') +
+      (r.applied ? '<br>The bed map was corrected by it ' + new Date(r.applied).toLocaleString() + '. Cut another rectangle to check.' : '') + '</div>' +
+      (!r.ok && !r.applied && c.controller === 'trotec' ? '<div style="display:flex;justify-content:flex-end"><button class="btn-primary" data-a="accApply">Correct the bed map by this</button></div>' : '')
+    : '';
+  return '<span style="line-height:1.5">1. Lay card or thin board on the bed, focus on it, and cut the rectangle with its diagonals (it goes in the middle of the bed).</span>' +
+    fld('Width', 'w', 'mm') + fld('Height', 'h', 'mm') + fld('Power', 'power', '%', 'A score that measures cleanly') + fld('Speed', 'speed', 'mm/s') +
+    '<div style="display:flex;justify-content:flex-end"><button class="tb" data-a="accJob">Queue the rectangle</button></div>' +
+    '<span style="line-height:1.5">2. Measure it with a steel rule or tape, corner to corner along the cut lines, to a quarter of a mm if you can.</span>' +
+    fld('Top', 'top', 'mm') + fld('Bottom', 'bottom', 'mm') + fld('Left', 'left', 'mm') + fld('Right', 'right', 'mm') +
+    fld('Diagonal top left → bottom right', 'd1', 'mm') + fld('Diagonal top right → bottom left', 'd2', 'mm') +
+    '<div style="display:flex;justify-content:flex-end"><button class="btn-primary" data-a="accMeasure">Work it out</button></div>' + result;
 }
 
 // the last checkerboard result: numbers, and each corner's error as an arrow over the bed
@@ -1016,11 +1124,79 @@ function boardResult(b) {
       ['Board bumps', (b.bumps || 0) + ' corner' + (b.bumps === 1 ? '' : 's') + ' left out'], ['Board misfit', b.noise !== undefined ? n(b.noise, 3) + ' mm' : '—'], ['Correction', { linear: 'Scale and squareness', smooth: 'Smooth', full: 'Every corner' }[b.model] || '—']]
       .map(([l, val]) => '<div style="display:flex;flex-direction:column;gap:2px;padding:8px;border-radius:8px;background:var(--surface-2)"><span class="lbl">' + l + '</span><span class="mono">' + val + '</span></div>').join('') + '</div>' +
     '<span class="lbl">' + (b.raw ? 'Machine as it is' : 'With the bed map on') + ' · board laid at ' + n(b.boardAngle, 2) + '° · ' + new Date(b.at).toLocaleString() + '</span>' +
+    // a new map against the one before: a machine drifts far less than a board laid bent or damp
+    (b.since ? '<div class="' + (b.since.big ? 'warnbox' : 'lbl') + '" style="line-height:1.5">Against the map of ' + new Date(b.since.from).toLocaleString() + ': X scale ' + sgn(b.since.scaleX, 2) + ' ‰, Y scale ' + sgn(b.since.scaleY, 2) + ' ‰, squareness ' + sgn(b.since.lean, 3) + '°' +
+      (b.since.big ? '. That\'s more than a machine changes on its own (without a crash or a belt jumping a tooth). Check the board is flat and dry and laid the same way, or cut a large rectangle with its diagonals and measure them: if they match, the board moved, not the machine.' : '') + '</div>' : '') +
     '<svg viewBox="' + [-20, -20, W + 40, H + 40].join(' ') + '" style="width:100%;aspect-ratio:' + (W + 40) + '/' + (H + 40) + ';background:var(--sunken);border-radius:8px" aria-label="Error at each corner, 200 times life size"><rect x="0" y="0" width="' + W + '" height="' + H + '" fill="var(--bed)" stroke="var(--bed-line)" vector-effect="non-scaling-stroke"/>' + arrows + '</svg>';
 }
 
+// A test grid's camera check (vision/grid.js): every square's picture, in a power × speed table,
+// ticked where it cut through, the setting picked ringed, and Save to put it into the material
+function gridImg(t) {
+  ui.gridImgs = ui.gridImgs || new Map();
+  if (ui.gridImgs.has(t.data)) return ui.gridImgs.get(t.data);
+  const bin = atob(t.data), cv = document.createElement('canvas');
+  cv.width = t.w; cv.height = t.h;
+  const cx = cv.getContext('2d'), im = cx.createImageData(t.w, t.h);
+  for (let i = 0; i < bin.length; i++) { const v = bin.charCodeAt(i); im.data[i * 4] = im.data[i * 4 + 1] = im.data[i * 4 + 2] = v; im.data[i * 4 + 3] = 255; }
+  cx.putImageData(im, 0, 0);
+  const url = cv.toDataURL('image/png');
+  if (ui.gridImgs.size > 200) ui.gridImgs.clear();
+  ui.gridImgs.set(t.data, url);
+  return url;
+}
+function gridWindow(r) {
+  if (!r) return '';
+  const best = r.best;
+  const cell = (p, v) => {
+    const s = r.squares.find((x) => x.power === p && x.speed === v);
+    if (!s) return '<td></td>';
+    const isBest = best && best.power === p && best.speed === v;
+    const col = s.through === true ? 'var(--ok-dot)' : s.through === false ? 'var(--line-strong)' : 'var(--warn-dot)';
+    return '<td style="padding:3px;text-align:center"><div style="position:relative;display:inline-block;border-radius:6px;box-shadow:0 0 0 ' + (isBest ? '4px var(--accent)' : '2px ' + col) + '">' +
+      (s.thumb ? '<img src="' + gridImg(s.thumb) + '" width="64" height="64" alt="' + p + ' % at ' + v + ' mm/s" style="display:block;border-radius:6px">' : '<div style="width:64px;height:64px"></div>') +
+      '<span style="position:absolute;right:2px;bottom:2px;font-size:13px;font-weight:700;padding:0 4px;border-radius:4px;background:var(--surface);color:' + col + '">' + (s.through === true ? '✓' : s.through === false ? '✗' : '?') + '</span></div></td>';
+  };
+  const table = '<div style="overflow:auto;max-height:52vh"><table style="border-collapse:collapse;font-size:13px"><thead><tr><th class="lbl" style="text-align:left;padding:4px">mm/s ↓ · power →</th>' + r.powers.map((p) => '<th class="mono" style="padding:4px">' + p + ' %</th>').join('') + '</tr></thead><tbody>' +
+    r.speeds.map((v) => '<tr><th class="mono" style="padding:4px;text-align:right">' + v + '</th>' + r.powers.map((p) => cell(p, v)).join('') + '</tr>').join('') + '</tbody></table></div>';
+  const mat = (r.material && r.material.name ? r.material.name + (r.material.thickness ? ' ' + r.material.thickness + ' mm' : '') : 'the material');
+  const n = r.squares.filter((s) => s.through).length;
+  return '<div class="scrim"><div role="dialog" aria-label="Test grid results" class="dlg wide">' +
+    '<span class="h-sec" style="font-size:18px">Test grid: ' + esc(mat) + '</span>' +
+    (best ? '<div style="display:flex;align-items:center;gap:14px;padding:12px 16px;border-radius:12px;background:var(--accent-soft)"><span style="font-size:24px;font-weight:600">' + best.power + ' % · ' + best.speed + ' mm/s</span><span class="lbl">' + n + ' of ' + r.squares.length + ' squares cut through</span></div>' : '') +
+    '<span style="line-height:1.5">' + esc(r.why || '') + '</span>' +
+    (r.confident ? '' : '<div class="warnbox">The camera isn\'t sure about this grid (the squares don\'t separate cleanly). Check the pictures before saving.</div>') +
+    table +
+    (r.saved ? '<span class="lbl">Saved to ' + esc(r.saved.material) + ', ' + esc(r.saved.process) + ' (was ' + r.saved.before.power + ' % at ' + r.saved.before.speed + ' mm/s), ' + new Date(r.saved.at).toLocaleString() + '. Pathline Prepare takes it on its next sync.</span>' : '') +
+    '<span class="lbl">' + esc(r.job ? r.job.name : '') + ' · checked ' + new Date(r.at).toLocaleString() + ' · by ' + esc(r.measure || '—') + '</span>' +
+    '<div style="display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap"><button class="tb" data-a="gridCheck"' + (running() ? ' disabled' : '') + '>Check again</button><button class="tb" data-a="close">Close</button>' +
+    (best ? '<button class="btn-primary" data-a="gridSave">' + (r.saved ? 'Saved' : 'Save ' + best.power + ' % · ' + best.speed + ' mm/s to ' + esc(mat)) + '</button>' : '') + '</div></div></div>';
+}
+
 // ---------------------------------------------------------------- dialogs
+// a QR code for text (vendor/qrcode.js), black on white whatever the theme: phone cameras need it
+function qrSvg(text, px) {
+  if (typeof qrcode !== 'function' || !text) return '';
+  const q = qrcode(0, 'M');
+  q.addData(text);
+  q.make();
+  const n = q.getModuleCount(), m = 3;
+  let d = '';
+  for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) if (q.isDark(r, c)) d += 'M' + (c + m) + ' ' + (r + m) + 'h1v1h-1z';
+  return '<svg viewBox="0 0 ' + (n + 2 * m) + ' ' + (n + 2 * m) + '" width="' + px + '" height="' + px + '" shape-rendering="crispEdges" role="img" aria-label="QR code for ' + esc(text) + '" style="display:block"><rect width="100%" height="100%" fill="#fff"/><path d="' + d + '" fill="#000"/></svg>';
+}
+
 function dialog() {
+  // print and cut: the sheet lies 5–10° turned from the job. The job waits for Continue or Stop
+  // (over every other dialog and page: nothing moves until it's answered)
+  const aw = S && S.status && S.status.angleWait;
+  if (aw) {
+    return '<div class="scrim"><div role="alertdialog" aria-label="Sheet turned" class="dlg"><span class="h-sec" style="font-size:18px">The sheet is turned ' + Math.abs(aw.angle).toFixed(1) + '°</span>' +
+      '<div class="warnbox" style="line-height:1.5">' + esc(aw.text) + '</div>' +
+      '<span style="color:var(--text-2);line-height:1.5">Continue runs it as it lies. Stop leaves it uncut, to straighten the sheet and start again.</span>' +
+      '<div style="display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap"><button class="tb" data-a="stop" style="height:52px;padding:0 20px;color:var(--err)">Stop job</button>' +
+      '<button class="btn-primary" data-a="angleOk" style="height:52px;padding:0 24px">Continue</button></div></div></div>';
+  }
   if (!ui.dlg) return '';
   if (ui.dlg.kind === 'import') {
     return '<div class="scrim"><div role="dialog" aria-label="Import file" class="dlg"><span class="h-sec" style="font-size:18px">Import job</span>' +
@@ -1031,8 +1207,42 @@ function dialog() {
       '<div style="display:flex;justify-content:flex-end;gap:8px"><button class="tb" data-a="close">Cancel</button><button class="btn-primary" data-a="importGo"' + (ui.dlg.data ? '' : ' disabled') + '>Add to queue</button></div></div></div>';
   }
   if (ui.dlg.kind === 'log') {
-    return '<div class="scrim"><div role="dialog" aria-label="Diagnostics log" class="dlg wide"><span class="h-sec" style="font-size:18px">Diagnostics log</span><pre class="log">' + esc((ui.dlg.lines || []).join('\n')) + '</pre>' +
+    // today's (since Pathline Run started), or an earlier day's from data/logs
+    const days = ui.dlg.days || [];
+    const dayBtns = days.length ? '<div role="radiogroup" aria-label="Day" class="seg" style="flex-wrap:wrap;max-width:100%">' +
+      '<button role="radio" aria-checked="' + !ui.dlg.day + '" data-a="logDay" data-v="">Now</button>' +
+      days.slice(0, 8).map((d) => '<button role="radio" aria-checked="' + (ui.dlg.day === d) + '" data-a="logDay" data-v="' + d + '">' + new Date(d + 'T12:00:00').toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' }) + '</button>').join('') + '</div>' : '';
+    return '<div class="scrim"><div role="dialog" aria-label="Diagnostics log" class="dlg wide"><span class="h-sec" style="font-size:18px">Diagnostics log</span>' + dayBtns +
+      '<span class="lbl">' + (ui.dlg.day ? 'Kept on this computer: ' + esc(ui.dlg.day) : 'Since Pathline Run started. Each day is also kept on this computer for ' + 30 + ' days.') + '</span><pre class="log">' + esc((ui.dlg.lines || []).join('\n')) + '</pre>' +
       '<div style="display:flex;justify-content:flex-end"><button class="tb" data-a="close">Close</button></div></div></div>';
+  }
+  // ☰ → Pathline Monitor on a phone: the hub's setup page as a QR code for a phone's camera
+  if (ui.dlg.kind === 'monitorQr' && ui.dlg.r && ui.dlg.r.server) {
+    // the Monitor server this machine reports to (Setup → Pathline Monitor): phones open it anywhere
+    const r = ui.dlg.r;
+    return '<div class="scrim"><div role="dialog" aria-label="Pathline Monitor on a phone" class="dlg"><span class="h-sec" style="font-size:18px">Pathline Monitor on a phone</span>' +
+      '<div style="display:flex;flex-wrap:wrap;gap:18px;align-items:center"><div style="flex:none;padding:10px;border-radius:12px;background:#fff;box-shadow:inset 0 0 0 1px var(--line)">' + qrSvg(r.setup, 220) + '</div>' +
+      '<div style="flex:1 1 220px;min-width:0;display:flex;flex-direction:column;gap:10px;line-height:1.5"><span style="font-size:16px">Scan this with a phone\'s camera. It opens Pathline Monitor: sign in with the workshop password, then add it to the Home Screen for alerts.</span>' +
+      '<span class="lbl">Address</span><span class="mono" style="font-size:14px;word-break:break-all">' + esc(r.setup) + '</span>' +
+      '<span class="lbl">This machine reports to it (Setup → Pathline Monitor)</span></div></div>' +
+      '<div style="display:flex;justify-content:flex-end;gap:8px"><button class="btn-primary" data-a="close">Close</button></div></div></div>';
+  }
+  if (ui.dlg.kind === 'monitorQr') {
+    const r = ui.dlg.r || {};
+    const field = '<label style="display:flex;flex-direction:column;gap:6px"><span class="lbl">Hub address (the PC or Pi running Pathline Monitor)</span>' +
+      '<div style="display:flex;gap:8px"><input class="cell" data-mh="1" placeholder="192.168.1.20 or 192.168.1.20:8480" value="' + esc(ui.dlg.typed !== undefined ? ui.dlg.typed : r.typed || '') + '" style="flex:1" autocomplete="off" spellcheck="false">' +
+      '<button class="tb" data-a="monitorHubSave">Look again</button></div></label>';
+    const body = r.found
+      ? '<div style="display:flex;flex-wrap:wrap;gap:18px;align-items:center"><div style="flex:none;padding:10px;border-radius:12px;background:#fff;box-shadow:inset 0 0 0 1px var(--line)">' + qrSvg(r.setup, 220) + '</div>' +
+        '<div style="flex:1 1 220px;min-width:0;display:flex;flex-direction:column;gap:10px;line-height:1.5"><span style="font-size:16px">Scan this with a phone\'s camera, on the workshop Wi-Fi. It opens <strong>Set up this phone</strong>, which walks through installing the app and turning on notifications.</span>' +
+        '<span class="lbl">Setup page</span><span class="mono" style="font-size:14px;word-break:break-all">' + esc(r.setup) + '</span>' +
+        (r.app ? '<span class="lbl">The app, once set up</span><span class="mono" style="font-size:14px;word-break:break-all">' + esc(r.app) + '</span>' : '') +
+        '<span class="lbl">Found ' + (r.typed ? 'at the address typed in' : 'watching this machine') + ' (' + esc(r.host) + ')</span></div></div>'
+      : '<div class="warnbox" style="line-height:1.5">This machine isn\'t connected to Pathline Monitor yet.</div>' +
+        '<span style="color:var(--text-2);line-height:1.5">Connect it in <strong>Setup → Pathline Monitor</strong> with the address and code from the app (Settings, Add a machine). The QR code then shows here.<br>An older Pathline Monitor hub on the workshop network (before 0.5) is found by itself, or type its address below.</span>' +
+        '<div style="display:flex;justify-content:flex-start"><button class="tb" data-a="mrOpen">Open Setup → Pathline Monitor</button></div>';
+    return '<div class="scrim"><div role="dialog" aria-label="Pathline Monitor on a phone" class="dlg"><span class="h-sec" style="font-size:18px">Pathline Monitor on a phone</span>' + body + field +
+      '<div style="display:flex;justify-content:flex-end;gap:8px"><button class="btn-primary" data-a="close">Close</button></div></div></div>';
   }
   if (ui.dlg.kind === 'about') {
     return '<div class="scrim"><div role="dialog" aria-label="About" class="dlg"><div style="display:flex;gap:14px;align-items:center"><img src="icon.svg" width="48" height="48" alt=""><div><div class="h-sec" style="font-size:18px">Pathline Run ' + esc(S.app) + '</div><span class="lbl">The machine side of Pathline</span></div></div>' +
@@ -1091,6 +1301,7 @@ function dialog() {
         : '<span class="lbl">No Ruida controller answered. Check it is switched on and cabled to this computer, that this computer\'s Ethernet has an address on the same network as the controller (Setup → Network), and that LightBurn, RDWorks and RDCutting are closed.</span>') +
       '<div style="display:flex;justify-content:flex-end;gap:8px"><button class="tb" data-a="close">Close</button></div></div></div>';
   }
+  if (ui.dlg.kind === 'grid') return gridWindow(ui.dlg.r);
   if (ui.dlg.kind === 'update') return updateWindow();
   if (ui.dlg.kind === 'changelog') return changelogWindow(ui.dlg.entries, ui.dlg.title);
   if (ui.dlg.kind === 'message') return messageWindow(ui.dlg.title, ui.dlg.msg);
@@ -1143,12 +1354,23 @@ function render() {
   const ae = document.activeElement;
   const focused = ae && /^(INPUT|SELECT|TEXTAREA)$/.test(ae.tagName) && ae.dataset && (ae.dataset.f || ae.dataset.n);
   if (ui.view === 'setup' && focused) { const h = $app.querySelector('header'); if (h) h.outerHTML = header(); markOpened(true); return; }
+  // nor a job's power and speed while one is being typed (Queue → Edit)
+  if (ae && ae.tagName === 'INPUT' && ae.dataset && (ae.dataset.pe || ae.dataset.mh || ae.dataset.acc || ae.dataset.mr)) { const h = $app.querySelector('header'); if (h) h.outerHTML = header(); markOpened(true); return; }
+  // nor anything while a finger drags a list, or it glides on after: redrawing under the finger
+  // ends the scroll (a touch screen); the next redraw catches up
+  if (ui.drawn === ui.view && (ui.dragging || Date.now() < (ui.glideUntil || 0))) {
+    const h = $app.querySelector('header'); if (h) h.outerHTML = header(); markOpened(true);
+    clearTimeout(ui.catchUp); ui.catchUp = setTimeout(render, 700);
+    return;
+  }
   // every part that scrolls keeps its place: the screen is redrawn every 0.7 s, and the job's
   // process list (a test grid has dozens) went back to the top each time, so it couldn't be scrolled
-  const scrollers = '.view, [data-keep], .dlg, pre.log';
-  const keyOf = (el) => el.dataset.keep || el.className;
+  // (any box with its own overflow counts: History's list scrolls inside its card, not the page,
+  // and went back to the top on every redraw; across as well as down)
+  const scrollers = '.view, [data-keep], .dlg, pre.log, [style*="overflow"]';
+  const keyOf = (el, i) => el.dataset.keep || el.className + '#' + i;
   const scroll = {};
-  if (ui.drawn === ui.view) for (const el of $app.querySelectorAll(scrollers)) scroll[keyOf(el)] = el.scrollTop;
+  if (ui.drawn === ui.view) [...$app.querySelectorAll(scrollers)].forEach((el, i) => { if (el.scrollTop || el.scrollLeft) scroll[keyOf(el, i)] = [el.scrollTop, el.scrollLeft]; });
   ui.drawn = ui.view;
   const v = ui.view === 'jog' ? jogView() : ui.view === 'history' ? historyView() : ui.view === 'setup' ? setupView() : queueView();
   const t = ui.toast;
@@ -1158,7 +1380,7 @@ function render() {
   $app.innerHTML = header() + v + dialog() + (t ? '<div class="toast" role="status" style="display:flex;align-items:center;gap:14px">' + esc(t.msg) +
     (t.action ? '<button class="tb sm" data-a="toastAction">' + esc(t.action) + '</button>' : '') + '</div>' : '');
   artFill(old);
-  for (const el of $app.querySelectorAll(scrollers)) if (keyOf(el) in scroll) el.scrollTop = scroll[keyOf(el)];
+  [...$app.querySelectorAll(scrollers)].forEach((el, i) => { const s = scroll[keyOf(el, i)]; if (s) { el.scrollTop = s[0]; el.scrollLeft = s[1]; } });
   markOpened(false);
   drawCam();
 }
@@ -1259,6 +1481,8 @@ const H = {
   camGoto: act(async (v) => call('POST', LOCAL('/camera/goto'), { to: v })),
   // print and cut: the waiting mark is under the crosshair; back to the queue to watch the job
   markAccept: act(async () => { await call('POST', API('/marks/accept'), {}); ui.view = 'queue'; }),
+  // print and cut: run with the sheet as it lies, turned 5–10°
+  angleOk: act(async () => { await call('POST', API('/marks/angle-ok'), {}); }),
   // the head Z axis: Setup → Z axis buttons (v: jog:±mm, up, home, read, focus, clear)
   z: act(async (v) => {
     const [what, arg] = String(v).split(':');
@@ -1274,6 +1498,43 @@ const H = {
     toast('Scanning the sheet\'s height under the job: the head moves over it with the nozzle up…', { ms: 6000 });
     const m = await call('POST', LOCAL('/zaxis/scan'), { id });
     toast('Sheet scanned: ' + m.nx + ' × ' + m.ny + ' points, ' + m.min.toFixed(1) + ' to +' + m.max.toFixed(1) + ' mm, steepest ' + (m.slope * 100).toFixed(1) + ' %' + (m.dropped ? ' (' + m.dropped + ' readings dropped)' : ''), { ms: 8000 });
+  }),
+  // a queued job's power and speed (procRows): Edit opens the fields, Save sends them
+  procEdit: (v) => {
+    const id = ui.sel, pkg = ui.pkgs[id];
+    const p = pkg && pkg !== 'loading' ? (pkg.processes || []).find((x) => x.index === Number(v)) : null;
+    if (!p) return;
+    ui.pe = { job: id, index: p.index, power: p.power === undefined ? '' : String(p.power), speed: String(p.speed) };
+    render();
+    const f = $app.querySelector('[data-pe="' + (p.power === undefined ? 'speed' : 'power') + '"]');
+    if (f) { f.focus(); f.select(); }
+  },
+  // (the field typed in lets go first: while it has focus the screen isn't redrawn)
+  procCancel: () => { ui.pe = null; if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); render(); },
+  procSave: act(async () => {
+    const pe = ui.pe;
+    if (!pe) return;
+    const num = (s) => (s === '' ? undefined : Number(String(s).replace(',', '.')));
+    const r = await call('POST', LOCAL('/jobs/' + encodeURIComponent(pe.job) + '/process'), { index: pe.index, power: num(pe.power), speed: num(pe.speed) });
+    ui.pe = null;
+    if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+    delete ui.pkgs[pe.job]; // shown again as it now is
+    toast((r.process.name || 'Process') + ': ' + (r.process.power !== undefined ? r.process.power + ' % at ' : '') + r.process.speed + ' mm/s' + (r.seconds ? ' · now ' + hms(r.seconds) : ''));
+  }),
+  // a test grid's results (vision/grid.js)
+  gridShow: act(async () => { const g = await call('GET', LOCAL('/grid')); if (!g.result) throw new Error('No test grid has been checked yet'); ui.dlg = { kind: 'grid', r: g.result }; }),
+  gridCheck: act(async () => {
+    const id = ui.dlg && ui.dlg.r && ui.dlg.r.job ? ui.dlg.r.job.id : null;
+    toast('Checking the test grid with the head camera…', { ms: 6000 });
+    const r = await call('POST', LOCAL('/grid/check'), { id });
+    ui.dlg = { kind: 'grid', r };
+  }),
+  gridSave: act(async () => {
+    const r = ui.dlg && ui.dlg.r;
+    if (!r || !r.best || r.saved) return;
+    const s = await call('POST', LOCAL('/grid/save'), { id: r.job.id });
+    toast('Saved ' + r.best.power + ' % at ' + r.best.speed + ' mm/s to ' + s.material + ' (' + s.process + '). Pathline Prepare takes it on its next sync.', { ms: 8000 });
+    ui.dlg = { kind: 'grid', r: (await call('GET', LOCAL('/grid'))).result || { ...r, saved: s } };
   }),
   camCalibrate: act(async () => {
     const r = await call('POST', LOCAL('/camera/calibrate'), {});
@@ -1410,8 +1671,57 @@ const H = {
   reconnect: act(async () => call('POST', LOCAL('/reconnect'), {})),
   import: () => { ui.dlg = { kind: 'import' }; render(); },
   importGo: act(async () => { const r = await call('POST', LOCAL('/import'), ui.dlg.data); ui.dlg = null; ui.sel = r.id; ui.view = 'queue'; }),
-  log: act(async () => { ui.navOpen = false; ui.dlg = { kind: 'log', lines: await call('GET', LOCAL('/log')) }; }),
+  log: act(async () => { ui.navOpen = false; ui.dlg = { kind: 'log', lines: await call('GET', LOCAL('/log')), days: await call('GET', LOCAL('/logs')).catch(() => []) }; }),
+  logDay: act(async (v) => {
+    if (!ui.dlg || ui.dlg.kind !== 'log') return;
+    const lines = v ? await call('GET', LOCAL('/logs/day?d=' + encodeURIComponent(v))) : await call('GET', LOCAL('/log'));
+    ui.dlg = { ...ui.dlg, day: v || null, lines };
+  }),
   about: () => { ui.navOpen = false; ui.dlg = { kind: 'about' }; render(); },
+  // Setup → Camera → Check with a cut rectangle
+  accJob: act(async () => {
+    const a = ui.acc || {};
+    const r = await call('POST', LOCAL('/accuracy/job'), { w: Number(a.w), h: Number(a.h), power: Number(a.power), speed: Number(a.speed) });
+    ui.acc = { ...a, w: r.rect.w, h: r.rect.h };
+    toast(r.name + ' is in the queue (' + r.id + ')', { ms: 6000 });
+  }),
+  accMeasure: act(async () => {
+    const el = document.activeElement; if (el && el.dataset && el.dataset.acc) el.blur();
+    const a = ui.acc || {};
+    await call('POST', LOCAL('/accuracy/measure'), a);
+  }),
+  accApply: act(async () => {
+    const r = await call('POST', LOCAL('/accuracy/apply'), {});
+    ui.draft = null;
+    toast('Bed map corrected' + (r.since ? ' (X ' + r.since.scaleX + ' ‰, Y ' + r.since.scaleY + ' ‰, ' + r.since.lean + '° against the one before)' : '') + '. Cut another rectangle to check it.', { ms: 9000 });
+  }),
+  // Setup → Pathline Monitor
+  mrConnect: async () => {
+    if (ui.mrBusy) return;
+    const el = document.activeElement; if (el && el.dataset && el.dataset.mr) el.blur();
+    ui.mrBusy = true; render();
+    try {
+      S.monitorReport = await call('POST', LOCAL('/monitor-report/connect'), { address: (ui.mr || {}).address, code: (ui.mr || {}).code });
+      ui.mr = null;
+      toast('Connected to Pathline Monitor. This machine shows in the app once its first report arrives.', { ms: 7000 });
+    } catch (e) { toast(e.message, { ms: 9000, err: true }); } finally { ui.mrBusy = false; render(); }
+  },
+  mrOpen: () => { ui.dlg = null; ui.view = 'setup'; ui.setTab = 'Pathline Monitor'; render(); },
+  mrDisconnect: act(async () => { S.monitorReport = await call('POST', LOCAL('/monitor-report/disconnect'), {}); ui.mr = null; }),
+  // ☰ → Pathline Monitor on a phone: the Monitor server this machine reports to, or else a hub
+  // on the workshop network (Pathline Monitor before 0.5)
+  monitorQr: act(async () => {
+    ui.navOpen = false;
+    const m = S.monitorReport || {};
+    ui.dlg = { kind: 'monitorQr', r: m.connected ? { found: true, server: true, host: m.address, setup: /^https?:\/\//.test(m.address) ? m.address + '/' : 'https://' + m.address + '/' } : await call('GET', LOCAL('/monitor-hub')) };
+  }),
+  monitorHubSave: act(async () => {
+    const el = document.querySelector('[data-mh]');
+    const v = el ? el.value.trim() : '';
+    if (el) el.blur();
+    await call('PUT', LOCAL('/config'), { monitorHub: v });
+    ui.dlg = { kind: 'monitorQr', r: await call('GET', LOCAL('/monitor-hub')) };
+  }),
   // ☰ → Check for updates: an update opens the update window; otherwise says what it found
   checkUpdate: act(async () => {
     ui.navOpen = false;
@@ -1478,6 +1788,20 @@ document.addEventListener('pointerup', () => endHold(true));
 document.addEventListener('pointercancel', () => endHold(false));
 window.addEventListener('blur', () => endHold(false));
 $app.addEventListener('contextmenu', (e) => { if (e.target.closest('[data-hold]')) e.preventDefault(); }); // long press on a touch screen
+
+// a finger dragging a list (not a tap, not the jog arrows or the bed view, which handle their
+// own): render() holds the redraw until it lets go and the list has glided to a stop
+let touch0 = null;
+$app.addEventListener('touchstart', (e) => {
+  touch0 = e.target.closest('[data-hold], #bedview') ? null : [e.touches[0].clientX, e.touches[0].clientY];
+}, { passive: true });
+$app.addEventListener('touchmove', (e) => {
+  if (!touch0 || ui.dragging) return;
+  if (Math.hypot(e.touches[0].clientX - touch0[0], e.touches[0].clientY - touch0[1]) > 8) ui.dragging = true;
+}, { passive: true });
+const touchEnd = () => { if (ui.dragging) ui.glideUntil = Date.now() + 1200; ui.dragging = false; touch0 = null; };
+$app.addEventListener('touchend', touchEnd, { passive: true });
+$app.addEventListener('touchcancel', touchEnd, { passive: true });
 
 // bed view: one finger or the mouse drags, two fingers pinch, the wheel zooms at the pointer
 const pan = { pts: new Map(), start: null };
@@ -1574,6 +1898,14 @@ $app.addEventListener('change', (e) => {
   }
 });
 $app.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.dataset && (e.target.dataset.f || e.target.dataset.n)) e.target.blur(); });
+// a job's power and speed being typed (Queue → Edit): kept as typed, Enter saves, Escape cancels
+$app.addEventListener('input', (e) => { const k = e.target.dataset && e.target.dataset.pe; if (k && ui.pe) ui.pe[k] = e.target.value; if (e.target.dataset && e.target.dataset.mh && ui.dlg) ui.dlg.typed = e.target.value; if (e.target.dataset && e.target.dataset.acc) ui.acc = { ...(ui.acc || {}), [e.target.dataset.acc]: e.target.value.trim() }; if (e.target.dataset && e.target.dataset.mr) ui.mr = { ...(ui.mr || {}), [e.target.dataset.mr]: e.target.value }; });
+$app.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.dataset && e.target.dataset.mh) H.monitorHubSave(); if (e.key === 'Enter' && e.target.dataset && e.target.dataset.mr) H.mrConnect(); });
+$app.addEventListener('keydown', (e) => {
+  if (!(e.target.dataset && e.target.dataset.pe)) return;
+  if (e.key === 'Enter') { e.preventDefault(); H.procSave(); }
+  if (e.key === 'Escape') { e.preventDefault(); H.procCancel(); }
+});
 $app.addEventListener('focusout', (e) => { if (e.target.dataset && (e.target.dataset.f || e.target.dataset.n)) setTimeout(render, 0); });
 
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => { if (!ui.themeSet) { ui.dark = e.matches; render(); } });

@@ -302,6 +302,16 @@ function toGrey(raw, w, h, fmt) {
 }
 
 // ---------------------------------------------------------------- simulated
+// is p inside the polygon pts (even-odd)
+function inPoly(p, pts) {
+  let inside = false;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    const [xi, yi] = pts[i], [xj, yj] = pts[j];
+    if ((yi > p[1]) !== (yj > p[1]) && p[0] < ((xj - xi) * (p[1] - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
 // opts.truth: the real camera, as calibration should find it:
 //   { offset: [x, y] laser − camera (mm), pixel (mm/px), rotation (deg, image vs bed),
 //     error(p) → where the head really is when sent to p (machine inaccuracy) }
@@ -329,9 +339,32 @@ class SimCamera {
   // the laser fired here (calibration marks); where it really landed follows the machine error
   laserMark(x, y, d) { const p = this.truth.error([x, y]); this.scene.marks.push({ x: p[0], y: p[1], d }); }
 
+  // a cut along points (bed mm) as the test grid leaves it: through (a dark gap down to the bed)
+  // or not (a groove: light, frosted on clear acrylic); 0.2 mm wide
+  laserCut(points, through) {
+    const pts = points.map((q) => this.truth.error(q));
+    const xs = pts.map((q) => q[0]), ys = pts.map((q) => q[1]);
+    (this.scene.cuts = this.scene.cuts || []).push({ pts: pts.concat([pts[0]]), v: through ? 35 : 250, box: [Math.min(...xs) - 0.3, Math.min(...ys) - 0.3, Math.max(...xs) + 0.3, Math.max(...ys) + 0.3] });
+  }
+
   // grey level of the bed at p (mm)
   shade(p) {
+    for (const ct of this.scene.cuts || []) {
+      if (p[0] < ct.box[0] || p[1] < ct.box[1] || p[0] > ct.box[2] || p[1] > ct.box[3]) continue;
+      for (let k = 1; k < ct.pts.length; k++) {
+        const A = ct.pts[k - 1], B = ct.pts[k], dx = B[0] - A[0], dy = B[1] - A[1], L2 = dx * dx + dy * dy;
+        const u = L2 ? Math.max(0, Math.min(1, ((p[0] - A[0]) * dx + (p[1] - A[1]) * dy) / L2)) : 0;
+        if (Math.hypot(A[0] + dx * u - p[0], A[1] + dy * u - p[1]) <= 0.1) return ct.v;
+      }
+    }
     for (const m of this.scene.dots.concat(this.scene.marks)) if (Math.hypot(p[0] - m.x, p[1] - m.y) <= m.d / 2) return 25;
+    // plates (steel, brushed along X: fine streaks) lying on the bed: { pts: corners, v, holes:
+    // [{ x, y, d }] }; through a hole, whatever is under it
+    for (const pl of this.scene.plates || []) {
+      if (!inPoly(p, pl.pts)) continue;
+      if ((pl.holes || []).some((o) => Math.hypot(p[0] - o.x, p[1] - o.y) <= o.d / 2)) break;
+      return (pl.v || 100) + 14 * Math.sin(p[1] * 11.3 + 2 * Math.sin(p[0] * 0.21));
+    }
     // printed artwork: dark rectangles { x0, y0, x1, y1 }
     for (const r of this.scene.rects || []) if (p[0] >= r.x0 && p[0] <= r.x1 && p[1] >= r.y0 && p[1] <= r.y1) return 40;
     // the bed checkerboard, and any others (scene.boards: e.g. the small 10 mm one for stage 1)
@@ -340,10 +373,11 @@ class SimCamera {
       const a = (-b.angle * Math.PI) / 180, dx = p[0] - b.x, dy = p[1] - b.y;
       let bu = dx * Math.cos(a) - dy * Math.sin(a), bv = dx * Math.sin(a) + dy * Math.cos(a);
       if (b.bump) { const d = b.bump(bu, bv); bu -= d[0]; bv -= d[1]; }
-      const u = bu / b.square, v = bv / b.square;
+      // b.print: [across, down] how far the print is from its size (a printer's scaling)
+      const u = bu / (b.square * (b.print ? b.print[0] : 1)), v = bv / (b.square * (b.print ? b.print[1] : 1));
       if (u >= -1 && v >= -1 && u < (b.nx || 30) - 1 && v < (b.ny || 20) - 1) return (Math.floor(u) + Math.floor(v)) % 2 === 0 ? 30 : 220;
     }
-    return 225;
+    return this.scene.sheet === undefined ? 225 : this.scene.sheet;
   }
 
   async grab() {

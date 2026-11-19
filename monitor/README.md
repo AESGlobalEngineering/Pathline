@@ -13,7 +13,7 @@ Pathline Run (each machine) ──https, outgoing only──▶  Monitor server 
 - **Nothing is opened at the workshop.** Each Run connects out to the server, the way a browser does. No port is opened on the workshop network.
 - **It's small.** The server is about 500 lines of Node.js with no packages to install, and keeps its data in a few JSON files.
 
-Machines report from the Pathline Run version that has **Settings → Pathline Monitor** (the brief for it is [hmi/RUN-REPORT-BRIEF.md](../hmi/RUN-REPORT-BRIEF.md)). Until a machine's Run has that, it can't be added.
+Machines report from **Pathline Run 0.7.13**, which has **Setup → Pathline Monitor** (the brief for it is [hmi/RUN-REPORT-BRIEF.md](../hmi/RUN-REPORT-BRIEF.md)). A machine on an older Run can't be added until it's updated.
 
 ## What makes an alert
 
@@ -42,7 +42,7 @@ From then on it's an app on the Home Screen: full screen, it opens even without 
 ## Add a machine
 
 1. In the app: **Settings → Add a machine**. It shows a 6-character code that works once, for 10 minutes.
-2. At the machine, in Pathline Run: **Settings → Pathline Monitor**. Type the server's address and the code, and press **Connect**.
+2. At the machine, in Pathline Run: **Setup → Pathline Monitor**. Type the server's address and the code, and press **Connect**.
 
 The machine appears in the app straight away. Run gets its own key from the server and reports with it from then on. To take a machine off, open it in the app and choose **Remove from Pathline Monitor**: its key stops working and its Run stops reporting.
 

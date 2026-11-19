@@ -71,7 +71,15 @@ function fillHoles(mask, w, h) {
 // Dark blobs whose size fits a dot of diameter minD … maxD px, round enough, not cut off by the
 // frame edge. Dark is judged locally (darkMask), so uneven light doesn't matter; opts.global
 // uses one threshold for the whole picture instead. Centre = darkness-weighted centroid.
+// opts.light: light blobs in a darker surround instead (a hole cut in steel, white card under it):
+// the picture is turned negative and looked at the same way, with a looser check of what's round
+// the hole (brushed steel has streaks where paper is plain). The dots found carry light: true.
 function findDots(img, opts = {}) {
+  if (opts.light) {
+    const neg = { ...img, data: new Uint8Array(img.data.length) };
+    for (let i = 0; i < img.data.length; i++) neg.data[i] = 255 - img.data[i];
+    return findDots(neg, { ...opts, light: false, ring: { ratio: 0.75, spread: 0.15 } }).map((d) => ({ ...d, light: true }));
+  }
   const { w, h, data } = img;
   const minD = opts.minD || 8, maxD = opts.maxD || Math.min(w, h) * 0.8;
   // the box must be well bigger than a dot, so a dot's middle is compared with paper round it,
@@ -116,7 +124,7 @@ function findDots(img, opts = {}) {
   const cx = (w - 1) / 2, cy = (h - 1) / 2;
   // printed registration marks always sit in plain white: keep only dots whose surroundings are
   // clean paper (anything dark next to a candidate, artwork or an edge, rules it out)
-  const keep = opts.whiteRing ? out.filter((dot) => whiteRound(img, dot)) : out;
+  const keep = opts.whiteRing ? out.filter((dot) => whiteRound(img, dot, opts.ring)) : out;
   keep.sort((a, b) => Math.hypot(a.x - cx, a.y - cy) - Math.hypot(b.x - cx, b.y - cy));
   // the one that will be used, refined so uneven light doesn't pull its centre
   if (keep.length && !opts.global) keep[0] = refineDot(img, keep[0]);
@@ -128,7 +136,8 @@ function findDots(img, opts = {}) {
 // touching the ring brings its darkest tenth down to the dot's level. The light may fall across the
 // ring very unevenly (the Trotec's lamp: a printed white disc round a mark read 135 on one side,
 // 68 on the other); judging the darkest tenth against the brightest, as before, ruled that out.
-function whiteRound(img, dot) {
+// (k: { ratio, spread } in place of 0.55 and 0.4: looser for holes in steel)
+function whiteRound(img, dot, k) {
   const { w, h, data } = img;
   const R = dot.d / 2, r1 = R * 1.3, r2 = R * 1.9;
   const ring = [], inner = [];
@@ -141,7 +150,176 @@ function whiteRound(img, dot) {
   }
   const q = (a, f) => a.sort((m, n) => m - n)[Math.min(a.length - 1, Math.floor(a.length * f))];
   const lo = q(ring, 0.1), mid = q(ring, 0.5), dark = q(inner, 0.5);
-  return dark <= mid * 0.55 && lo - dark >= 0.4 * (mid - dark);
+  const ratio = (k && k.ratio) || 0.55, spread = (k && k.spread) || 0.4;
+  return dark <= mid * ratio && lo - dark >= spread * (mid - dark);
+}
+
+// ------------------------------------------------------------------ a plate's corner
+// A plate (steel, any colour) on a white background: its corner from the two straight edges that
+// meet there. M: the camera matrix [a, b, c, d] (pixel offset from the frame centre → bed mm);
+// toward: [sx, sy], which way the plate lies from its corner in bed X and Y (±1 each: [1, 1] is the
+// corner at the plate's least X and least Y). Works in bed mm round the frame centre, so the
+// picture's own turn doesn't matter.
+// Edge "X" (along bed X, plate on its sy side) is found across lines along Y, at X from 1 mm past
+// the frame centre outward on the plate's side; edge "Y" likewise. On each line the edge is where
+// the brightness steps most (averaged over half a mm each side, so steel's brushed streaks don't
+// count), placed at the halfway level between the two sides. Lines with too small a step (off the
+// plate) are left out, a straight line fitted through the rest twice (dropping points 0.15 mm off),
+// and the two lines meet at the corner.
+// Returns { x, y } px (as findDots), the edges' angles (degrees, X edge from +X towards +Y; Y edge
+// the same turn of +Y), the turn of the corner (their mean), squareness (their difference),
+// contrast and the points used; null if there's no clear corner.
+// Rounded corners (opts.r, the radius in mm): the corner is still where the two straight edges'
+// lines meet (the plate's bounding box corner, which the plate itself doesn't reach), so each edge
+// is fitted only where it's more than r + 0.5 mm from that point, leaving the arc out. opts.c0:
+// where the corner is expected, mm from the frame centre (Vision aims the camera inside a rounded
+// corner, so more straight edge is in view). opts.why: given an object, it gets the reason when no
+// corner is found (why.reason; why.view when the camera can't see enough straight edge).
+function findPlateCorner(img, opts = {}) {
+  const { w, h, data } = img;
+  const M = opts.M, [sx, sy] = opts.toward || [1, 1];
+  const R = Math.max(0, Number(opts.r) || 0), c0 = opts.c0 || [0, 0];
+  const why = opts.why || {};
+  const fail = (reason, view) => { why.reason = reason; if (view) why.view = true; return null; };
+  const det = M[0] * M[3] - M[1] * M[2];
+  if (!det) return null;
+  const Mi = [M[3] / det, -M[1] / det, -M[2] / det, M[0] / det];
+  const cx = (w - 1) / 2, cy = (h - 1) / 2;
+  const px = Math.sqrt(Math.abs(det));
+  const toPx = (X, Y) => [cx + Mi[0] * X + Mi[1] * Y, cy + Mi[2] * X + Mi[3] * Y];
+  const at = (X, Y) => {
+    const [u, v] = toPx(X, Y);
+    if (u < 1 || v < 1 || u > w - 2 || v > h - 2) return null;
+    const x0 = Math.floor(u), y0 = Math.floor(v), fx = u - x0, fy = v - y0, i = y0 * w + x0;
+    return data[i] * (1 - fx) * (1 - fy) + data[i + 1] * fx * (1 - fy) + data[i + w] * (1 - fx) * fy + data[i + w + 1] * fx * fy;
+  };
+  // the frame's reach in mm from the centre along X and Y
+  const half = [w, h].map(() => 0);
+  const reachAlong = (ax) => { let r = 0; while (r < 500 && at(ax ? 0 : r + px, ax ? r + px : 0) !== null && at(ax ? 0 : -(r + px), ax ? -(r + px) : 0) !== null) r += px; return r; };
+  half[0] = reachAlong(0); half[1] = reachAlong(1);
+  const step = Math.max(px, 0.02), n = Math.max(3, Math.round(0.5 / step));
+  // one line across an edge: points along `t` (mm) at fixed `s`; returns the steps on it (each
+  // biggest within a mm), each placed at the halfway level between its two sides: { t, d }
+  const across = (along, s, lim) => {
+    const P = [];
+    for (let t = -lim; t <= lim; t += step) { const v = along ? at(s, t) : at(t, s); if (v !== null) P.push([t, v]); }
+    if (P.length < 4 * n) return [];
+    const S = [0];
+    for (const p of P) S.push(S[S.length - 1] + p[1]);
+    const mean = (a, b) => (S[b] - S[a]) / (b - a);
+    // each step against the light there (a fraction of the brightness round it): the Trotec's lamp
+    // lights part of the view four times brighter than the rest, and an edge in the shadow counts
+    // as much as one in the light
+    const D = new Float64Array(P.length);
+    let top = 0;
+    for (let i = n; i < P.length - n; i++) { D[i] = (mean(i, i + n) - mean(i - n, i)) / (mean(i - n, i + n) + 8); top = Math.max(top, Math.abs(D[i])); }
+    const out = [];
+    for (let i = n; i < P.length - n; i++) {
+      const a0 = Math.abs(D[i]);
+      if (a0 < 0.3 * top) continue;
+      let peak = true;
+      for (let j = Math.max(n, i - 2 * n); j <= Math.min(P.length - n - 1, i + 2 * n); j++) if (Math.abs(D[j]) > a0 || (Math.abs(D[j]) === a0 && j < i)) { peak = false; break; }
+      if (!peak) continue;
+      const a = Math.max(0, i - 3 * n), b = Math.min(P.length, i + 3 * n);
+      const lo = mean(a, Math.max(a + 1, i - n)), hi = mean(Math.min(b - 1, i + n), b), mid = (lo + hi) / 2;
+      let t = P[i][0];
+      for (let k = Math.max(1, i - n); k <= Math.min(P.length - 1, i + n); k++) {
+        const v0 = P[k - 1][1] - mid, v1 = P[k][1] - mid;
+        if ((v0 <= 0 && v1 > 0) || (v0 >= 0 && v1 < 0)) { t = P[k - 1][0] + (P[k][0] - P[k - 1][0]) * (v0 / (v0 - v1)); break; }
+      }
+      out.push({ t, d: (hi - lo) / ((hi + lo) / 2 + 8) });
+    }
+    return out;
+  };
+  // an edge: lines from 1 mm past the expected corner (r + 1 for a rounded one) out to the frame's
+  // side, every 0.4 mm or more; d is plate − background when the plate is on the tSide of the step
+  const sStart = [c0[0] + sx * (R + 1), c0[1] + sy * (R + 1)];
+  const edge = (along, s0Side, tSide) => {
+    const lim = half[along ? 1 : 0] * 0.95, sMax = half[along ? 0 : 1] * 0.95;
+    const s0 = sStart[along ? 0 : 1], lines = [];
+    for (let u = 0; Math.abs(s0 + s0Side * u) <= sMax; u += Math.max(0.4, sMax / 24)) {
+      const s = s0 + s0Side * u;
+      lines.push({ s, steps: across(along, s, lim).map((c) => ({ t: c.t, d: c.d * tSide })), tSide });
+    }
+    return lines;
+  };
+  // how much straight edge the frame can show past the rounding: 3 mm at least along each
+  const viewX = half[0] * 0.95 - sx * c0[0] - R, viewY = half[1] * 0.95 - sy * c0[1] - R;
+  if (Math.min(viewX, viewY) < 3.5) return fail('the camera sees only ' + Math.max(0, Math.min(viewX, viewY)).toFixed(1) + ' mm of straight edge past the corner' + (R ? ' (radius ' + R + ' mm)' : '') + ', and needs 3.5', true);
+  const LA0 = edge(true, sx, sy), LB0 = edge(false, sy, sx);
+  // the plate against the background, the same way round on both edges: the sign of the biggest
+  // steps (a hole in the plate steps both ways, an edge one way)
+  const allSteps = LA0.concat(LB0).flatMap((l) => l.steps);
+  if (!allSteps.length) return fail('no edge in view');
+  const big = Math.max(...allSteps.map((p) => Math.abs(p.d)));
+  const sign = Math.sign(allSteps.filter((p) => Math.abs(p.d) > 0.6 * big).reduce((s, p) => s + Math.sign(p.d), 0)) || 1;
+  // on each line, the edge is the first clear step coming from the background's side, whichever way
+  // it goes: the head lamp's glare makes polished steel brighter than the white background along
+  // part of an edge and darker along the rest (J0111, 18 Nov: half the plate's top edge was lit,
+  // and taking only darker steps there picked the glare's own boundary 7 mm inside the plate)
+  const pick = (lines) => lines.map((l) => {
+    const c = l.steps.filter((p) => Math.abs(p.d) > Math.max(0.08, 0.3 * big)).sort((p, q) => p.t * l.tSide - q.t * l.tSide)[0];
+    return c ? { s: l.s, t: c.t, d: c.d } : null;
+  }).filter(Boolean);
+  const A = pick(LA0), B = pick(LB0);
+  if (A.length < 5 || B.length < 5) return fail('not two edges meeting at a corner (' + A.length + ' and ' + B.length + ' points along them)');
+  // a straight line t = k0 + k1·s through the points. The line through two of them that the most
+  // others lie within 0.1 mm of is taken first (a glare boundary, a scratch, a line that grazed the
+  // other edge can be a third of the points and pull a plain fit away; on J0111's plate a hazy
+  // stretch of edge read 0.3–0.8 mm off, and a 0.2 mm band took some of it in, turning the edge
+  // 1°), then fitted through those
+  const tol = Math.max(0.1, 3 * px);
+  const lsq = (Q) => {
+    const m = Q.length, ss = Q.reduce((a, p) => a + p.s, 0), st = Q.reduce((a, p) => a + p.t, 0);
+    const sss = Q.reduce((a, p) => a + p.s * p.s, 0), sst = Q.reduce((a, p) => a + p.s * p.t, 0);
+    const dd = m * sss - ss * ss;
+    if (!dd) return null;
+    const k1 = (m * sst - ss * st) / dd;
+    return { k0: (st - k1 * ss) / m, k1 };
+  };
+  const line = (P) => {
+    if (P.length < 4) return null;
+    let best = null, bestErr = Infinity;
+    for (let i = 0; i < P.length; i++) for (let j = i + 1; j < P.length; j++) {
+      if (Math.abs(P[j].s - P[i].s) < 1) continue;
+      const k1 = (P[j].t - P[i].t) / (P[j].s - P[i].s);
+      if (Math.abs(k1) > 0.27) continue; // more than 15° from the job's axes: not this edge
+      const k0 = P[i].t - k1 * P[i].s;
+      const inl = P.filter((p) => Math.abs(p.t - (k0 + k1 * p.s)) < tol);
+      const e = inl.reduce((a, p) => a + Math.abs(p.t - (k0 + k1 * p.s)), 0);
+      if (!best || inl.length > best.length || (inl.length === best.length && e < bestErr)) { best = inl; bestErr = e; }
+    }
+    if (!best || best.length < 4) return null;
+    let Q = best, f = lsq(Q);
+    for (let k = 0; f && k < 2; k++) { const next = P.filter((p) => Math.abs(p.t - (f.k0 + f.k1 * p.s)) < tol); if (next.length < 4) break; Q = next; f = lsq(Q); }
+    if (!f) return null;
+    f.n = Q.length;
+    f.span = Math.max(...Q.map((p) => p.s)) - Math.min(...Q.map((p) => p.s));
+    f.rms = Math.sqrt(Q.reduce((a, p) => a + (p.t - (f.k0 + f.k1 * p.s)) ** 2, 0) / Q.length);
+    return f;
+  };
+  // the edges meet at the corner; lines at or past it (near the corner a line along one edge can
+  // cross the other, turned, edge), or on a rounded corner's arc (within r of it), are left out and
+  // the edges fitted again
+  let A1 = A, B1 = B, LA, LB, X, Y;
+  for (let k = 0; k < 6; k++) {
+    LA = line(A1); LB = line(B1);
+    if (!LA || !LB) return fail('the edges aren\'t straight');
+    // edge X: Y = a0 + a1·X; edge Y: X = b0 + b1·Y
+    X = (LB.k0 + LB.k1 * LA.k0) / (1 - LB.k1 * LA.k1); Y = LA.k0 + LA.k1 * X;
+    const nA = A.filter((p) => (p.s - X) * sx >= R + 0.5), nB = B.filter((p) => (p.s - Y) * sy >= R + 0.5);
+    if (nA.length === A1.length && nB.length === B1.length && nA.every((p, i) => p === A1[i]) && nB.every((p, i) => p === B1[i])) break;
+    A1 = nA; B1 = nB;
+  }
+  if (LA.n < 5 || LB.n < 5) return fail('too few points on a straight line along an edge (' + LA.n + ' and ' + LB.n + ', 5 needed)');
+  if (LA.span < 3 || LB.span < 3) return fail('only ' + Math.min(LA.span, LB.span).toFixed(1) + ' mm of straight edge found past the corner' + (R ? ' (radius ' + R + ' mm)' : '') + ', and 3 are needed', R > 0);
+  const angX = (Math.atan(LA.k1) * 180) / Math.PI, angY = (-Math.atan(LB.k1) * 180) / Math.PI;
+  // a plate's corner is square to well within a degree; two lines further off that are something
+  // else (a glare band's side and an edge, told the wrong corner)
+  if (Math.abs(angX - angY) > 3) return fail('the two edges found meet ' + Math.abs(angX - angY).toFixed(1) + '° off square: not the plate\'s corner');
+  const [u, v] = toPx(X, Y);
+  if (u < 0 || v < 0 || u > w - 1 || v > h - 1) return fail('the corner the edges meet at is outside the picture');
+  return { x: u, y: v, bed: [X, Y], r: R, angles: [angX, angY], rotation: (angX + angY) / 2, squareness: angX - angY, contrast: Math.abs(big), plateBrighter: sign > 0, points: LA.n + LB.n, rms: Math.max(LA.rms, LB.rms) };
 }
 
 // A dot's centre without the light's slope: fit the paper round it as a tilted plane
@@ -495,4 +673,4 @@ function preview(img, size) {
   return { w: s.w, h: s.h, data };
 }
 
-module.exports = { otsu, findDots, findCorner, findCorners, findCornersIn, fitLattice, shrink, preview };
+module.exports = { otsu, findDots, findPlateCorner, findCorner,findCorners, findCornersIn, fitLattice, shrink, preview };

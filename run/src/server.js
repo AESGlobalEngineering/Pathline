@@ -23,6 +23,8 @@ const network = require('./network');
 const ruidaModels = require('./ctrl/ruida/models');
 const anchor = require('./job/anchor');
 const fitting = require('./vision/fit');
+const bedmaps = require('./bedmaps');
+const accuracy = require('./accuracy');
 const { DEFAULTS: VisionDefaults } = require('./vision/vision');
 const { controller, CONTROLLERS } = require('./ctrl');
 const pkgJson = require('../package.json');
@@ -57,20 +59,48 @@ function start(opts = {}) {
     cfg.connection = { ...cfg.connection, mode: 'sim' };
     if (!cfg.configured) Object.assign(cfg, { configured: true, name: cfg.name || 'Simulated laser' });
   }
+  // the bed map in use goes into the maps' history (data/bedmaps.json) if it isn't there yet
+  try { bedmaps.ensure(DATA, cfg.vision.map, cfg.vision.mapAt); } catch (e) { /* history only */ }
   const PORT = Number(opts.port || cfg.httpPort || 8470);
   const updates = opts.updates || NO_UPDATES;
   const isLocalReq = (req) => /^(::1|127\.0\.0\.1|::ffff:127\.0\.0\.1)$/.test(req.socket.remoteAddress || '');
 
+  // The diagnostics log: on screen (☰ → Diagnostics log) and kept on disk, a file a day in
+  // data/logs (run-2026-11-13.log), the last 30 days. It was only in memory, so a restart lost
+  // it: why J0064 stopped and the 14:43 bed calibration's numbers were gone by the evening.
   const logLines = [];
+  const LOGS = path.join(DATA, 'logs');
+  const LOG_DAYS = 30;
+  const dayOf = (d) => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  let logFail = false;
+  function pruneLogs() {
+    try {
+      const keep = dayOf(new Date(Date.now() - LOG_DAYS * 864e5));
+      for (const f of fs.readdirSync(LOGS)) { const m = f.match(/^run-(\d{4}-\d{2}-\d{2})\.log$/); if (m && m[1] < keep) fs.unlinkSync(path.join(LOGS, f)); }
+    } catch (e) { /* nothing to prune */ }
+  }
+  try { fs.mkdirSync(LOGS, { recursive: true }); } catch (e) { logFail = true; }
+  pruneLogs();
+  setInterval(pruneLogs, 6 * 3600 * 1000).unref();
   function log(msg) {
-    const line = new Date().toLocaleTimeString() + '  ' + msg;
+    const now = new Date();
+    const line = now.toLocaleTimeString() + '  ' + msg;
     console.log(line);
     logLines.push(line);
-    if (logLines.length > 300) logLines.shift();
+    if (logLines.length > 1000) logLines.shift();
+    if (!logFail) { try { fs.appendFileSync(path.join(LOGS, 'run-' + dayOf(now) + '.log'), line + '\n'); } catch (e) { logFail = true; console.log('log file: ' + e.message); } }
     if (opts.log) opts.log(msg);
   }
+  // an earlier day's log (the last lines), and the days kept
+  const logDays = () => { try { return fs.readdirSync(LOGS).map((f) => (f.match(/^run-(\d{4}-\d{2}-\d{2})\.log$/) || [])[1]).filter(Boolean).sort().reverse(); } catch (e) { return []; } };
+  const logOf = (day) => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(day))) throw err(400, 'A day is YYYY-MM-DD');
+    try { return fs.readFileSync(path.join(LOGS, 'run-' + day + '.log'), 'utf8').split('\n').filter(Boolean).slice(-5000); } catch (e) { throw err(404, 'No log for ' + day); }
+  };
 
   const store = new Store(DATA);
+  // old jobs' folders: kept while queued, learnt from, or in the last 30 days of History
+  try { const c = store.cleanup(); if (c.removed) log('storage: ' + c.removed + ' old job folder' + (c.removed === 1 ? '' : 's') + ' removed (' + (c.bytes / 1048576).toFixed(1) + ' MB)'); } catch (e) { log('storage: ' + e.message); }
   // jobs queued before the Trotec timed its own travel: its estimate for them too
   if (cfg.configured && cfg.controller === 'trotec') {
     for (const j of store.jobs.filter((x) => x.status === 'queued' || x.status === 'done')) {
@@ -82,19 +112,37 @@ function start(opts = {}) {
   // that's shifted and turned a little, all lit unevenly (25 … 100 % across the picture); the
   // machine itself is 1.5 mm/m long in X and 0.03° out of square
   const sheet = (p) => { const a = (0.3 * Math.PI) / 180; return [0.8 + p[0] * Math.cos(a) - p[1] * Math.sin(a), -0.5 + p[0] * Math.sin(a) + p[1] * Math.cos(a)]; };
+  // and a steel plate on white: drawn 200 × 190 mm from (430, 60) with 8 mm holes at (450, 80),
+  // (610, 80) and (450, 230); laid turned 0.6° about its corner and moved 1.2, −0.7 mm
+  const plateAt = (p) => { const a = (0.6 * Math.PI) / 180, dx = p[0] - 430, dy = p[1] - 60; return [431.2 + dx * Math.cos(a) - dy * Math.sin(a), 59.3 + dx * Math.sin(a) + dy * Math.cos(a)]; };
+  // and one with rounded corners (8 mm), drawn 120 × 250 mm from (1120, 350), laid turned 2° about
+  // that corner (where its straight edges meet) and moved 0.9, −0.6 mm
+  const roundAt = (p) => { const a = (2 * Math.PI) / 180, dx = p[0] - 1120, dy = p[1] - 350; return [1120.9 + dx * Math.cos(a) - dy * Math.sin(a), 349.4 + dx * Math.sin(a) + dy * Math.cos(a)]; };
+  const roundRect = (x0, y0, x1, y1, r) => {
+    const pts = [], arc = (cx, cy, a0) => { for (let k = 0; k <= 24; k++) { const a = ((a0 + (k / 24) * 90) * Math.PI) / 180; pts.push([cx + r * Math.cos(a), cy + r * Math.sin(a)]); } };
+    arc(x1 - r, y0 + r, -90); arc(x1 - r, y1 - r, 0); arc(x0 + r, y1 - r, 90); arc(x0 + r, y0 + r, 180);
+    return pts;
+  };
   const simVision = opts.sim ? {
     forceSim: true,
     sim: {
       truth: { offset: [41.2, 12.9], pixel: 0.08, rotation: 90, error: (p) => [p[0] * 1.0015 + p[1] * 0.0005236, p[1]] },
       scene: {
         dots: [[40, 25], [340, 25], [40, 215]].map((p) => { const q = sheet(p); return { x: q[0], y: q[1], d: 5 }; }),
+        plates: [{ pts: [[430, 60], [630, 60], [630, 250], [430, 250]].map(plateAt), v: 100, holes: [[450, 80], [610, 80], [450, 230]].map((p) => { const q = plateAt(p); return { x: q[0], y: q[1], d: 8 }; }) },
+          { pts: roundRect(1120, 350, 1240, 600, 8).map(roundAt), v: 100 }],
+        // the bed board's first corner covered (as one out of the camera's reach): the scan has
+        // to carry on without it
+        // (bigger than the picture, so no edge of it shows round the corner)
+        rects: [{ x0: 60, y0: 260, x1: 140, y1: 340 }],
         board: {
           x: 100, y: 300, angle: 1.5, square: 50, nx: 20, ny: 10,
           // a bump round board point (450, 150): the pattern pushed outward up to 0.3 mm
           bump: (u, v) => { const dx = u - 450, dy = v - 150, r = Math.hypot(dx, dy); if (r < 1) return [0, 0]; const k = 0.3 * Math.exp(-(r * r) / 4050); return [(k * dx) / r, (k * dy) / r]; }
         },
-        // the small one for camera calibration: 10 mm squares, turned 7°
-        boards: [{ x: 700, y: 100, angle: 7, square: 10, nx: 10, ny: 10 }]
+        // the small one for camera calibration: 10 mm squares, turned 7°, printed 1.2 % large
+        // across and 0.65 % down (as Ruby's measured)
+        boards: [{ x: 700, y: 100, angle: 7, square: 10, nx: 10, ny: 10, print: [1.012, 1.0065] }]
       },
       light: (ix, iy) => 0.25 + 0.75 * Math.exp(-((ix - 14) ** 2 + (iy + 8) ** 2) / 648)
     }
@@ -111,7 +159,8 @@ function start(opts = {}) {
   let fitting = null;
   const trotecMotion = () => ({ ...require('./ctrl/trotec/motion').travelLimits(cfg, require('./ctrl/trotec/compile').PLANNER.Standard, (cfg.trotec && cfg.trotec.travelSpeed) || 700), cut: require('./ctrl/trotec/compile').cutProfile(require('./ctrl/trotec/compile').PLANNER.Standard) });
   function fitFollow(why) {
-    if (fitting || cfg.controller !== 'trotec' || opts.sim) return fitting;
+    // (not on the simulator, except for the self-test: PATHLINE_RUN_FIT_IN_SIM)
+    if (fitting || cfg.controller !== 'trotec' || (opts.sim && !process.env.PATHLINE_RUN_FIT_IN_SIM)) return fitting;
     const { Worker } = require('worker_threads');
     const L = followState.learnt || {};
     fitting = new Promise((resolve) => {
@@ -120,29 +169,120 @@ function start(opts = {}) {
         w = new Worker(path.join(__dirname, 'follow-worker.js'), { workerData: { dataDir: DATA, current: { stamp: L.stamp, travel: L.travel, cut: L.cut }, cfg, motion: trotecMotion() } });
       } catch (e) { log('follow fit: not started (' + e.message + ')'); fitting = null; return resolve(null); }
       log('follow fit: started (' + why + ')');
-      w.on('message', (m) => {
+      w.on('message', (m) => { try { onFit(m); } catch (e) { log('follow fit: ' + (e && e.message)); } });
+      const onFit = (m) => {
         if (m.log) log(m.log);
         if (m.error) log('follow fit: ' + m.error);
+        // the estimate's cutting, travel and engraving scaled by what the runs took (timefit.js)
+        if (m.times) {
+          const t = m.times;
+          const s = t.scale ? 'cutting ×' + t.scale.cut + ', travel ×' + t.scale.travel + ', engraving ×' + t.scale.engrave : '';
+          if (t.use) learnt({ timeScale: { ...t.scale, runs: t.runs, at: t.at } }, 'estimate fitted to ' + t.runs + ' runs: ' + s + '; the runs\' totals ' + t.before.rms + ' % → ' + t.after.rms + ' % off (rms), worst ' + t.after.worst + ' %').then(() => { try { store.jobs.filter((j) => j.status === 'queued').forEach((j) => { const p = controller(cfg.controller).compile(plan.build(store.runPkg(j.id)), cfg); if (p && p.estimated) j.seconds = Math.round(p.seconds); }); store.flush(); } catch (e) { /* the old estimates stay */ } }).catch(() => {});
+          else log('estimate fit: not used (' + (t.why || 'no better') + ')' + (s ? ': ' + s + (t.before ? ', ' + t.before.rms + ' % → ' + t.after.rms + ' % off' : '') : ''));
+        }
         if (!m.result) return;
         const r = m.result;
-        const learnt = { ...(followState.learnt || {}) };
-        if (r.stampUse) learnt.stamp = r.stamp;
-        if (r.use) Object.assign(learnt, { travel: r.travel, cut: r.cut, score: r.after, runs: r.runs });
+        // (not called learnt: that hid learnt(), the setting saver, all through this handler, and
+        // the estimate fit above threw "Cannot access 'learnt' before initialization")
+        const kept = { ...(followState.learnt || {}) };
+        if (r.stampUse) kept.stamp = r.stamp;
+        if (r.use) Object.assign(kept, { travel: r.travel, cut: r.cut, score: r.after, runs: r.runs });
         if (r.stampUse || r.use) {
-          learnt.at = r.at;
-          machine.learnt = learnt;
-          if (machine.link) machine.link.stamp = learnt.stamp || null;
+          kept.at = r.at;
+          machine.learnt = kept;
+          if (machine.link) machine.link.stamp = kept.stamp || null;
         }
-        followState = { learnt: r.stampUse || r.use ? learnt : followState.learnt || null, last: r };
+        followState = { learnt: r.stampUse || r.use ? kept : followState.learnt || null, last: r };
         try { fs.writeFileSync(FOLLOW_FILE, JSON.stringify(followState, null, 2)); } catch (e) { log('follow fit: not saved (' + e.message + ')'); }
-      });
+      };
       const done = () => { fitting = null; resolve(followState); };
       w.on('error', (e) => { log('follow fit: ' + e.message); done(); });
       w.on('exit', done);
     });
     return fitting;
   }
-  machine.onRunSaved = (job) => { setTimeout(() => fitFollow('after ' + job.name), 5000); };
+  machine.onRunSaved = (job, result, info = {}) => {
+    setTimeout(() => fitFollow('after ' + job.name), 5000);
+    // the time a registration mark takes, learnt (the estimate's 4 s was 7–9 s on Ruby): halfway
+    // to each new run's, kept between 3 and 30 s. (Top level, not under trotec: a change there
+    // reconnects the laser)
+    if (cfg.controller === 'trotec' && Number.isFinite(info.markSec) && info.markSec > 1 && info.markSec < 60) {
+      const was = Number(cfg.markSec) || 8;
+      const now = +Math.max(3, Math.min(30, was + 0.5 * (info.markSec - was))).toFixed(1);
+      if (now !== was) learnt({ markSec: now }, 'estimate: a registration mark takes ' + now + ' s (this job ' + info.markSec.toFixed(1) + ' s a mark)').catch(() => {});
+    }
+    // a test grid cut: the head camera checks it as soon as the machine is free (vision/grid.js)
+    if (result === 'Completed' && cfg.vision && cfg.vision.enabled) {
+      let grid = null;
+      try { grid = gridOf(job.id); } catch (e) { /* not one */ }
+      if (grid) whenFree(() => checkGrid(job.id).catch((e) => log('test grid: ' + e.message)));
+    }
+  };
+
+  // ---- Automatic power and speed calibration: Pathline Prepare's test grid, checked by the head
+  // camera once it's cut; the pick saved into the material's cut setting on the operator's word
+  const GRIDS = path.join(DATA, 'grids');
+  let gridState = null; // { job, name, state: 'checking' | 'done' | 'failed', at, best, confident, error }
+  const gridOf = (id) => require('./vision/grid').detect(store.runPkg(id));
+  const gridResult = (id) => { try { return JSON.parse(fs.readFileSync(path.join(GRIDS, id + '.json'), 'utf8')); } catch (e) { return null; } };
+  function whenFree(fn) {
+    let n = 0;
+    const t = setInterval(() => { if (!machine.run && !machine.busy() && machine.st.state === 'idle') { clearInterval(t); fn(); } else if (++n > 240) clearInterval(t); }, 500);
+  }
+  async function checkGrid(id) {
+    const job = store.get(id) || store.history.find((h) => h.id === id);
+    if (!job) throw err(404, 'No such job');
+    const grid = gridOf(id);
+    if (!grid) throw err(409, '"' + job.name + '" isn\'t a power and speed test grid');
+    if (!cfg.vision || !cfg.vision.enabled) throw err(409, 'Turn the head camera on to check a test grid (Setup → Camera)');
+    gridState = { job: id, name: job.name, state: 'checking', at: new Date().toISOString() };
+    log('test grid: checking ' + job.name + ' (' + grid.squares.length + ' squares) with the head camera');
+    try {
+      // simulated: the cuts as a material takes them (through from sim.cutThreshold W·s/mm-ish: power ÷ speed)
+      if (opts.sim) {
+        const cam = await machine.vision.cam();
+        if (cam.laserCut && !(cam.gridCut || (cam.gridCut = new Set())).has(id)) {
+          cam.gridCut.add(id);
+          cam.scene.sheet = 150;
+          const th = Number((cfg.sim || {}).cutThreshold) || 1;
+          for (const s of grid.squares) cam.laserCut(s.p, s.power / s.speed >= th);
+        }
+      }
+      const r = await machine.cameraTask('Checking the test grid', (ctl, say) => require('./vision/grid').inspect(machine.vision, grid, ctl, say));
+      r.job = { id, name: job.name };
+      fs.mkdirSync(GRIDS, { recursive: true });
+      fs.writeFileSync(path.join(GRIDS, id + '.json'), JSON.stringify(r));
+      gridState = { job: id, name: job.name, state: 'done', at: r.at, best: r.best, confident: r.confident };
+      const n = r.squares.filter((s) => s.through).length;
+      log('test grid: ' + job.name + ': ' + n + ' of ' + r.squares.length + ' cut through (by ' + r.measure + ', separation ' + r.separation + (r.confident ? '' : ', not sure') + ')' + (r.best ? '; best ' + r.best.power + ' % at ' + r.best.speed + ' mm/s' : '') + ': ' + r.why);
+      return r;
+    } catch (e) {
+      gridState = { job: id, name: job.name, state: 'failed', at: new Date().toISOString(), error: e.message };
+      throw e;
+    }
+  }
+  // the pick into the material's cut process (materials.js: the list Prepare keeps on the machine;
+  // a newer updatedAt is what Prepare takes back)
+  function saveGrid(id, b) {
+    const r = gridResult(id);
+    if (!r || !r.best) throw err(409, 'There\'s no setting to save from that test grid');
+    const doc = materials.parse(DATA);
+    const mat = (doc.materials || []).find((x) => (r.material.id && x.id === r.material.id) || (!r.material.id && x.name === r.material.name));
+    if (!mat) throw err(409, 'This machine has no "' + r.material.name + '" in its materials yet: Pathline Prepare sends them when it connects. Set ' + r.best.power + ' % at ' + r.best.speed + ' mm/s in Prepare by hand this time.');
+    const procs = Array.isArray(mat.processes) ? mat.processes : [];
+    const cuts = procs.map((p, k) => [p, k]).filter(([p]) => p.proc === 'Cut');
+    const k = Number.isInteger(b && b.process) ? b.process : cuts.length ? cuts[0][1] : -1;
+    if (k < 0 || !procs[k]) throw err(409, '"' + mat.name + '" has no cut process to put the setting in');
+    const before = { power: procs[k].power, speed: procs[k].speed };
+    procs[k] = { ...procs[k], power: r.best.power, speed: r.best.speed };
+    mat.processes = procs;
+    mat.updatedAt = new Date().toISOString();
+    materials.write(DATA, JSON.stringify(doc));
+    log('test grid: ' + mat.name + ', ' + (procs[k].name || 'cut') + ': ' + before.power + ' % at ' + before.speed + ' mm/s → ' + r.best.power + ' % at ' + r.best.speed + ' mm/s (Pathline Prepare takes it on its next sync)');
+    r.saved = { at: mat.updatedAt, material: mat.name, process: procs[k].name || 'Cut', before };
+    fs.writeFileSync(path.join(GRIDS, id + '.json'), JSON.stringify(r));
+    return r.saved;
+  }
 
   // The head Z axis (zaxis/): the nozzle kept focused on the sheet as it lies, from a height map
   // the ultrasonic sensor scans. Followed along the route the screen draws (motion as fitted).
@@ -242,6 +382,67 @@ function start(opts = {}) {
   let discovery = null;
   // what watchers read (GET /api/v1/monitor, /api/v1/events)
   const monitor = require('./monitor').createMonitor({ machine, store, dataDir: DATA, info: () => ({ id: deviceId, ...infoView() }) });
+  // Setup → Pathline Monitor: the same answer, reported out to the Monitor server (one way:
+  // report.js reads back only the key at enrolment and each report's status code)
+  const reporter = require('./report').createReporter({
+    dataDir: DATA, view: () => monitor.view(), onChange: monitor.onChange, running: () => !!machine.run,
+    info: () => ({ id: deviceId, name: cfg.name }), log, scale: Number(process.env.PATHLINE_RUN_REPORT_SCALE) || 1
+  });
+  // who has been watching (ip → when): the Pathline Monitor hub asks every 2 s or keeps a stream
+  const watchers = new Map();
+  // streams still open (ip → how many): a hub holding /api/v1/events open is watching now, however
+  // long ago it connected (it was noted only when it connected, so it dropped out after 10 minutes)
+  const streaming = new Map();
+  // how long one that asks now and then counts as watching (shorter only in the self-tests)
+  const WATCH_MS = Number(process.env.PATHLINE_RUN_WATCH_MS) || 10 * 60 * 1000;
+  const watcherIp = (req) => { const ip = String(req.socket.remoteAddress || '').replace(/^::ffff:/, ''); return ip === '::1' ? '127.0.0.1' : ip; };
+  const noteWatcher = (req) => {
+    const ip = watcherIp(req);
+    if (!ip) return;
+    watchers.set(ip, Date.now());
+    if (new URL(req.url, 'http://x').pathname !== '/api/v1/events') return;
+    streaming.set(ip, (streaming.get(ip) || 0) + 1);
+    let gone = false;
+    const end = () => {
+      if (gone) return;
+      gone = true;
+      watchers.set(ip, Date.now());
+      const n = (streaming.get(ip) || 1) - 1;
+      if (n > 0) streaming.set(ip, n); else streaming.delete(ip);
+    };
+    req.on('close', end);
+    req.socket.on('close', end);
+  };
+  // a Pathline Monitor hub at host:port answers GET /api/phone with the addresses phones open
+  const askHub = (host, port) => new Promise((resolve) => {
+    const r = http.get({ host, port, path: '/api/phone', timeout: 1500, headers: { accept: 'application/json' } }, (res) => {
+      let s = '';
+      res.on('data', (c) => { s += c; if (s.length > 256 * 1024) r.destroy(); });
+      res.on('end', () => { try { const j = JSON.parse(s); resolve(res.statusCode === 200 && Array.isArray(j.urls) ? j : null); } catch (e) { resolve(null); } });
+    });
+    r.on('timeout', () => r.destroy());
+    r.on('error', () => resolve(null));
+  });
+  async function findMonitorHub() {
+    const typed = String(cfg.monitorHub || '').trim();
+    const cands = [];
+    if (typed) { const m = typed.replace(/^https?:\/\//, '').replace(/\/.*$/, '').match(/^([^:]+)(?::(\d+))?$/); if (m) cands.push({ host: m[1], port: Number(m[2] || 8480), typed: true }); }
+    const recent = [...watchers].filter(([ip, t]) => streaming.has(ip) || Date.now() - t < WATCH_MS)
+      .sort((a, b) => (streaming.has(b[0]) - streaming.has(a[0])) || b[1] - a[1]).map(([ip]) => ip);
+    for (const ip of recent) if (!cands.some((c) => c.host === ip)) cands.push({ host: ip, port: 8480 });
+    for (const c of cands) {
+      const j = await askHub(c.host, c.port);
+      if (!j) continue;
+      // the address this machine reaches the hub at is one phones on this network reach too
+      // (not when the hub runs on this computer: then the hub's own first address)
+      const local = /^(127\.|localhost$)/.test(c.host);
+      const port = (() => { try { return Number(new URL(j.urls[0]).port) || c.port; } catch (e) { return c.port; } })();
+      const web = local ? j.urls[0] : 'http://' + c.host + ':' + port + '/';
+      const app = (j.app || []).find((u) => u.includes('//' + c.host + ':')) || (j.app || [])[0] || null;
+      return { found: true, host: c.host, typed: c.typed ? typed : null, web, setup: web ? web.replace(/\/?$/, '/') + 'setup' : null, app, urls: j.urls };
+    }
+    return { found: false, typed: typed || null, watchers: recent };
+  }
 
   // what Pathline is told while no machine has been added
   const needMachine =() => { if (!cfg.configured) throw err(409, 'No machine is set up in Pathline Run yet. Add one on its screen: Setup → Add machine.'); };
@@ -273,12 +474,15 @@ function start(opts = {}) {
     'POST /start': (b) => machine.start(b || {}),
     'POST /pause': () => machine.pause(),
     'POST /resume': () => machine.resume(),
-    'POST /stop': () => machine.stop(),
+    // (who stopped it goes into History: this screen, or Pathline on another computer)
+    'POST /stop': (b, req) => machine.stop(isLocalReq(req) ? 'Stop pressed on this screen' : 'Stopped from Pathline on another computer'),
     'POST /jog': (b) => machine.jog(b),
     // print and cut: the mark the job is waiting for is under the camera's crosshair
     'POST /marks/accept': () => machine.markAccept(),
+    // print and cut: run with the sheet turned 5–10° from the job (the screen asked)
+    'POST /marks/angle-ok': () => machine.angleAccept(),
     'POST /home': () => machine.home(),
-    'POST /frame': (b) => machine.frame(b.box),
+    'POST /frame': (b) => machine.frame(b.box, { path: b.path, speed: b.speed }),
     'POST /io': (b) => machine.io(b),
     'POST /autofocus': () => { throw err(409, 'This machine has no auto-focus'); },
     'POST /testfire': () => { throw err(409, 'Test fire isn\'t supported by Pathline Run yet'); },
@@ -287,21 +491,72 @@ function start(opts = {}) {
     'POST /toolchange': () => { throw err(409, 'Tools are chosen by the job: each tool has its own output on the controller'); }
   };
 
+  // ---------------------------------------------------------------- a queued job's power and speed
+  // The operator can change a process's power and speed on the machine before the job runs
+  // (Queue → the job's processes → Edit). The package Pathline sent is changed in place; each
+  // process keeps what it was sent with (`was`), so the screen shows what changed. Not while it runs.
+  function editProcess(id, b) {
+    const job = store.get(id);
+    if (!job) throw err(404, 'No such job');
+    if ((machine.run && machine.run.job.id === id) || job.status === 'running') throw err(409, 'The job is running: change it before you start it');
+    if (job.status !== 'queued') throw err(409, 'Only a queued job can be changed (this one is ' + job.status + ')');
+    const pkg = store.pkg(id);
+    const k = (pkg.processes || []).findIndex((x) => x.index === Number(b.index));
+    if (k < 0) throw err(404, 'That job has no such process');
+    const p = pkg.processes[k], next = { ...p };
+    const laser = p.power !== undefined;
+    if (b.power !== undefined && b.power !== null && b.power !== '') {
+      if (!laser) throw err(400, 'This process has no power to set');
+      const v = Number(b.power);
+      if (!(v >= 0 && v <= 100)) throw err(400, 'Power must be 0 to 100 %');
+      next.power = Math.round(v * 10) / 10;
+    }
+    if (b.speed !== undefined && b.speed !== null && b.speed !== '') {
+      const v = Number(b.speed), max = Number((cfg.trotec && cfg.controller === 'trotec' && cfg.trotec.maxSpeed) || cfg.speed) || 2000;
+      if (!(v > 0 && v <= max)) throw err(400, 'Speed must be above 0 and at most ' + max + ' mm/s');
+      next.speed = Math.round(v * 10) / 10;
+    }
+    // what Pathline sent, kept once; dropped again when it's set back
+    const was = p.was || (laser ? { power: p.power, speed: p.speed } : { speed: p.speed });
+    if (was.speed === next.speed && (!laser || was.power === next.power)) delete next.was; else next.was = was;
+    if (typeof next.summary === 'string' && laser) next.summary = next.summary.replace(/\d+(?:\.\d+)? %/, next.power + ' %').replace(/\d+(?:\.\d+)? mm\/s/, next.speed + ' mm/s');
+    pkg.processes[k] = next;
+    // still converts for this controller; the estimate as it now is
+    let program;
+    try { program = controller(cfg.controller).compile(plan.build(require('./job/anchor').apply(pkg, job.anchor)), cfg); } catch (e) { throw err(400, 'Can\'t convert the job with that setting: ' + e.message); }
+    fs.writeFileSync(path.join(store.jobDir(id), 'package.json'), JSON.stringify(pkg));
+    if (program && program.estimated) job.seconds = Math.round(program.seconds);
+    job.edited = pkg.processes.some((x) => x.was);
+    store.flush();
+    rowsCache.clear();
+    log('changed ' + job.name + ', ' + (p.name || 'process ' + p.index) + ': ' + (laser ? p.power + ' % at ' : '') + p.speed + ' mm/s → ' + (laser ? next.power + ' % at ' : '') + next.speed + ' mm/s' + (program && program.estimated ? ' (now ' + Math.floor(job.seconds / 60) + ' min ' + String(job.seconds % 60).padStart(2, '0') + ' s)' : ''));
+    return { id, process: next, seconds: job.seconds };
+  }
+
   // ---------------------------------------------------------------- HMI screen
   // A Trotec job's engraving as it's sent (lines, overscan, time), for the screen to draw the head
   // along at the real pace (ui/follow.js). Kept per job and placement: working out the lines of a
   // large engraving takes a moment
   const rowsCache = new Map();
+  // The job as the laser is sent it: through the Trotec's bed map when it's on (machine.compile
+  // does the same). The head's reports are where it was sent, so the screen follows this, not the
+  // job as Pathline placed it: on J0085 that put the reports 0.006 mm (median) off the drawn route,
+  // not 0.49 mm (1.36 mm p90), and the drawn head 1.5 mm from the real one, not 2.0 (4.5 not 8.2 p90).
   function withRows(id, pkg) {
-    if (cfg.controller !== 'trotec' || !(pkg.toolpath || []).some((s) => s.type === 'engrave')) return pkg;
+    const v = cfg.vision;
+    const map = cfg.controller === 'trotec' && v && v.enabled && v.mapOn !== false && v.map ? v.map : null;
+    const engraves = cfg.controller === 'trotec' && (pkg.toolpath || []).some((s) => s.type === 'engrave');
+    if (!map && !engraves) return pkg;
     const job = store.get(id);
-    const key = id + ':' + (pkg.placed || '') + ':' + JSON.stringify((job && job.anchor) || null);
+    const key = id + ':' + (pkg.placed || '') + ':' + JSON.stringify((job && job.anchor) || null) + ':' + (map ? v.mapAt || 'map' : '');
     if (!rowsCache.has(key)) {
-      try { rowsCache.set(key, require('./ctrl/trotec/compile').engraveRows(pkg, cfg)); } catch (e) { rowsCache.set(key, null); }
+      let out = pkg;
+      if (map) { try { out = { ...fitting.transformPkg(pkg, (q) => fitting.correct(map, q)), mapped: v.mapAt || true }; } catch (e) { out = pkg; } }
+      if (engraves) { try { const rows = require('./ctrl/trotec/compile').engraveRows(out, cfg); if (rows) out = { ...out, rows }; } catch (e) { /* drawn without rows */ } }
+      rowsCache.set(key, out);
       if (rowsCache.size > 20) rowsCache.delete(rowsCache.keys().next().value);
     }
-    const rows = rowsCache.get(key);
-    return rows ? { ...pkg, rows } : pkg;
+    return rowsCache.get(key);
   }
 
   function exportJob(id, format, ctrlName) {
@@ -341,9 +596,56 @@ function start(opts = {}) {
   const onlyHere = (req) => { if (!isLocalReq(req)) throw err(403, 'Updates can only be installed on the machine\'s own screen'); };
 
   const local = {
+    // Setup → Camera → Check with a cut rectangle (accuracy.js): the rectangle and its diagonals
+    // queued as a job; then what was measured with a rule, worked out; then, if it's out, the bed
+    // map corrected by it
+    'POST /accuracy/job': (b) => {
+      const pkg = accuracy.rectJob(b || {}, cfg.bed);
+      const job = queueJob(pkg, 'bed check');
+      return { id: job.id, name: job.name, rect: pkg.bedCheck };
+    },
+    'POST /accuracy/measure': async (b) => {
+      const r = accuracy.measure(b || {});
+      const v = cfg.vision || {};
+      r.mapOn = cfg.controller === 'trotec' && !!(v.enabled && v.mapOn !== false && v.map);
+      r.mapAt = r.mapOn ? v.mapAt || null : null;
+      r.at = new Date().toISOString();
+      r.applied = null;
+      await learnt({ accuracyCheck: r }, 'bed check (cut rectangle ' + r.w + ' × ' + r.h + ' mm' + (r.mapOn ? ', bed map on' : ', no bed map') + '): X scale ' + r.scaleX + ' ‰, Y scale ' + r.scaleY + ' ‰' + (r.lean !== null ? ', out of square ' + r.lean + '°' : '') + (r.ok ? ': within what a rule can tell' : ''));
+      return r;
+    },
+    'POST /accuracy/apply': async () => {
+      const c = cfg.accuracyCheck;
+      if (cfg.controller !== 'trotec') throw err(409, 'Only the Trotec has a bed map');
+      if (!c) throw err(409, 'Measure the cut rectangle first');
+      if (c.applied) throw err(409, 'This check has already corrected the bed map: cut and measure a new rectangle to check it');
+      const v = cfg.vision || {};
+      const mapNow = v.enabled && v.mapOn !== false && v.map ? v.mapAt || null : null;
+      if ((c.mapOn ? c.mapAt : null) !== mapNow) throw err(409, 'The bed map has changed since the rectangle was cut: cut and measure a new one');
+      const base = c.mapOn ? v.map : accuracy.flatMap(cfg.bed);
+      const map = accuracy.correctMap(base, c);
+      const at = new Date().toISOString();
+      try { bedmaps.ensure(DATA, v.map, v.mapAt); } catch (e) { /* history only */ }
+      let since = null;
+      try { since = bedmaps.add(DATA, map, at, { from: 'rectangle', check: { scaleX: c.scaleX, scaleY: c.scaleY, lean: c.lean, w: c.w, h: c.h } }).since; } catch (e) { log('bed map history: ' + e.message); }
+      await learnt({ vision: { ...v, map, mapOn: true, mapAt: at }, accuracyCheck: { ...c, applied: at } }, 'camera: bed map corrected by the cut rectangle (X ' + c.scaleX + ' ‰, Y ' + c.scaleY + ' ‰' + (c.lean !== null ? ', ' + c.lean + '°' : '') + ')');
+      rowsCache.clear();
+      return { mapAt: at, since };
+    },
+    // ☰ → Pathline Monitor: the hub's phone setup page, for a QR code on this screen. The hub
+    // isn't announced; it's whoever has been watching this machine (GET /api/v1/monitor or
+    // /events) lately, or the address typed in (monitorHub: "host" or "host:port")
+    'GET /monitor-hub': () => findMonitorHub(),
+    // Setup → Pathline Monitor: { address, code } from the app's Settings → Add a machine
+    'GET /monitor-report': () => reporter.status(),
+    'POST /monitor-report/connect': (b) => reporter.connect(b || {}),
+    'POST /monitor-report/disconnect': () => reporter.disconnect(),
     'GET /state': (b, req) => ({
+      monitorReport: reporter.status(),
       app: pkgJson.version, update: updates.status(), here: isLocalReq(req), config: cfg, status: machine.status(), info: machine.info, ruidaModels: ruidaModels.MODELS,
       fromController: machine.ctrl || null,
+      // a test grid's camera check: the screen opens its results when one is done
+      grid: gridState,
       // the head Z axis: on, its state, and the sheet's height map (drawn on the bed)
       zaxis: { enabled: machine.zaxis.enabled(), state: machine.zaxis.state, fault: machine.zaxis.fault || null, following: machine.zaxis.run ? machine.zaxis.run.zf.state : null, mesh: machine.zaxis.meshView(), settings: { ...ZDefaults, ...(cfg.zaxis || {}) } },
       camera: { open: !!machine.vision.camera, info: machine.vision.camera ? machine.vision.camera.info || null : null, busy: machine.camBusy || null, exposure: machine.vision.exposureNow(), defaults: VisionDefaults },
@@ -353,6 +655,10 @@ function start(opts = {}) {
       // the route's timing for drawing the head, as fitted to the jobs run (follow-fit.js)
       motion: cfg.controller === 'trotec' ? { ...trotecMotion(), follow: machine.learnt && machine.learnt.travel ? { travel: machine.learnt.travel, cut: machine.learnt.cut } : undefined } : null
     }),
+    // ---- test grids (vision/grid.js): the latest check, a check by hand, the pick saved
+    'GET /grid': () => ({ state: gridState, result: gridState ? gridResult(gridState.job) : null }),
+    'POST /grid/check': async (b) => checkGrid(b && b.id),
+    'POST /grid/save': (b) => saveGrid(b && b.id, b || {}),
     // ---- the head Z axis (zaxis/): the screen's Z axis card, Jog's Z buttons, Queue → Scan
     'GET /zaxis': async () => ({ ...(await machine.zaxis.status()), settings: { ...ZDefaults, ...(cfg.zaxis || {}) }, mesh: machine.zaxis.meshView() }),
     'POST /zaxis/connect': async () => { await machine.zaxis.connect(); return machine.zaxis.status(); },
@@ -377,6 +683,9 @@ function start(opts = {}) {
       return (await fitFollow('asked for')) || followState;
     },
     'GET /log': () => logLines,
+    // earlier days (data/logs): the days kept, and one day's lines
+    'GET /logs': () => logDays(),
+    'GET /logs/day': (b, req) => logOf(new URL(req.url, 'http://x').searchParams.get('d')),
     'GET /ports': async () => {
       try {
         const ports = await require('./ctrl/trotec/link').listPorts();
@@ -435,7 +744,7 @@ function start(opts = {}) {
     // how much the lens bends lines; a small head move gives which way the picture is turned
     'POST /camera/calibrate': async () => {
       const r = await machine.cameraTask('Calibrating the camera on the small checkerboard', () => machine.vision.calibrateCamera({ square: cfg.vision.camBoard && cfg.vision.camBoard.square }));
-      await learnt({ vision: { ...(cfg.vision || {}), matrix: r.matrix, cameraAt: new Date().toISOString(), cameraLens: +r.lens.toFixed(4) } }, 'camera: pixel size ' + (r.pixel * 1000).toFixed(3) + ' µm, turned ' + r.rotation.toFixed(2) + '° saved');
+      await learnt({ vision: { ...(cfg.vision || {}), matrix: r.matrix, cameraAt: new Date().toISOString(), cameraLens: +r.lens.toFixed(4), cameraSensor: Number.isFinite(r.sensor) ? +r.sensor.toFixed(2) : null } }, 'camera: pixel size ' + (r.pixel * 1000).toFixed(3) + ' µm, turned ' + r.rotation.toFixed(2) + '° saved');
       return r;
     },
     // pixel size and rotation without the small board: a dot or checkerboard corner under the camera, the head moves a little
@@ -457,7 +766,14 @@ function start(opts = {}) {
       const r = await machine.cameraTask(calibrate ? 'Calibrating the bed with the checkerboard' : 'Checking the bed with the checkerboard', (ctl, status) => machine.vision.scanBoard({ raw: calibrate, board: b && b.board }, ctl, status));
       if (calibrate) {
         const map = r.map || fitting.bedMap(r.points, r.step, cfg.bed);
+        // kept with the maps before it, and compared with the last: a big change is more likely
+        // the board (bent, damp, laid differently) than the machine
+        try { bedmaps.ensure(DATA, (cfg.vision || {}).map, (cfg.vision || {}).mapAt); } catch (e) { /* history only */ }
+        let since = null;
+        try { since = bedmaps.add(DATA, map, r.at, { points: r.points.length, missed: r.missed, bumps: r.bumps, noise: r.noise, model: r.model }).since; } catch (e) { log('bed map history: ' + e.message); }
+        r.since = since;
         await learnt({ vision: { ...(cfg.vision || {}), map, mapOn: true, mapAt: r.at } }, 'camera: bed map saved (' + r.points.length + ' corners, worst ' + r.worst.toFixed(3) + ' mm before correcting)');
+        if (since) log('camera: bed map against the one of ' + since.from + ': X scale ' + (since.scaleX >= 0 ? '+' : '') + since.scaleX + ' ‰, Y scale ' + (since.scaleY >= 0 ? '+' : '') + since.scaleY + ' ‰, squareness ' + (since.lean >= 0 ? '+' : '') + since.lean + '°' + (since.big ? ': more than a machine drifts; check the board is flat and dry, or cut a test rectangle and measure its diagonals' : ''));
       }
       return r;
     },
@@ -530,6 +846,7 @@ function start(opts = {}) {
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://x');
     const p = url.pathname;
+    if (req.method === 'GET' && (p === '/api/v1/events' || p === '/api/v1/monitor')) noteWatcher(req);
     try {
       // watchers (Pathline Monitor): the same answer as GET /api/v1/monitor, as it changes
       if (req.method === 'GET' && p === '/api/v1/events') return monitor.stream(req, res);
@@ -570,6 +887,11 @@ function start(opts = {}) {
           const f = exportJob(decodeURIComponent(m[1]), url.searchParams.get('format'), url.searchParams.get('ctrl'));
           res.writeHead(200, { 'content-type': f.type, 'content-disposition': 'attachment; filename="' + encodeURIComponent(f.name) + '"; filename*=UTF-8\'\'' + encodeURIComponent(f.name) });
           return res.end(f.data);
+        }
+        // a queued job's process: { index, power?, speed? }
+        if (isLocal && (m = route.match(/^POST \/jobs\/([^/]+)\/process$/))) {
+          const b = await body(req, 4096);
+          return send(res, 200, editProcess(decodeURIComponent(m[1]), b || {}));
         }
         if (isLocal && (m = route.match(/^POST \/jobs\/([^/]+)\/requeue$/))) {
           const b = await body(req, 1024);
@@ -614,6 +936,11 @@ function start(opts = {}) {
     }
   });
 
+  // an idle kept-alive connection is closed after 30 s, not Node's 5 s: closed just as a client
+  // (Prepare, Monitor's 2 s look) reused it, the request failed with ECONNRESET, most often right
+  // after the server had been busy with the camera
+  server.keepAliveTimeout = 30000;
+  server.headersTimeout = 31000;
   return new Promise((resolve, reject) => {
     server.once('error', (e) => reject(e.code === 'EADDRINUSE' ? new Error('Port ' + PORT + ' is in use. Is Pathline Run (or the emulator) already running?') : e));
     server.listen(PORT, () => {
@@ -637,8 +964,9 @@ function start(opts = {}) {
         close: async () => {
           try { if (discovery) await discovery.close(); } catch (e) { /* closing anyway */ }
           try { await machine.zaxis.close(); } catch (e) { /* closing anyway */ }
+          try { reporter.close(); } catch (e) { /* closing anyway */ }
           try { monitor.close(); } catch (e) { /* closing anyway */ }
-          try { await machine.stop(); } catch (e) { /* closing anyway */ }
+          try { await machine.stop('Pathline Run was closed'); } catch (e) { /* closing anyway */ }
           try { if (machine.link) await machine.link.close(); } catch (e) { /* closing anyway */ }
           server.close();
         }

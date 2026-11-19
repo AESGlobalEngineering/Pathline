@@ -138,6 +138,15 @@ function compile(plan, cfg, opts = {}) {
             seePart(part, x, y);
           }
         }
+      } else if (step.op === 'punch') {
+        // one strike per point: travel there tool up, then a zero-length "cut" lowers and lifts the
+        // tool (its down/up times are the layer's laser on/off delays)
+        layer(p, false);
+        for (const [px, py] of step.pts) {
+          const [x, y] = [M.x(px), M.y(py)];
+          body.push(...RD.moveAbs(x, y), ...RD.cutAbs(x, y));
+          seePart(part, x, y);
+        }
       } else if (step.op === 'engrave') {
         layer(p, true);
         const pitch = 25.4 / step.dpi;

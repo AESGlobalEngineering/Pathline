@@ -49,7 +49,7 @@ Updates work as in Pathline: it checks when it opens and every minute, then asks
 |---|---|---|
 | **Amazon Linux** (or another Linux server) | **[⬇ Pathline-Monitor.zip](https://github.com/AESGlobalEngineering/Pathline/releases/download/pathlinemonitor/Pathline-Monitor.zip)** | Point a web address at the server and open ports 80 and 443 to it. Unzip, then `sudo sh pathline-monitor/install.sh monitor.example.com`. It asks for the workshop password, gets the certificate and starts the service |
 
-**2. Each machine, once.** In the app: **Settings → Add a machine** gives a code. At the machine, in Pathline Run: **Settings → Pathline Monitor**, type the server's address and the code. Run then reports to the server over an outgoing https connection: nothing is opened on the workshop network, and the server never sends a machine anything.
+**2. Each machine, once.** In the app: **Settings → Add a machine** gives a code. At the machine, in Pathline Run (0.7.13 or later): **Setup → Pathline Monitor**, type the server's address and the code. Run then reports to the server over an outgoing https connection: nothing is opened on the workshop network, and the server never sends a machine anything.
 
 **3. Each phone, once.** Open the server's address in the phone's browser and sign in with the workshop password. Add it to the Home Screen (iPhone: Share, then Add to Home Screen; Android: **Install app**), then turn on notifications in its Settings. iPhones need iOS 16.4 or newer.
 

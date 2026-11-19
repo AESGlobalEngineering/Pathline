@@ -8,6 +8,7 @@
 // the fake Ruida answers whatever port asked; the real 40200 may be held by Pathline Run itself
 process.env.PATHLINE_RUN_RUIDA_PORT_IN = process.env.PATHLINE_RUN_RUIDA_PORT_IN || '41200';
 const fs = require('fs');
+const http = require('http');
 const os = require('os');
 const path = require('path');
 const zlib = require('zlib');
@@ -19,6 +20,20 @@ const config = require('../src/config');
 const validate = require('../src/job/validate');
 const trotec = require('../src/ctrl/trotec/compile');
 const ruida = require('../src/ctrl/ruida/compile');
+
+// a request whose kept-alive connection the server closed as it was sent (ECONNRESET) is tried
+// once more: that's the connection, not what's being tested
+{
+  const raw = globalThis.fetch;
+  globalThis.fetch = async (url, opts) => {
+    try { return await raw(url, opts); } catch (e) {
+      const code = e && e.cause && e.cause.code;
+      if (code !== 'ECONNRESET' && code !== 'UND_ERR_SOCKET') throw e;
+      await new Promise((r) => setTimeout(r, 200));
+      return raw(url, opts);
+    }
+  };
+}
 
 let failed = 0;
 const ok = (cond, msg, detail) => {
@@ -167,6 +182,21 @@ console.log('Trotec job stream');
   ok(lens[0].name === 'MOVEX_PLUS' && lens[1].name === 'MOVEX_MINUS', 'bidirectional lines alternate');
   const ys = cmds.filter((c) => c.name === 'MOVEXY').map((c) => c.v[1]);
   ok(ys[0] > ys[ys.length - 1], 'direction "up" starts at the front (largest Y)');
+  // its time, as Ruby engraves (fitted on J0076, J0093, J0094): each line (40 − 3.43) mm at the set
+  // speed, then a turn of 0.0902 + 2.295e-5 · v s, and 0.203 s for the island
+  const st = trotec.compile(plan.build(pkg), cfg).segments[0].steps[0];
+  const n = tables.length, want = n * ((40 - 3.43) / 400 + 0.0902 + 2.295e-5 * 400) + 0.203;
+  ok(Math.abs(st.parts.engrave - want) < 0.05, 'engraving time: ' + n + ' lines × ' + ((st.parts.engrave - 0.203) / n).toFixed(4) + ' s + 0.203 s = ' + st.parts.engrave + ' s (' + want.toFixed(2) + ')', JSON.stringify(st.parts));
+  const rows = trotec.engraveRows(pkg, cfg)[0];
+  ok(rows && rows.n === n && rows.lead === 0.203 && Math.abs(rows.sec + rows.lead - st.parts.engrave) < 0.01,
+    'the screen\'s engraving rows take the estimate\'s time (lines and the island\'s own 0.203 s)', JSON.stringify(rows));
+  const rowsK = trotec.engraveRows(pkg, { ...cfg, timeScale: { engrave: 0.99 } })[0];
+  ok(Math.abs(rowsK.sec - rows.sec * 0.99) < 0.01, 'the drawing takes the fitted engraving scale, as the estimate does');
+  // drawn: each line at an even pace, the island's time in all
+  const F = require('../ui/follow');
+  const route = F.routeOf({ ...pkg, rows: trotec.engraveRows(pkg, cfg) }, F.motionFor(null, cfg));
+  const drawn = route.segs.filter((g) => g.step === 0 && g.kind !== 'travel').reduce((a, g) => a + g.dt, 0);
+  ok(Math.abs(drawn - st.parts.engrave) < 0.3, 'drawn: the island takes the estimate\'s time (' + drawn.toFixed(2) + ' s of ' + st.parts.engrave + ')');
 }
 {
   // travel between cuts: the planner's S-curve (motion.js), the profiles, and Run's own estimate
@@ -212,6 +242,8 @@ console.log('Trotec job stream');
   ok(mv.markArea === undefined, 'camera off: no markArea');
   const mvC = config.machineView({ ...cfg, configured: true, bed: [1300, 900], vision: { enabled: true, offset: [-41.735, -12.9854] } });
   ok(JSON.stringify(mvC.markArea) === '[26.9,3.5,1300,900]', 'camera on: Pathline is told where marks can be read (the Q500: 26.9 mm from the left, 3.5 from the back)', JSON.stringify(mvC.markArea));
+  const mvM = config.machineView({ ...cfg, configured: true, markSec: 4.6667, vision: { enabled: true } });
+  ok(mvC.markTime === 8 && mvM.markTime === 4.7 && mv.markTime === undefined, 'camera on: Pathline is told the seconds per mark, as learnt (4.7), else 8; camera off: none', mvC.markTime + ', ' + mvM.markTime);
 }
 
 console.log('Ruida encoding');
@@ -935,6 +967,26 @@ async function visionTests() {
     const plain = detect.findDots(ai, { minD: 30, maxD: 100 })[0], clean = detect.findDots(ai, { minD: 30, maxD: 100, whiteRing: true })[0];
     // the clean dot (107, 80) is 6.5 mm right of the middle: 81 px
     ok(plain && clean && Math.abs(clean.x - (239.5 + 81.25)) < 1 && Math.abs(plain.x - (239.5 + 81.25)) > 20, 'marks sit in white: a dot against dark artwork is passed over for the clean one', JSON.stringify({ plain, clean }));
+    // plate corners with an 8 mm radius, the plate turned 2°: each corner is where the straight edges
+    // meet, the camera aimed 8 mm inside the plate (as Vision.cornerAim does), within 0.05 mm
+    {
+      const rr = (x0, y0, x1, y1, r) => { const pts = [], arc = (cx, cy, a0) => { for (let k = 0; k <= 24; k++) { const a = ((a0 + (k / 24) * 90) * Math.PI) / 180; pts.push([cx + r * Math.cos(a), cy + r * Math.sin(a)]); } }; arc(x1 - r, y0 + r, -90); arc(x1 - r, y1 - r, 0); arc(x0 + r, y1 - r, 90); arc(x0 + r, y0 + r, 180); return pts; };
+      const turn = (p) => { const a = (2 * Math.PI) / 180, dx = p[0] - 500, dy = p[1] - 100; return [500 + dx * Math.cos(a) - dy * Math.sin(a), 100 + dx * Math.sin(a) + dy * Math.cos(a)]; };
+      const pl = { pts: rr(500, 100, 700, 250, 8).map(turn), v: 100 };
+      const M = [0, -0.05, 0.05, 0];
+      const errs = [];
+      for (const [c, tw] of [[[500, 100], [1, 1]], [[700, 100], [-1, 1]], [[700, 250], [-1, -1]], [[500, 250], [1, -1]]]) {
+        const t = turn(c), look = [t[0] + 0.7 + 8 * tw[0], t[1] - 0.6 + 8 * tw[1]];
+        const fr = await new SimCamera({ size: 700, truth: { offset: [0, 0], pixel: 0.05, rotation: 90 }, scene: { plates: [pl] }, headAt: () => ({ x: look[0], y: look[1] }) }).grab();
+        const h = detect.findPlateCorner(fr, { M, toward: tw, r: 8, c0: [-8 * tw[0], -8 * tw[1]] });
+        errs.push(h ? +Math.hypot(look[0] + h.bed[0] - t[0], look[1] + h.bed[1] - t[1]).toFixed(3) : null);
+      }
+      ok(errs.every((e) => e !== null && e < 0.05), 'rounded plate corners (r 8, turned 2°): found where the straight edges meet, ' + errs.join(', ') + ' mm off', JSON.stringify(errs));
+      // too round for the picture: says so, and why.view marks it as something the camera can't see
+      const why = {};
+      const big = await new SimCamera({ size: 700, truth: { offset: [0, 0], pixel: 0.05, rotation: 90 }, scene: { plates: [pl] }, headAt: () => ({ x: 510, y: 110 }) }).grab();
+      ok(!detect.findPlateCorner(big, { M, toward: [1, 1], r: 40, c0: [-10, -10], why }) && why.view && /straight edge/.test(why.reason), 'a corner radius too big for the picture: not found, and says the camera can\'t see enough straight edge', JSON.stringify(why));
+    }
     // (the angle only aims the scan at the next corner; the board's angle comes from the corners found)
     ok(c && Math.abs(c.x - (239.5 - 25)) < 0.5 && Math.abs(c.y - (239.5 + 12.5)) < 0.5 && Math.abs(c.angle - 25) < 3, 'checkerboard corner at 25°: found to a fraction of a pixel, angle ' + (c && c.angle.toFixed(1)) + '° (a hint, within 3°)', JSON.stringify(c));
   }
@@ -1043,6 +1095,16 @@ async function visionTests() {
     const px = await call('POST', 'local/camera/calibrate');
     ok(px.status === 200 && Math.abs(px.data.pixel - 0.08) < 0.0002 && Math.abs(Math.abs(px.data.rotation) - 90) < 0.2 && !px.data.mirrored,
       'stage 1, camera on the 10 mm board: ' + (px.data && px.data.corners) + ' corners, ' + (px.data && (px.data.pixel * 1000).toFixed(2)) + ' µm, picture turned ' + (px.data && px.data.rotation.toFixed(2)) + '° (80 µm, 90°)', JSON.stringify(px.data));
+    // the size from the head's moves, not the board's print (printed 1.2 % large across, 0.65 %
+    // down): X and Y as the machine moves (its X travel is 1.5 ‰ long, so 80 / 1.0015 µm along
+    // X), the print reported; and a second calibration agrees with the first
+    const xy = (px.data && px.data.pixelXY) || [0, 0], sq = (px.data && px.data.squares) || [0, 0];
+    ok(Math.abs(xy[0] / (0.08 / 1.0015) - 1) < 0.0005 && Math.abs(xy[1] / 0.08 - 1) < 0.0005 && sq[0] > 10.08 && sq[1] > 10.04 && sq[1] < 10.1,
+      'stage 1 on a board printed off scale: X ' + (xy[0] * 1000).toFixed(3) + ' µm (79.880), Y ' + (xy[1] * 1000).toFixed(3) + ' µm (80.000); its squares measured ' + sq.join(' × ') + ' mm', JSON.stringify(px.data));
+    await new Promise((r) => setTimeout(r, 400));
+    const px2 = await call('POST', 'local/camera/calibrate');
+    ok(px2.status === 200 && Math.abs(px2.data.pixel / px.data.pixel - 1) < 0.001 && Math.abs(px2.data.rotation - px.data.rotation) < 0.1,
+      'stage 1 again agrees: ' + (px2.data && (px2.data.pixel * 1000).toFixed(3)) + ' µm, ' + (px2.data && px2.data.rotation.toFixed(2)) + '° (first ' + (px.data.pixel * 1000).toFixed(3) + ' µm, ' + px.data.rotation.toFixed(2) + '°)', JSON.stringify(px2.data));
     await new Promise((r) => setTimeout(r, 400));
     const back = (await call('GET', 'v1/status')).data.pos;
     ok(Math.hypot(back.x - 786.2, back.y - 157.9) < 0.01, 'the camera over the board to start with (not moved to the laser\'s spot), and the head back there afterwards', JSON.stringify(back));
@@ -1058,11 +1120,14 @@ async function visionTests() {
     const fl = await call('POST', 'local/camera/offset', { power: 20, speed: 50 });
     ok(fl.status === 200 && Math.abs(fl.data.offset[0] - 41.2) < 0.2 && Math.abs(fl.data.offset[1] - 12.9) < 0.2 && fl.data.check < 0.05,
       'stage 2 with the offset stored the other way round: found, ' + (fl.data && fl.data.offset && fl.data.offset.join(', ')) + ' mm (41.2, 12.9)', JSON.stringify(fl.data));
-    // checkerboard: the laser head over its first corner (100, 300); calibrate, then check with the map on
+    // checkerboard: the laser head over its first corner (100, 300), which the camera can't see
+    // (covered, as one out of its reach would be); calibrate, then check with the map on
     await jogTo(100, 300);
     const cal = await call('POST', 'local/camera/board', { mode: 'calibrate', board: { model: 'linear' } });
     ok(cal.status === 200 && cal.data.points.length >= 15 && Math.abs(cal.data.boardAngle - 1.5) < 0.1 && Math.abs(cal.data.scaleX - 1.5) < 0.15 && Math.abs(cal.data.squareness - 0.03) < 0.015,
       'bumpy checkerboard at 1.5°, uneven light: ' + (cal.data.points && cal.data.points.length) + ' corners, ' + cal.data.bumps + ' left out as bumps; X travel ' + (cal.data.scaleX || 0).toFixed(2) + ' mm/m (+1.5), Y leans ' + (cal.data.squareness || 0).toFixed(3) + '° (0.03)', JSON.stringify(cal.data).slice(0, 300));
+    ok(cal.status === 200 && cal.data.missed >= 1 && !cal.data.points.some((p) => p.grid[0] === 0 && p.grid[1] === 0),
+      'the board\'s first corner not seen: left out, and the scan carried on from the others (' + (cal.data && cal.data.missed) + ' missed)', JSON.stringify(cal.data).slice(0, 200));
     await jogTo(100, 300);
     const chk = await call('POST', 'local/camera/board', { mode: 'check', board: { model: 'linear' } });
     // (corners on the bump stay where the bump put them: the machine error is what's checked)
@@ -1085,6 +1150,118 @@ async function visionTests() {
     const fitLine = (log.match(/print and cut: .*/) || [''])[0];
     const rot = Number((fitLine.match(/rotation (-?[\d.]+)°/) || [])[1]);
     ok(st.status === 200 && s.state === 'idle' && s.progress === 1 && Math.abs(rot - 0.3) < 0.1, 'print and cut: 3 marks read, sheet turned ' + rot + '° (0.3), job run', fitLine + ' / ' + JSON.stringify(s));
+
+    // the placement angle: the sim's sheet lies 0.3° turned, so with the limits brought down to
+    // 0.1° (ask) and 10° (stop) the job waits for Continue, and with 0.2° (stop) it stops
+    const { placementCheck } = require('../src/vision/vision');
+    const eng = { toolpath: [{ type: 'engrave' }] }, cutOnly = { toolpath: [{ type: 'cut' }] };
+    const pc = (a, p = eng, c = {}) => placementCheck({ rotation: a }, p, c).act;
+    ok(pc(4.9) === 'run' && pc(-5) === 'run' && pc(5.1) === 'ask' && pc(-9.9) === 'ask' && pc(10) === 'ask' && pc(10.1) === 'stop' && pc(-46) === 'stop' && pc(359) === 'run' && pc(46, cutOnly) === 'run',
+      'placement angle: within 5° runs, 5–10° asks, over 10° stops (either way round); cutting only is never asked');
+    ok(/12\.0° clockwise/.test(placementCheck({ rotation: 12 }, eng, {}).text) && /anticlockwise/.test(placementCheck({ rotation: -7 }, eng, {}).text) && pc(3, eng, { placementAngle: { ask: 2, stop: 4 } }) === 'ask',
+      'placement angle: says which way the sheet is turned; the limits come from the config');
+    const runAngled = async (lim) => {
+      await call('PUT', 'local/config', { placementAngle: lim });
+      const qa = await unanchored(example);
+      await new Promise((r) => setTimeout(r, 300));
+      await call('POST', 'v1/start', { id: qa.data.id });
+      for (let i = 0; i < 300; i++) { await new Promise((r) => setTimeout(r, 100)); const x = (await call('GET', 'v1/status')).data; if (x.angleWait || x.state === 'idle' || x.state === 'alarm') return x; }
+      return null;
+    };
+    let wa = await runAngled({ ask: 0.1, stop: 10 });
+    const okA = await call('POST', 'v1/marks/angle-ok');
+    let da;
+    for (let i = 0; i < 200; i++) { await new Promise((r) => setTimeout(r, 250)); da = (await call('GET', 'v1/status')).data; if (da.state === 'idle' || da.state === 'alarm') break; }
+    ok(wa && wa.angleWait && Math.abs(wa.angleWait.angle - 0.3) < 0.1 && wa.state === 'running' && /Continue or Stop/.test(wa.message) && okA.status === 200 && da.state === 'idle' && da.progress === 1 && !da.angleWait,
+      'sheet turned 0.3° with "ask" at 0.1°: the job waits for Continue, then runs', JSON.stringify({ wa, da }));
+    const late2 = await call('POST', 'v1/marks/angle-ok');
+    ok(late2.status === 409, 'Continue with nothing waiting is refused', JSON.stringify(late2.data));
+    wa = await runAngled({ ask: 0.1, stop: 10 });
+    await call('POST', 'v1/stop');
+    for (let i = 0; i < 100; i++) { await new Promise((r) => setTimeout(r, 100)); da = (await call('GET', 'v1/status')).data; if (da.state === 'idle' || da.state === 'alarm') break; }
+    const hist = (await call('GET', 'local/state')).data.history || [];
+    ok(wa && wa.angleWait && da.state === 'idle' && da.message === 'Stopped' && !da.angleWait && hist[0] && /asked about the sheet turned/.test(hist[0].reason || ''),
+      'Stop while asked about the angle: stopped, not an alarm, and History says why', JSON.stringify({ da, reason: hist[0] && hist[0].reason }));
+    wa = await runAngled({ ask: 0.1, stop: 0.2 });
+    ok(wa && wa.state === 'alarm' && /turned 0\.3° clockwise from the job as drawn.*Turn the sheet.*Nothing was cut/.test(wa.message) && !wa.progress,
+      'sheet turned 0.3° with "stop" at 0.2°: stopped before anything was cut, told to turn the sheet', JSON.stringify(wa));
+    await call('POST', 'local/alarm/clear');
+    await call('PUT', 'local/config', { placementAngle: { ask: 5, stop: 10 } });
+
+    // marks that aren't printed: holes cut in a steel plate (white under it), and the plate's own
+    // corners on a white background. The sim's plate (server.js) is drawn from (430, 60), 200 × 190
+    // mm, and lies turned 0.6° with that corner at (431.2, 59.3)
+    // (move: the example's own artwork moved that far, [dx, dy], to lie by the plate)
+    const onPlate = (marks, move) => {
+      const p = JSON.parse(JSON.stringify(example));
+      if (move) {
+        const mv = (q) => [q[0] + move[0], q[1] + move[1]];
+        for (const t of p.toolpath) { if (Array.isArray(t.p)) t.p = t.p.map(mv); if (Array.isArray(t.box)) t.box = [t.box[0] + move[0], t.box[1] + move[1], t.box[2] + move[0], t.box[3] + move[1]]; }
+        for (const e of p.entities || []) for (const q of e.paths || []) if (Array.isArray(q.p)) q.p = q.p.map(mv);
+      }
+      p.toolpath = marks.map((m, i) => ({ type: 'inspect', mark: i + 1, of: marks.length, ...m })).concat(p.toolpath.filter((t) => t.type !== 'inspect'));
+      return p;
+    };
+    const runMarks = async (pkg) => {
+      const qm = await unanchored(pkg);
+      await new Promise((r) => setTimeout(r, 300));
+      const started = await call('POST', 'v1/start', { id: qm.data.id });
+      let sm;
+      for (let i = 0; i < 300; i++) { await new Promise((r) => setTimeout(r, 100)); sm = (await call('GET', 'v1/status')).data; if (sm.state === 'idle' || sm.state === 'alarm' || sm.markWait) break; }
+      if (sm.markWait) await call('POST', 'v1/stop');
+      const all = (await call('GET', 'local/log')).data;
+      let from = 0;
+      all.forEach((l, k) => { if (/mark 1: expected/.test(l)) from = k; });
+      const lg = all.slice(from);
+      const fitL = lg.find((l) => /print and cut: /.test(l)) || '';
+      return { started, s: sm, log: lg, rot: Number((fitL.match(/rotation (-?[\d.]+)°/) || [])[1]), found1: ((lg[0] || '').match(/found (-?[\d.]+), (-?[\d.]+)/) || []).slice(1).map(Number), fitL };
+    };
+    const holes = await runMarks(onPlate([{ at: [450, 80], d: 8, kind: 'hole' }, { at: [610, 80], d: 8, kind: 'hole' }, { at: [450, 230], d: 8, kind: 'hole' }]));
+    ok(holes.s.state === 'idle' && holes.s.progress === 1 && Math.abs(holes.rot - 0.6) < 0.05 && holes.log.filter((l) => /; hole [\d.]+ mm across/.test(l)).length === 3,
+      'holes in a steel plate on white: 3 found as light dots, plate turned ' + holes.rot + '° (0.6), job run', holes.fitL + ' / ' + JSON.stringify(holes.s) + ' / ' + holes.log.slice(0, 4).join(' | '));
+    // the same holes given as plain registration marks (a job from a Pathline without mark kinds):
+    // no dark dot there, so each is found as a hole
+    const plain = await runMarks(onPlate([{ at: [450, 80], d: 8 }, { at: [610, 80], d: 8 }, { at: [450, 230], d: 8 }]));
+    ok(plain.s.state === 'idle' && plain.s.progress === 1 && Math.abs(plain.rot - 0.6) < 0.05 && plain.log.filter((l) => /found as a hole/.test(l)).length === 3 && !plain.log.some((l) => /smaller than printed|larger than printed/.test(l)),
+      'holes given as ordinary marks: found as holes (no size warning), plate turned ' + plain.rot + '°', plain.fitL + ' / ' + plain.log.slice(0, 4).join(' | '));
+    const corners = await runMarks(onPlate([{ at: [430, 60], kind: 'corner', toward: [1, 1] }, { at: [630, 60], kind: 'corner', toward: [-1, 1] }, { at: [430, 250], kind: 'corner', toward: [1, -1] }]));
+    ok(corners.s.state === 'idle' && corners.s.progress === 1 && Math.abs(corners.rot - 0.6) < 0.05 && /print and cut: rigid/.test(corners.fitL) && corners.log.filter((l) => /plate corner, edges at/.test(l)).length === 3 && Math.hypot(corners.found1[0] - 431.2, corners.found1[1] - 59.3) < 0.15,
+      'plate corners on white: 3 read from their edges, moved and turned only (rigid), ' + corners.rot + '° (0.6), first corner at ' + corners.found1.join(', ') + ' (431.2, 59.3)', corners.fitL + ' / ' + corners.log.slice(0, 4).join(' | '));
+    const one = await runMarks(onPlate([{ at: [430, 60], kind: 'corner', toward: [1, 1] }]));
+    ok(one.s.state === 'idle' && one.s.progress === 1 && Math.abs(one.rot - 0.6) < 0.1 && /print and cut: corner/.test(one.fitL),
+      'one plate corner: its edges give the turn, ' + one.rot + '° (0.6)', one.fitL + ' / ' + JSON.stringify(one.s));
+    // rounded corners (Prepare 1.6.16 sends r, and `at` where the straight edges meet): the sim's
+    // second plate, r 8, drawn from (1120, 350), lies turned 2° with that point at (1120.9, 349.4)
+    const rounded = await runMarks(onPlate([{ at: [1120, 350], d: 0, kind: 'corner', toward: [1, 1], r: 8 }, { at: [1240, 350], d: 0, kind: 'corner', toward: [-1, 1], r: 8 }, { at: [1120, 600], d: 0, kind: 'corner', toward: [1, -1], r: 8 }], [880, 360]));
+    ok(rounded.s.state === 'idle' && rounded.s.progress === 1 && Math.abs(rounded.rot - 2) < 0.05 && /plate corners r 8 mm, edges off square by/.test(rounded.fitL) && rounded.log.filter((l) => /plate corner \(rounded, r 8 mm/.test(l)).length === 3 && Math.hypot(rounded.found1[0] - 1120.9, rounded.found1[1] - 349.4) < 0.15,
+      'rounded plate corners (r 8): read where the straight edges meet, ' + rounded.rot + '° (2), first at ' + rounded.found1.join(', ') + ' (1120.9, 349.4)', rounded.fitL + ' / ' + rounded.log.slice(0, 4).join(' | '));
+    // a radius the camera can't see past: the jog dialog says why
+    const tooRound = onPlate([{ at: [1120, 350], d: 0, kind: 'corner', toward: [1, 1], r: 40 }], [880, 360]);
+    const qr = await unanchored(tooRound);
+    await new Promise((r) => setTimeout(r, 300));
+    await call('POST', 'v1/start', { id: qr.data.id });
+    let wr;
+    for (let i = 0; i < 300; i++) { await new Promise((r) => setTimeout(r, 100)); wr = (await call('GET', 'v1/status')).data; if (wr.markWait || wr.state === 'idle' || wr.state === 'alarm') break; }
+    ok(wr.markWait && wr.markWait.r === 40 && /straight edge/.test(wr.markWait.why || ''), 'a corner radius too big for the camera\'s view: the job waits, and says the camera can\'t see enough straight edge', JSON.stringify(wr.markWait));
+    await call('POST', 'v1/stop');
+    for (let i = 0; i < 100; i++) { await new Promise((r) => setTimeout(r, 100)); if ((await call('GET', 'v1/status')).data.state !== 'running') break; }
+    const badR = await call('POST', 'v1/jobs', onPlate([{ at: [430, 60], kind: 'corner', toward: [1, 1], r: -2 }]));
+    ok(badR.status >= 400 && /radius/.test(JSON.stringify(badR.data)), 'a corner with a negative radius is refused', JSON.stringify(badR.data));
+    // a corner job where the camera finds no corner (told the plate lies the other way): it waits to
+    // be found by hand, and the dialog says it's the plate's corner
+    const wrongWay = onPlate([{ at: [430, 60], kind: 'corner', toward: [-1, -1] }]);
+    const qw = await unanchored(wrongWay);
+    await new Promise((r) => setTimeout(r, 300));
+    await call('POST', 'v1/start', { id: qw.data.id });
+    let ww;
+    for (let i = 0; i < 300; i++) { await new Promise((r) => setTimeout(r, 100)); ww = (await call('GET', 'v1/status')).data; if (ww.markWait || ww.state === 'idle' || ww.state === 'alarm') break; }
+    ok(ww.markWait && ww.markWait.kind === 'corner' && /over the plate's corner/.test(ww.message), 'a plate corner not found: waits for the camera to be jogged over the plate\'s corner', JSON.stringify(ww));
+    await call('POST', 'v1/stop');
+    for (let i = 0; i < 100; i++) { await new Promise((r) => setTimeout(r, 100)); if ((await call('GET', 'v1/status')).data.state !== 'running') break; }
+    const badKind = await call('POST', 'v1/jobs', onPlate([{ at: [430, 60], kind: 'corner' }]));
+    const badKind2 = await call('POST', 'v1/jobs', onPlate([{ at: [430, 60], kind: 'star' }]));
+    ok(badKind.status >= 400 && /toward/.test(JSON.stringify(badKind.data)) && badKind2.status >= 400 && /unknown registration mark kind/.test(JSON.stringify(badKind2.data)),
+      'a corner without toward, or an unknown mark kind: the job is refused', JSON.stringify([badKind.data, badKind2.data]));
 
     // the sheet laid 40 mm away from where the job expects it: mark 1 isn't found, the job waits,
     // the camera is jogged over the real mark by hand (jogs and the camera picture allowed
@@ -1154,8 +1331,25 @@ async function visionTests() {
     const ws = await waitFor((x) => x.markWait || x.state === 'idle' || x.state === 'alarm');
     if (ws.markWait) await call('POST', 'v1/stop');
     ok(ws.state === 'alarm' && /found [\d.]+ mm apart, but they are [\d.]+ mm apart in the job.*Nothing was cut/.test(ws.message) && !ws.progress, 'marks not as far apart as the job\'s: stopped before cutting', JSON.stringify(ws));
+    // (each is written just after it's looked at, while the head goes on to the next mark)
+    await new Promise((r) => setTimeout(r, 600));
     const kept = fs.existsSync(path.join(data, 'marks', 'mark1.bin.gz')) && fs.existsSync(path.join(data, 'marks', 'mark3.json'));
     ok(kept, 'the pictures looked at for the marks are kept (data/marks)', fs.existsSync(path.join(data, 'marks')) ? fs.readdirSync(path.join(data, 'marks')).join(', ') : 'no marks folder');
+    await call('POST', 'local/alarm/clear');
+    // the same sheet as a Non-linear job: chosen for a print that stretched unevenly, so it follows
+    // the marks where they're found; the difference is logged, nothing stops
+    const bent = JSON.parse(JSON.stringify(wrong));
+    bent.regMarks = { ...(bent.regMarks || {}), mode: 'nonlinear' };
+    const q7 = await unanchored(bent);
+    await waitFor((x) => x.state === 'idle');
+    await new Promise((r) => setTimeout(r, 300));
+    const s7 = await call('POST', 'v1/start', { id: q7.data.id });
+    if (s7.status !== 200) ok(false, 'Non-linear job starts', JSON.stringify(s7));
+    const w7 = await waitFor((x) => x.markWait || x.state === 'idle' || x.state === 'alarm');
+    if (w7.markWait) await call('POST', 'v1/stop');
+    const log7 = (await call('GET', 'local/log')).data || [];
+    ok(w7.state === 'idle' && w7.progress === 1 && log7.some((l) => /mm in the job \([-\d.]+ %\): Non-linear, so the job follows the marks/.test(l)) && log7.some((l) => /print and cut: nonlinear/.test(l)),
+      'Non-linear: marks not as far apart as the job\'s are logged, not stopped, and the job runs bent to them', JSON.stringify({ w7, last: log7.slice(-5) }));
     await call('POST', 'v1/alarm/clear');
   } catch (e) { ok(false, 'head camera', e.stack + '\n' + out.slice(-1500)); }
   srv.kill();
@@ -1164,6 +1358,196 @@ async function visionTests() {
 // ---------------------------------------------------------------- found on the network
 // Run's mDNS answers, as Pathline Prepare asks for them (its own discover.js when it's in this
 // repo): a question from an ordinary port is answered straight back, with id, name, port, IP
+// ---------------------------------------------------------------- a queued job's power and speed
+async function editTests() {
+  console.log('Changing a queued job\'s power and speed');
+  const data = fs.mkdtempSync(path.join(os.tmpdir(), 'pathline-run-'));
+  fs.writeFileSync(path.join(data, 'config.json'), JSON.stringify({ controller: 'trotec', regMarks: 'ignore', bed: [813, 508], sim: { speedup: 400 } }));
+  const port = 19400 + Math.floor(Math.random() * 200);
+  const srv = spawn(process.execPath, [path.join(__dirname, '..', 'src', 'server.js'), '--sim', '--port', String(port), '--data', data], { stdio: ['ignore', 'pipe', 'pipe'] });
+  const base = 'http://127.0.0.1:' + port + '/api';
+  const call = async (m, r, b) => { const res = await fetch(base + r, { method: m, headers: { 'content-type': 'application/json' }, body: b ? JSON.stringify(b) : undefined }); return { s: res.status, j: await res.json().catch(() => null) }; };
+  try {
+    for (let i = 0; i < 60; i++) { try { await call('GET', '/v1/info'); break; } catch (e) { await new Promise((r) => setTimeout(r, 100)); } }
+    const q = (await call('POST', '/v1/jobs', example)).j;
+    const cut = example.processes.find((p) => p.proc === 'Cut');
+    const before = (await call('GET', '/v1/jobs')).j.find((j) => j.id === q.id).seconds;
+    const e1 = await call('POST', '/local/jobs/' + q.id + '/process', { index: cut.index, power: 55, speed: 10 });
+    const pkg = (await call('GET', '/local/jobs/' + q.id + '/package')).j;
+    const p = pkg.processes.find((x) => x.index === cut.index);
+    const after = (await call('GET', '/v1/jobs')).j.find((j) => j.id === q.id).seconds;
+    ok(e1.s === 200 && p.power === 55 && p.speed === 10 && p.was && p.was.power === cut.power && p.was.speed === cut.speed && after > before, 'power and speed changed on a queued job: kept, with what Pathline sent, and the estimate longer at the slower speed (' + before + ' → ' + after + ' s)', JSON.stringify({ e1, p }));
+    const bad = await call('POST', '/local/jobs/' + q.id + '/process', { index: cut.index, power: 140 });
+    const bad2 = await call('POST', '/local/jobs/' + q.id + '/process', { index: cut.index, speed: 0 });
+    ok(bad.s === 400 && /0 to 100/.test(bad.j.error) && bad2.s === 400, 'power over 100 % or a speed of 0 is refused', JSON.stringify([bad.j, bad2.j]));
+    await call('POST', '/local/jobs/' + q.id + '/process', { index: cut.index, power: cut.power, speed: cut.speed });
+    const back = (await call('GET', '/local/jobs/' + q.id + '/package')).j.processes.find((x) => x.index === cut.index);
+    ok(back.power === cut.power && back.was === undefined, 'set back as sent: no longer marked as changed');
+    await call('POST', '/local/jobs/' + q.id + '/process', { index: cut.index, power: 60 });
+    await call('POST', '/v1/start', { id: q.id });
+    const busy = await call('POST', '/local/jobs/' + q.id + '/process', { index: cut.index, power: 70 });
+    ok(busy.s === 409, 'not while the job runs', JSON.stringify(busy.j));
+    let s; for (let i = 0; i < 80; i++) { await new Promise((r) => setTimeout(r, 250)); s = (await call('GET', '/v1/status')).j; if (s.state === 'idle') break; }
+    ok(s.state === 'idle' && s.progress === 1, 'the changed job runs to the end');
+  } finally { srv.kill(); }
+}
+
+// ---------------------------------------------------------------- keeping the machine in order
+// the log on disk, why a job stopped, old job folders, the cut-rectangle check and the estimate's fit
+async function upkeepTests() {
+  console.log('Upkeep: log on disk, stop reasons, old jobs, rectangle check, estimate fit');
+  const data = fs.mkdtempSync(path.join(os.tmpdir(), 'pathline-run-'));
+  fs.writeFileSync(path.join(data, 'config.json'), JSON.stringify({ controller: 'trotec', regMarks: 'ignore', bed: [1300, 900], sim: { speedup: 20 } }));
+  const port = 19610 + Math.floor(Math.random() * 200);
+  const srv = spawn(process.execPath, [path.join(__dirname, '..', 'src', 'server.js'), '--sim', '--port', String(port), '--data', data], { stdio: ['ignore', 'pipe', 'pipe'] });
+  const base = 'http://127.0.0.1:' + port + '/api';
+  const call = async (m, r, b) => { const res = await fetch(base + r, { method: m, headers: { 'content-type': 'application/json' }, body: b ? JSON.stringify(b) : undefined }); return { s: res.status, j: await res.json().catch(() => null) }; };
+  try {
+    for (let i = 0; i < 60; i++) { try { await call('GET', '/v1/info'); break; } catch (e) { await new Promise((r) => setTimeout(r, 100)); } }
+    // a job stopped on this screen part way: History says so, and the log is on disk
+    const q = (await call('POST', '/v1/jobs', example)).j;
+    await call('POST', '/v1/start', { id: q.id });
+    await new Promise((r) => setTimeout(r, 1500));
+    await call('POST', '/v1/stop', {});
+    let h; for (let i = 0; i < 40; i++) { await new Promise((r) => setTimeout(r, 200)); h = (await call('GET', '/local/state')).j.history || []; if (h.length) break; }
+    ok(h[0] && h[0].result === 'Stopped' && /^Stop pressed on this screen.* at \d+ %$/.test(h[0].reason || ''), 'History: why the job stopped (' + (h[0] && h[0].reason) + ')', JSON.stringify(h[0]));
+    const days = (await call('GET', '/local/logs')).j;
+    const lines = days.length ? (await call('GET', '/local/logs/day?d=' + days[0])).j : [];
+    ok(days.length === 1 && lines.some((l) => /Stop pressed on this screen/.test(l)) && fs.existsSync(path.join(data, 'logs', 'run-' + days[0] + '.log')), 'the log is kept on disk, a file a day (' + days[0] + ', ' + lines.length + ' lines)', JSON.stringify(days));
+    // the rectangle: queued as a job in the middle of the bed, then measured
+    const rj = await call('POST', '/local/accuracy/job', { w: 1000, h: 800, power: 20, speed: 60 });
+    const rp = rj.s === 200 ? (await call('GET', '/local/jobs/' + rj.j.id + '/package')).j : null;
+    ok(rj.s === 200 && rp && rp.toolpath.length === 3 && rp.toolpath[0].p[0][0] === 150 && rp.toolpath[0].p[0][1] === 50, 'cut-rectangle check: 1000 × 800 mm and its diagonals queued in the middle of the bed', JSON.stringify(rj.j));
+    // measured as a machine 1 ‰ long in X, 0.5 ‰ short in Y and 0.1° out of square would cut it
+    const W = 1000, H = 800, a = W * 1.001, b = H * 0.9995, t = Math.tan(0.1 * Math.PI / 180);
+    const d1 = Math.hypot(a + t * b, b), d2 = Math.hypot(a - t * b, b);
+    const m = (await call('POST', '/local/accuracy/measure', { w: W, h: H, top: a, bottom: a, left: b, right: b, d1, d2 })).j;
+    ok(m && Math.abs(m.scaleX - 1) < 0.01 && Math.abs(m.scaleY + 0.5) < 0.01 && Math.abs(m.lean - 0.1) < 0.002 && !m.ok, 'cut-rectangle check: X +1 ‰, Y −0.5 ‰ and 0.1° out of square read back from the sides and diagonals (' + m.scaleX + ' ‰, ' + m.scaleY + ' ‰, ' + m.lean + '°)', JSON.stringify(m));
+    const ap = await call('POST', '/local/accuracy/apply', {});
+    const st = (await call('GET', '/local/state')).j.config;
+    const fit = require('../src/vision/fit');
+    // the corrected map sends the head where a machine with those errors really reaches the point
+    const truth = (q2) => [q2[0] * 1.001 + q2[1] * t, q2[1] * 0.9995];
+    const sent = fit.correct(st.vision.map, [1150, 850]), got = truth(sent);
+    ok(ap.s === 200 && st.vision.mapOn && st.accuracyCheck.applied && Math.hypot(got[0] - 1150, got[1] - 850) < 0.02, 'cut-rectangle check: the bed map corrected by it puts the far corner within ' + (Math.hypot(got[0] - 1150, got[1] - 850) * 1000).toFixed(0) + ' µm', JSON.stringify(ap.j));
+    const again = await call('POST', '/local/accuracy/apply', {});
+    ok(again.s === 409, 'cut-rectangle check: applied once only', JSON.stringify(again.j));
+  } finally { srv.kill(); }
+
+  // old job folders: kept while queued, learnt from or in the last 30 days of History
+  const Store = require('../src/store');
+  const dS = fs.mkdtempSync(path.join(os.tmpdir(), 'pathline-store-'));
+  const st = new Store(dS);
+  const mk = () => st.add({ job: { name: 'x' }, processes: [], toolpath: [] }, [], 'test');
+  const [jOld, jRecent, jRun, jQueued] = [mk(), mk(), mk(), mk()];
+  const old = new Date(Date.now() - 40 * 864e5).toISOString(), recent = new Date(Date.now() - 5 * 864e5).toISOString();
+  st.jobs = st.jobs.filter((j) => j.id === jQueued.id);
+  st.history = [{ id: jOld.id, name: 'old', finishedAt: old, result: 'Completed' }, { id: jRecent.id, name: 'recent', finishedAt: recent, result: 'Completed' }, { id: jRun.id, name: 'learnt', finishedAt: old, result: 'Completed' }];
+  fs.mkdirSync(path.join(dS, 'runs'), { recursive: true });
+  fs.writeFileSync(path.join(dS, 'runs', jRun.id + '-2026-10-01T00-00-00-000Z.json'), '{}');
+  const c = st.cleanup();
+  const has = (j) => fs.existsSync(path.join(dS, 'jobs', j.id));
+  ok(c.removed === 1 && !has(jOld) && has(jRecent) && has(jRun) && has(jQueued) && st.history[0].gone === true && !st.history[1].gone, 'old job folders removed (40 days old, not queued, not learnt from); recent, queued and learnt-from ones kept', JSON.stringify(c));
+  let refused = null; try { st.requeue(jOld.id); } catch (e) { refused = e; }
+  ok(refused && refused.code === 404 && /removed/.test(refused.message), 'Run again on a removed job says its files were removed', refused && refused.message);
+
+  // the estimate's parts fitted to whole runs: runs whose cutting took 3 % longer and travel 8 %
+  // less than estimated give those scales back
+  const tf = require('../src/timefit');
+  const dT = fs.mkdtempSync(path.join(os.tmpdir(), 'pathline-tf-'));
+  fs.mkdirSync(path.join(dT, 'runs'), { recursive: true });
+  [[400, 120, 0], [100, 80, 0], [30, 20, 200], [600, 90, 0], [50, 60, 30], [200, 200, 0]].forEach(([cu, tr, en], i) => {
+    const real = cu * 1.03 + tr * 0.92 + en;
+    const steps = [{ i: 0, marker: 1, seconds: cu + tr + en, parts: { cut: cu, travel: tr, engrave: en } }];
+    const timeline = Array.from({ length: 50 }, (_, k) => [(k / 49) * real * 1000, 0, 0, null, 'busy']);
+    fs.writeFileSync(path.join(dT, 'runs', 'J000' + i + '-2026-11-1' + i + 'T00-00-00-000Z.json'), JSON.stringify({ id: 'J000' + i, result: 'Completed', steps, timeline }));
+  });
+  const tr = tf.fit(dT, {}, { current: {} });
+  ok(tr.use && Math.abs(tr.scale.cut - 1.03) < 0.01 && Math.abs(tr.scale.travel - 0.92) < 0.02 && tr.after.rms < 0.5, 'estimate fit: cutting ×' + (tr.scale && tr.scale.cut) + ', travel ×' + (tr.scale && tr.scale.travel) + ' found (1.03, 0.92), runs ' + tr.before.rms + ' % → ' + tr.after.rms + ' % off', JSON.stringify(tr));
+  // the same, through the server's own background fit (the worker after a job): kept in the setup,
+  // and the server carries on (its handler once threw, as a JavaScript error dialog in the app)
+  fs.writeFileSync(path.join(dT, 'config.json'), JSON.stringify({ controller: 'trotec', regMarks: 'ignore', bed: [1300, 900] }));
+  const portT = 19820 + Math.floor(Math.random() * 100);
+  const srvT = spawn(process.execPath, [path.join(__dirname, '..', 'src', 'server.js'), '--sim', '--port', String(portT), '--data', dT], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, PATHLINE_RUN_FIT_IN_SIM: '1' } });
+  let outT = '';
+  srvT.stdout.on('data', (d) => { outT += d; }); srvT.stderr.on('data', (d) => { outT += d; });
+  try {
+    const bT = 'http://127.0.0.1:' + portT + '/api';
+    for (let i = 0; i < 60; i++) { try { await fetch(bT + '/v1/info'); break; } catch (e) { await new Promise((r) => setTimeout(r, 100)); } }
+    await fetch(bT + '/local/follow/fit', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+    let ts = null;
+    for (let i = 0; i < 40 && !ts; i++) { await new Promise((r) => setTimeout(r, 250)); ts = (await (await fetch(bT + '/local/state')).json()).config.timeScale || null; }
+    const alive = (await fetch(bT + '/v1/status')).status === 200;
+    ok(ts && Math.abs(ts.cut - 1.03) < 0.01 && alive && !/before initialization|TypeError|ReferenceError/.test(outT), 'the background fit after a job keeps the estimate\'s scales, and the server carries on (cutting ×' + (ts && ts.cut) + ')', outT.split('\n').filter((l) => /estimate|follow fit|Error/.test(l)).slice(-4).join(' | '));
+  } finally { srvT.kill(); }
+  const prog = trotec.compile(plan.build(example), { ...config.defaults('trotec'), timeScale: { cut: 1.1, travel: 1, engrave: 1 } });
+  const prog1 = trotec.compile(plan.build(example), config.defaults('trotec'));
+  const st1 = prog1.segments.filter((s) => s.kind === 'stream').flatMap((s) => s.steps).find((s) => s.parts && s.parts.cut > 0);
+  const st2 = prog.segments.filter((s) => s.kind === 'stream').flatMap((s) => s.steps).find((s) => s.i === st1.i);
+  ok(st1 && Math.abs(st2.seconds - (st1.parts.cut * 1.1 + st1.parts.travel)) < 0.01 && st2.parts.cut === st1.parts.cut, 'the estimate uses the fitted scales, and each step keeps its parts unscaled for the next fit');
+}
+
+// ---------------------------------------------------------------- test grid: power and speed by camera
+async function gridTests() {
+  console.log('Test grid checked by the head camera (power and speed)');
+  const G = require('../src/vision/grid');
+  const powers = [30, 35, 40, 45, 50], speeds = [15, 20, 25, 30, 35, 40];
+  const mk = (truth) => {
+    const processes = [], toolpath = [];
+    speeds.forEach((v, r) => powers.forEach((p, c) => { const k = processes.length; processes.push({ index: k, name: p + ' % · ' + v + ' mm/s', proc: 'Cut', power: p, speed: v }); const x = 90 + c * 14, y = 70 + r * 14; toolpath.push({ type: 'cut', process: k, closed: true, p: [[x, y], [x + 8, y], [x + 8, y + 8], [x, y + 8]] }); }));
+    processes.push({ index: 99, name: 'Grid labels', proc: 'Engrave', power: 15, speed: 300, f: 300, passes: 1 });
+    return { pkg: { processes, toolpath, material: { id: 'm1', name: 'Clear', thickness: 3 }, job: { name: 'Test grid · Clear 3 mm · Cut' } }, truth };
+  };
+  const { pkg } = mk();
+  const grid = G.detect(pkg);
+  ok(grid && grid.squares.length === 30 && grid.powers.join() === powers.join() && grid.speeds.join() === speeds.join(), 'a Prepare test grid is recognised (30 squares, 5 powers × 6 speeds, labels left out)');
+  ok(G.detect({ processes: [{ index: 0, name: 'Cut', proc: 'Cut', power: 60, speed: 20 }], toolpath: [{ type: 'cut', process: 0, p: [[0, 0], [10, 0], [10, 10]] }] }) === null, 'an ordinary job isn\'t taken for a test grid');
+  // measures as the camera might give them: through where power/speed ≥ 1.4, noise, and one square
+  // read badly (a bridge left uncut: its line looks like an uncut one)
+  let seed = 5;
+  const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647 - 0.5; };
+  const truth = grid.squares.map((s) => s.power / s.speed >= 1.4);
+  const m = grid.squares.map((s, k) => ({ line: (truth[k] ? -0.3 : 0.25) + rnd() * 0.12, weakest: rnd(), strongest: rnd(), inside: rnd() * 0.05 }));
+  const odd = grid.squares.findIndex((s, k) => truth[k] && s.power === 50 && s.speed === 20);
+  m[odd].line = 0.25;
+  const c = G.classify(grid, m);
+  const wrong = c.through.filter((v, k) => v !== truth[k]).length;
+  ok(wrong === 0 && c.confident && c.measure === 'line', 'noisy measures, darker or lighter unknown: every square right, the badly read one put right by the grid', JSON.stringify({ wrong, measure: c.measure, sep: c.separation }));
+  const pick = G.choose(grid, c.through);
+  // through at 1.4: at 30 mm/s 45 % (1.5) and 50 % ; at 35 mm/s 50 % (1.43); none at 40
+  ok(pick.best && pick.best.speed === 35 && pick.best.power === 50 && /35 mm\/s/.test(pick.why), 'the pick: the fastest speed that cut through (35 mm/s at 50 %, the only one there)', JSON.stringify(pick));
+  const all = G.choose(grid, grid.squares.map(() => true));
+  ok(all.best && all.best.speed === 40 && all.best.power === 35 && /Every square/.test(all.why), 'every square through: the fastest at one step above the lowest, and a note that the grid may not reach the limit', JSON.stringify(all));
+  ok(G.choose(grid, grid.squares.map(() => false)).best === null, 'none through: no setting, and why');
+  // a measure that doesn't follow power and speed at all: not trusted
+  const flat = G.classify(grid, grid.squares.map(() => ({ line: rnd() * 0.01, weakest: rnd() * 0.01, strongest: rnd() * 0.01, inside: rnd() * 0.01 })));
+  ok(!flat.confident, 'measures that don\'t follow the energy aren\'t trusted', JSON.stringify({ confident: flat.confident, measure: flat.measure }));
+
+  // the whole thing on a simulated machine and camera: cut, checked by itself, saved into the material
+  const data = fs.mkdtempSync(path.join(os.tmpdir(), 'pathline-grid-'));
+  fs.writeFileSync(path.join(data, 'config.json'), JSON.stringify({ configured: true, name: 'Sim laser', connection: { mode: 'sim' }, controller: 'trotec', regMarks: 'ignore', bed: [813, 508], sim: { speedup: 80, cutThreshold: 1.4 }, vision: { enabled: true, source: 'sim', offset: [41.2, 12.9], matrix: [0, -0.08, 0.08, 0] } }));
+  fs.writeFileSync(path.join(data, 'materials.json'), JSON.stringify({ format: 'pathline-materials', version: 1, materials: [{ id: 'm1', name: 'Clear', t: 3, updatedAt: '2026-11-01T00:00:00.000Z', processes: [{ name: 'Engrave', proc: 'Engrave', power: 20, speed: 300 }, { name: 'Cut', proc: 'Cut', power: 60, speed: 15 }] }] }));
+  const port = 19100 + Math.floor(Math.random() * 200);
+  const srv = spawn(process.execPath, [path.join(__dirname, '..', 'src', 'server.js'), '--sim', '--port', String(port), '--data', data], { stdio: ['ignore', 'pipe', 'pipe'] });
+  const base = 'http://127.0.0.1:' + port + '/api';
+  const call = async (meth, r, b) => { const res = await fetch(base + r, { method: meth, headers: { 'content-type': 'application/json' }, body: b ? JSON.stringify(b) : undefined }); return { s: res.status, j: await res.json().catch(() => null) }; };
+  try {
+    for (let i = 0; i < 60; i++) { try { await call('GET', '/v1/info'); break; } catch (e) { await new Promise((r) => setTimeout(r, 100)); } }
+    const qr = await call('POST', '/v1/jobs', { format: 'lrc-job-package', version: 1, machine: { type: 'laser' }, entities: [], ...mk().pkg });
+    if (qr.s !== 200) throw new Error('the test grid wasn\'t taken: ' + JSON.stringify(qr.j));
+    const q = qr.j;
+    await call('POST', '/v1/start', { id: q.id });
+    let g;
+    for (let i = 0; i < 240; i++) { await new Promise((r) => setTimeout(r, 500)); g = (await call('GET', '/local/grid')).j; if (g.state && (g.state.state === 'done' || g.state.state === 'failed')) break; }
+    const r = g && g.result;
+    const wrongSim = r ? r.squares.filter((s) => s.through !== s.power / s.speed >= 1.4).length : -1;
+    ok(r && wrongSim === 0 && r.confident && r.best && r.best.power === 50 && r.best.speed === 35 && r.squares.every((s) => s.thumb && s.thumb.w === 96), 'simulated: cut, then checked by the camera by itself: every square right, 50 % at 35 mm/s, a picture of each', JSON.stringify(g && g.state));
+    const sv = await call('POST', '/local/grid/save', { id: q.id });
+    const mat = JSON.parse(fs.readFileSync(path.join(data, 'materials.json'), 'utf8')).materials[0];
+    ok(sv.s === 200 && mat.processes[1].power === 50 && mat.processes[1].speed === 35 && mat.processes[0].power === 20 && mat.updatedAt > '2026-11-01', 'Save: the material\'s cut setting becomes 50 % at 35 mm/s (the engrave one untouched), marked newer for Prepare', JSON.stringify(mat));
+  } finally { srv.kill(); }
+}
+
 // ---------------------------------------------------------------- watchers: GET /api/v1/monitor, /events
 async function monitorTests() {
   console.log('Watchers (GET /api/v1/monitor, /api/v1/events)');
@@ -1198,7 +1582,8 @@ async function monitorTests() {
   const data = fs.mkdtempSync(path.join(os.tmpdir(), 'pathline-run-'));
   fs.writeFileSync(path.join(data, 'config.json'), JSON.stringify({ controller: 'trotec', regMarks: 'ignore', bed: [813, 508], sim: { speedup: 120 } }));
   const port = 19370 + Math.floor(Math.random() * 300);
-  const srv = spawn(process.execPath, [path.join(__dirname, '..', 'src', 'server.js'), '--sim', '--port', String(port), '--data', data], { stdio: ['ignore', 'pipe', 'pipe'] });
+  // (a watcher that only asks now and then counts for 1.5 s here, not 10 minutes)
+  const srv = spawn(process.execPath, [path.join(__dirname, '..', 'src', 'server.js'), '--sim', '--port', String(port), '--data', data], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, PATHLINE_RUN_WATCH_MS: '1500' } });
   const base = 'http://127.0.0.1:' + port + '/api/v1';
   const get = async (r) => { const res = await fetch(base + r); return { res, j: await res.json() }; };
   let events = '', ac;
@@ -1222,9 +1607,182 @@ async function monitorTests() {
     const m3 = (await get('/monitor')).j;
     ok(m2.today.filter((x) => x.id === q.id).length === 1 && m2.today[0].result === 'Completed' && m3.today[0].finishedAt === m2.today[0].finishedAt && m2.job === null, 'GET /monitor after: the job once in today, finishedAt unchanged', JSON.stringify(m2.today));
     ok((events.match(/event: finished/g) || []).length === 1 && events.includes('"id":"' + q.id + '"'), 'GET /events: one "finished" event for the job', (events.match(/event: finished/g) || []).length + ' finished events');
+    // ☰ → Pathline Monitor on a phone: the hub is whoever watches (this test did), or the address
+    // typed in; its setup page, for a QR code
+    const loc = 'http://127.0.0.1:' + port + '/api/local';
+    // the stream opened long before (longer than a watcher counts for) and is still open, as the
+    // hub's is for hours: it's still watching (it dropped out after 10 minutes, and the QR with it)
+    await new Promise((r) => setTimeout(r, 1700));
+    const h0 = await (await fetch(loc + '/monitor-hub')).json();
+    ok(h0.found || (h0.watchers || []).includes('127.0.0.1'), 'Monitor hub: a watcher with its stream still open is remembered however long ago it connected (' + JSON.stringify(h0.watchers || h0.host) + ')', JSON.stringify(h0));
+    ac.abort();
+    await new Promise((r) => setTimeout(r, 1700));
+    const hGone = await (await fetch(loc + '/monitor-hub')).json();
+    ok(!hGone.found && !(hGone.watchers || []).includes('127.0.0.1'), 'Monitor hub: once its stream closes, it counts for as long as one that asks now and then', JSON.stringify(hGone));
+    const hub = http.createServer((rq, rs) => { rs.writeHead(rq.url === '/api/phone' ? 200 : 404, { 'content-type': 'application/json' }); rs.end(JSON.stringify({ urls: ['http://192.168.7.7:' + hub.address().port + '/'], app: ['https://192.168.7.7:8443/'] })); });
+    await new Promise((r) => hub.listen(0, '127.0.0.1', r));
+    try {
+      await fetch(loc + '/config', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ monitorHub: '127.0.0.1:' + hub.address().port }) });
+      const h1 = await (await fetch(loc + '/monitor-hub')).json();
+      ok(h1.found && h1.typed === '127.0.0.1:' + hub.address().port && h1.setup === 'http://192.168.7.7:' + hub.address().port + '/setup' && h1.app === 'https://192.168.7.7:8443/', 'Monitor hub at the address typed in: its setup page ' + h1.setup + ' (on this computer, so the hub\'s own address)', JSON.stringify(h1));
+    } finally { hub.close(); }
   } finally {
     if (ac) ac.abort();
     srv.kill();
+  }
+  // bed maps over time (data/bedmaps.json): what each says about the machine, and a jump flagged
+  const bm = require('../src/bedmaps');
+  const dataB = fs.mkdtempSync(path.join(os.tmpdir(), 'pathline-maps-'));
+  const mk = (sx, sy, lean) => { const m = { x0: 0, y0: 0, step: 50, nx: 21, ny: 11, ex: [], ey: [] }; for (let j = 0; j < 11; j++) for (let i = 0; i < 21; i++) { const x = i * 50, y = j * 50; m.ex.push(x * sx / 1000 + y * Math.tan(lean * Math.PI / 180)); m.ey.push(y * sy / 1000); } return m; };
+  bm.add(dataB, mk(1.76, -0.13, 0.033), '2026-11-03T15:46:43.000Z');
+  const small = bm.add(dataB, mk(1.70, -0.10, 0.04), '2026-11-04T10:00:00.000Z').since;
+  const big = bm.add(dataB, mk(1.12, -1.34, -0.147), '2026-11-12T14:43:37.000Z').since;
+  const s0 = bm.load(dataB)[0];
+  ok(Math.abs(s0.scaleX - 1.76) < 0.01 && Math.abs(s0.scaleY + 0.13) < 0.01 && Math.abs(s0.lean - 0.033) < 0.001 && s0.bend < 0.001, 'bed maps: scale and squareness read back from the map (' + s0.scaleX + ' / ' + s0.scaleY + ' ‰, ' + s0.lean + '°)', JSON.stringify(s0).slice(0, 120));
+  ok(small && !small.big && big && big.big && Math.abs(big.lean + 0.187) < 0.001 && bm.byAt(dataB, '2026-11-04T10:00:00.000Z'), 'bed maps: a small change passes, a jump like 3 → 12 Nov (Y ' + (big && big.scaleY) + ' ‰, ' + (big && big.lean) + '°) is flagged', JSON.stringify({ small, big }));
+}
+
+// ---------------------------------------------------------------- reporting to Pathline Monitor
+// Setup → Pathline Monitor (hmi/RUN-REPORT-BRIEF.md), against a stand-in Monitor server. Run's
+// times are run 5× faster here (PATHLINE_RUN_REPORT_SCALE 0.2): every 2 s idle, 1 s while a job
+// runs, at most every 0.2 s on a change, a report given up after 1.6 s.
+async function reportTests() {
+  console.log('Reporting to Pathline Monitor');
+  const R = require('../src/report');
+  const throws = (f) => { try { f(); return null; } catch (e) { return e.message; } };
+  ok(R.address('monitor.example.com/').base === 'https://monitor.example.com' && R.address('https://Monitor.example.com').base === 'https://monitor.example.com' && R.address('http://127.0.0.1:9/').base === 'http://127.0.0.1:9' && R.code(' k7m-2qx ') === 'K7M2QX' && R.code('K7M 2QX') === 'K7M2QX',
+    'address with or without https:// and a trailing slash; code in any case, with or without the dash');
+  ok(/https only/.test(throws(() => R.address('http://monitor.example.com')) || '') && throws(() => R.code('K7M2Q')), 'an http:// address that isn\'t localhost is refused, and a code that isn\'t 6 characters');
+
+  // the stand-in: enrol K7M2QX → key; reports kept; mode: ok (204) | removed (401) | down (no answer) | orders (200 with made-up instructions)
+  const got = [];
+  let mode = 'ok', enrolled = null;
+  const mon = http.createServer((rq, rs) => {
+    let s = '';
+    rq.on('data', (c) => { s += c; });
+    rq.on('end', () => {
+      if (rq.url === '/api/v1/enrol') {
+        const b = JSON.parse(s || '{}');
+        if (b.code !== 'K7M2QX') { rs.writeHead(403, { 'content-type': 'application/json' }); return rs.end(JSON.stringify({ error: 'That code isn\'t right, or it has run out.' })); }
+        enrolled = b;
+        rs.writeHead(200, { 'content-type': 'application/json' }); return rs.end(JSON.stringify({ key: 'stand-in-key-1' }));
+      }
+      if (rq.url === '/api/v1/report') {
+        if (mode === 'down') return rq.socket.destroy();
+        got.push({ at: Date.now(), auth: rq.headers.authorization, body: JSON.parse(s), mode });
+        if (mode === 'removed') { rs.writeHead(401, { 'content-type': 'application/json' }); return rs.end('{"error":"removed"}'); }
+        if (mode === 'orders') { rs.writeHead(200, { 'content-type': 'application/json' }); return rs.end(JSON.stringify({ start: 'J0031', stop: true, config: { name: 'Hijacked', httpPort: 1, removeDone: false }, interval: 0, key: 'other' })); }
+        rs.writeHead(204); return rs.end();
+      }
+      rs.writeHead(404); rs.end();
+    });
+  });
+  await new Promise((r) => mon.listen(0, '127.0.0.1', r));
+  const monAddr = 'http://127.0.0.1:' + mon.address().port + '/';
+
+  const data = fs.mkdtempSync(path.join(os.tmpdir(), 'pathline-report-'));
+  fs.writeFileSync(path.join(data, 'config.json'), JSON.stringify({ controller: 'trotec', regMarks: 'ignore', bed: [813, 508], sim: { speedup: 30 } }));
+  const port = 19670 + Math.floor(Math.random() * 300);
+  const srv = spawn(process.execPath, [path.join(__dirname, '..', 'src', 'server.js'), '--sim', '--port', String(port), '--data', data], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, PATHLINE_RUN_REPORT_SCALE: '0.2' } });
+  let out = '';
+  srv.stdout.on('data', (d) => { out += d; }); srv.stderr.on('data', (d) => { out += d; });
+  const base = 'http://127.0.0.1:' + port + '/api/';
+  const call = async (m, r, b) => { const res = await fetch(base + r, { method: m, headers: b ? { 'content-type': 'application/json' } : {}, body: b ? JSON.stringify(b) : undefined }); return { status: res.status, data: await res.json().catch(() => null) }; };
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  const gaps = (list) => list.slice(1).map((g, i) => g.at - list[i].at);
+  const med = (a) => { const s = a.slice().sort((x, y) => x - y); return s.length ? s[Math.floor(s.length / 2)] : NaN; };
+  const keyFile = path.join(data, 'monitor-report.json');
+  try {
+    for (let i = 0; i < 60; i++) { try { await call('GET', 'v1/info'); break; } catch (e) { await wait(100); } }
+    // a wrong code: the server's own words, nothing saved
+    const bad = await call('POST', 'local/monitor-report/connect', { address: monAddr, code: 'AAA-111' });
+    ok(bad.status === 400 && /code isn't right/.test(bad.data.error) && !fs.existsSync(keyFile) && !(await call('GET', 'local/monitor-report')).data.connected, 'a wrong code shows the server\'s error and saves nothing', JSON.stringify(bad));
+    const plain = await call('POST', 'local/monitor-report/connect', { address: 'http://monitor.example.com', code: 'K7M-2QX' });
+    ok(plain.status === 400 && /https/.test(plain.data.error), 'an http:// address that isn\'t localhost is refused by Connect', JSON.stringify(plain));
+    // Connect: the key saved (not in the config, nor shown), the first report with it straight away
+    const t0 = Date.now();
+    const c = await call('POST', 'local/monitor-report/connect', { address: monAddr, code: 'k7m 2qx' });
+    for (let i = 0; i < 40 && !got.length; i++) await wait(50);
+    const saved = JSON.parse(fs.readFileSync(keyFile, 'utf8'));
+    const st = (await call('GET', 'local/state')).data;
+    ok(c.status === 200 && c.data.connected && saved.key === 'stand-in-key-1' && enrolled && enrolled.id === (await call('GET', 'v1/info')).data.id && got.length && got[0].auth === 'Bearer stand-in-key-1' && got[0].at - t0 < 1500 &&
+      !JSON.stringify(st.config).includes('stand-in-key') && !JSON.stringify(st.monitorReport).includes('stand-in-key'),
+    'Connect with a code: the key saved in its own file, the first report arrives with it as the bearer (' + (got[0] ? got[0].at - t0 : '-') + ' ms), the key not in the config or the panel', JSON.stringify({ c, n: got.length }));
+    // the body is GET /api/v1/monitor's answer
+    await wait(300);
+    const mv = (await call('GET', 'v1/monitor')).data;
+    ok(JSON.stringify(got[got.length - 1].body) === JSON.stringify(mv), 'the report\'s body equals GET /api/v1/monitor', JSON.stringify(got[got.length - 1].body).slice(0, 200));
+    // idle: about every 10 s (2 s here)
+    const n0 = got.length;
+    await wait(6500);
+    const idleGaps = gaps(got.slice(n0 - 1));
+    ok(idleGaps.length >= 2 && idleGaps.every((g) => g > 1700 && g < 2600), 'nothing changing: a report about every 10 s (here every ' + idleGaps.join(', ') + ' ms, scaled 0.2)', JSON.stringify(idleGaps));
+    ok((await call('GET', 'local/monitor-report')).data.lastSent >= got[got.length - 1].at - 50, 'the panel shows when it was last sent');
+    // a change: straight away (the lid opened)
+    const n1 = got.length, tLid = Date.now();
+    await call('POST', 'local/sim/lid', { open: true });
+    for (let i = 0; i < 40 && !got.slice(n1).some((g) => g.body.interlock); i++) await wait(25);
+    const lidAt = got.slice(n1).find((g) => g.body.interlock);
+    ok(lidAt && lidAt.at - tLid < 1000, 'a change (the lid opened) arrives within a second (' + (lidAt ? lidAt.at - tLid : '-') + ' ms)', JSON.stringify(got.slice(n1).map((g) => g.body.interlock)));
+    await call('POST', 'local/sim/lid', { open: false });
+    for (let i = 0; i < 40 && (await call('GET', 'v1/status')).data.interlock; i++) await wait(100);
+    // a job running: about every 5 s (1 s here)
+    const q = await call('POST', 'v1/jobs', example);
+    await call('POST', 'local/jobs/' + q.data.id + '/anchor', { clear: true });
+    await wait(300);
+    await call('POST', 'v1/start', { id: q.data.id });
+    for (let i = 0; i < 40 && (await call('GET', 'v1/status')).data.state !== 'running'; i++) await wait(100);
+    await wait(500);
+    const n2 = got.length;
+    await wait(4200);
+    const runGaps = gaps(got.slice(n2).filter((g) => g.body.state === 'running' && g.body.job));
+    ok(runGaps.length >= 3 && med(runGaps) > 700 && med(runGaps) < 1300 && got.slice(n2).every((g) => g.body.job ? Number.isFinite(g.body.job.remaining) : true), 'a job running: a report about every 5 s (here ' + runGaps.join(', ') + ' ms)', JSON.stringify(runGaps));
+    // the server can't be reached: the job carries on untouched, the panel says so, and reports
+    // come back when it's back (on the schedule, no faster)
+    const p0 = (await call('GET', 'v1/status')).data.progress;
+    mode = 'down';
+    await wait(2600);
+    const down = (await call('GET', 'local/monitor-report')).data, sDown = (await call('GET', 'v1/status')).data;
+    ok(down.connected && down.failingSince && sDown.state === 'running' && sDown.progress > p0, 'the server unreachable: the job carries on (' + (p0 * 100).toFixed(0) + ' → ' + (sDown.progress * 100).toFixed(0) + ' %), the panel says since when', JSON.stringify({ down, state: sDown.state }));
+    mode = 'ok';
+    const n3 = got.length;
+    for (let i = 0; i < 50 && got.length === n3; i++) await wait(50);
+    await wait(100);
+    const back = (await call('GET', 'local/monitor-report')).data;
+    ok(got.length > n3 && !back.failingSince && back.lastSent, 'reports resume when it\'s back', JSON.stringify(back));
+    await call('POST', 'v1/stop');
+    for (let i = 0; i < 40 && (await call('GET', 'v1/status')).data.state !== 'idle'; i++) await wait(100);
+    // the one-way rule: a report answered with made-up instructions changes nothing
+    const before = (await call('GET', 'local/state')).data;
+    const queued0 = before.jobs.filter((j) => j.status === 'queued').map((j) => j.id).join();
+    await wait(1000);
+    mode = 'orders';
+    const n4 = got.length;
+    await wait(9500);
+    const after = (await call('GET', 'local/state')).data;
+    // (the first gap can be short: the job's stop still settling is a change, sent straight away)
+    const oGaps = gaps(got.slice(n4).filter((g) => g.mode === 'orders')).slice(1);
+    ok(oGaps.length >= 2 && oGaps.every((g) => g > 1700 && g < 2600) && JSON.stringify(after.config) === JSON.stringify(before.config) && after.status.state === 'idle' &&
+      after.jobs.filter((j) => j.status === 'queued').map((j) => j.id).join() === queued0 && JSON.parse(fs.readFileSync(keyFile, 'utf8')).key === 'stand-in-key-1',
+    'one way: a report answered with { start, stop, config, interval: 0, key } changes nothing in Run, and the rate stays (' + oGaps.join(', ') + ' ms)', JSON.stringify({ oGaps, name: after.config.name, state: after.status.state }));
+    // removed in Pathline Monitor: 401 → reporting stops, the key is gone, the panel says so
+    mode = 'removed';
+    for (let i = 0; i < 60 && (await call('GET', 'local/monitor-report')).data.connected; i++) await wait(100);
+    const rm = (await call('GET', 'local/monitor-report')).data;
+    const n5 = got.length;
+    await wait(2600);
+    ok(!rm.connected && rm.removed && !JSON.parse(fs.readFileSync(keyFile, 'utf8')).key && got.length === n5, 'the server answers 401: reporting stops, the key is forgotten, the panel says "Removed in Pathline Monitor"', JSON.stringify({ rm, more: got.length - n5 }));
+    // Disconnect forgets the key and doesn't call the server
+    mode = 'ok';
+    await call('POST', 'local/monitor-report/connect', { address: monAddr, code: 'K7M2QX' });
+    await wait(300);
+    const n6 = got.length;
+    const dis = await call('POST', 'local/monitor-report/disconnect', {});
+    await wait(2600);
+    ok(dis.status === 200 && !dis.data.connected && !dis.data.removed && !JSON.parse(fs.readFileSync(keyFile, 'utf8')).key && got.length <= n6 + 1, 'Disconnect forgets the key and stops reporting', JSON.stringify(dis.data));
+  } catch (e) { ok(false, 'reporting', e.stack + '\n' + out.slice(-1500)); } finally {
+    srv.kill();
+    mon.close();
   }
 }
 
@@ -1405,7 +1963,7 @@ async function zaxisTests() {
   ok(zf.state === 'up', 'paused or stopped: the nozzle goes up');
 }
 
-jogTests().then(linkTests).then(serverTests).then(monitorTests).then(discoveryTests).then(followFitTests).then(zaxisTests).then(materialsTests).then(visionTests).then(() => {
+jogTests().then(linkTests).then(serverTests).then(editTests).then(upkeepTests).then(monitorTests).then(reportTests).then(gridTests).then(discoveryTests).then(followFitTests).then(zaxisTests).then(materialsTests).then(visionTests).then(() => {
   console.log(failed ? '\n' + failed + ' FAILED' : '\nAll passed');
   process.exit(failed ? 1 : 0);
 });

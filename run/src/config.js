@@ -45,6 +45,11 @@ const BASE = {
   regMarks: 'refuse',            // 'refuse' or 'ignore' (run without print-and-cut correction)
   removeDone: true,              // completed jobs leave the queue for History
   returnHead: true,              // after a completed job the head goes back to where it was at Start
+  // print and cut with engraving: how far the sheet may lie turned from the job as drawn (°). The
+  // engraving lines run along the bed's X whatever way the sheet lies, so a turned sheet engraves
+  // its lines at that angle across the part. Up to `ask` runs; up to `stop` asks; beyond stops
+  placementAngle: { ask: 5, stop: 10 },
+  monitorHub: '',                // Pathline Monitor hub ("host" or "host:port"), when it isn't found by itself
   manual: [],                    // settings typed in Setup over the controller's own ('bed.0', 'speed' …)
   knifeHome: null,               // RDD6584: where the head homes and parks, controller mm (learnt)
   vision: { enabled: false },    // the Trotec's head camera (vision/vision.js DEFAULTS for the rest)
@@ -60,7 +65,7 @@ const BASE = {
 };
 
 // settings that belong to Pathline Run, not to the machine (kept when a machine is removed)
-const APP_PREFS = ['httpPort', 'regMarks', 'removeDone', 'returnHead', 'prefix', 'sim'];
+const APP_PREFS = ['httpPort', 'regMarks', 'removeDone', 'returnHead', 'placementAngle', 'prefix', 'sim', 'monitorHub'];
 
 // the setup with the machine removed
 function withoutMachine(cfg) {
@@ -155,7 +160,9 @@ function machineView(cfg) {
   const area = cam ? markArea(off, cfg.bed, travelBox(cfg)).map((q) => +q.toFixed(1)) : null;
   return {
     ...base, source: cfg.source, power: cfg.power, lens: cfg.lens, minPower: cfg.minPower,
-    ...(cam ? { markType: 'Dot', camX: off[0].toFixed(2), camY: off[1].toFixed(2), markArea: area, calibrated: v.calibrated ? new Date(v.calibrated).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '' } : {}),
+    // markTime: seconds per registration mark as this machine reads them, learnt from the jobs
+    // run (markSec; with the short move between marks). Pathline's estimate used 1.5 s without it
+    ...(cam ? { markType: 'Dot', camX: off[0].toFixed(2), camY: off[1].toFixed(2), markArea: area, markTime: +(Number(cfg.markSec) > 0 ? Number(cfg.markSec) : require('./ctrl/trotec/compile').MARK_SEC).toFixed(1), calibrated: v.calibrated ? new Date(v.calibrated).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '' } : {}),
     f: { camera: cam, autofocus: false, rotary: false, air: !!cfg.f.air, pointer: !!cfg.f.pointer, pass: false, interlock: !!cfg.f.interlock, conveyor: false, vacuum: false }
   };
 }

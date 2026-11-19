@@ -87,7 +87,10 @@
       // for J0068's labels was 10× too long, and the drawing fell far behind)
       const rows = pkg.rows && pkg.rows[i];
       if (s.type === 'engrave' && rows && rows.n > 0) {
-        const n = Math.max(1, Math.min(200, rows.n)), per = rows.sec / n;
+        // each line at an even pace, the island's own time (lead) spread over them: against the
+        // reported head on Ruby's 500 mm/s jobs that drew closer than across-then-turn (the reports'
+        // timing scatters more than a line takes)
+        const n = Math.max(1, Math.min(200, rows.n)), per = (rows.sec + (rows.lead || 0)) / n;
         go([rows.xs, rows.y0], i);
         for (let r = 0; r < n; r++) {
           const y = n > 1 ? rows.y0 + ((rows.y1 - rows.y0) * r) / (n - 1) : rows.y0;
@@ -97,6 +100,12 @@
           add(a, b, per, 'row', i);
           cur = b;
         }
+        return;
+      }
+      // punch: travel to each point, then the strike (Prepare's time spread over the strikes)
+      if (s.type === 'punch' && Array.isArray(s.p) && s.p.length) {
+        const per = (Number(s.seconds) || 0.3 * s.p.length) / s.p.length;
+        for (const q of s.p) { go(q, i); add(q, q, per, 'strike', i); }
         return;
       }
       if (Array.isArray(s.p) && s.p.length > 1) pts = s.closed ? s.p.concat([s.p[0]]) : s.p;

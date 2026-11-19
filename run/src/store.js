@@ -10,6 +10,7 @@ const anchor = require('./job/anchor');
 
 const KEEP_DONE = 30;      // finished jobs listed in GET /jobs
 const KEEP_HISTORY = 200;
+const KEEP_DAYS = 30;      // a finished job's folder (Run again from History), cleanup()
 
 class Store {
   constructor(dir) {
@@ -117,20 +118,23 @@ class Store {
     this.flush();
   }
 
-  finish(job, result, startedAt, removeDone) {
+  // reason: why a stopped job stopped (who pressed Stop, or what went wrong), for History
+  finish(job, result, startedAt, removeDone, reason) {
     job.status = result === 'Completed' ? 'done' : 'stopped';
     job.finishedAt = new Date().toISOString();
     job.runs = (job.runs || 0) + 1;
     if (result === 'Completed') job.progress = 1;
     this.history.unshift({
       id: job.id, name: job.name, material: job.material, startedAt, finishedAt: job.finishedAt,
-      seconds: Math.round((Date.parse(job.finishedAt) - Date.parse(startedAt)) / 1000), result
+      seconds: Math.round((Date.parse(job.finishedAt) - Date.parse(startedAt)) / 1000), result,
+      ...(reason ? { reason: String(reason).slice(0, 300) } : {})
     });
     if (removeDone && result === 'Completed') job.hidden = true;
     // anchored for that run only: run again, the switch is back as the job started out
     job.anchor = null; job.anchorAtStart = this.anchorDefault(job.id);
     this.prune();
     this.flush();
+    try { this.cleanup(); } catch (e) { /* tidying only */ }
   }
 
   // what the controller reported through a run (positions, markers), for working out how it really
@@ -159,13 +163,43 @@ class Store {
       this.flush();
       return j;
     }
-    const pkg = this.pkg(id);
+    let pkg;
+    try { pkg = this.pkg(id); } catch (e) { throw Object.assign(new Error('This job\'s files were removed (kept ' + KEEP_DAYS + ' days). Send it again from Pathline.'), { code: 404 }); }
     return this.add(pkg, [], 'history');
   }
 
   prune() {
     const done = this.jobs.filter((j) => j.status === 'done' || j.status === 'stopped');
     for (const j of done.slice(0, Math.max(0, done.length - KEEP_DONE))) this.jobs.splice(this.jobs.indexOf(j), 1);
+  }
+
+  // Old jobs' folders (the package and its files, up to 7 MB a job) were never deleted: 69 on
+  // Ruby, 167 MB, after two weeks. A folder is kept while something still needs it: a job in the
+  // queue (any state), a run the head drawing learns from (data/runs), or a History entry from
+  // the last KEEP_DAYS days (Run again). Older History entries keep their line, without Run
+  // again (gone: true). Returns { removed, bytes }.
+  cleanup(opts = {}) {
+    const days = opts.days || KEEP_DAYS;
+    const cutoff = Date.now() - days * 864e5;
+    const keep = new Set(this.jobs.map((j) => j.id));
+    try { for (const f of fs.readdirSync(path.join(this.dir, 'runs'))) { const m = f.match(/^(J\d+)-/); if (m) keep.add(m[1]); } } catch (e) { /* no runs yet */ }
+    for (const h of this.history.slice(0, KEEP_HISTORY)) if (Date.parse(h.finishedAt || h.startedAt || 0) >= cutoff) keep.add(h.id);
+    let removed = 0, bytes = 0;
+    let dirs = [];
+    try { dirs = fs.readdirSync(this.jobsDir, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name); } catch (e) { return { removed, bytes }; }
+    for (const id of dirs) {
+      if (keep.has(id)) continue;
+      const dir = this.jobDir(id);
+      try {
+        for (const f of fs.readdirSync(dir)) { try { bytes += fs.statSync(path.join(dir, f)).size; } catch (e) { /* gone */ } }
+        fs.rmSync(dir, { recursive: true, force: true });
+        removed++;
+      } catch (e) { /* in use: next time */ }
+    }
+    let marked = false;
+    for (const h of this.history) if (!h.gone && !keep.has(h.id) && !fs.existsSync(this.jobDir(h.id))) { h.gone = true; marked = true; }
+    if (marked || removed) this.flush();
+    return { removed, bytes };
   }
 }
 

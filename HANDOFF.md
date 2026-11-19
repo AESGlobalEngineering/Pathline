@@ -21,7 +21,7 @@ Version 1.6.18 (18 Nov):
 - **Origin**: `CC.originOf(machine)` returns `machine.origin` (set in Machine setup for any machine, kept across controller syncs), else `info.origin`, else tl. Run's /machine reports `cfg.origin` (default tl), not the Ruida origin it actually runs with (`cfg.ruida.origin`), and every sync overwrote `info.origin`. So the owner saw top left whatever the setting. `originOf` feeds the origin dot, the estimate's home and the setup preview. Rulers and coordinates stay top left (the protocol's system).
 - **Tool heads**: `CC.toolOptions(machine, current)` (the machine's `info.heads`, else the standard four) and `CC.toolFor(machine, tool)` (same slot). Used on Materials (row select, Tool heads card from the tab's machine) and the Job page (new process, process panel).
 - **Machines on a material**: `mat.off` = machine ids taken off; `CC.matOnMachine(mat, machine)`. Materials tabs have × (removeMachine: deletes that machine's presets; the last machine of a type drops the type) and Add machine. Saving a preset from the Job page puts the machine back on.
-- **Run needs:** a `punch` step type (validate.js turns it down today) and `/frame` path and speed: **hmi/RUN-PUNCH-FRAME-BRIEF.md**.
+- **Run:** `punch` steps and `/frame` path and speed are in Run 0.7.13 (commit 2752246, from **hmi/RUN-PUNCH-FRAME-BRIEF.md**). Not yet tried on a real router.
 
 Version 1.6.17 (18 Nov):
 - **Job tabs** (owner: "multiple jobs open on prepare"). `src/main/tabs.js` keeps the open jobs: `createTabs({ newJob, prepare })` → current, job, set(job, opts, tab), create, open, switchTo, close, move, undo, redo, history, info, unsavedTabs. Each tab has its own undo/redo. main.js has no `session` any more; `currentJob()` is the front tab's job, so Simulation, Setup and bug reports see the tab in front.
@@ -369,6 +369,7 @@ These are rules the owner set over many rounds. Keep them unless the owner chang
 - Switching marks on adds a **"Registration marks"** process. Objects in its colours ARE the marks; nothing is auto-placed. The old "Mark" process type was removed.
 - Marks are drawn filled black and go on the `REGMARKS` DXF layer. **More marks than the mode needs blocks sending** (Position 2, Linear 3, Non-linear 3).
 - Marks are read first. The reading order is chosen to travel least and **end nearest where the work starts** (so the job then runs from that end, normally the top).
+- **To do (18 Nov 2026): marks that are holes in the plate, or the plate's own corners.** Run already reads them (`kind` on `inspect` steps, PROTOCOL.md). What Prepare needs is in `HANDOFF-prepare-mark-kinds.md`.
 
 ### Run order, passes, cut order (estimator: `src/shared/core.js`)
 - Order: **registration-mark inspection → engraving → cutting**.

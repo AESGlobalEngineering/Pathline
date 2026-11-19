@@ -164,53 +164,100 @@ class Vision {
     const t = this.m.travel ? this.m.travel() : [0, 0, ...this.m.cfg.bed];
     if (x < t[0] - 0.5 || y < t[1] - 0.5 || x > t[2] + 0.5 || y > t[3] + 0.5) throw err('The camera can\'t reach ' + p.map((v) => v.toFixed(1)).join(', ') + ' mm: the head would leave the bed');
     // (within the half mm allowed: to the edge of the travel, never past the machine's zero)
+    const t0 = Date.now();
     await this.m.link.moveTo(Math.max(t[0], Math.min(t[2], x)), Math.max(t[1], Math.min(t[3], y)));
-    await this.m.waitIdle(30000, 150);
+    const t1 = Date.now();
+    await this.m.waitIdle(30000, 150, 40);
+    if (opts.times) { opts.times.send += t1 - t0; opts.times.travel += Date.now() - t1; }
   }
 
   // the thing nearest the middle of the frame: kind 'dot' (d mm across) or 'corner'
+  // kind 'hole': a hole in a plate with white under it, so a light dot in a darker surround (or,
+  // where the steel shines brighter than the card, a dark one); 'plate': a plate's corner on a white
+  // background (opts.toward: which way the plate lies from it, [±1, ±1] in bed X and Y).
+  // opts.alsoLight: a registration mark not found as a dark dot is looked for as a hole too
   find(img, kind, d, opts = {}) {
     if (kind === 'corner') return detect.findCorner(img);
+    if (kind === 'plate') return detect.findPlateCorner(img, { M: this.cfg.matrix, toward: opts.toward || [1, 1], r: opts.r || 0, c0: opts.expect, why: opts.why });
     const px = this.pixelSize();
     // registration marks (d given) sit in plain white: only those count; calibration targets
     // (the cut mark on scrap, a dot under the camera) may have darker surroundings
-    const dots = detect.findDots(img, d ? { minD: (d * 0.5) / px, maxD: (d * 1.6) / px, whiteRing: !!opts.whiteRing, fillHoles: !!opts.fillHoles } : {});
+    const o = d ? { minD: (d * 0.5) / px, maxD: (d * 1.6) / px, whiteRing: !!opts.whiteRing, fillHoles: !!opts.fillHoles } : {};
+    if (kind === 'hole') return detect.findDots(img, { ...o, light: true })[0] || detect.findDots(img, o)[0] || null;
+    const dots = detect.findDots(img, o);
+    if (!dots.length && opts.alsoLight && d) return detect.findDots(img, { ...o, light: true })[0] || null;
     return dots[0] || null;
   }
 
   // where the thing really is, near p: camera over p, find, re-centre if needed
+  // opts.times: { send, travel, look } ms added up (registration marks log them)
+  // opts.aim [dx, dy] mm: the camera looks that far from p, with the thing expected that far from
+  // the picture's middle (inside a rounded plate corner, so more of its straight edges are in view)
   async measure(p, kind, opts = {}) {
     const v = this.cfg;
+    const aim = opts.aim || [0, 0];
+    const o = { ...opts, expect: [-aim[0], -aim[1]] };
     let at = p.slice();
     for (let k = 0; k <= v.recentre; k++) {
       if (opts.ctl && opts.ctl.aborted) throw err('Stopped');
-      await this.moveCamera(at, opts);
-      const { img, hit } = await this.grabFind(kind, opts.d, opts);
+      const look = [at[0] + aim[0], at[1] + aim[1]];
+      await this.moveCamera(look, opts);
+      const tl = Date.now();
+      const { img, hit } = await this.grabFind(kind, opts.d, o);
+      if (opts.times) opts.times.look += Date.now() - tl;
       if (!hit) return null;
-      const off = this.toBed(img, hit);
-      const found = [at[0] + off[0], at[1] + off[1]];
-      if (Math.hypot(off[0], off[1]) <= v.tolerance || k === v.recentre) return { found, off, tries: k + 1, hit };
+      const seen = this.toBed(img, hit);
+      const found = [look[0] + seen[0], look[1] + seen[1]];
+      const off = [found[0] - at[0], found[1] - at[1]];
+      // a dot's size as the camera's calibration measures it (mm): against the size printed it
+      // shows whether the sheet is at the height the camera was calibrated at
+      const dotMm = (kind === 'dot' || kind === 'hole') && hit.d ? hit.d * this.pixelSize() : null;
+      if (Math.hypot(off[0], off[1]) <= v.tolerance || k === v.recentre) return { found, off, tries: k + 1, hit, dotMm };
       at = found;
     }
     return null;
   }
 
+  // how far the last picture reaches from its middle along bed X and Y (mm); null before the first
+  fieldHalf() {
+    const img = this.last && this.last.img;
+    if (!img) return null;
+    const [a, b, c, d] = this.cfg.matrix;
+    return [(Math.abs(a) * img.w + Math.abs(b) * img.h) / 2, (Math.abs(c) * img.w + Math.abs(d) * img.h) / 2];
+  }
+
+  // where to aim the camera from a rounded corner (radius r, plate toward [sx, sy]): inside the
+  // plate by r along both, so the straight edges past the rounding fill the picture; never so far
+  // that an edge leaves it (2.5 mm in from the picture's side at least)
+  cornerAim(r, toward) {
+    if (!(r > 0)) return [0, 0];
+    const fh = this.fieldHalf() || [12, 12];
+    const k = Math.max(0, Math.min(r, Math.min(fh[0], fh[1]) - 2.5));
+    return [toward[0] * k, toward[1] * k];
+  }
+
   // The last picture looked at for a mark, kept for finding out why a mark was missed: half size,
   // grey bytes after a 4-byte header (width, height as 16-bit), gzipped, in the data folder's
   // marks/ (the last job's only), with what was looked for and found beside it
+  // (shrinking and packing a 5 MP picture takes a moment: done once the head is on its way to
+  // the next mark, not before it sets off)
   saveMarkFrame(name, info) {
-    try {
-      const dir = this.m.store && this.m.store.dir && require('path').join(this.m.store.dir, 'marks');
-      if (!dir || !this.last) return;
-      const fs = require('fs');
-      fs.mkdirSync(dir, { recursive: true });
-      const s = detect.shrink(this.last.img, Math.max(this.last.img.w, this.last.img.h) / 2);
-      const b = Buffer.alloc(4 + s.w * s.h);
-      b.writeUInt16BE(s.w, 0); b.writeUInt16BE(s.h, 2);
-      for (let i = 0; i < s.w * s.h; i++) b[4 + i] = Math.round(s.data[i]);
-      fs.writeFileSync(require('path').join(dir, name + '.bin.gz'), require('zlib').gzipSync(b));
-      fs.writeFileSync(require('path').join(dir, name + '.json'), JSON.stringify({ ...info, head: this.last.at, exposure: this.exposureNow(), pixel: this.pixelSize(), half: true }, null, 1));
-    } catch (e) { this.log('mark picture not kept: ' + e.message); }
+    const dir = this.m.store && this.m.store.dir && require('path').join(this.m.store.dir, 'marks');
+    const last = this.last;
+    if (!dir || !last) return;
+    const extra = { head: last.at, exposure: this.exposureNow(), pixel: this.pixelSize(), half: true };
+    setTimeout(() => {
+      try {
+        const fs = require('fs');
+        fs.mkdirSync(dir, { recursive: true });
+        const s = detect.shrink(last.img, Math.max(last.img.w, last.img.h) / 2);
+        const b = Buffer.alloc(4 + s.w * s.h);
+        b.writeUInt16BE(s.w, 0); b.writeUInt16BE(s.h, 2);
+        for (let i = 0; i < s.w * s.h; i++) b[4 + i] = Math.round(s.data[i]);
+        fs.writeFileSync(require('path').join(dir, name + '.bin.gz'), require('zlib').gzipSync(b));
+        fs.writeFileSync(require('path').join(dir, name + '.json'), JSON.stringify({ ...info, ...extra }, null, 1));
+      } catch (e) { this.log('mark picture not kept: ' + e.message); }
+    }, 30);
   }
 
   clearMarkFrames() {
@@ -226,55 +273,128 @@ class Vision {
   async readMarks(pkg, ctl = {}, status = () => {}, opts = {}) {
     const steps = (pkg.toolpath || []).filter((s) => s.type === 'inspect');
     const E = [], D = [];
+    const sizes = []; // each mark's measured diameter against the printed one
+    const turns = []; // each plate corner's edges: how the plate lies (degrees)
+    const squares = []; // each plate corner: its radius and how far its edges are off square
+    let byHand = false;
     this.clearMarkFrames();
     for (const s of steps) {
+      // what the mark is (PROTOCOL.md): a printed dot (the default), a hole in the plate (white under
+      // it), or the plate's corner on a white background
+      const kind = s.kind === 'corner' ? 'plate' : s.kind === 'hole' ? 'hole' : 'dot';
+      // a rounded plate corner: r, its radius (mm); `at` is where the straight edges meet. The
+      // camera looks from inside the plate (cornerAim: worked out from the picture's size, known
+      // once the camera has taken one), and why says what the corner finder last missed
+      const rad = kind === 'plate' ? Math.max(0, Number(s.r) || 0) : 0;
+      const why = {};
+      const what = () => ({ kind, toward: s.toward, alsoLight: kind === 'dot', r: rad, why, ...(kind === 'plate' ? { aim: this.cornerAim(rad, s.toward || [1, 1]) } : {}) });
       // predict from the marks found so far: the shift from one; shift and rotation from two (their
       // scale is one distance, and carried 740 mm out to the third mark it put a 6 % stretch's
       // worth, 45 mm, into the prediction); the full fit from three
       const pred = E.length ? fitting.fit(E, D, E.length === 1 ? 'shift' : E.length === 2 ? 'rigid' : 'affine')(s.at) : s.at;
       status('Reading mark ' + s.mark + ' of ' + s.of);
-      let r = await this.measure(pred, 'dot', { d: s.d, ctl, whiteRing: true });
-      this.saveMarkFrame('mark' + s.mark, { mark: s.mark, design: s.at, expected: pred, d: s.d, found: r ? r.found : null, hit: r ? r.hit : null });
+      // where each mark's time goes (logged): sending the move, the head travelling and settling,
+      // the pictures and finding the dot
+      const times = { send: 0, travel: 0, look: 0 }, tm0 = Date.now();
+      let r = await this.measure(pred, kind, { d: s.d, ctl, whiteRing: true, times, ...what() });
+      this.saveMarkFrame('mark' + s.mark, { mark: s.mark, kind, toward: s.toward, design: s.at, expected: pred, d: s.d, found: r ? r.found : null, hit: r ? r.hit : null });
       // Anchored, and the first mark isn't there: the camera may have been put over the dot at
       // Start in place of the laser (J0064: every mark 42, 19 mm off, the camera's offset). Look
       // one offset over before asking for the camera to be jogged by hand
       if (!r && !E.length && opts.anchored) {
         const o = this.cfg.offset, alt = [pred[0] - o[0], pred[1] - o[1]];
         status('Reading mark ' + s.mark + ' of ' + s.of + ' (as if the camera was put over the dot)');
-        r = await this.measure(alt, 'dot', { d: s.d, ctl, whiteRing: true }).catch((e) => { if (ctl.aborted) throw e; return null; });
+        r = await this.measure(alt, kind, { d: s.d, ctl, whiteRing: true, ...what() }).catch((e) => { if (ctl.aborted) throw e; return null; });
         if (r) this.log('mark ' + s.mark + ': found one camera offset from where it should be: the camera, not the laser, was put over the dot at Start. Put the laser over it next time');
       }
       // not where it should be: the job waits while the user jogs the camera over it (Jog page),
       // then the dot finder looks again from there. Put there by hand, the dot nearest the
       // crosshair counts even without clean white round it (artwork close by may be why it was missed)
       for (let again = false; !r; again = true) {
-        this.log('mark ' + s.mark + (again ? ' still not found' : ' not found near ' + pred.map((v) => v.toFixed(1)).join(', ') + ' mm') + ': waiting for the camera to be jogged over it');
-        const at = await this.m.waitForMark({ mark: s.mark, of: s.of, near: pred, again }, ctl);
+        byHand = true;
+        this.log('mark ' + s.mark + (again ? ' still not found' : ' not found near ' + pred.map((v) => v.toFixed(1)).join(', ') + ' mm') + (why.reason ? ' (' + why.reason + ')' : '') + ': waiting for the camera to be jogged over it');
+        const at = await this.m.waitForMark({ mark: s.mark, of: s.of, near: pred, again, kind: s.kind === 'corner' || s.kind === 'hole' ? s.kind : 'dot', r: rad, why: why.view ? why.reason : null }, ctl);
+        delete why.reason; delete why.view;
         status('Reading mark ' + s.mark + ' of ' + s.of + ' where the camera was put');
-        r = await this.measure(at, 'dot', { d: s.d, ctl, whiteRing: false });
-        this.saveMarkFrame('mark' + s.mark + '-hand' + (again ? '2' : ''), { mark: s.mark, design: s.at, expected: pred, camera: at, d: s.d, found: r ? r.found : null, hit: r ? r.hit : null });
+        r = await this.measure(at, kind, { d: s.d, ctl, whiteRing: false, ...what() });
+        this.saveMarkFrame('mark' + s.mark + '-hand' + (again ? '2' : ''), { mark: s.mark, kind, toward: s.toward, design: s.at, expected: pred, camera: at, d: s.d, found: r ? r.found : null, hit: r ? r.hit : null });
         if (r) this.log('mark ' + s.mark + ': found by hand, ' + Math.hypot(r.found[0] - pred[0], r.found[1] - pred[1]).toFixed(2) + ' mm from where it was expected; the camera was put ' + Math.hypot(r.found[0] - at[0], r.found[1] - at[1]).toFixed(2) + ' mm from it');
       }
       E.push(s.at); D.push(r.found);
-      this.log('mark ' + s.mark + ': expected ' + s.at.map((v) => v.toFixed(2)).join(', ') + ', found ' + r.found.map((v) => v.toFixed(3)).join(', ') + ' (' + r.tries + ' frame' + (r.tries > 1 ? 's' : '') + ')');
+      // (printed dots only: a hole's size is the cut's, not the camera's height)
+      if (kind === 'dot' && !r.hit.light && r.dotMm && s.d) sizes.push(r.dotMm / s.d);
+      if (kind === 'plate') { turns.push(r.hit.rotation); squares.push({ r: rad, sq: r.hit.squareness }); }
+      const sec = (ms) => (ms / 1000).toFixed(2) + ' s';
+      const seen = kind === 'plate'
+        ? '; plate corner' + (rad ? ' (rounded, r ' + rad + ' mm: where its straight edges meet)' : '') + ', edges at ' + r.hit.angles.map((v) => v.toFixed(2) + '°').join(' and ') + ' (' + Math.abs(r.hit.squareness).toFixed(2) + '° off square), plate ' + (r.hit.plateBrighter ? 'lighter' : 'darker') + ' than the background'
+        : r.dotMm ? '; ' + (r.hit.light ? (kind === 'hole' ? 'hole ' : 'found as a hole (light, in a darker surround) ') : kind === 'hole' ? 'hole (darker than the plate round it) ' : 'dot ') + r.dotMm.toFixed(2) + ' mm across (' + s.d + ' expected)' : '';
+      this.log('mark ' + s.mark + ': expected ' + s.at.map((v) => v.toFixed(2)).join(', ') + ', found ' + r.found.map((v) => v.toFixed(3)).join(', ') + ' (' + r.tries + ' frame' + (r.tries > 1 ? 's' : '') + '); ' +
+        sec(Date.now() - tm0) + ': sending ' + sec(times.send) + ', travel and settle ' + sec(times.travel) + ', pictures ' + sec(times.look) + seen);
     }
     // the marks found must be as far apart as the job's: a dot that isn't the mark (a hole in the
     // bed through clear acrylic, artwork) bent the job 5 % one way and 6 % the other, and it was cut
-    // off the print. Over 1 % (2 mm at least) out: stop before anything is cut
+    // off the print. Over 1 % (2 mm at least) out: stop before anything is cut.
+    // Not with Non-linear: it's chosen for a print that has stretched (or shrunk) unevenly, and it
+    // bends the job to the marks wherever they're found, so the difference is only logged
+    const bends = pkg.regMarks && pkg.regMarks.mode === 'nonlinear';
     for (let i = 0; i < E.length; i++) {
       for (let j = i + 1; j < E.length; j++) {
         const de = Math.hypot(E[j][0] - E[i][0], E[j][1] - E[i][1]), dd = Math.hypot(D[j][0] - D[i][0], D[j][1] - D[i][1]);
         if (Math.abs(dd - de) > Math.max(2, 0.01 * de)) {
+          if (bends) {
+            this.log('print and cut: marks ' + steps[i].mark + ' and ' + steps[j].mark + ' found ' + dd.toFixed(1) + ' mm apart, ' + de.toFixed(1) + ' mm in the job (' + ((dd / de - 1) * 100).toFixed(1) + ' %): Non-linear, so the job follows the marks');
+            continue;
+          }
           this.log('print and cut: marks ' + steps[i].mark + ' and ' + steps[j].mark + ' found ' + dd.toFixed(1) + ' mm apart, ' + de.toFixed(1) + ' mm in the job: stopped');
           throw err('Registration marks ' + steps[i].mark + ' and ' + steps[j].mark + ' were found ' + dd.toFixed(1) + ' mm apart, but they are ' + de.toFixed(1) + ' mm apart in the job. One of them wasn\'t the mark (or the sheet isn\'t this job\'s). Nothing was cut.');
         }
       }
     }
-    const type = fitting.typeFor(pkg.regMarks && pkg.regMarks.mode, E.length);
-    const f = fitting.fit(E, D, type);
+    // a plate's corners: the plate is its own size, so it's only moved and turned (never stretched
+    // to the corners, whatever the job's mode); one corner gives the turn from its edges
+    let type = fitting.typeFor(pkg.regMarks && pkg.regMarks.mode, E.length);
+    if (turns.length) type = E.length === 1 ? 'corner' : 'rigid';
+    const f = type === 'corner' ? fitting.pose(E[0], D[0], turns[0]) : fitting.fit(E, D, type);
     const i = f.info;
-    this.log('print and cut: ' + i.type + ', shift ' + i.shift.map((v) => v.toFixed(3)).join(', ') + ' mm, rotation ' + i.rotation.toFixed(3) + '°, scale ' + ((i.scaleX - 1) * 1000).toFixed(2) + ' / ' + ((i.scaleY - 1) * 1000).toFixed(2) + ' mm/m');
-    return { f, expected: E, found: D, info: i };
+    // (plate corners: their radius, and the angle between each corner's two edges)
+    const cornerNote = turns.length ? ', plate corners r ' + [...new Set(squares.map((q) => q.r))].join(' / ') + ' mm, edges off square by ' + squares.map((q) => Math.abs(q.sq).toFixed(2) + '°').join(', ') : '';
+    this.log('print and cut: ' + i.type + ', shift ' + i.shift.map((v) => v.toFixed(3)).join(', ') + ' mm, rotation ' + i.rotation.toFixed(3) + '°, scale ' + ((i.scaleX - 1) * 1000).toFixed(2) + ' / ' + ((i.scaleY - 1) * 1000).toFixed(2) + ' mm/m' + cornerNote);
+    // the plate's edges against the corners' positions: more than 1° apart, a corner found may be
+    // something else's edge, or the plate isn't straight-sided (only logged)
+    if (turns.length && E.length > 1) {
+      const off = turns.map((t) => t - i.rotation), worst = Math.max(...off.map(Math.abs));
+      if (worst > 1) this.log('print and cut: the plate\'s edges lie ' + turns.map((t) => t.toFixed(2) + '°').join(', ') + ', the corners together ' + i.rotation.toFixed(2) + '°: a corner may not be the plate\'s, or its edges aren\'t straight');
+    }
+    const height = await this.heightCheck(sizes);
+    return { f, expected: E, found: D, info: i, byHand, height };
+  }
+
+  // The camera measures right only at the height it was calibrated at: the picture's scale goes
+  // with the distance to the surface (the 3 Nov calibration, on a board the table wasn't focused
+  // on, was 4 % out). Two checks, each only a warning in the log:
+  //   - the marks' size: printed dots measured more than 5 % larger (nearer the camera) or smaller
+  //     than printed. (Printers spread a dot a little, so a few % is normal.)
+  //   - with the head Z axis: its sensor's distance against what it read at camera calibration.
+  async heightCheck(sizes) {
+    const out = {};
+    const ok = sizes.filter((s) => Number.isFinite(s) && s > 0).sort((a, b) => a - b);
+    if (ok.length) {
+      out.dots = +ok[ok.length >> 1].toFixed(3);
+      if (Math.abs(out.dots - 1) > 0.05) this.log('camera: the marks measure ' + Math.abs((out.dots - 1) * 100).toFixed(0) + ' % ' + (out.dots > 1 ? 'larger' : 'smaller') + ' than printed: the sheet is ' + (out.dots > 1 ? 'nearer the camera' : 'further from the camera') + ' than the board was when the camera was calibrated (is the table focused on the sheet?), or the print was scaled');
+    }
+    const z = await this.sensorNow();
+    if (Number.isFinite(z) && Number.isFinite(this.cfg.cameraSensor)) {
+      out.sensor = +(z - this.cfg.cameraSensor).toFixed(2);
+      if (Math.abs(out.sensor) > 1.5) this.log('camera: the sheet is ' + Math.abs(out.sensor).toFixed(1) + ' mm ' + (out.sensor < 0 ? 'nearer' : 'further') + ' than the board was at camera calibration (Z axis sensor); its measurements scale with that');
+    }
+    return out;
+  }
+
+  // the head Z axis sensor's distance now (mm), when it's on and ready
+  async sensorNow() {
+    const z = this.m.zaxis;
+    try { if (z && z.enabled && z.enabled() && z.state === 'ready') return (await z.read(8)).mm; } catch (e) { /* not available */ }
+    return null;
   }
 
   // the job without its inspect steps, moved onto the marks found
@@ -285,12 +405,12 @@ class Vision {
 
   // ---------------------------------------------------------------- calibration
   // Stage 1, camera: a small checkerboard (10 mm squares) under the camera, filling the picture.
-  // Its corners give the pixel size: the squares are a known size, so it doesn't depend on how
-  // accurately the machine moves; how far its corners stray from a perfect grid shows how much
-  // the lens bends straight lines. Then the head moves a little along X, then Y (under half a
-  // square, so the corner followed can't be mistaken for its neighbour): that gives which way the
-  // picture is turned and whether it's mirrored, relative to the machine. The board itself can
-  // lie at any angle.
+  // Its corners are something sharp to follow; how far they stray from a perfect grid shows how
+  // much the lens bends straight lines. The head moves a little along X, then Y (under half a
+  // square, so a corner followed can't be mistaken for its neighbour), and how far the corners
+  // move gives the pixel size along X and Y, which way the picture is turned and whether it's
+  // mirrored. A printed board is seldom quite to scale, so its own size is only reported. The
+  // board can lie at any angle.
   // The board goes under the camera, where it is now: this stage needs no offset (stage 2 finds
   // it), so the camera isn't moved over the laser's spot first. The head goes back where it was.
   async calibrateCamera(opts = {}) {
@@ -305,42 +425,66 @@ class Vision {
     const cs0 = detect.findCornersIn(await this.grabSteps());
     const L = detect.fitLattice(cs0);
     if (!L) throw err('Put the ' + square + ' mm checkerboard under the camera, flat, filling the camera view (' + cs0.length + ' corners seen)');
-    const spacing = Math.sqrt(Math.abs(L.a[0] * L.b[1] - L.a[1] * L.b[0])); // px per square
-    const pixel = square / spacing;
-    // only corners on the board's grid: a false one (a soft edge, a shadow) could be nearer
-    const c0 = L.points[0];
+    const detA = L.a[0] * L.b[1] - L.a[1] * L.b[0]; // px² per square
+    const boardPixel = square / Math.sqrt(Math.abs(detA)); // as printed: only a first guess
+    // The head moves a little along X, then Y, and the board's corners follow in the picture.
+    // Every corner on the grid is followed (a false one, a soft edge or a shadow, could be
+    // nearer), and the steps averaged: one corner, near the edge where the lens bends most, was
+    // off by a pixel or two, and the X and Y sizes came out up to 0.8 % apart.
     const d = square * 0.3;
+    const reach = (d / boardPixel) * 1.6;
     const follow = async (x, y) => {
       await this.m.link.moveTo(x, y);
       await this.m.waitIdle(30000, 150);
       const Lk = detect.fitLattice(detect.findCornersIn(await this.grabSteps()));
       const cs = Lk ? Lk.points : [];
-      const near = cs.sort((p, q) => Math.hypot(p.x - c0.x, p.y - c0.y) - Math.hypot(q.x - c0.x, q.y - c0.y))[0];
-      if (!near || Math.hypot(near.x - c0.x, near.y - c0.y) > (d / pixel) * 1.6) throw err('Lost the board while moving: keep it flat under the camera and try again');
-      return [near.x - c0.x, near.y - c0.y];
+      const steps = [];
+      for (const c0 of L.points) {
+        let near = null, best = Infinity;
+        for (const c of cs) { const g = Math.hypot(c.x - c0.x, c.y - c0.y); if (g < best) { best = g; near = c; } }
+        if (near && best <= reach) steps.push([near.x - c0.x, near.y - c0.y]);
+      }
+      if (!steps.length) throw err('Lost the board while moving: keep it flat under the camera and try again');
+      // the step most corners agree on (a corner matched to its neighbour would stray): the
+      // median, then the mean of those near it
+      const med = [0, 1].map((k) => steps.map((s) => s[k]).sort((p, q) => p - q)[steps.length >> 1]);
+      const near = steps.filter((s) => Math.hypot(s[0] - med[0], s[1] - med[1]) < 2);
+      return [0, 1].map((k) => near.reduce((t, s) => t + s[k], 0) / near.length);
     };
     let u1, u2;
     try { u1 = await follow(start.x + d, start.y); u2 = await follow(start.x, start.y + d); } finally {
       await this.m.link.moveTo(start.x, start.y);
       await this.m.waitIdle(30000, 150);
     }
-    // the head moves +d → the board moves u px in the picture: A·u = −d along that axis
+    // the head moves +d → the board moves u px in the picture: A·u = −d along that axis. The size
+    // and shape come from these moves, not from the board's print: on Ruby a printed 10 mm board
+    // measured 10.12 × 10.07 mm by the head's moves (a printer's scaling), which would have put
+    // the size 1 % out and the pixels 0.5 % from square. The machine itself is within 0.2 %
+    // (the bed checkerboard map), and averaged over the corners the moves repeat to 0.05 %.
     const det = u1[0] * u2[1] - u1[1] * u2[0];
     if (Math.abs(det) < 1) throw err('The picture hardly moved: is the camera on?');
     const inv = [u2[1] / det, -u2[0] / det, -u1[1] / det, u1[0] / det];
-    const motion = inv.map((v) => -d * v);
-    const motionPx = Math.sqrt(Math.abs(motion[0] * motion[3] - motion[1] * motion[2]));
-    // direction from the move, size from the board
-    const matrix = motion.map((v) => +((v * pixel) / motionPx).toPrecision(8));
+    const matrix = inv.map((v) => +(-d * v).toPrecision(8));
+    const pixel = Math.sqrt(Math.abs(matrix[0] * matrix[3] - matrix[1] * matrix[2]));
     const rotation = (Math.atan2(matrix[2], matrix[0]) * 180) / Math.PI;
     const mirrored = matrix[0] * matrix[3] - matrix[1] * matrix[2] < 0;
+    // the board's squares as the head's moves measure them (mm): how true its print is
+    // (mm), the one nearer the machine's X first
+    const mmOf = (v) => [matrix[0] * v[0] + matrix[1] * v[1], matrix[2] * v[0] + matrix[3] * v[1]];
+    const ma = mmOf(L.a), mb = mmOf(L.b);
+    const squares = (Math.abs(ma[0]) >= Math.abs(mb[0]) ? [ma, mb] : [mb, ma]).map((v) => +Math.hypot(v[0], v[1]).toFixed(3));
     const r = {
       matrix, pixel, rotation, mirrored, corners: L.n,
-      // how far the corners stray from a perfect grid (lens), and how the head's moves compare
-      // with the board (the machine's own length error, roughly: the checkerboard bed check says more)
-      lens: L.worst * pixel, moveVsBoard: (motionPx / pixel - 1) * 1000
+      lens: L.worst * pixel, squares,
+      // the picture's X and Y pixel sizes: the same on a camera looking straight down
+      pixelXY: [Math.hypot(matrix[0], matrix[1]), Math.hypot(matrix[2], matrix[3])],
+      // how far the board's print is from its size (‰, the mean of across and down)
+      moveVsBoard: ((squares[0] + squares[1]) / (2 * square) - 1) * 1000
     };
-    this.log('camera calibrated on the ' + square + ' mm board: ' + L.n + ' corners, pixel size ' + (pixel * 1000).toFixed(3) + ' µm, picture turned ' + rotation.toFixed(2) + '°' + (mirrored ? ' (mirrored)' : '') + ', lens bends lines up to ' + (r.lens * 1000).toFixed(0) + ' µm');
+    // the head Z axis sensor's distance here, when there is one: jobs compare against it
+    r.sensor = await this.sensorNow();
+    const off = squares.some((s) => Math.abs(s / square - 1) > 0.005);
+    this.log('camera calibrated on the ' + square + ' mm board: ' + L.n + ' corners, pixel size ' + (pixel * 1000).toFixed(3) + ' µm (X ' + (r.pixelXY[0] * 1000).toFixed(3) + ', Y ' + (r.pixelXY[1] * 1000).toFixed(3) + '), picture turned ' + rotation.toFixed(2) + '°' + (mirrored ? ' (mirrored)' : '') + ', lens bends lines up to ' + (r.lens * 1000).toFixed(0) + ' µm; the board\'s squares measure ' + squares[0].toFixed(2) + ' × ' + squares[1].toFixed(2) + ' mm' + (off ? ' (printed off scale: the size is taken from the head\'s moves, so it doesn\'t matter here)' : ''));
     return r;
   }
 
@@ -446,31 +590,50 @@ class Vision {
   }
 
   async scanFrom(cam0, { b, raw, step, ni, nj }, ctl, status) {
-    const first = await this.measure(cam0, 'corner', { raw, ctl });
-    if (!first) throw err('No checkerboard corner under the laser head. Jog the laser head over the board\'s top-left corner, then start again.');
-    // which way the board's lines run: the corner's angle in the frame, turned onto the bed
-    const [a, bm, c, dm] = this.cfg.matrix;
-    const ai = ((first.hit.angle || 0) * Math.PI) / 180;
-    let th = Math.atan2(c * Math.cos(ai) + dm * Math.sin(ai), a * Math.cos(ai) + bm * Math.sin(ai));
-    // of the board's two line directions, u is the one nearest +X, v nearest +Y
-    th = Math.atan2(Math.sin(th * 4), Math.cos(th * 4)) / 4; // fold into −45…45°
-    const u = [Math.cos(th), Math.sin(th)], v = [-Math.sin(th), Math.cos(th)];
+    // The first corner may be out of the camera's reach (the camera sits beside the laser, so a
+    // board reaching the bed's edge has corners only the laser can get over) or not seen: like
+    // any other corner it's then left out, and the scan goes on from where the head is, along the
+    // machine's axes, until it finds one. A board doesn't need every corner of every row seen.
+    let first = null;
+    try { first = await this.measure(cam0, 'corner', { raw, ctl }); } catch (e) { if (ctl.aborted) throw e; this.log('first corner: ' + e.message); }
+    // which way the board's lines run: a corner's angle in the frame, turned onto the bed
+    let u = [1, 0], v = [0, 1];
+    const lines = (hit) => {
+      const [a, bm, c, dm] = this.cfg.matrix;
+      const ai = ((hit.angle || 0) * Math.PI) / 180;
+      let th = Math.atan2(c * Math.cos(ai) + dm * Math.sin(ai), a * Math.cos(ai) + bm * Math.sin(ai));
+      // of the board's two line directions, u is the one nearest +X, v nearest +Y
+      th = Math.atan2(Math.sin(th * 4), Math.cos(th * 4)) / 4; // fold into −45…45°
+      u = [Math.cos(th), Math.sin(th)]; v = [-Math.sin(th), Math.cos(th)];
+    };
+    if (first) lines(first.hit);
     const grid = [], found = [];
     const order = [];
     for (let j = 0; j < nj; j++) for (let k = 0; k < ni; k++) order.push([j % 2 ? ni - 1 - k : k, j]); // back and forth
-    let missed = 0;
+    let missed = 0, unreachable = 0;
     for (const [i, j] of order) {
       if (ctl.aborted) throw err('Stopped');
       const g = [i * step, j * step];
-      // predict from the corners found so far (board → bed, rotation + shift)
-      const pred = grid.length >= 2 ? fitting.fit(grid, found, 'rigid')(g) : [first.found[0] + g[0] * u[0] + g[1] * v[0], first.found[1] + g[0] * u[1] + g[1] * v[1]];
+      // predict from the corners found so far (board → bed, rotation + shift); from one corner,
+      // or none yet (from the first corner's place under the laser), along the board's lines
+      const o = grid.length ? [found[0], grid[0]] : [first ? first.found : cam0, [0, 0]];
+      const dg = [g[0] - o[1][0], g[1] - o[1][1]];
+      const pred = grid.length >= 2 ? fitting.fit(grid, found, 'rigid')(g) : [o[0][0] + dg[0] * u[0] + dg[1] * v[0], o[0][1] + dg[0] * u[1] + dg[1] * v[1]];
       status('Corner ' + (grid.length + missed + 1) + ' of ' + order.length);
       let r = null;
-      try { r = await this.measure(pred, 'corner', { raw, ctl }); } catch (e) { if (ctl.aborted) throw e; this.log('corner ' + i + ', ' + j + ': ' + e.message); }
+      try { r = await this.measure(pred, 'corner', { raw, ctl }); } catch (e) {
+        if (ctl.aborted) throw e;
+        if (/can't reach/.test(e.message)) unreachable++; else this.log('corner ' + i + ', ' + j + ': ' + e.message);
+      }
       if (!r) { missed++; continue; }
+      if (!grid.length && !first) lines(r.hit);
       grid.push(g); found.push(r.found);
     }
-    if (grid.length < 4) throw err('Only ' + grid.length + ' corners found: check the board size in Setup → Camera');
+    if (unreachable) this.log('checkerboard: ' + unreachable + ' corners out of the camera\'s reach (it sits beside the laser), left out');
+    if (grid.length < 4) {
+      if (!first && grid.length === 0) throw err('No checkerboard corners found. Jog the laser head over the board\'s top-left corner, then start again.');
+      throw err('Only ' + grid.length + ' corners found: check the board size in Setup → Camera');
+    }
     // The board's own position and angle (rigid: the board is the length reference) come out
     // first; what's left is the machine's error, plus wherever the board isn't flat. The
     // machine's part is the smooth model (Setup: scale and squareness / smooth / every corner);
@@ -658,4 +821,24 @@ function fitInfo(ov, bed, anchored, after) {
   return { kind: 'reach', title: 'The job doesn\'t fit on the bed where the sheet is', moves, why, wide: '', then, text: head + ' ' + why.join(' ') + ' ' + then };
 }
 
-module.exports = { Vision, DEFAULTS, reach, reachInfo, reachMessage, fitInfo };
+// How far the sheet lies turned from the job as drawn, from the marks' fit (rotation, ° from +X
+// towards +Y: Y runs to the front, so seen from above a positive angle is clockwise), against
+// cfg.placementAngle. Only for a job that engraves: the engraving lines run along the bed's X
+// whatever way the sheet lies, so a sheet turned 45° (J0094) engraves its lines 45° across the
+// part, and parts placed at different angles come out with their lines different ways.
+//   → { act: 'run' | 'ask' | 'stop', angle (°, signed), text }
+function placementCheck(info, pkg, cfg) {
+  const lim = { ask: 5, stop: 10, ...((cfg && cfg.placementAngle) || {}) };
+  let a = info && Number.isFinite(info.rotation) ? info.rotation : 0;
+  a = ((((a + 180) % 360) + 360) % 360) - 180;
+  const engraves = (pkg.toolpath || []).some((s) => s.type === 'engrave');
+  const by = Math.abs(a);
+  const turned = by.toFixed(1) + '° ' + (a > 0 ? 'clockwise' : 'anticlockwise');
+  if (!engraves || !(by > lim.ask)) return { act: 'run', angle: a, text: '' };
+  if (by <= lim.stop) {
+    return { act: 'ask', angle: a, text: 'The sheet is turned ' + turned + ' from the job as drawn, so the engraving lines will cross the parts at ' + by.toFixed(1) + '° to the usual direction. Up to ' + lim.ask + '° runs without asking.' };
+  }
+  return { act: 'stop', angle: a, text: 'The sheet is turned ' + turned + ' from the job as drawn (more than ' + lim.stop + '°): the engraving lines would cross the parts ' + by.toFixed(0) + '° from the usual direction. Turn the sheet so it lies within ' + lim.ask + '° of the job, then start again. Nothing was cut.' };
+}
+
+module.exports = { Vision, DEFAULTS, reach, reachInfo, reachMessage, fitInfo, placementCheck };
