@@ -71,6 +71,16 @@ class RuidaLink {
       if (h && Number.isFinite(h.x) && Number.isFinite(h.y)) this.zero = { x: Math.round(h.x * 1000), y: Math.round(h.y * 1000) };
       else await this.learnHome();
     }
+    // the controller's own work area (µm from its zero): it ignores moves and refuses jobs past it,
+    // silently (J0014/J0015 on the YC-1610 reached Y 1591 and never moved; frame didn't go there)
+    this.range = null;
+    try {
+      const rx = await this.query(0x0026), ry = await this.query(0x0036);
+      if (rx > 100000 && ry > 100000 && rx < 10000000 && ry < 10000000) {
+        this.range = { x: rx, y: ry };
+        this.log('ruida: work area ' + (rx / 1000).toFixed(1) + ' × ' + (ry / 1000).toFixed(1) + ' mm (the controller\'s own), home at ' + (this.zero.x / 1000).toFixed(1) + ', ' + (this.zero.y / 1000).toFixed(1));
+      }
+    } catch (e) { /* not known: nothing is checked against it */ }
     this.info = {
       model: 'Ruida card ' + cardText(id) + (model.id !== 'OTHER' ? ' · set up as ' + model.label : ''),
       firmware: 'swizzle magic 0x' + this.magic.toString(16) + (this.magicFixed ? ' (detected)' : ''),
@@ -225,6 +235,21 @@ class RuidaLink {
       await this.packetNow(Buffer.from([0xe8, 0x01, (n >> 7) & 0x7f, n & 0x7f]));
       return answer;
     });
+  }
+
+  // Bed points (mm) the controller won't go to: past its own work area, measured as moves and
+  // jobs are (from its zero, home included). null when all are inside, or the area isn't known.
+  // → { axis, need (mm), max (mm) } for the furthest one out (more than 1 mm out)
+  outOfReach(points) {
+    if (!this.range) return null;
+    let worst = null;
+    for (const [x, y] of points) {
+      for (const [axis, v, max] of [['X', this.M.x(x) + this.zero.x, this.range.x], ['Y', this.M.y(y) + this.zero.y, this.range.y]]) {
+        const over = v < 0 ? -v : v - max;
+        if (over > 1000 && (!worst || over > worst.over)) worst = { axis, need: +(v / 1000).toFixed(1), max: +(max / 1000).toFixed(1), over, at: [x, y], past: v > 0 };
+      }
+    }
+    return worst;
   }
 
   // A file into the controller's memory under `name` (as RDWorks' Download and VCutWorks do):

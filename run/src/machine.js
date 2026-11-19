@@ -333,8 +333,13 @@ class Machine {
     const corners = [[x1, y0], [x1, y1], [x0, y1], [x0, y0], [x1, y0]].map((q) => [this.clampX(q[0]), this.clampY(q[1])]);
     const max = Number(this.cfg.speed) > 0 ? Number(this.cfg.speed) : Infinity;
     const speed = Number(opts.speed) > 0 ? Math.min(Number(opts.speed), max) : undefined;
+    // Ruida: a corner past the controller's own work area is ignored there, so the frame wasn't
+    // the job's (J0015 on the YC-1610): say so instead of tracing something else
+    const far = this.reachText(corners, 'The frame');
+    if (far) { this.log('frame refused: ' + far); throw busyErr(far); }
     if (this.st.link === 'online') { try { this.apply(await this.link.poll()); } catch (e) { /* the last position */ } }
     const start = { x: this.st.pos.x, y: this.st.pos.y };
+    const ruida = this.cfg.controller === 'ruida';
     this.log('frame: X ' + x0.toFixed(1) + '–' + x1.toFixed(1) + ', Y ' + y0.toFixed(1) + '–' + y1.toFixed(1) + ' mm' + (speed ? ' at ' + speed + ' mm/s' : '') +
       (Number.isFinite(start.x) ? ', back to X ' + start.x.toFixed(1) + ' Y ' + start.y.toFixed(1) : ', head position unknown: it stays at the last corner'));
     this.framing = true;
@@ -347,17 +352,38 @@ class Machine {
           const [cx, cy] = this.corrected([x, y]);
           await this.link.moveTo(cx, cy, speed ? { light: true, speed } : { light: true });
           await this.waitIdle(60000, 400);
+          // Ruida: did the head get there? (the controller ignores a move it won't make)
+          if (ruida) {
+            const p = this.st.pos;
+            if (p && Number.isFinite(p.x) && Math.hypot(p.x - cx, p.y - cy) > 2) {
+              const msg = 'Frame stopped: the head didn\'t reach the corner at X ' + cx.toFixed(1) + ', Y ' + cy.toFixed(1) + ' mm (it is at X ' + p.x.toFixed(1) + ', Y ' + p.y.toFixed(1) + '). The machine may not reach that far.';
+              this.log(msg);
+              this.framing = 'failed';
+              this.frameMsg = msg;
+              break;
+            }
+          }
         }
-        // then back to where the head was
+        // then back to where the head was (after a corner it didn't reach too)
         if (this.framing && Number.isFinite(start.x) && Number.isFinite(start.y)) {
           await this.link.moveTo(start.x, start.y, speed ? { speed } : {});
           await this.waitIdle(60000, 400);
         }
       } catch (e) { this.log('frame: ' + e.message); }
+      const failed = this.framing === 'failed' ? this.frameMsg : null;
       this.framing = false;
-      if (this.st.state === 'framing') { this.st.state = 'idle'; this.st.message = 'Ready'; }
+      if (this.st.state === 'framing') { this.st.state = 'idle'; this.st.message = failed || 'Ready'; }
     })();
     return { state: 'framing' };
+  }
+
+  // Ruida: why the controller won't go to these bed points (past its own work area), or null
+  reachText(points, what) {
+    const r = this.link && this.link.outOfReach ? this.link.outOfReach(points) : null;
+    if (!r) return null;
+    const [W, H] = this.cfg.bed;
+    return what + ' reaches ' + r.axis + ' ' + r.need + ' mm on the controller (bed X ' + r.at[0].toFixed(0) + ', Y ' + r.at[1].toFixed(0) + ' mm), but the controller\'s own work area is ' + r.axis + ' 0–' + r.max +
+      ' mm, and it ignores anything outside that. Move the job ' + (r.past ? 'towards' : 'away from') + ' the machine\'s origin corner in Pathline Prepare, or set the bed in Setup → Machine to what the machine really reaches (it says ' + W + ' × ' + H + ' mm).';
   }
 
   // true once the machine is idle, false if it still isn't after ms
@@ -468,6 +494,8 @@ class Machine {
     const pkg = this.store.runPkg(job.id);
     if (!(pkg.toolpath || []).some((s) => validate.WORK.has(s.type))) throw busyErr('"' + job.name + '": ' + validate.nothingToRun(pkg));
     if (pkg.toolpath.some((s) => s.type === 'inspect') && this.cfg.regMarks !== 'ignore') throw busyErr('"' + job.name + '" uses registration marks, which need Pathline Run: use Start');
+    const far = this.reachText([].concat(...pkg.toolpath.map((s) => (Array.isArray(s.p) ? s.p : []))), '"' + job.name + '"');
+    if (far) throw busyErr(far);
     const opts = { file: true, card: this.info && this.info.cardId ? this.info.cardId & 0xffff : undefined };
     let program;
     try { program = this.compile(pkg, opts); } catch (e) { throw Object.assign(new Error('Couldn\'t convert "' + job.name + '": ' + e.message), { code: 409 }); }
@@ -542,6 +570,10 @@ class Machine {
     if (job.anchor) {
       try { validate.check(pkg, this.cfg); } catch (e) { throw busyErr('"' + job.name + '" anchored at the head: ' + e.message); }
     }
+    // Ruida: a job reaching past the controller's own work area is refused there without a word
+    // (J0014 "completed" in 13 s with nothing cut, then sat busy at home)
+    const far = this.reachText([].concat(...(pkg.toolpath || []).map((s) => (Array.isArray(s.p) ? s.p : []))), '"' + job.name + '"');
+    if (far) { this.log('start refused: ' + far); throw busyErr(far); }
     let program;
     // a plotter's conveyor moves on from where it stopped last time
     const opts = { card: this.info && this.info.cardId ? this.info.cardId & 0xffff : undefined };
@@ -697,9 +729,11 @@ class Machine {
           // times) at 100 % from the start: progress, Remaining and the head drawn all at the end.
           // So the marker showing before this job is sent is ignored until another one shows.
           let stale;
-          try { const p0 = await this.link.poll(); this.apply(p0); stale = p0.marker; } catch (e) { stale = this.link.lastReply ? this.link.lastReply.marker : undefined; }
+          let from = null, moved = 0; // where the head was as the segment went, and how far it got from there
+          try { const p0 = await this.link.poll(); this.apply(p0); stale = p0.marker; from = p0.pos; } catch (e) { stale = this.link.lastReply ? this.link.lastReply.marker : undefined; }
           let fresh = !stale;
           const follow = (p) => {
+            if (from && p.pos && Number.isFinite(from.x) && Number.isFinite(p.pos.x)) moved = Math.max(moved, Math.hypot(p.pos.x - from.x, p.pos.y - from.y));
             if (!fresh && p.marker !== undefined && p.marker !== stale) fresh = true;
             if (!fresh) p = { ...p, marker: undefined };
             this.apply(p);
@@ -740,6 +774,12 @@ class Machine {
             if (idle >= 2 && Date.now() - idleSince >= 600 && (sawBusy || Date.now() - sentAt > 3000)) break;
           }
           thrownAway();
+          // RDD6584: a bed that should take a while ended with the head never having left: the
+          // controller didn't run it (J0014 was kept as Completed after 13 s, and home was then
+          // learnt wherever the head stood)
+          if (!ctl.aborted && program.knife && seg.kind === 'file' && seg.seconds > 5 && from && moved < 2) {
+            throw new Error('The controller didn\'t run the job: the head never moved. It may reach past what the machine can travel, or the controller showed an error on its panel.');
+          }
           // idle before the last part was reported done: the laser ended the job itself (J0055 went
           // idle at part 14 of 188 after 15 s, and was kept as Completed). Every job that really
           // finished was idle on its last marker
