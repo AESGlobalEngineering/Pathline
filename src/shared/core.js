@@ -259,7 +259,10 @@
   // head strikes along each line every punchSpace mm, or with centre punch on,
   // once at the centre of each closed shape.
   const PUNCH_SPACE = 5;
-  const isPunch = (p) => !!p && p.mode === 'punch';
+  // a process punches when set to, or when its tool head is a punch (by the
+  // machine's name for that slot when the machine is given): a punch can't cut
+  const isPunch = (p, machine) => !!p && (p.mode === 'punch' || /punch/i.test(machine ? toolFor(machine, p.tool) : p.tool || ''));
+  const punchHead = (p, machine) => !!p && /punch/i.test(machine ? toolFor(machine, p.tool) : p.tool || '');
   const punchSpaceOf = (p) => Math.max(0.5, Number(p && p.punchSpace) || PUNCH_SPACE);
   // Where a punch process strikes on one path, in order. A closed line is
   // divided evenly, so there's no double hit where it starts and ends; an open
@@ -1738,7 +1741,7 @@
         curTool = slot;
       }
 
-      if (!isLaser && isPunch(proc)) {
+      if (!isLaser && isPunch(proc, machine)) {
         // each line's strikes in a row; lines nearest next. A ring of strikes
         // starts at its strike nearest the head, an open line at its nearer end.
         let items = cache.get(key);
@@ -2534,7 +2537,7 @@
     ACI_HEX, ACI_NAMES, aciHex, aciName, aciFg, aciStroke, rgbToAci, hexToRgb,
     uid, EMPTY_BOX, growBox, entityBox, boxOf, boxValid, boxW, boxH,
     mapEntity, translate, scaleAbout, rotateAbout, polyLen, polyArea, pointInPoly, distToEntity, isClosedPts, cleanPath, shapes,
-    processOrder, processOfAci, engraveHoles, toolSlot, isPunch, punchPoints, punchSpaceOf, PUNCH_SPACE, toolOptions, toolFor, STD_TOOLS, matOnMachine, frameArgs, originOf, toolRank, polyTime, travelTime, rasterSpans, orderPaths,
+    processOrder, processOfAci, engraveHoles, toolSlot, isPunch, punchHead, punchPoints, punchSpaceOf, PUNCH_SPACE, toolOptions, toolFor, STD_TOOLS, matOnMachine, frameArgs, originOf, toolRank, polyTime, travelTime, rasterSpans, orderPaths,
     estimate, headAt, fmtDuration, fmtLen, fmtArea, checkJob, regMarks, regMarkAci, regKindOf, regCornersOf, marksCutByJob, plateOutline, REG_KINDS, REG_TIPS, camReach, marksOutOfReach, reachShift, regProcess, withPresets, ensureRegProcess, isRegProc, REG_PROC, REG_NEEDED,
     cutOrderOf, CUT_ORDER_DEFAULT, START_CLEAR, commonLines, bedOf, bedCount, defaultPresets, DEFAULTS,
     rasterIslands, engraveScan, ENGRAVE_DIRS, DPI_STEPS, starterPresets, nestRects, THERMAL, thermalKey, thermalOf, colourOf, absorptionOf, thermalSim, bendLimit, cutModelOf, cutModelTime, fitArcs, TROTEC_CUT, rasterModelOf, rasterPitch, rasterModelTime, TROTEC_RASTER, isBareMetal, markingSprayOf, SPRAY_ABSORB, metalPresets, presetsFor

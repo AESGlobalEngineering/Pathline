@@ -1532,7 +1532,7 @@
             style: { fill: regSolid ? 'var(--ink)' : isEng && !isHole && !isReg ? col : 'none', stroke: col }
           });
           (selSet.has(e.id) ? selected : normal).push(el);
-          if (pr && CC.isPunch(pr) && this.isPlot()) {
+          if (pr && CC.isPunch(pr, this.props.machine) && this.isPlot()) {
             const key = pr.mode + '|' + pr.punchSpace + '|' + !!pr.centre;
             let pts = this._punch && this._punch.get(e);
             if (!pts || pts.key !== key) {

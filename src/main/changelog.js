@@ -7,7 +7,7 @@ module.exports = [
   {
     version: '1.6.18', date: '18 Nov 2026',
     added: [
-      'Punching on plotters: a process\'s Processing mode can be Punch. The punch head strikes along each line every Punch space mm, or with Centre punch on, once in the centre of each closed shape. The strikes show as rings on the Job and Simulation pages and are counted in the estimate. Picking a tool head with "punch" in its name sets the process to Punch. Needs Pathline Run updated to run punch jobs.',
+      'Punching on plotters: a process\'s Processing mode can be Punch. The punch head strikes along each line every Punch space mm, or with Centre punch on, once in the centre of each closed shape. The strikes show as rings on the Job and Simulation pages and are counted in the estimate. A process on a tool head with "punch" in its name always punches. Punch processes have no speed setting (the head moves between strikes at travel speed), on the Job page or in materials. Needs Pathline Run updated to run punch jobs.',
       'Materials: a machine can be taken off a material with the × on its tab, and added again with Add machine. A material taken off a machine isn\'t offered for it on the Job page.'
     ],
     fixed: [

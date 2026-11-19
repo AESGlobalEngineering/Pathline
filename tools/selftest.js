@@ -138,6 +138,17 @@ async function main() {
     const custom = { ...plotter, info: { ...plotter.info, heads: [{ slot: 'T1', tool: 'Drag knife' }, { slot: 'T2', tool: 'Punch 4 mm' }] } };
     ok(CC.toolOptions(custom).join('|') === 'T1 · Drag knife|T2 · Punch 4 mm' && CC.toolFor(custom, 'T2 · V-cut 45°') === 'T2 · Punch 4 mm', 'tool head lists show the heads on the machine, matched by slot');
     ok(CC.toolOptions(custom, 'T4 · Pen').includes('T4 · Pen') && CC.toolOptions({ type: 'plotter', info: {} }).length === 4, 'a tool not on the machine stays listed; a machine that reports no heads gets the standard four');
+    ok(CC.isPunch({ tool: 'T2 · V-cut 45°' }, custom) && CC.punchHead({ tool: 'T2' }, custom) && !CC.isPunch({ tool: 'T1 · Knife' }, custom), 'a process on the machine’s punch head punches, whatever its mode says');
+    const onHead = { ...pj, processes: [{ ...pj.processes[0], mode: undefined, centre: true, tool: 'T2 · Punch 4 mm' }] };
+    ok(CC.estimate(onHead, custom).punches === 4, 'the estimate punches with a punch head even without the mode set');
+    // Pathline Run's own check of a punch package, when its validator knows punch steps
+    const validateFile = path.join(__dirname, '..', 'run', 'src', 'job', 'validate.js');
+    if (fs.existsSync(validateFile) && /'punch'/.test(fs.readFileSync(validateFile, 'utf8'))) {
+      const v = require(validateFile);
+      let err = null;
+      try { v.check(ex.buildPackage(onHead, custom, null, CC.estimate(onHead, custom, { timeline: true })), { controller: 'ruida', type: 'plotter', name: custom.name, bed: CC.bedOf(custom), heads: custom.info.heads, f: {} }); } catch (e) { err = e; }
+      ok(!err, 'Pathline Run accepts a punch package' + (err ? ' (' + err.message + ')' : ''));
+    }
     // machines on a material
     const mat = { id: 'm', m: ['laser', 'plotter'], off: ['trotec'] };
     ok(!CC.matOnMachine(mat, { id: 'trotec', type: 'laser' }) && CC.matOnMachine(mat, { id: 'laser2', type: 'laser' }) && CC.matOnMachine(mat, plotter), 'a machine taken off a material isn\'t offered it; other machines still are');
@@ -690,7 +701,8 @@ async function main() {
       const v = require(validateFile);
       for (const [name, job] of [['corner', corners], ['hole', holes]]) {
         let err = null;
-        try { v.check(ex.buildPackage(job, cam, null, CC.estimate(job, cam, { timeline: true }))); } catch (e) { err = e; }
+        const runCfg = { controller: 'trotec', type: 'laser', name: cam.name, bed: CC.bedOf(cam), f: {}, regMarks: 'ignore', vision: { enabled: true } };
+        try { v.check(ex.buildPackage(job, cam, null, CC.estimate(job, cam, { timeline: true })), runCfg); } catch (e) { err = e; }
         ok(!err, 'Pathline Run accepts a ' + name + ' package' + (err ? ' (' + err.message + ')' : ''));
       }
     }

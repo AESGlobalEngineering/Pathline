@@ -341,11 +341,16 @@ select.dd:disabled{background-color:var(--sunken);background-repeat:no-repeat;ba
                   <span role="cell">
                     {{r.toolSelect}}
                   </span>
-                  <span role="cell"><input class="cell" value="{{r.speed}}" onChange="{{r.setSpeed}}" disabled="{{locked}}" aria-label="{{r.name}} speed"></span>
+                  <span role="cell"><sc-if value="{{r.cuts}}" hint-placeholder-val="{{true}}"><input class="cell" value="{{r.speed}}" onChange="{{r.setSpeed}}" disabled="{{locked}}" aria-label="{{r.name}} speed"></sc-if></span>
                   <span role="cell"><input class="cell" value="{{r.passes}}" onChange="{{r.setPasses}}" disabled="{{locked}}" aria-label="{{r.name}} passes"></span>
-                  <span role="cell"><input type="checkbox" checked="{{r.dash}}" onChange="{{r.toggleDash}}" disabled="{{locked}}" aria-label="{{r.name}} dashed" style="width: 18px; height: 18px; margin: 0"></span>
-                  <span role="cell"><input class="cell" value="{{r.dl}}" onChange="{{r.setDl}}" disabled="{{r.dashOff}}" aria-label="{{r.name}} dash length"></span>
-                  <span role="cell"><input class="cell" value="{{r.gl}}" onChange="{{r.setGl}}" disabled="{{r.dashOff}}" aria-label="{{r.name}} gap length"></span>
+                  <sc-if value="{{r.cuts}}" hint-placeholder-val="{{true}}">
+                    <span role="cell"><input type="checkbox" checked="{{r.dash}}" onChange="{{r.toggleDash}}" disabled="{{locked}}" aria-label="{{r.name}} dashed" style="width: 18px; height: 18px; margin: 0"></span>
+                    <span role="cell"><input class="cell" value="{{r.dl}}" onChange="{{r.setDl}}" disabled="{{r.dashOff}}" aria-label="{{r.name}} dash length"></span>
+                    <span role="cell"><input class="cell" value="{{r.gl}}" onChange="{{r.setGl}}" disabled="{{r.dashOff}}" aria-label="{{r.name}} gap length"></span>
+                  </sc-if>
+                  <sc-if value="{{r.punches}}" hint-placeholder-val="{{false}}">
+                    <span role="cell" class="lbl" style="grid-column: span 3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis" title="{{r.punchNote}}">{{r.punchNote}}</span>
+                  </sc-if>
                   <span role="cell">
                     <button role="switch" class="sw" aria-checked="{{r.out}}" aria-label="{{r.name}} output" onClick="{{r.toggleOut}}" disabled="{{locked}}"></button>
                   </span>
@@ -860,7 +865,9 @@ class Component extends DCLogic {
       const toolSelect = React.createElement('select', { className: 'cell dd', value: CC.toolFor(machine, b.tool), disabled: locked, 'aria-label': b.name + ' tool head',
         onChange: (e) => { const v = e.target.value; this.patchRows((list) => { list[i] = { ...list[i], tool: v, ...(/punch/i.test(v) ? { mode: 'punch' } : {}) }; return list; }); } },
         opts.map((o) => React.createElement('option', { key: o, value: o }, o)));
-      return { ...common(b, i), tool: b.tool, toolSelect };
+      // a punch moves between strikes at travel speed: no speed, no dashes (the controller greys them out too)
+      const punches = CC.isPunch(b, machine);
+      return { ...common(b, i), tool: b.tool, toolSelect, cuts: !punches, punches, punchNote: punches ? (b.centre ? 'Centre punch' : 'Punch every ' + CC.punchSpaceOf(b) + ' mm') : '' };
     }) : [];
 
     // test grid (laser): cut or engrave, centred on this machine's first
