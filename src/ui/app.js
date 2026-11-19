@@ -1447,7 +1447,7 @@
         kids.push(h('text', { key: 'l', x, y: -8 / v.s, fontSize: 13 / v.s, fontWeight: 600, style: { fill: now ? 'var(--accent-fg)' : 'var(--text)' }, fontFamily: 'IBM Plex Sans, sans-serif' }, 'Bed ' + (k + 1) + (now ? ' · on the table now' : ' · after feed ' + k)));
       }
       // the machine's origin corner (Machine setup → Origin)
-      const o = ((this.props.machine && this.props.machine.info) || {}).origin || 'tl';
+      const o = CC.originOf(this.props.machine);
       kids.push(h('circle', { key: 'o', cx: x + (o.includes('r') ? bw : 0), cy: o.includes('b') ? bh : 0, r: 5 / v.s, strokeWidth: 2, vectorEffect: 'non-scaling-stroke', style: { fill: 'var(--bed)', stroke: this.accent() } }, h('title', null, 'Machine origin')));
       return h('g', { key: 'bed' + k }, kids);
     }

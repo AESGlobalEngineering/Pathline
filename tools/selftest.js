@@ -128,6 +128,12 @@ async function main() {
     const fa = CC.frameArgs({ x0: 10, y0: 20, x1: 110, y1: 70 }, plotter);
     ok(fa.path.map(pt).join(' ') === '110,20 110,70 10,70 10,20 110,20' && fa.box.join() === '10,20,110,70', 'frame runs down, then left, up and right, from the top-right corner');
     ok(fa.speed >= 500, 'frame goes at the machine\'s travel speed (' + fa.speed + ' mm/s), not the slow default');
+    // origin: Machine setup's own setting wins over what the controller reports
+    const reportsTl = { ...plotter, info: { ...plotter.info, origin: 'tl' } };
+    ok(CC.originOf(reportsTl) === 'tl' && CC.originOf({ ...reportsTl, origin: 'tr' }) === 'tr' && CC.originOf({ type: 'laser' }) === 'tl', 'the origin set in Machine setup is used even when the controller reports top left');
+    const bed = CC.bedOf(plotter);
+    const home = CC.estimate(pj, { ...reportsTl, origin: 'br' }).home;
+    ok(home && near(home[0], bed[0], 1e-6) && near(home[1], bed[1], 1e-6), 'the estimate starts and ends the head at that origin corner (' + home.join(', ') + ')');
     // tool heads: the machine's own
     const custom = { ...plotter, info: { ...plotter.info, heads: [{ slot: 'T1', tool: 'Drag knife' }, { slot: 'T2', tool: 'Punch 4 mm' }] } };
     ok(CC.toolOptions(custom).join('|') === 'T1 · Drag knife|T2 · Punch 4 mm' && CC.toolFor(custom, 'T2 · V-cut 45°') === 'T2 · Punch 4 mm', 'tool head lists show the heads on the machine, matched by slot');
