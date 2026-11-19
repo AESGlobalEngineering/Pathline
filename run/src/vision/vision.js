@@ -238,11 +238,12 @@ class Vision {
 
   // The last picture looked at for a mark, kept for finding out why a mark was missed: half size,
   // grey bytes after a 4-byte header (width, height as 16-bit), gzipped, in the data folder's
-  // marks/ (the last job's only), with what was looked for and found beside it
+  // marks/<job>/ (the last few jobs': a job's own pictures were gone once the next job read its
+  // marks, J0112's part edges among them), with what was looked for and found beside it
   // (shrinking and packing a 5 MP picture takes a moment: done once the head is on its way to
   // the next mark, not before it sets off)
   saveMarkFrame(name, info) {
-    const dir = this.m.store && this.m.store.dir && require('path').join(this.m.store.dir, 'marks');
+    const dir = this.markDir;
     const last = this.last;
     if (!dir || !last) return;
     const extra = { head: last.at, exposure: this.exposureNow(), pixel: this.pixelSize(), half: true };
@@ -260,11 +261,23 @@ class Vision {
     }, 30);
   }
 
-  clearMarkFrames() {
+  // a job's pictures go in marks/<job> (emptied first: the job read again); the 5 jobs read most
+  // recently are kept, older ones (and pictures loose in marks/, kept before 0.7.17) removed
+  clearMarkFrames(job) {
+    const fs = require('fs'), path = require('path');
+    const root = this.m.store && this.m.store.dir && path.join(this.m.store.dir, 'marks');
+    this.markDir = null;
+    if (!root) return;
+    const name = String(job || 'job').replace(/[^A-Za-z0-9_-]/g, '') || 'job';
     try {
-      const dir = this.m.store && this.m.store.dir && require('path').join(this.m.store.dir, 'marks');
-      if (dir) require('fs').rmSync(dir, { recursive: true, force: true });
-    } catch (e) { /* nothing to clear */ }
+      this.markDir = path.join(root, name);
+      fs.rmSync(this.markDir, { recursive: true, force: true });
+      fs.mkdirSync(this.markDir, { recursive: true });
+      const all = fs.readdirSync(root, { withFileTypes: true });
+      for (const e of all) if (!e.isDirectory()) fs.rmSync(path.join(root, e.name), { force: true });
+      const dirs = all.filter((e) => e.isDirectory() && e.name !== name).map((e) => ({ n: e.name, t: fs.statSync(path.join(root, e.name)).mtimeMs })).sort((a, b) => b.t - a.t);
+      for (const d of dirs.slice(4)) fs.rmSync(path.join(root, d.n), { recursive: true, force: true });
+    } catch (e) { /* kept as far as it went */ }
   }
 
   // ---------------------------------------------------------------- print and cut
@@ -281,7 +294,7 @@ class Vision {
     // part is cut as normal). Found from the print's edges, and the job fitted to the corners like
     // marks: printed sheets stretch, so it's stretched to them too (Full linear from three corners)
     const edges = (pkg.regMarks && pkg.regMarks.kind === 'edge') || steps.some((s) => s.kind === 'corner' && s.part);
-    this.clearMarkFrames();
+    this.clearMarkFrames(opts.job);
     for (const s of steps) {
       // what the mark is (PROTOCOL.md): a printed dot (the default), a hole in the plate (white under
       // it), or the plate's corner on a white background
@@ -333,7 +346,7 @@ class Vision {
       if (kind === 'plate') { turns.push(r.hit.rotation); squares.push({ r: rad, sq: r.hit.squareness }); }
       const sec = (ms) => (ms / 1000).toFixed(2) + ' s';
       const seen = kind === 'plate' && edges
-        ? '; printed corner of part ' + (s.part || '?') + ', r ' + rad + ' mm (where its straight edges meet), edges at ' + r.hit.angles.map((v) => v.toFixed(2) + '°').join(' and ') + ' (' + Math.abs(r.hit.squareness).toFixed(2) + '° off square), print ' + (r.hit.plateBrighter ? 'lighter' : 'darker') + ' than past it'
+        ? '; printed corner of part ' + (s.part || '?') + ', r ' + rad + ' mm (where its straight edges meet), edges at ' + r.hit.angles.map((v) => v.toFixed(2) + '°').join(' and ') + ' (' + Math.abs(r.hit.squareness).toFixed(2) + '° off square), print ' + (r.hit.plateBrighter ? 'lighter' : 'darker') + ' than past it' + (r.hit.sharp ? ', edges ' + r.hit.sharp.map((v) => v.toFixed(2)).join(' / ') + ' mm sharp' : '')
         : kind === 'plate'
         ? '; plate corner' + (rad ? ' (rounded, r ' + rad + ' mm: where its straight edges meet)' : '') + ', edges at ' + r.hit.angles.map((v) => v.toFixed(2) + '°').join(' and ') + ' (' + Math.abs(r.hit.squareness).toFixed(2) + '° off square), plate ' + (r.hit.plateBrighter ? 'lighter' : 'darker') + ' than the background'
         : r.dotMm ? '; ' + (r.hit.light ? (kind === 'hole' ? 'hole ' : 'found as a hole (light, in a darker surround) ') : kind === 'hole' ? 'hole (darker than the plate round it) ' : 'dot ') + r.dotMm.toFixed(2) + ' mm across (' + s.d + ' expected)' : '';

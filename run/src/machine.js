@@ -592,7 +592,7 @@ class Machine {
       }
       this.execute(job, null, async (ctl, status) => {
         const t0 = Date.now();
-        const r = await this.vision.readMarks(pkg, ctl, status, { anchored: !!job.anchor });
+        const r = await this.vision.readMarks(pkg, ctl, status, { anchored: !!job.anchor, job: job.id });
         // how long the marks took, a mark: the estimate learns it (cfg.trotec.markSec). Not when
         // one was found by hand (the wait is the operator's)
         const nMarks = (r.found || []).length;

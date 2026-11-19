@@ -5,6 +5,13 @@
 
 module.exports = [
   {
+    version: '0.7.17', date: '19 Nov 2026',
+    added: [
+      'Part edges: the print\'s own edge is read, not its shadow. On clear acrylic the print casts a soft shadow on the card underneath, just outside its edge, and the corner finder took the outermost edge it saw: J0112\'s corners were read 0.1–1 mm outside the parts, and the job was cut about 1 mm low at the bottom. Now each edge close to another is told apart, and the sharpest is taken (the print is in focus on the top surface; the shadow 3 mm below is soft). How sharp each corner\'s edges were is logged.',
+      'The camera\'s pictures of the marks are kept for the last 5 jobs (data\\marks\\<job>), not only the last one, so a job that went wrong can still be looked into after the next has run.'
+    ]
+  },
+  {
     version: '0.7.16', date: '19 Nov 2026',
     added: [
       'Print and cut by Part edges (Pathline Prepare 1.6.19): a printed sheet without registration marks is lined up from the printed corners of the parts at its corners, on their own cut lines. The camera finds the edge of the print, dark on light or light on dark, from the longest straight runs along the expected directions, so the bed\'s honeycomb through clear acrylic and the artwork\'s own edges don\'t count. With three or four corners the job is fitted like marks, stretch included (Full linear); with two, moved, turned and scaled. Each corner\'s part and radius are logged, and with four corners how far the worst lies from the fit. When one isn\'t found, the jog dialog asks for the printed corner of the part at the top left (and so on). For a clean read, print a sharp edge on those parts with no bleed past it, and put white card under them on clear material.',

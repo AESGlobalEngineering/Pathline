@@ -198,6 +198,37 @@ function findPlateCorner(img, opts = {}) {
   const reachAlong = (ax) => { let r = 0; while (r < 500 && at(ax ? 0 : r + px, ax ? r + px : 0) !== null && at(ax ? 0 : -(r + px), ax ? -(r + px) : 0) !== null) r += px; return r; };
   half[0] = reachAlong(0); half[1] = reachAlong(1);
   const step = Math.max(px, 0.02), n = Math.max(3, Math.round(0.5 / step));
+  // Printed edges: one step (brightness averaged over half a mm each side) can hold more than one
+  // edge. The print is on the top surface, in focus; on clear acrylic its shadow falls on the card
+  // 3 mm below, soft, just outside it (J0112's corners were read 0.1–1 mm outside the parts, on
+  // the step the shadow and the print made together). So within each step, every place the
+  // brightness changes fastest (slope over 0.05 mm, at least 35 % of the step's fastest, 0.15 mm
+  // apart) is an edge of its own, placed where its slope peaks, with how sharp it is: the width
+  // where the slope is over half its peak (mm)
+  const fine = opts.printed ? (P, i, nn, sgn) => {
+    const m = Math.max(1, Math.round(0.025 / step));
+    const g = (k) => (k - m < 0 || k + m >= P.length ? 0 : sgn * (P[k + m][1] - P[k - m][1]));
+    const k0 = Math.max(m + 1, i - nn), k1 = Math.min(P.length - m - 2, i + nn);
+    let top = 0;
+    for (let k = k0; k <= k1; k++) top = Math.max(top, g(k));
+    if (top <= 0) return [];
+    const peaks = [];
+    for (let k = k0; k <= k1; k++) {
+      const v = g(k);
+      if (v < 0.35 * top || v < g(k - 1) || v <= g(k + 1)) continue;
+      const near = peaks.find((p) => Math.abs(p.k - k) * step < 0.15);
+      if (near) { if (v > near.v) Object.assign(near, { k, v }); continue; }
+      peaks.push({ k, v });
+    }
+    return peaks.map(({ k, v }) => {
+      const a0 = g(k - 1), c0 = g(k + 1), den = a0 - 2 * v + c0;
+      const off = den < 0 ? Math.max(-0.5, Math.min(0.5, (0.5 * (a0 - c0)) / den)) : 0;
+      let a = k, b = k;
+      while (a > 0 && g(a - 1) > v / 2 && g(a - 1) <= g(a)) a--;
+      while (b < P.length - 1 && g(b + 1) > v / 2 && g(b + 1) <= g(b)) b++;
+      return { t: P[k][0] + off * step, w: (b - a + 1) * step };
+    });
+  } : null;
   // one line across an edge: points along `t` (mm) at fixed `s`; returns the steps on it (each
   // biggest within a mm), each placed at the halfway level between its two sides: { t, d }
   const across = (along, s, lim) => {
@@ -227,7 +258,8 @@ function findPlateCorner(img, opts = {}) {
         const v0 = P[k - 1][1] - mid, v1 = P[k][1] - mid;
         if ((v0 <= 0 && v1 > 0) || (v0 >= 0 && v1 < 0)) { t = P[k - 1][0] + (P[k][0] - P[k - 1][0]) * (v0 / (v0 - v1)); break; }
       }
-      out.push({ t, d: (hi - lo) / ((hi + lo) / 2 + 8) });
+      const d = (hi - lo) / ((hi + lo) / 2 + 8);
+      if (fine) { for (const e of fine(P, i, n, Math.sign(D[i]))) out.push({ t: e.t, d, w: e.w }); } else out.push({ t, d });
     }
     return out;
   };
@@ -239,7 +271,7 @@ function findPlateCorner(img, opts = {}) {
     const s0 = sStart[along ? 0 : 1], lines = [];
     for (let u = 0; Math.abs(s0 + s0Side * u) <= sMax; u += Math.max(0.4, sMax / 24)) {
       const s = s0 + s0Side * u;
-      lines.push({ s, steps: across(along, s, lim).map((c) => ({ t: c.t, d: c.d * tSide })), tSide });
+      lines.push({ s, steps: across(along, s, lim).map((c) => ({ t: c.t, d: c.d * tSide, w: c.w })), tSide });
     }
     return lines;
   };
@@ -266,7 +298,7 @@ function findPlateCorner(img, opts = {}) {
   // shows past the print, and the artwork has edges of its own inside it; the edge is the longest
   // straight run along the expected direction (line(), below), so a honeycomb wall or a printed
   // detail that crosses only a few lines doesn't count
-  const pickAll = (lines) => lines.flatMap((l) => l.steps.filter((p) => Math.abs(p.d) > Math.max(0.08, 0.15 * big)).map((c) => ({ s: l.s, t: c.t, d: c.d })));
+  const pickAll = (lines) => lines.flatMap((l) => l.steps.filter((p) => Math.abs(p.d) > Math.max(0.08, 0.15 * big)).map((c) => ({ s: l.s, t: c.t, d: c.d, w: c.w })));
   const printed = !!opts.printed;
   const A = printed ? pickAll(LA0) : pick(LA0), B = printed ? pickAll(LB0) : pick(LB0);
   const nS = (P) => new Set(P.map((p) => p.s)).size;
@@ -293,8 +325,9 @@ function findPlateCorner(img, opts = {}) {
     return [...by.values()].map((x) => x.p);
   };
   // side (printed): which way the part lies across this edge. Of the runs nearly as long as the
-  // longest (80 %), the one nearest the outside is the print's edge (a printed border inside it
-  // can run as far)
+  // longest (80 %), the sharpest is the print's edge (its shadow on the card under clear acrylic
+  // runs as far, just outside it, but soft); of those about as sharp (within 30 %), the one
+  // nearest the outside (a printed border inside the part is as sharp, and runs as far)
   const line = (P, side) => {
     if (P.length < 4) return null;
     let best = null, bestErr = Infinity;
@@ -306,15 +339,16 @@ function findPlateCorner(img, opts = {}) {
       const k0 = P[i].t - k1 * P[i].s;
       const inl = inliers(P, k0, k1);
       const e = inl.reduce((a, p) => a + Math.abs(p.t - (k0 + k1 * p.s)), 0);
-      if (printed) runs.push({ inl, e, out: inl.reduce((a, p) => a + p.t * side, 0) / inl.length });
+      if (printed) { const ws = inl.map((p) => (Number.isFinite(p.w) ? p.w : 99)).sort((a, b) => a - b); runs.push({ inl, e, out: inl.reduce((a, p) => a + p.t * side, 0) / inl.length, w: ws[ws.length >> 1] }); }
       else if (!best || inl.length > best.length || (inl.length === best.length && e < bestErr)) { best = inl; bestErr = e; }
     }
     if (printed && runs.length) {
       const most = Math.max(...runs.map((r) => r.inl.length));
       const long = runs.filter((r) => r.inl.length >= Math.max(4, 0.8 * most));
       if (long.length) {
-        const outer = Math.min(...long.map((r) => r.out));
-        best = long.filter((r) => r.out <= outer + 2 * tol).sort((a, b) => b.inl.length - a.inl.length || a.e - b.e)[0].inl;
+        const sharpest = Math.min(...long.map((r) => r.w));
+        const crisp = long.filter((r) => r.w <= sharpest * 1.3 + step);        const outer = Math.min(...crisp.map((r) => r.out));
+        best = crisp.filter((r) => r.out <= outer + 2 * tol).sort((a, b) => b.inl.length - a.inl.length || a.e - b.e)[0].inl;
       }
     }
     if (!best || best.length < 4) return null;
@@ -334,6 +368,7 @@ function findPlateCorner(img, opts = {}) {
     f.span = Math.max(...Q.map((p) => p.s)) - Math.min(...Q.map((p) => p.s));
     f.rms = Math.sqrt(Q.reduce((a, p) => a + (p.t - (f.k0 + f.k1 * p.s)) ** 2, 0) / Q.length);
     f.d = Q.reduce((a, p) => a + p.d, 0) / Q.length;
+    if (printed) { const ws = Q.map((p) => p.w).sort((a, b) => a - b); f.w = ws[ws.length >> 1]; }
     return f;
   };
   // the edges meet at the corner; lines at or past it (near the corner a line along one edge can
@@ -359,7 +394,7 @@ function findPlateCorner(img, opts = {}) {
   if (u < 0 || v < 0 || u > w - 1 || v > h - 1) return fail('the corner the edges meet at is outside the picture');
   // (printed: lighter or darker than what's past it, from the edges' own steps)
   const brighter = printed ? LA.d + LB.d > 0 : sign > 0;
-  return { x: u, y: v, bed: [X, Y], r: R, angles: [angX, angY], rotation: (angX + angY) / 2, squareness: angX - angY, contrast: Math.abs(big), plateBrighter: brighter, printed, points: LA.n + LB.n, rms: Math.max(LA.rms, LB.rms) };
+  return { x: u, y: v, bed: [X, Y], r: R, angles: [angX, angY], rotation: (angX + angY) / 2, squareness: angX - angY, contrast: Math.abs(big), plateBrighter: brighter, printed, ...(printed ? { sharp: [LA.w, LB.w] } : {}), points: LA.n + LB.n, rms: Math.max(LA.rms, LB.rms) };
 }
 
 // A dot's centre without the light's slope: fit the paper round it as a tilted plane

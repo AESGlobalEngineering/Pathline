@@ -995,7 +995,15 @@ async function visionTests() {
       const pf = await new SimCamera({ size: 500, truth: { offset: [0, 0], pixel: 0.06, rotation: 90 }, scene: { plates: part, under: honey }, headAt: () => ({ x: pl5[0], y: pl5[1] }) }).grab();
       const ph = detect.findPlateCorner(pf, { M: [0, -0.06, 0.06, 0], toward: [1, 1], r: 10, c0: [-8, -8], printed: true });
       const pe = ph ? Math.hypot(pl5[0] + ph.bed[0] - pc[0], pl5[1] + ph.bed[1] - pc[1]) : null;
-      ok(pe !== null && pe < 0.05 && ph.printed && Math.abs(ph.rotation - 0.5) < 0.3, 'printed part corner on clear acrylic over the honeycomb (r 10, panel inside): found ' + (pe === null ? 'nothing' : pe.toFixed(3) + ' mm off, edges at ' + ph.rotation.toFixed(2) + '° (0.5)'), JSON.stringify(ph && ph.angles));
+      // the print's shadow on white card 3 mm under the acrylic: a soft band (0.4 mm) 0.6 mm outside
+      // the print's edge; J0112's corners were read on it, 0.1–1 mm outside the parts
+      const sd = (q) => { const dx = Math.abs(q[0] - 340) - 30, dy = Math.abs(q[1] - 360) - 50; return Math.hypot(Math.max(dx, 0), Math.max(dy, 0)) + Math.min(Math.max(dx, dy), 0) - 10; };
+      const shade = (p) => { const d = sd([p[0] + 0.6, p[1] + 0.5]); return d > 0.2 ? null : Math.round(225 - 105 * Math.max(0, Math.min(1, 0.5 - d / 0.4))); };
+      const sf = await new SimCamera({ size: 500, truth: { offset: [0, 0], pixel: 0.06, rotation: 90 }, scene: { plates: [{ pts: rr(300, 300, 380, 420, 10), v: 55 }], under: shade }, headAt: () => ({ x: 308, y: 308 }) }).grab();
+      const sh = detect.findPlateCorner(sf, { M: [0, -0.06, 0.06, 0], toward: [1, 1], r: 10, c0: [-8, -8], printed: true });
+      const se = sh ? Math.hypot(308 + sh.bed[0] - 300, 308 + sh.bed[1] - 300) : null;
+      ok(se !== null && se < 0.05, 'printed part corner with its shadow 0.6 mm outside it (soft, on the card under clear acrylic): the print\'s sharp edge is read, ' + (se === null ? 'nothing found' : se.toFixed(3) + ' mm off'), JSON.stringify(sh && sh.sharp));
+      ok(pe !== null && pe < 0.05 && ph.printed && Math.abs(ph.rotation - 0.5) < 0.3,'printed part corner on clear acrylic over the honeycomb (r 10, panel inside): found ' + (pe === null ? 'nothing' : pe.toFixed(3) + ' mm off, edges at ' + ph.rotation.toFixed(2) + '° (0.5)'), JSON.stringify(ph && ph.angles));
     }
     // (the angle only aims the scan at the next corner; the board's angle comes from the corners found)
     ok(c && Math.abs(c.x - (239.5 - 25)) < 0.5 && Math.abs(c.y - (239.5 + 12.5)) < 0.5 && Math.abs(c.angle - 25) < 3, 'checkerboard corner at 25°: found to a fraction of a pixel, angle ' + (c && c.angle.toFixed(1)) + '° (a hint, within 3°)', JSON.stringify(c));
@@ -1350,8 +1358,10 @@ async function visionTests() {
     ok(ws.state === 'alarm' && /found [\d.]+ mm apart, but they are [\d.]+ mm apart in the job.*Nothing was cut/.test(ws.message) && !ws.progress, 'marks not as far apart as the job\'s: stopped before cutting', JSON.stringify(ws));
     // (each is written just after it's looked at, while the head goes on to the next mark)
     await new Promise((r) => setTimeout(r, 600));
-    const kept = fs.existsSync(path.join(data, 'marks', 'mark1.bin.gz')) && fs.existsSync(path.join(data, 'marks', 'mark3.json'));
-    ok(kept, 'the pictures looked at for the marks are kept (data/marks)', fs.existsSync(path.join(data, 'marks')) ? fs.readdirSync(path.join(data, 'marks')).join(', ') : 'no marks folder');
+    const md = path.join(data, 'marks', q4.data.id);
+    const kept = fs.existsSync(path.join(md, 'mark1.bin.gz')) && fs.existsSync(path.join(md, 'mark3.json'));
+    const jobsKept = fs.existsSync(path.join(data, 'marks')) ? fs.readdirSync(path.join(data, 'marks')) : [];
+    ok(kept && jobsKept.length > 1 && jobsKept.length <= 5, 'the pictures looked at for the marks are kept per job (data/marks/<job>, the last 5): ' + jobsKept.join(', '), fs.existsSync(md) ? fs.readdirSync(md).join(', ') : 'no ' + md);
     await call('POST', 'local/alarm/clear');
     // the same sheet as a Non-linear job: chosen for a print that stretched unevenly, so it follows
     // the marks where they're found; the difference is logged, nothing stops
