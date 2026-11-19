@@ -13,6 +13,7 @@ const ex = require('../src/main/exporters');
 const device = require('../src/main/device');
 const discover = require('../src/main/discover');
 const seed = require('../src/main/seed');
+const { createTabs } = require('../src/main/tabs');
 
 let failed = 0;
 const ok = (cond, msg) => {
@@ -50,6 +51,92 @@ function testJob() {
 }
 
 async function main() {
+  console.log('Open jobs (tabs)');
+  {
+    let n = 0;
+    const tabs = createTabs({ newJob: (mid) => ({ id: 'j' + (++n), name: 'Untitled job', machineId: mid || 'm1', entities: [], processes: [], path: null, dirty: false }) });
+    const first = tabs.job();
+    ok(tabs.info().tabs.length === 1 && tabs.info().active === tabs.current().id, 'the app starts with one tab holding a new job');
+    const sq = { id: 'e1', paths: [] };
+    tabs.set({ ...first, entities: [sq], dirty: true }, { record: true });
+    const t1 = tabs.current().id;
+    const second = tabs.create();
+    ok(tabs.info().tabs.length === 2 && second.id !== first.id && second.machineId === 'm1' && tabs.job() === second, 'New opens a second tab in front, on the same machine');
+    ok(tabs.history().undo === 0, 'each tab has its own undo history');
+    tabs.set({ ...second, name: 'B', entities: [sq], dirty: true }, { record: true });
+    tabs.set({ ...tabs.job(), name: 'B2' }, { record: true }, tabs.byId(t1));
+    ok(tabs.job().name === 'B' && tabs.byId(t1).job.name === 'B2', 'an edit handed over late goes to the tab it was made in, not the one in front');
+    tabs.switchTo(t1);
+    ok(tabs.job().name === 'B2' && tabs.history().undo === 2 && tabs.undo().entities.length === 1 && tabs.history().redo === 1, 'switching tabs brings that job and its own undo steps to the front');
+    ok(tabs.info().tabs.every((t) => t.dirty), 'tabs with unsaved drawings are marked');
+    // opening files
+    const fileJob = (p, name) => ({ id: 'f' + name, name, entities: [sq], processes: [], path: p, dirty: false });
+    tabs.open(fileJob('C:\\jobs\\a.cjob', 'A'));
+    ok(tabs.info().tabs.length === 3 && tabs.job().name === 'A', 'a job file opens in a new tab when the tab in front has work in it');
+    const before = tabs.current().id;
+    tabs.switchTo(t1);
+    tabs.open(fileJob('c:/jobs/A.cjob', 'A again'));
+    ok(tabs.info().tabs.length === 3 && tabs.current().id === before && tabs.job().name === 'A', 'opening a file that is already open brings its tab to the front');
+    tabs.create();
+    const blankId = tabs.current().id;
+    tabs.open(fileJob('C:\\jobs\\c.cjob', 'C'));
+    ok(tabs.info().tabs.length === 4 && tabs.current().id === blankId && tabs.job().name === 'C', 'a job file opens in the front tab when that is still an empty new job');
+    // closing
+    const order = tabs.info().tabs.map((t) => t.id);
+    tabs.switchTo(order[1]);
+    tabs.close(order[1]);
+    ok(tabs.info().tabs.length === 3 && tabs.current().id === order[2], 'closing the front tab brings the tab to its right to the front');
+    tabs.close(order[0]);
+    ok(tabs.current().id === order[2], 'closing a tab at the back leaves the front tab in front');
+    tabs.close(order[3]);
+    ok(tabs.current().id === order[2], 'closing the last tab brings the one to its left to the front');
+    tabs.close(order[2]);
+    ok(tabs.info().tabs.length === 1 && !tabs.job().entities.length && tabs.job().machineId === 'm1', 'closing the only tab leaves one new job on the same machine');
+    tabs.create(); tabs.create();
+    const ids = tabs.info().tabs.map((t) => t.id);
+    ok(tabs.move(ids[2], 0).tabs.map((t) => t.id).join() === [ids[2], ids[0], ids[1]].join(), 'a tab can be moved');
+    // saving and quitting
+    const t = tabs.byId(ids[1]);
+    tabs.set({ ...t.job, entities: [sq], dirty: true }, null, t);
+    ok(tabs.unsavedTabs().length === 1 && tabs.unsavedTabs()[0] === t, 'quitting asks about each tab with unsaved changes');
+    tabs.set({ ...t.job, path: 'C:/jobs/d.cjob', dirty: false }, null, tabs.ofJob(t.job));
+    ok(!tabs.unsavedTabs().length && tabs.byId(ids[1]).job.path === 'C:/jobs/d.cjob', 'saving updates the tab the job is in, even when it is not in front');
+  }
+
+  console.log('Punch, frame, tool heads');
+  {
+    const { plotter } = testJob();
+    const pt = (q) => q.map((v) => +v.toFixed(3)).join(',');
+    const ring = CC.punchPoints({ p: CC.shapes.rect(0, 0, 20, 10, 0), c: true }, { mode: 'punch', punchSpace: 5 });
+    ok(ring.length === 12 && pt(ring[0]) === '0,0' && pt(ring[1]) === '5,0' && pt(ring[6]) === '20,10', 'punch: a closed line is struck every punch space, evenly, once at the seam (' + ring.length + ' strikes)');
+    const line = CC.punchPoints({ p: [[0, 0], [12, 0]], c: false }, { mode: 'punch', punchSpace: 5 });
+    ok(line.length === 4 && pt(line[0]) === '0,0' && pt(line[3]) === '12,0', 'punch: an open line is struck at both ends, never further apart than the punch space');
+    const centre = CC.punchPoints({ p: CC.shapes.ellipse(30, 40, 4, 4), c: true }, { mode: 'punch', centre: true });
+    ok(centre.length === 1 && near(centre[0][0], 30, 0.01) && near(centre[0][1], 40, 0.01), 'centre punch: one strike at the centre of each closed shape');
+    const holes = [[20, 20], [60, 20], [100, 20], [20, 60]].map(([x, y], i) => ({ id: 'h' + i, name: 'Hole', aci: 2, paths: [{ p: CC.shapes.ellipse(x, y, 3, 3), c: true }] }));
+    const pj = { format: 'cjob', id: 'pj', name: 'Punch', machineId: plotter.id, machineType: 'plotter', entities: holes, sheet: { on: false }, regMode: 'off', beds: 1, cutOrder: { order: 'speed', inside: 'all' },
+      processes: [{ name: 'Holes', tool: 'T2 · V-cut 45°', speed: 300, passes: 1, aci: [2], mode: 'punch', centre: true, punchSpace: 5, adv: {} }] };
+    const est = CC.estimate(pj, plotter, { timeline: true });
+    const ops = est.timeline.filter((o) => o.kind === 'op');
+    ok(est.punches === 4 && ops.length === 4 && ops.every((o) => o.mode === 'punch' && o.hits === 1), 'a centre-punch process strikes once per shape (' + est.punches + ' punches, ' + CC.fmtDuration(est.total, true) + ')');
+    const tp = ex.toolpath(pj, est).filter((x) => x.type === 'punch');
+    ok(tp.length === 4 && tp.every((x) => x.tool === 'T2' && x.centre === true && x.p.length === 1) && ex.processSummary(pj.processes[0], false).includes('centre punch'), 'the package has a punch step per shape, with the tool slot and the strike points');
+    const spaced = { ...pj, processes: [{ ...pj.processes[0], centre: false, punchSpace: 2 }] };
+    const e2 = CC.estimate(spaced, plotter, { timeline: true });
+    ok(e2.punches > 4 * 5 && e2.total > est.total, 'punching along the line strikes every punch space round each shape (' + e2.punches + ' punches)');
+    // frame: from the top-right corner down, left, up and right, at travel speed
+    const fa = CC.frameArgs({ x0: 10, y0: 20, x1: 110, y1: 70 }, plotter);
+    ok(fa.path.map(pt).join(' ') === '110,20 110,70 10,70 10,20 110,20' && fa.box.join() === '10,20,110,70', 'frame runs down, then left, up and right, from the top-right corner');
+    ok(fa.speed >= 500, 'frame goes at the machine\'s travel speed (' + fa.speed + ' mm/s), not the slow default');
+    // tool heads: the machine's own
+    const custom = { ...plotter, info: { ...plotter.info, heads: [{ slot: 'T1', tool: 'Drag knife' }, { slot: 'T2', tool: 'Punch 4 mm' }] } };
+    ok(CC.toolOptions(custom).join('|') === 'T1 · Drag knife|T2 · Punch 4 mm' && CC.toolFor(custom, 'T2 · V-cut 45°') === 'T2 · Punch 4 mm', 'tool head lists show the heads on the machine, matched by slot');
+    ok(CC.toolOptions(custom, 'T4 · Pen').includes('T4 · Pen') && CC.toolOptions({ type: 'plotter', info: {} }).length === 4, 'a tool not on the machine stays listed; a machine that reports no heads gets the standard four');
+    // machines on a material
+    const mat = { id: 'm', m: ['laser', 'plotter'], off: ['trotec'] };
+    ok(!CC.matOnMachine(mat, { id: 'trotec', type: 'laser' }) && CC.matOnMachine(mat, { id: 'laser2', type: 'laser' }) && CC.matOnMachine(mat, plotter), 'a machine taken off a material isn\'t offered it; other machines still are');
+  }
+
   console.log('Estimator');
   {
     // a straight 100 mm line at 10 mm/s with huge acceleration ≈ 10 s
@@ -395,10 +482,39 @@ async function main() {
     // done with slow turnarounds (low acceleration) spreads the heat over longer
     {
       const engr = { ...job, processes: [{ name: 'Engrave fill', proc: 'Engrave', power: 35, speed: 400, f: 500, passes: 1, out: true, aci: [7] }], entities: [{ id: 'sq', aci: 7, paths: [{ p: CC.shapes.rect(20, 20, 15, 15, 0), c: true }] }] };
-      const run = (acc) => { const m = { ...laser, info: { ...laser.info, acc } }; const e = CC.estimate(engr, m, { timeline: true }); const r = e.timeline.find((o) => o.kind === 'op' && o.mode === 'raster'); return { r, sim: CC.thermalSim({ ...engr, thermalSpray: true }, m, bare, e.timeline).to(e.total) }; };
+      const run = (acc) => { const m = { ...laser, ctrl: 'Ruida', info: { ...laser.info, acc } }; const e = CC.estimate(engr, m, { timeline: true }); const r = e.timeline.find((o) => o.kind === 'op' && o.mode === 'raster'); return { r, sim: CC.thermalSim({ ...engr, thermalSpray: true }, m, bare, e.timeline).to(e.total) }; };
       const slow = run(350), quick = run(20000);
       ok(near(slow.r.on, quick.r.on, 1e-6) && slow.r.on < slow.r.dur * 0.05, 'beam-on time is the sweep across the artwork (' + slow.r.on.toFixed(2) + ' s of ' + slow.r.dur.toFixed(0) + ' s)');
       ok(quick.sim.peak - 20 > 5 * (slow.sim.peak - 20), 'the same marking heats far more with quick turnarounds (+' + Math.round(quick.sim.peak - 20) + ' vs +' + Math.round(slow.sim.peak - 20) + ' °C)');
+      // a Trotec engraves as measured (PREPARE-ESTIMATE-FINDINGS): its acc is for travel only
+      const M = CC.TROTEC_RASTER;
+      ok(near(CC.rasterPitch(M, 500), 0.048, 1e-9) && near(CC.rasterPitch(null, 500), 0.0508, 1e-9), 'Trotec lines are 0.048 mm apart at 500 DPI (its 6 µm steps), not 0.0508');
+      const box10 = CC.rasterModelTime(M, { x0: 0, y0: 0, x1: 10, y1: 10 }, 500, 500, false);
+      ok(box10.lines === 208 && near(box10.t, 208 * (0.955 * 30 / 500 + 0.077 + 4.58e-5 * 500) + 0.32, 1e-9), 'Trotec island: box width + 2 × 10 mm per line, 0.077 s + 4.58e-5·v turnaround, 0.32 s per island (' + box10.t.toFixed(1) + ' s for 10 × 10 mm at 500 mm/s)');
+      const tro = (acc) => { const m = { ...laser, ctrl: 'Trotec', info: { ...laser.info, acc } }; return CC.estimate(engr, m, { timeline: true }).timeline.find((o) => o.kind === 'op' && o.mode === 'raster'); };
+      const t352 = tro(352), t5000 = tro(5000);
+      ok(near(t352.dur, t5000.dur, 1e-9) && near(t352.dur, CC.rasterModelTime(M, { x0: 20, y0: 20, x1: 35, y1: 35 }, 500, 400, false).t, 0.01), 'a Trotec\'s engraving time doesn\'t come from its travel acc (' + t352.dur.toFixed(1) + ' s at 352 and 5000 mm/s²)');
+      // a Trotec cuts as measured (Pathline Run's cut model): 2000 mm/s², radii as arcs, corners by angle
+      const P = CC.TROTEC_CUT;
+      const circ = CC.shapes.ellipse(50, 50, 10, 10);
+      const arcs = CC.fitArcs(circ.concat([circ[0]]));
+      ok(arcs.length <= 4 && arcs.every((x) => x.c && near(x.r, 10, 0.05)), 'a circle drawn as ' + circ.length + ' segments is cut as ' + arcs.length + ' arcs');
+      ok(near(CC.cutModelTime([[0, 0], [100, 0]], false, 35, P), 100 / 35 + 35 / 2000, 1e-6), 'a straight cut holds the set speed, speeding up and slowing at 2000 mm/s²');
+      ok(near(CC.cutModelTime(circ, true, 35, P), (2 * Math.PI * 10) / 35, 0.05), 'a 10 mm radius runs at full speed (up to √(1000·r) mm/s)');
+      const sq = CC.cutModelTime(CC.shapes.rect(0, 0, 10, 10, 0), true, 35, P);
+      ok(sq > 40 / 35 + 0.03 && sq < 40 / 35 + 0.1, 'square corners slow the head to √(20·c/(1−c)) ≈ 7 mm/s (' + sq.toFixed(2) + ' s for a 10 mm square at 35 mm/s)');
+      const runCompile = path.join(__dirname, '..', 'run', 'src', 'ctrl', 'trotec', 'compile.js');
+      if (fs.existsSync(runCompile)) {
+        const rc = require(runCompile), ra = require(path.join(__dirname, '..', 'run', 'src', 'ctrl', 'trotec', 'arcs.js'));
+        const shapes = [circ.concat([circ[0]]), CC.shapes.rect(0, 0, 10, 10, 2).concat([[2, 0]]), [[0, 0], [30, 0], [30, 5], [60, 40]]];
+        const diff = Math.max(...shapes.map((p) => Math.abs(CC.cutModelTime(p, false, 35, P) - rc.runTime(p[0], ra.fitArcs(p), 35, rc.cutProfile(rc.PLANNER.Standard)))));
+        ok(diff < 1e-9, 'Prepare\'s Trotec cut time is Pathline Run\'s (largest difference ' + diff.toExponential(1) + ' s)');
+      }
+      const trotec = { ...laser, ctrl: 'Trotec', info: { ...laser.info, travelSpeed: 700, travelAcc: 500, jerk: 5000 } };
+      const hops = CC.estimate({ ...engr, processes: [{ name: 'Cut', proc: 'Cut', power: 80, speed: 35, f: 5000, passes: 1, out: true, aci: [7] }], entities: [{ id: 'a', aci: 7, paths: [{ p: [[10, 10], [20, 10]], c: false }] }, { id: 'b', aci: 7, paths: [{ p: [[27, 10], [37, 10]], c: false }] }] }, trotec, { timeline: true }).timeline.filter((o) => o.kind === 'travel' && o.leg === 'between');
+      ok(hops.length === 1 && near(hops[0].dur, CC.travelTime(7, 700, 2000, 5000) + 0.03, 1e-6), 'Trotec travel: 4 × the planner\'s acceleration and 0.03 s a move, as Run times it (' + hops[0].dur.toFixed(3) + ' s for 7 mm)');
+      ok(CC.cutModelOf({ ...laser, ctrl: 'Ruida' }) === null, 'other controllers cut segment by segment from acc');
+      ok(CC.rasterModelOf({ ...laser, ctrl: 'Ruida' }) === null && CC.rasterModelOf({ ...laser, ctrl: 'Ruida', info: { raster: { over: 5, turn: 0.05 } } }).turn === 0.05, 'other controllers time lines from acc, unless the machine sends its own raster model');
     }
     const steel = CC.thermalSim(job, laser, { name: 'Stainless Steel', g: 'Metal', t: 0.9 }, est.timeline).to(est.total);
     const hs = steel.hotSpot();
@@ -463,6 +579,30 @@ async function main() {
 
   console.log('Importers');
   {
+    // binary DXF (AutoCAD can save DXF as binary): a 30 × 20 square drawn as
+    // four lines, one of them twice (as older drawings often have), and a circle
+    {
+      const parts = [Buffer.from('AutoCAD Binary DXF' + String.fromCharCode(13, 10, 26, 0), 'latin1')];
+      const code = (c) => { const b = Buffer.alloc(2); b.writeUInt16LE(c); parts.push(b); };
+      const str = (c, v) => { code(c); parts.push(Buffer.from(v + String.fromCharCode(0), 'latin1')); };
+      const dbl = (c, v) => { code(c); const b = Buffer.alloc(8); b.writeDoubleLE(v); parts.push(b); };
+      const i16 = (c, v) => { code(c); const b = Buffer.alloc(2); b.writeInt16LE(v); parts.push(b); };
+      str(0, 'SECTION'); str(2, 'HEADER'); str(9, '$ACADVER'); str(1, 'AC1014'); str(9, '$INSUNITS'); i16(70, 4); str(0, 'ENDSEC');
+      str(0, 'SECTION'); str(2, 'ENTITIES');
+      const line = (x1, y1, x2, y2) => { str(0, 'LINE'); str(8, 'CUT'); i16(62, 1); dbl(10, x1); dbl(20, y1); dbl(30, 0); dbl(11, x2); dbl(21, y2); dbl(31, 0); };
+      line(0, 0, 30, 0); line(30, 0, 30, 20); line(30, 20, 0, 20); line(0, 20, 0, 0); line(30, 0, 0, 0);
+      str(0, 'CIRCLE'); str(8, 'CUT'); i16(62, 1); dbl(10, 15); dbl(20, 10); dbl(30, 0); dbl(40, 4);
+      str(0, 'ENDSEC'); str(0, 'EOF');
+      fs.writeFileSync(path.join(tmp, 'bin.dxf'), Buffer.concat(parts));
+      const b = await importFile(path.join(tmp, 'bin.dxf'));
+      ok(b.entities.length === 2 && b.entities.every((e) => e.paths.every((p) => p.c)) && near(b.width, 30, 0.01) && near(b.height, 20, 0.01), 'binary DXF imports: a closed 30 × 20 square and a circle (' + b.entities.length + ' shapes, ' + b.width.toFixed(1) + ' × ' + b.height.toFixed(1) + ')');
+      const sq = b.entities.find((e) => CC.boxW(CC.entityBox(e)) > 25);
+      ok(sq && near(CC.polyLen(sq.paths[0].p, true), 100, 0.01), 'a line drawn twice is kept once (outline ' + (sq ? CC.polyLen(sq.paths[0].p, true).toFixed(1) : '?') + ' mm, not 130)');
+      fs.writeFileSync(path.join(tmp, 'cut.dxf'), Buffer.concat(parts).subarray(0, 200));
+      let err = null;
+      try { await importFile(path.join(tmp, 'cut.dxf')); } catch (e) { err = e; }
+      ok(err && /ends early|group code/.test(err.message), 'a damaged binary DXF says so (' + (err && err.message) + ')');
+    }
     const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="100mm" height="50mm" viewBox="0 0 100 50"><rect x="0" y="0" width="40" height="20" stroke="#FF0000" fill="none"/><path d="M50 0 l10 0 l0 10 z" stroke="blue"/><g transform="translate(70 10)"><circle r="5" stroke="#00FF00" fill="none"/></g></svg>';
     fs.writeFileSync(path.join(tmp, 'a.svg'), svg);
     const r = await importFile(path.join(tmp, 'a.svg'));
@@ -496,6 +636,58 @@ async function main() {
     const pd = await importFile(path.join(tmp, 'd.pdf'));
     ok(pd.entities.length === 1 && pd.entities[0].aci === 1 && pd.entities[0].paths[0].c, 'PDF: closed red path');
     ok(near(pd.width, 25.4, 0.01), 'PDF: points converted to mm (' + pd.width.toFixed(2) + ')');
+  }
+
+  console.log('Registration mark kinds');
+  {
+    // a plate with a part, three marks drawn in the Registration marks colour and the sheet as the plate
+    const { laser } = testJob();
+    const cam = { ...laser, info: { ...laser.info, f: { ...(laser.info.f || {}), camera: true } } };
+    const base = { ...testJob().job, regMode: 'linear', sheet: { on: true, x: 50, y: 40, w: 300, h: 200 }, cutOrder: { order: 'speed', inside: 'part' },
+      processes: [{ name: 'Cut', proc: 'Cut', power: 90, speed: 20, f: 5000, passes: 1, out: true, aci: [1] }, { ...CC.regProcess(), aci: [5] }],
+      entities: [{ id: 'part', aci: 1, paths: [{ p: CC.shapes.rect(120, 90, 150, 100, 0), c: true }] },
+        ...[[60, 50], [340, 50], [60, 230]].map(([x, y], i) => ({ id: 'm' + i, aci: 5, paths: [{ p: CC.shapes.ellipse(x, y, 3, 3), c: true }] }))] };
+    const inspect = (job) => ex.buildPackage(job, cam, null, CC.estimate(job, cam, { timeline: true })).toolpath.filter((x) => x.type === 'inspect');
+    // older jobs and printed dots: exactly as before
+    const dots = inspect(base);
+    ok(CC.regKindOf(base) === 'dot' && dots.length === 3 && dots.every((x) => x.kind === undefined && x.toward === undefined && x.d === 6), 'a job without a mark type reads printed dots, and its package is unchanged (no kind, no toward)');
+    // holes: the same marks, with kind hole
+    const holes = { ...base, regKind: 'hole' };
+    const hs = inspect(holes);
+    ok(hs.length === 3 && hs.every((x) => x.kind === 'hole' && x.d === 6), 'hole marks: every inspect step says kind hole, with the hole\'s size');
+    ok(ex.buildPackage(holes, cam, null, CC.estimate(holes, cam)).regMarks.kind === 'hole', 'the package\'s regMarks says the kind too');
+    const cutting = { ...holes, entities: holes.entities.concat([{ id: 'drill', aci: 1, paths: [{ p: CC.shapes.ellipse(60, 50, 3, 3), c: true }] }]) };
+    ok(CC.checkJob(cutting, cam).some((c) => c.warn && /Hole 1 is cut by this job/.test(c.l)) && !CC.checkJob(holes, cam).some((c) => /cut by this job/.test(c.l)), 'a hole this same job cuts is flagged (it has to be there before the camera looks)');
+    // plate corners: the corners of a box drawn in the mark colour (the plate), with toward, by count
+    const plateBox = (r) => ({ id: 'plate', aci: 5, paths: [{ p: CC.shapes.rect(50, 40, 300, 200, r), c: true }] });
+    const corners = { ...base, regKind: 'corner', sheet: { on: false }, entities: [base.entities[0], plateBox(0)] };
+    const cs = CC.regMarks(corners, cam);
+    const want = { 'plate-tl': [50, 40, 1, 1], 'plate-tr': [350, 40, -1, 1], 'plate-bl': [50, 240, 1, -1] };
+    ok(cs.length === 3 && cs.every((m) => { const w = want[m.id]; return w && near(m.x, w[0], 1e-6) && near(m.y, w[1], 1e-6) && m.toward[0] === w[2] && m.toward[1] === w[3] && m.d === 0 && m.kind === 'corner' && m.r === 0; }), 'three plate corners from the box: top left, top right, bottom left, each with the way the plate lies');
+    ok(CC.regMarks({ ...corners, regMode: 'pos' }, cam).map((m) => m.id).join() === 'plate-tl,plate-br' && CC.regMarks({ ...corners, regCorners: 1 }, cam).map((m) => m.id).join() === 'plate-tl', 'two corners are the diagonal; one corner is the top left');
+    // rounded corners: the corner is where the straight edges meet, and the radius goes along
+    const rounded = { ...corners, entities: [base.entities[0], plateBox(8)] };
+    const rs = CC.regMarks(rounded, cam);
+    ok(rs.length === 3 && rs.every((m) => near(m.r, 8, 0.15)) && near(rs[0].x, 50, 1e-6) && near(rs[0].y, 40, 1e-6), 'a box with rounded corners gives the corners where its straight edges meet, and the radius (' + rs.map((m) => m.r).join(', ') + ' mm)');
+    const cst = inspect(rounded);
+    ok(cst.length === 3 && cst.every((x) => x.kind === 'corner' && Array.isArray(x.toward) && x.d === 0 && near(x.r, 8, 0.15)) && cst.map((x) => x.at.join(',')).join(' ') === '50,40 50,240 350,40', 'corner inspect steps carry kind, toward and the radius, read top left, bottom left, top right');
+    ok(CC.checkJob(rounded, cam).some((c) => c.ok && /3 plate corners · rounded, r 8 mm/.test(c.l)), 'the check says the plate\'s corners are rounded');
+    const none = { ...corners, entities: [base.entities[0]] };
+    ok(CC.regMarks(none, cam).length === 0 && CC.checkJob(none, cam).some((c) => c.block && /draw the plate\'s outline/.test(c.l)), 'plate corners without a box in the mark colour can\'t be sent');
+    ok(CC.checkJob({ ...corners, entities: corners.entities.concat(base.entities.slice(1)) }, cam).some((c) => c.block && /one box/.test(c.l)), 'more than one object in the mark colour can\'t be sent with plate corners');
+    ok(CC.checkJob({ ...corners, entities: [base.entities[0], { id: 'disc', aci: 5, paths: [{ p: CC.shapes.ellipse(200, 140, 90, 90), c: true }] }] }, cam).some((c) => c.block && /rectangle along X and Y/.test(c.l)), 'a plate outline that isn\'t a rectangle can\'t be sent');
+    const sheetText = ex.jobSheet(rounded, cam, null, CC.estimate(rounded, cam));
+    ok(/plate corners/.test(sheetText) && /r 8 mm/.test(sheetText) && /10 mm of white/.test(sheetText) && /white card or paper/.test(ex.jobSheet(holes, cam, null, CC.estimate(holes, cam))), 'the job sheet says the mark type, the corner radius and what to put under or around the plate');
+    // Pathline Run's own check, once its mark kinds are in this repository
+    const validateFile = path.join(__dirname, '..', 'run', 'src', 'job', 'validate.js');
+    if (fs.existsSync(validateFile) && /toward/.test(fs.readFileSync(validateFile, 'utf8'))) {
+      const v = require(validateFile);
+      for (const [name, job] of [['corner', corners], ['hole', holes]]) {
+        let err = null;
+        try { v.check(ex.buildPackage(job, cam, null, CC.estimate(job, cam, { timeline: true }))); } catch (e) { err = e; }
+        ok(!err, 'Pathline Run accepts a ' + name + ' package' + (err ? ' (' + err.message + ')' : ''));
+      }
+    }
   }
 
   console.log('Engraving holes');
@@ -588,8 +780,10 @@ async function main() {
       ok(['running', 'idle'].includes(st.state), 'start job (' + st.state + ')');
       const dir = fs.readdirSync(path.join(tmp, 'received'));
       ok(dir.length === 1 && fs.existsSync(path.join(tmp, 'received', dir[0], 'job.dxf')), 'device stored the job files');
-      // the machine's queue: list, reorder, remove
-      await new Promise((r) => setTimeout(r, 400));
+      // the machine's queue: list, reorder, remove. Wait for the job to finish and
+      // the emulator to stop looking for the next one (it does 0.5 s after a job ends)
+      for (let i = 0; i < 50 && (await device.status(m)).state !== 'idle'; i++) await new Promise((r) => setTimeout(r, 100));
+      await new Promise((r) => setTimeout(r, 800));
       const a = await device.sendPackage(m, ex.buildPackage({ ...job, name: 'A' }, m, null, est));
       const b = await device.sendPackage(m, ex.buildPackage({ ...job, name: 'B' }, m, null, est));
       let q = (await device.jobs(m)).filter((j) => j.status === 'queued').map((j) => j.name).join(',');

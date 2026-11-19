@@ -79,7 +79,7 @@ PROTOCOL.md lists every endpoint. These are the practical details Pathline depen
 | Move tab: jog arrows (step 0.1, 1, 10 or 100 mm) | `POST /jog { axis: "x"\|"y"\|"z", distance: ±mm }` |
 | Move tab: **Stop machine** (red) | `POST /stop {}` |
 | Move tab: Home | `POST /home {}` |
-| Move tab: Frame | `POST /frame { box: [x0, y0, x1, y1] }` (bounding box of the visible job, bed mm) |
+| Move tab: Frame | `POST /frame { box: [x0, y0, x1, y1], path, speed }` (bounding box of the visible job, bed mm; `path` = corners from top right: down, left, up, right; `speed` mm/s) |
 | Move tab: Air / Pointer / Vacuum switches | `POST /io { air: true }` (one key per call) |
 | Move tab: Auto-focus (lasers with autofocus) | `POST /autofocus {}` |
 | Move tab: Test fire (operator confirms in Pathline) | `POST /testfire { power: %, ms }` |
@@ -162,6 +162,7 @@ Run `toolpath` **in array order**. **Every step is one pass.** Travel between st
 | `engrave` | `process`, `name`, `ents: [ids]`, `bed`, `dpi`, `passes` (=1), `pass`, `lines`, `scan: "across"\|"island"`, `box: [x0, y0, x1, y1]`, `seconds` | Raster-engrave the listed entities inside `box` (4.5). |
 | `cut` | `process`, `name`, `ent`, `bed`, `closed`, `passes` (=1), `pass`, `p: [[x, y]…]`, `seconds` | Follow the polyline `p` with the process settings. If `closed`, finish back at `p[0]`. The start point is already chosen (Pathline picks the most convenient point on closed shapes). Apply links if `dash`. |
 | `dwell` | `process`, `name`, `pass`, `seconds` | Beam off, wait `seconds` before the next pass |
+| `punch` | `process`, `name`, `tool` (slot), `ent`, `bed`, `centre`, `passes` (=1), `pass`, `p: [[x, y]…]`, `seconds` | Plotter punch: move to each point of `p` in order (head up) and strike once there (down and up). `centre`: one point, the centre of a closed shape. The process has `mode: "punch"`, `punchSpace` (mm) and `centre`. |
 | `toolchange` | `process`, `tool`, `bed` | Plotter: switch to the tool's slot (`"T2 · V-cut 45°"` → `T2`) |
 | `feed` | `bed` | Plotter conveyor: advance the material one bed (`feedLen`), then continue with the next bed's steps |
 

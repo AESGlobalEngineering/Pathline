@@ -297,9 +297,12 @@ select.dd option { background: var(--surface); color: var(--text); }
 
 /* underline tabs: panels inside a page */
 .tabs { display: flex; flex-wrap: wrap; align-items: stretch; gap: 2px; border-bottom: 1px solid var(--line); }
-.tabs > button, .tabs > a { display: inline-flex; align-items: center; gap: 6px; height: 40px; padding: 0 12px; border: 0; border-bottom: 2px solid transparent; margin-bottom: -1px; background: transparent; color: var(--text-3); font-weight: 500; cursor: pointer; text-decoration: none; }
+.tabs > button, .tabs > a, .tabs > .tab-wrap > [role="tab"] { display: inline-flex; align-items: center; gap: 6px; height: 40px; padding: 0 12px; border: 0; border-bottom: 2px solid transparent; margin-bottom: -1px; background: transparent; color: var(--text-3); font-weight: 500; cursor: pointer; text-decoration: none; }
 .tabs > button:hover { color: var(--text); }
-.tabs > .on, .tabs > [aria-selected="true"] { color: var(--text); font-weight: 600; border-bottom-color: var(--accent); }
+.tabs > .tab-wrap { display: flex; align-items: stretch; }
+.tabs > .tab-wrap > [role="tab"]:hover { color: var(--text); }
+.tabs > .tab-wrap > .ib { align-self: center; }
+.tabs > .on, .tabs > [aria-selected="true"], .tabs > .tab-wrap > [aria-selected="true"] { color: var(--text); font-weight: 600; border-bottom-color: var(--accent); }
 .tabs .count { min-width: 18px; height: 18px; padding: 0 5px; box-sizing: border-box; border-radius: 9px; background: var(--sunken); color: var(--text-2); font: 500 11px var(--mono); display: inline-flex; align-items: center; justify-content: center; }
 
 /* switch */

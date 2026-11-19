@@ -31,6 +31,21 @@
 .mbar{display:flex;gap:2px;flex:none}
 .mbar .mb{height:32px;padding:0 10px;border:0;border-radius:6px;cursor:pointer;color:var(--text-2)}
 .mbar .mb:hover,.mbar .mb[aria-expanded="true"]{color:var(--text)}
+/* open jobs: one tab each, under the app bar */
+.jtabs{display:flex;align-items:flex-end;gap:2px;height:38px;padding:0 10px;background:var(--sunken);border-bottom:1px solid var(--line);overflow-x:auto;overflow-y:hidden;scrollbar-width:none;flex:none;box-sizing:border-box}
+.jtab{position:relative;display:flex;align-items:center;flex:0 1 220px;min-width:120px;height:31px;margin-bottom:-1px;border-radius:8px 8px 0 0;color:var(--text-2)}
+.jtab:hover{background:var(--hover);color:var(--text)}
+.jtab:has(> [aria-selected="true"]){background:var(--surface);color:var(--text);box-shadow:inset 0 2px 0 var(--accent),inset 1px 0 0 var(--line),inset -1px 0 0 var(--line)}
+.jt-name{flex:1;min-width:0;display:flex;align-items:center;gap:7px;height:100%;padding:0 4px 0 12px;border:0;border-radius:8px 0 0 0;background:transparent;color:inherit;font:inherit;cursor:pointer;text-align:left}
+.jt-name[aria-selected="true"]{font-weight:600;cursor:default}
+.jt-name .nm{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.jt-dot{width:7px;height:7px;border-radius:50%;background:var(--accent);flex:none}
+.jt-x{flex:none;display:flex;align-items:center;justify-content:center;width:22px;height:22px;margin-right:5px;padding:0;border:0;border-radius:5px;background:transparent;color:var(--text-3);cursor:pointer}
+.jt-x:hover{background:var(--hover);color:var(--text)}
+.jt-x .i{width:14px;height:14px}
+.jt-new{flex:none;align-self:center;display:flex;align-items:center;justify-content:center;width:28px;height:28px;margin-left:4px;padding:0;border:0;border-radius:6px;background:transparent;color:var(--text-2);cursor:pointer}
+.jt-new:hover{background:var(--hover);color:var(--text)}
+.jt-new .i{width:16px;height:16px}
 /* machine box in the app bar */
 .mach-box{display:flex;align-items:center;gap:10px;height:44px;padding:0 10px 0 8px;border:1px solid var(--line-strong);border-radius:10px;background:var(--surface);cursor:pointer;text-align:left;color:var(--text);box-sizing:border-box}
 .mach-box:hover{border-color:var(--line-hover)}
@@ -145,6 +160,17 @@
       </sc-if>
     </div>
   </header>
+
+  <!-- ===== Open jobs: a tab each ===== -->
+  <div class="jtabs" role="tablist" aria-label="Open jobs">
+    <sc-for list="{{jobTabs}}" as="t" hint-placeholder-count="1">
+      <div class="jtab" title="{{t.title}}" onMouseUp="{{t.aux}}" onMouseDown="{{t.down}}">
+        <button role="tab" class="jt-name" aria-selected="{{t.on}}" onClick="{{t.pick}}"><span class="nm">{{t.name}}</span><sc-if value="{{t.dirty}}" hint-placeholder-val="{{false}}"><span class="jt-dot" role="img" aria-label="unsaved changes"></span></sc-if></button>
+        <button class="jt-x" onClick="{{t.close}}" aria-label="Close {{t.name}}" title="Close (Ctrl+W)"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.x}}"></path></svg></button>
+      </div>
+    </sc-for>
+    <button class="jt-new" onClick="{{newJobTab}}" aria-label="New job" title="New job (Ctrl+N)"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{icons.plus}}"></path></svg></button>
+  </div>
 
   <!-- ===== Loading (while the page reads its data): the page's own panels with the content greyed ===== -->
   <sc-if value="{{loading}}" hint-placeholder-val="{{false}}">
@@ -293,6 +319,19 @@
                 <sc-if value="{{r.on}}" hint-placeholder-val="{{false}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="color: var(--accent-fg)"><path d="{{icons.check}}"></path></svg></sc-if>
               </button>
             </sc-for>
+            <sc-if value="{{regOn}}" hint-placeholder-val="{{false}}">
+              <div class="h-sec" style="padding: 10px 10px 4px">Mark type</div>
+              <div style="padding: 0 6px 6px">
+                <div role="radiogroup" aria-label="Mark type" class="seg fill sm">
+                  <sc-for list="{{regKinds}}" as="k" hint-placeholder-count="3">
+                    <button role="radio" aria-checked="{{k.on}}" onClick="{{k.pick}}" style="background: {{k.bg}}; box-shadow: {{k.sh}}; color: {{k.fg}}">{{k.l}}</button>
+                  </sc-for>
+                </div>
+              </div>
+              <sc-if value="{{regTipOn}}" hint-placeholder-val="{{false}}">
+                <div class="lbl" style="padding: 2px 10px 8px; line-height: 1.4">{{regTip}}</div>
+              </sc-if>
+            </sc-if>
           </div>
         </sc-if>
       </div>
@@ -751,7 +790,7 @@ const lastDev = (id, v) => {
 };
 class Component extends DCLogic {
   state = {
-    ready: false, job: null, machines: [], materials: [], recent: [], hist: { undo: 0, redo: 0 },
+    ready: false, job: null, machines: [], materials: [], recent: [], hist: { undo: 0, redo: 0 }, tabsInfo: { active: null, tabs: [] },
     dev: null, devErr: null, devJobs: null, devJobsErr: null,
     sel: [], tool: 'select', zoom: '—', snap: { grid: true, objects: true, centre: false },
     menu: false, reg: false, fill: false, fillKind: 'nest', nestRot: true, fillLayout: 'nest', fillMode: 'max', fillArea: 'sheet', fillCustom: { w: '300', h: '200' },
@@ -776,10 +815,10 @@ class Component extends DCLogic {
     document.addEventListener('click', this.onNavClick, true);
     this.onPageHide = () => this.flushJob();
     window.addEventListener('pagehide', this.onPageHide);
-    Promise.all([api.job.current(), api.machines.list(), api.materials.list(), api.job.recent(), api.job.history(), api.settings.get(), api.machines.placeholder()])
-      .then(([job, machines, materials, recent, hist, settings, none]) => {
+    Promise.all([api.job.current(), api.machines.list(), api.materials.list(), api.job.recent(), api.job.history(), api.settings.get(), api.machines.placeholder(), api.job.tabs()])
+      .then(([job, machines, materials, recent, hist, settings, none, tabsInfo]) => {
         // no machines set up yet: lay the job out on the stand-in bed
-        this.setState({ ready: true, job, machines: machines.length ? machines : [none], materials, recent, hist, settings });
+        this.setState({ ready: true, job, machines: machines.length ? machines : [none], materials, recent, hist, settings, tabsInfo });
         if (!machines.length) LRC.toast('No machines yet. Add one under Setup → Machines.', { ms: 6000 });
         // "Send to machine" from the Simulation page lands here
         if (location.hash === '#send') {
@@ -801,7 +840,7 @@ class Component extends DCLogic {
       if (!files.length) return;
       Promise.all(files.map((f) => {
         const p = window.api.pathOf(f);
-        return /\.cjob$/i.test(p) ? window.api.job.open(p).then((job) => { this.setState({ job, sel: [], edit: {} }); return null; }) : window.api.job.importPath(p);
+        return /\.cjob$/i.test(p) ? this.openJob(p).then(() => null) : window.api.job.importPath(p);
       })).then((res) => this.placeImports(res.filter(Boolean))).catch(LRC.fail);
     };
     window.addEventListener('dragover', this.onDragOver);
@@ -849,7 +888,8 @@ class Component extends DCLogic {
   // Apply a job change; record:true adds an undo step.
   commit(job, opts, sel) {
     // registration marks on always come with their process (as the main process keeps it)
-    job = CC.ensureRegProcess(job);
+    // (marked unsaved here as the main process does, so the tab shows it at once)
+    job = CC.ensureRegProcess({ ...job, dirty: true });
     const patch = { job };
     if (sel) patch.sel = sel;
     this.setState(patch);
@@ -857,7 +897,7 @@ class Component extends DCLogic {
     // over a large job takes a while, so it goes once a burst of edits pauses
     // (quick nudges become one undo step); flushJob() sends it at once.
     const record = !!(opts || { record: true }).record;
-    this._sync = { job, record: (this._sync && this._sync.record) || record };
+    this._sync = { job, record: (this._sync && this._sync.record) || record, tab: this.state.tabsInfo.active };
     clearTimeout(this._syncTimer);
     this._syncTimer = setTimeout(() => this.flushJob(), 300);
     if (!this._syncDone) this._syncDone = new Promise((resolve) => { this._syncResolve = resolve; });
@@ -868,9 +908,9 @@ class Component extends DCLogic {
     const s = this._sync, resolve = this._syncResolve;
     this._sync = null; this._syncDone = null; this._syncResolve = null;
     if (!s) return Promise.resolve();
-    return window.api.job.update(s.job, { record: s.record })
-      .then(() => window.api.job.history())
-      .then((hist) => this.setState({ hist }))
+    return window.api.job.update(s.job, { record: s.record, tab: s.tab })
+      .then(() => Promise.all([window.api.job.history(), window.api.job.tabs()]))
+      .then(([hist, tabsInfo]) => this.setState({ hist, tabsInfo }))
       .catch(LRC.fail)
       .then(() => resolve && resolve());
   }
@@ -885,33 +925,81 @@ class Component extends DCLogic {
   closeMenus() { this.setState({ bar: null, sub: null, menu: false, reg: false, fill: false, matOpen: false }); }
 
   // ---------------------------------------------------------------- file actions
+  // a new job opens in a new tab
   async newJob() {
-    if (!(await this.okToDiscard())) return;
-    const job = await window.api.job.create(this.state.job && this.state.job.machineId);
-    this.setState({ job, sel: [], edit: {}, procSel: 0 });
-    this.refreshHist();
+    this.rememberTab();
+    await this.flushJob();
+    await this.showJob(await window.api.job.create(this.state.job && this.state.job.machineId), true);
   }
-  async okToDiscard() {
-    const j = this.state.job;
-    if (!j || !j.dirty || !j.entities.length) return true;
-    const r = await LRC.dialog({ title: 'Discard unsaved changes?', message: '"' + j.name + '" has changes that are not saved to a file.', buttons: [{ label: 'Cancel', value: null }, { label: 'Save first', value: 'save' }, { label: 'Discard', value: 'discard', danger: true }] });
-    if (!r) return false;
-    if (r.button === 'save') return !!(await this.save());
-    return true;
-  }
+  // a job file opens in a new tab (or the tab that has it already, or the
+  // front tab if that's still an empty new job)
   async openJob(file) {
-    if (!(await this.okToDiscard())) return;
+    this.rememberTab();
+    await this.flushJob();
     const job = await window.api.job.open(file);
-    if (job) {
-      this.setState({ job, sel: [], edit: {}, procSel: 0 });
-      this.refreshHist();
-      LRC.toast('Opened ' + job.name);
+    if (!job) return;
+    await this.showJob(job, true);
+    LRC.toast('Opened ' + job.name);
+  }
+
+  // ---------------------------------------------------------------- tabs: several jobs open
+  refreshTabs() { return window.api.job.tabs().then((tabsInfo) => this.setState({ tabsInfo })).catch(LRC.fail); }
+  // what the tab in front was showing (selection, process, zoom), so going back to it looks the same
+  rememberTab() {
+    const id = this.state.tabsInfo.active;
+    if (!id) return;
+    this._tabMem = this._tabMem || {};
+    this._tabMem[id] = { sel: this.state.sel, procSel: this.state.procSel, view: this.canvas && this.canvas.state ? this.canvas.state.view : null };
+  }
+  // show the job now in front (after switching, opening, new or closing a tab)
+  async showJob(job, fresh) {
+    const [tabsInfo, hist] = await Promise.all([window.api.job.tabs(), window.api.job.history()]);
+    const mem = (!fresh && this._tabMem && this._tabMem[tabsInfo.active]) || {};
+    const has = new Set(job.entities.map((e) => e.id));
+    this.setState({ job, tabsInfo, hist, sel: (mem.sel || []).filter((id) => has.has(id)), edit: {}, draft: {}, procSel: Math.min(mem.procSel || 0, Math.max(0, job.processes.length - 1)), picker: false });
+    setTimeout(() => {
+      if (!this.canvas) return;
+      if (mem.view) this.canvas.setState({ view: mem.view });
+      else this.canvas.fit();
+    }, 30);
+  }
+  async switchTab(id) {
+    if (!id || id === this.state.tabsInfo.active) return;
+    this.rememberTab();
+    await this.flushJob();
+    await this.showJob(await window.api.job.switchTab(id));
+  }
+  // Ctrl+Tab / Ctrl+Shift+Tab
+  cycleTab(step) {
+    const t = this.state.tabsInfo.tabs;
+    if (t.length < 2) return;
+    const i = t.findIndex((x) => x.id === this.state.tabsInfo.active);
+    return this.switchTab(t[(i + step + t.length) % t.length].id);
+  }
+  // close a tab, asking first when its job has unsaved changes
+  async closeTab(id) {
+    await this.flushJob();
+    const info = await window.api.job.tabs();
+    id = id || info.active;
+    const t = info.tabs.find((x) => x.id === id);
+    if (!t) return;
+    if (t.dirty) {
+      await this.switchTab(id); // in front while asking
+      const r = await LRC.dialog({ title: 'Save changes to "' + t.name + '"?', message: 'Closing this tab loses the changes that are not saved to a file.', buttons: [{ label: 'Cancel', value: null }, { label: "Don't save", value: 'discard', danger: true }, { label: 'Save', value: 'save', primary: true }] });
+      if (!r || !r.button) return;
+      if (r.button === 'save' && !(await this.save())) return;
     }
+    const front = id === this.state.tabsInfo.active;
+    if (this._tabMem) delete this._tabMem[id];
+    const job = await window.api.job.closeTab(id);
+    if (front) await this.showJob(job);
+    else await this.refreshTabs();
   }
   async save(as) {
     const job = await window.api.job.save(this.state.job, as);
     if (job) {
       this.setState({ job, recent: await window.api.job.recent() });
+      this.refreshTabs();
       LRC.toast('Saved ' + job.path.split(/[\\/]/).pop(), { kind: 'ok' });
     }
     return job;
@@ -1078,7 +1166,7 @@ class Component extends DCLogic {
   }
   // Registration marks on: add a "Registration marks" process whose colours mark the objects the
   // camera looks for. Nothing is placed automatically.
-  setRegMode(mode) {
+  setRegMode(mode, n) {
     const job = this.state.job;
     let processes = job.processes;
     let regIdx = processes.findIndex(CC.isRegProc);
@@ -1091,9 +1179,21 @@ class Component extends DCLogic {
       processes = processes.filter((_, k) => k !== regIdx);
       regIdx = -1;
     }
-    this.setState({ reg: false, ...(mode !== 'off' ? { procSel: regIdx, picker: true, tab: 'Processes', edit: {} } : { procSel: 0, edit: {} }) });
-    this.commit({ ...job, regMode: mode, processes }, { record: true });
-    if (mode !== 'off') LRC.toast('Registration marks on — pick the colour(s) your mark objects use for "Registration marks", or right-click the marks and choose a colour', { ms: 7000 });
+    const corners = CC.regKindOf(job) === 'corner';
+    const wasOn = job.regMode && job.regMode !== 'off';
+    // turning marks on: pick the colour the marks (or the plate's outline) use
+    this.setState({ reg: false, ...(mode !== 'off' && !wasOn ? { procSel: regIdx, picker: true, tab: 'Processes', edit: {} } : mode === 'off' ? { procSel: 0, edit: {} } : {}) });
+    this.commit({ ...job, regMode: mode, processes, ...(corners && n ? { regCorners: n } : {}) }, { record: true });
+    if (mode !== 'off' && !wasOn) LRC.toast(corners ? 'Registration marks on — draw the plate\'s outline as a box and give it the colour you pick for "Registration marks"' : 'Registration marks on — pick the colour(s) your mark objects use for "Registration marks", or right-click the marks and choose a colour', { ms: 7000 });
+  }
+  // What the camera looks for: printed dots, holes already in the plate, or the plate's corners
+  setRegKind(kind) {
+    const job = this.state.job;
+    if (CC.regKindOf(job) === kind) return;
+    const next = { ...job, regKind: kind };
+    if (kind === 'corner' && !job.regCorners) next.regCorners = CC.regCornersOf(job);
+    this.commit(next, { record: true });
+    if (kind === 'corner') LRC.toast('Plate corners: draw the plate\'s outline as a box (rounded corners are fine) in the Registration marks colour', { ms: 7000 });
   }
   // Give every selected object a colour (and so a process).
   recolour(n, ids) {
@@ -1161,7 +1261,7 @@ class Component extends DCLogic {
     if (m.type !== s.job.machineType) {
       const settings = await window.api.settings.get();
       const want = settings.currentMaterial && settings.currentMaterial[m.type];
-      const mat = s.materials.find((x) => x.id === want && x.m.includes(m.type)) || s.materials.find((x) => x.m.includes(m.type));
+      const mat = s.materials.find((x) => x.id === want && CC.matOnMachine(x, m)) || s.materials.find((x) => CC.matOnMachine(x, m));
       const own = CC.presetsFor(mat, m);
       const presets = own.length ? own : null;
       if (!presets) return LRC.fail(new Error('No material with ' + m.type + ' presets — add one in Setup → Materials'));
@@ -1276,7 +1376,7 @@ class Component extends DCLogic {
     let k = presets.findIndex((x) => x.name === this.state.job.processes[i].name);
     if (k < 0) k = i < presets.length ? i : presets.length;
     presets[k] = clean;
-    const saved = await window.api.materials.save({ ...mat, m: mat.m.includes(type) ? mat.m : mat.m.concat(type), presets: { ...mat.presets, [machine.id]: presets } });
+    const saved = await window.api.materials.save({ ...mat, m: mat.m.includes(type) ? mat.m : mat.m.concat(type), off: (mat.off || []).filter((id) => id !== machine.id), presets: { ...mat.presets, [machine.id]: presets } });
     const processes = this.state.job.processes.map((x, n) => (n === i ? { ...p, src: 'preset' } : x));
     this.clearEdit(i);
     this.setState({ materials: this.state.materials.map((x) => (x.id === saved.id ? saved : x)) });
@@ -1302,7 +1402,7 @@ class Component extends DCLogic {
       title: 'New process',
       fields: [
         { key: 'name', label: 'Name', value: aciFor ? 'ACI ' + aciFor : isLaser ? 'New cut' : 'New tool pass', full: true },
-        isLaser ? { key: 'proc', label: 'Process', type: 'seg', value: 'Cut', options: ['Cut', 'Engrave'] } : { key: 'proc', label: 'Tool head', type: 'seg', value: 'T1 · Knife', options: ['T1 · Knife', 'T2 · V-cut 45°', 'T3 · Crease wheel', 'T4 · Pen'] },
+        isLaser ? { key: 'proc', label: 'Process', type: 'seg', value: 'Cut', options: ['Cut', 'Engrave'] } : { key: 'proc', label: 'Tool head', type: 'select', value: CC.toolOptions(this.machine())[0], options: CC.toolOptions(this.machine()) },
         { key: 'aci', label: 'Colour (ACI)', type: 'number', value: free ? String(free) : '' }
       ],
       buttons: [{ label: 'Cancel', value: null }, { label: 'Add', value: 'ok', primary: true }]
@@ -1384,7 +1484,7 @@ class Component extends DCLogic {
   frame() {
     const b = this.jobBox();
     if (!CC.boxValid(b)) return LRC.toast('Nothing to frame');
-    this.dev('frame', { box: [b.x0, b.y0, b.x1, b.y1] }, 'Framing ' + CC.boxW(b).toFixed(0) + ' × ' + CC.boxH(b).toFixed(0) + ' mm');
+    this.dev('frame', CC.frameArgs(b, this.machine()), 'Framing ' + CC.boxW(b).toFixed(0) + ' × ' + CC.boxH(b).toFixed(0) + ' mm');
   }
   async sendDialog(andStart) {
     const s = this.state;
@@ -1440,7 +1540,8 @@ class Component extends DCLogic {
     const r = (fn) => this.run(fn);
     const nudge = (dx, dy) => r(() => { if (this.state.sel.length) this.commit(LRC.ops.translate(this.state.job, this.state.sel, dx, dy), { record: true }); });
     return {
-      'Ctrl+N': r(() => this.newJob()), 'Ctrl+O': r(() => this.openJob()), 'Ctrl+S': r(() => this.save()), 'Ctrl+Shift+S': r(() => this.save(true)),
+      'Ctrl+N': r(() => this.newJob()), 'Ctrl+O': r(() => this.openJob()), 'Ctrl+W': r(() => this.closeTab()),
+      'Ctrl+Tab': r(() => this.cycleTab(1)), 'Ctrl+Shift+Tab': r(() => this.cycleTab(-1)), 'Ctrl+PageDown': r(() => this.cycleTab(1)), 'Ctrl+PageUp': r(() => this.cycleTab(-1)), 'Ctrl+S': r(() => this.save()), 'Ctrl+Shift+S': r(() => this.save(true)),
       'Ctrl+Shift+E': r(() => this.saveCopy()), 'Ctrl+I': r(() => this.importFiles()),
       'Ctrl+Z': () => this.undo(), 'Ctrl+Y': () => this.redo(), 'Ctrl+Shift+Z': () => this.redo(),
       'Ctrl+C': () => this.copy(false), 'Ctrl+X': () => this.copy(true), 'Ctrl+V': () => this.paste(false), 'Ctrl+Shift+V': () => this.paste(true),
@@ -1466,7 +1567,7 @@ class Component extends DCLogic {
       title: 'Keyboard shortcuts', buttons: [{ label: 'Close', value: 'ok', primary: true }],
       fields: [{
         key: 't', type: 'table', rows: [
-          ['New / open / save', 'Ctrl+N · Ctrl+O · Ctrl+S'], ['Import drawing', 'Ctrl+I'], ['Undo / redo', 'Ctrl+Z · Ctrl+Y'],
+          ['New / open / save', 'Ctrl+N · Ctrl+O · Ctrl+S'], ['Close job / next job', 'Ctrl+W · Ctrl+Tab'], ['Import drawing', 'Ctrl+I'], ['Undo / redo', 'Ctrl+Z · Ctrl+Y'],
           ['Cut / copy / paste', 'Ctrl+X · Ctrl+C · Ctrl+V'], ['Duplicate / delete', 'Ctrl+D · Del'], ['Rename', 'F2 · double-click in Objects'], ['Select all / invert', 'Ctrl+A · Ctrl+Shift+I'],
           ['Group / ungroup', 'Ctrl+G · Ctrl+Shift+G'], ['Nudge 1 mm / 10 mm', 'Arrows · Shift+Arrows'], ['Move with copy', 'Alt+drag'],
           ['Tools', 'V select · L line · R rect · E ellipse · P polygon · T text · M measure'], ['Zoom', 'Wheel · + / − · 0 fit'], ['Pan', 'Space+drag or right-drag'],
@@ -1596,7 +1697,7 @@ class Component extends DCLogic {
     };
 
     if (!S.ready || !S.job) {
-      return { accent, icons, noop, loading: true, menuBar: [], machines: [], mach: { name: 'Loading…', sub: '', type: '', tbg: 'var(--idle-dot)', toolsLabel: '' }, dev: { label: '', dot: 'var(--idle-dot)', fg: 'var(--text-3)', cls: '' }, tools: [], toolGroups: [], machTools: [], tabs: [], colours: [], checks: [], snaps: [], queue: [], objects: [], est: '', jobSummary: '', saveName: '', savedLabel: '', canvasEl: null, fill: { button: 'Fill' }, sheetPill: '', zoom: '', selInfo: '', isLaser: true };
+      return { accent, icons, noop, loading: true, menuBar: [], machines: [], mach: { name: 'Loading…', sub: '', type: '', tbg: 'var(--idle-dot)', toolsLabel: '' }, dev: { label: '', dot: 'var(--idle-dot)', fg: 'var(--text-3)', cls: '' }, tools: [], toolGroups: [], machTools: [], tabs: [], colours: [], checks: [], snaps: [], queue: [], objects: [], est: '', jobSummary: '', saveName: '', savedLabel: '', jobTabs: [], newJobTab: noop, canvasEl: null, fill: { button: 'Fill' }, sheetPill: '', zoom: '', selInfo: '', isLaser: true };
     }
 
     const job = S.job;
@@ -1644,14 +1745,35 @@ class Component extends DCLogic {
       { id: 'linear', l: 'Full linear', n: '3 dots', dots: ['tl', 'tr', 'bl'] },
       { id: 'nonlinear', l: 'Non-linear', n: '3 dots', dots: ['tl', 'tr', 'bl'] }
     ];
+    const regKind = CC.regKindOf(job);
     const mode = MODES.find((x) => x.id === (job.regMode || 'off')) || MODES[0];
-    const regModes = MODES.map((x) => ({
-      ...x, on: x.id === mode.id, bg: x.id === mode.id ? accentSoft : 'transparent',
-      dots: x.dots.map((k) => DOT[k]),
-      pick: () => this.setRegMode(x.id)
-    }));
-    const regLabel = mode.id === 'off' ? 'Off' : mode.l + ' · ' + mode.n;
     const regOn = mode.id !== 'off';
+    // plate corners are counted, not fitted by mode (Run turns and shifts the
+    // job only): Off / 1 / 2 / 3 corners, each kept as a mode plus regCorners
+    const nCorners = CC.regCornersOf(job);
+    const CORNER_MODES = [
+      { id: 'off', n: 0, l: 'Off', s: 'No marks', dots: [] },
+      { id: 'pos', n: 1, l: '1 corner', s: 'Top left', dots: ['tl'] },
+      { id: 'pos', n: 2, l: '2 corners', s: 'Top left and bottom right', dots: ['tl', 'br'] },
+      { id: 'linear', n: 3, l: '3 corners', s: 'Top left, top right and bottom left', dots: ['tl', 'tr', 'bl'] }
+    ];
+    const regModes = regKind === 'corner'
+      ? CORNER_MODES.map((x) => {
+        const on = x.id === 'off' ? !regOn : regOn && x.n === nCorners;
+        // corners drawn as small Ls at the box's corners
+        return { l: x.l, n: x.s, on, bg: on ? accentSoft : 'transparent', dots: x.dots.map((k) => DOT[k]), pick: () => this.setRegMode(x.id, x.n) };
+      })
+      : MODES.map((x) => ({
+        ...x, n: regKind === 'hole' ? x.n.replace('dots', 'holes') : x.n, on: x.id === mode.id, bg: x.id === mode.id ? accentSoft : 'transparent',
+        dots: x.dots.map((k) => DOT[k]),
+        pick: () => this.setRegMode(x.id)
+      }));
+    const regLabel = !regOn ? 'Off'
+      : regKind === 'corner' ? 'Plate corners · ' + nCorners
+        : regKind === 'hole' ? 'Holes · ' + (CC.REG_NEEDED[mode.id] || 3) : mode.l + ' · ' + mode.n;
+    const KINDS = [['dot', 'Printed dots'], ['hole', 'Holes'], ['corner', 'Plate corners']];
+    const regKinds = KINDS.map(([id, l]) => ({ l, on: regKind === id, bg: regKind === id ? 'var(--seg-on)' : 'transparent', sh: regKind === id ? 'var(--shadow-1)' : 'none', fg: regKind === id ? 'var(--text)' : 'var(--text-3)', pick: () => this.setRegKind(id) }));
+    const regTip = CC.REG_TIPS[regKind] || '';
 
     // ---- processes
     const ACI = [1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => ({ n, name: CC.aciName(n), hex: LRC.aci.hex(n), fg: LRC.aci.fg(n) }));
@@ -1678,7 +1800,7 @@ class Component extends DCLogic {
         chips, none: chips.length === 0, name: p.name, badge,
         badgeBg: badge === 'Edited' ? 'var(--warn-soft)' : accent, badgeFg: badge === 'Edited' ? 'var(--warn)' : 'var(--on-accent)',
         proc: (isReg ? 'Camera marks, not cut' : isLaser ? p.proc : p.tool) + (nObj ? ' · ' + nObj + ' object' + (nObj > 1 ? 's' : '') : ''),
-        summary: isReg ? nObj + ' / ' + (CC.REG_NEEDED[job.regMode] || 3) + ' marks' : isLaser ? p.power + '% · ' + p.speed + ' mm/s' : p.speed + ' mm/s',
+        summary: isReg ? (regKind === 'corner' ? (nObj === 1 ? 'plate outline' : nObj + ' / 1 plate outline') : nObj + ' / ' + (CC.REG_NEEDED[job.regMode] || 3) + (regKind === 'hole' ? ' holes' : ' marks')) : isLaser ? p.power + '% · ' + p.speed + ' mm/s' : p.speed + ' mm/s',
         dashOn: !!p.dash, on: i === selIdx,
         bg: i === selIdx ? accentSoft : 'var(--surface)', bd: i === selIdx ? accent : 'var(--line)', op: out && shown ? 1 : 0.55,
         // the eye only hides the objects here (still sent and simulated)
@@ -1726,15 +1848,23 @@ class Component extends DCLogic {
         statusBg: dirty ? 'var(--warn-soft)' : sc.src === 'job' ? accent : 'var(--sunken)',
         statusFg: dirty ? 'var(--warn)' : sc.src === 'job' ? 'var(--on-accent)' : 'var(--text-2)',
         selectLabel: isLaser ? 'Process' : 'Tool head',
-        selectValue: isLaser ? sc.proc : sc.tool,
+        selectValue: isLaser ? sc.proc : CC.toolFor(machine, sc.tool),
         sliders: isLaser
           ? [{ l: 'Power', v: sc.power, u: '%', min: 0, max: 100, step: 1, set: num('power') }, { l: 'Speed', v: sc.speed, u: 'mm/s', min: 1, max: Math.max(1000, Number(sc.speed) || 0), step: 1, set: num('speed') }]
-          : [{ l: 'Speed', v: sc.speed, u: 'mm/s', min: 10, max: Math.max(1000, Number(sc.speed) || 0), step: 10, set: num('speed') }],
+          : CC.isPunch(sc) ? [] : [{ l: 'Speed', v: sc.speed, u: 'mm/s', min: 10, max: Math.max(1000, Number(sc.speed) || 0), step: 10, set: num('speed') }],
         nums: isLaser
           ? [isCut ? { isNum: true, l: 'Frequency', v: String(sc.f), u: 'Hz', set: num('f') } : { isSel: true, l: 'DPI', el: dpiSelect(sc.f, (v) => this.setEdit('f', v)) }, { isNum: true, l: 'Passes', v: String(sc.passes), u: '×', set: num('passes') }]
             .concat(Number(sc.passes) > 1 ? [{ isNum: true, l: 'Dwell between passes', v: String(sc.dwell || 0), u: 's', set: num('dwell') }] : [])
-          : [{ isNum: true, l: 'Passes', v: String(sc.passes), u: '×', set: num('passes') }],
-        showLinks: !isLaser || isCut,
+          : [{ isSel: true, l: 'Processing mode', el: React.createElement('select', { className: 'dd', value: CC.isPunch(sc) ? 'punch' : 'cut', 'aria-label': 'Processing mode', onChange: (e) => this.setEdit('mode', e.target.value === 'punch' ? 'punch' : 'cut') },
+              React.createElement('option', { value: 'cut' }, 'Cut'), React.createElement('option', { value: 'punch' }, 'Punch')) }]
+            .concat(CC.isPunch(sc) ? [
+              { isNum: true, l: 'Punch space', v: String(sc.punchSpace != null ? sc.punchSpace : CC.PUNCH_SPACE), u: 'mm', set: num('punchSpace') },
+              { isSel: true, l: 'Centre punch', el: React.createElement('span', { style: { display: 'flex', alignItems: 'center', gap: 8, minHeight: 36 } },
+                React.createElement('input', { type: 'checkbox', checked: !!sc.centre, onChange: () => this.setEdit('centre', !sc.centre), 'aria-label': 'Centre punch', style: { width: 16, height: 16, accentColor: 'var(--accent)' } }),
+                React.createElement('span', { className: 'lbl' }, 'One in the centre of each shape')) }
+            ] : [])
+            .concat([{ isNum: true, l: 'Passes', v: String(sc.passes), u: '×', set: num('passes') }]),
+        showLinks: isLaser ? isCut : !CC.isPunch(sc),
         dashTitle: isLaser ? 'Generate links' : 'Dashed line',
         dashLenLabel: isLaser ? 'Link length' : 'Dash length',
         gapLabel: isLaser ? 'Gap length' : 'Gap',
@@ -1791,10 +1921,10 @@ class Component extends DCLogic {
         sel.adv = [];
         sel.showAdv = false;
       }
-      const selOpts = isLaser ? ['Cut', 'Engrave'].concat(regOnNow ? [CC.REG_PROC] : []) : ['T1 · Knife', 'T2 · V-cut 45°', 'T3 · Crease wheel', 'T4 · Pen'];
+      const selOpts = isLaser ? ['Cut', 'Engrave'].concat(regOnNow ? [CC.REG_PROC] : []) : CC.toolOptions(machine, sc.tool);
       sel.selectOpen = S.procOpen;
       sel.toggleSelect = () => this.setState((s) => ({ procOpen: !s.procOpen }));
-      sel.selectOpts = S.procOpen ? selOpts.map((o) => opt(o, sel.selectValue, () => { this.setEdit(isLaser ? 'proc' : 'tool', o); this.setState({ procOpen: false }); })) : [];
+      sel.selectOpts = S.procOpen ? selOpts.map((o) => opt(o, sel.selectValue, () => { this.setEdit(isLaser ? 'proc' : 'tool', o); if (!isLaser && /punch/i.test(o) && !CC.isPunch(sc)) this.setEdit('mode', 'punch'); this.setState({ procOpen: false }); })) : [];
     }
     const aci = ACI.map((a) => {
       const on = hasSel && (procs[selIdx].aci || []).includes(a.n);
@@ -1944,7 +2074,7 @@ class Component extends DCLogic {
         ['Save', 'Ctrl+S', null, () => this.save()], ['Save as…', 'Ctrl+Shift+S', null, () => this.save(true)], ['Save to computer…', 'Ctrl+Shift+E', null, () => this.saveCopy()], '-',
         ['Import…', 'Ctrl+I', null, () => this.importFiles()],
         ['Export', null, [{ l: 'DXF', run: act(() => this.exportAs('dxf')) }, { l: 'SVG', run: act(() => this.exportAs('svg')) }, { l: 'PDF', run: act(() => this.exportAs('pdf')) }, { l: 'Print sheet with registration marks', run: act(() => this.exportAs('print')) }, { l: 'Job sheet (settings + time)', run: act(() => this.exportAs('sheet')) }]], '-',
-        ['Job settings…', null, null, () => this.jobSettings()], ['Close job', 'Ctrl+W', null, () => this.newJob()]
+        ['Job settings…', null, null, () => this.jobSettings()], ['Close job', 'Ctrl+W', null, () => this.closeTab()]
       ]],
       ['Edit', [
         ['Undo', 'Ctrl+Z', null, () => this.undo(), null, !S.hist.undo], ['Redo', 'Ctrl+Y', null, () => this.redo(), null, !S.hist.redo], '-',
@@ -2144,13 +2274,14 @@ class Component extends DCLogic {
     }));
     const outProcs = procs.filter((p) => p.out !== false && (p.aci || []).some((a) => usedAci.has(a))).length;
     const nObj = job.entities.filter((e) => !e.hidden).length;
-    const jobSummary = outProcs + ' process' + (outProcs === 1 ? '' : 'es') + ' · ' + (isLaser ? (SH.on ? SH.w + ' × ' + SH.h + ' sheet' : 'full bed') : est.beds + ' bed' + (est.beds > 1 ? 's' : '')) + ' · ' + nObj + ' object' + (nObj === 1 ? '' : 's') + (est.total ? ' · ' + CC.fmtLen(est.cutLen) + ' cut' : '') + (est.repeats > 1 ? ' · whole job ' + est.repeats + '×' : '');
+    const jobSummary = outProcs + ' process' + (outProcs === 1 ? '' : 'es') + ' · ' + (isLaser ? (SH.on ? SH.w + ' × ' + SH.h + ' sheet' : 'full bed') : est.beds + ' bed' + (est.beds > 1 ? 's' : '')) + ' · ' + nObj + ' object' + (nObj === 1 ? '' : 's') + (est.total && (est.cutLen || !est.punches) ? ' · ' + CC.fmtLen(est.cutLen) + ' cut' : '') + (est.punches ? ' · ' + est.punches + ' punch' + (est.punches === 1 ? '' : 'es') : '') + (est.repeats > 1 ? ' · whole job ' + est.repeats + '×' : '');
 
     // ---- canvas
     const canvasEl = React.createElement(LRC.JobCanvas, {
       job, machine, sel: selIds, tool: S.tool, accent, snap: S.snap, drawAci: this.drawAci(),
       // camera machine: where registration marks can go (shown fainter while they're off)
       reach: isLaser ? CC.camReach(machine) : null, reachOn: isLaser && !!job.regMode && job.regMode !== 'off',
+      corners: isLaser && regKind === 'corner' ? CC.regMarks(job, machine) : null,
       canvasRef: (c) => { this.canvas = c; },
       onSelect: (sel) => this.setState({ sel }),
       onCommit: (j, opts, sel) => { this.commit(j, opts, sel); if (S.tool !== 'select' && S.tool !== 'measure') this.setState({ tool: 'select' }); },
@@ -2164,7 +2295,7 @@ class Component extends DCLogic {
       const on = S.tab === l;
       return { l, on, badge: badge || false, bd: on ? accent : 'transparent', fg: on ? 'var(--text)' : 'var(--text-3)', w: on ? 600 : 500, pick: () => this.setState({ tab: l }) };
     };
-    const matList = S.materials.filter((x) => x.m.includes(m)).map((x) => ({
+    const matList = S.materials.filter((x) => CC.matOnMachine(x, machine)).map((x) => ({
       name: x.name + ' · ' + x.t + ' mm', sub: x.g + (x.locked ? ' · locked' : ''), sw: x.sw, on: material && x.id === material.id,
       bg: material && x.id === material.id ? accentSoft : 'transparent', pick: R(() => this.pickMaterial(x.id))
     }));
@@ -2176,10 +2307,25 @@ class Component extends DCLogic {
       toggleMenu: machine.placeholder ? () => this.flushJob().then(() => { location.href = 'MachineSetupDetailed.dc.html#add'; }) : () => this.setState((s) => ({ menu: !s.menu, reg: false, fill: false, bar: null })),
       regOpen: S.reg, regBd: regOn ? accent : 'var(--line-strong)', regSh: regOn ? 'inset 0 0 0 1px ' + accent : 'none', regIc: regOn ? accentFg : 'var(--text-3)',
       toggleReg: () => this.setState((s) => ({ reg: !s.reg, menu: false, fill: false })),
-      regModes, regLabel, regAvail: isLaser && feat('camera'),
+      regModes, regLabel, regAvail: isLaser && feat('camera'), regOn, regKinds, regTip, regTipOn: !!regTip,
       fillOpen: S.fill, fillBd: S.fill ? accent : 'var(--line-strong)', toggleFill: () => this.setState((s) => ({ fill: !s.fill, menu: false, reg: false, sheetOpen: false })), fill,
       sheetFields, sheetPresets,
       saveName: job.name, savedLabel: fmtSaved, renameJob: R(() => this.renameJob()),
+      jobTabs: S.tabsInfo.tabs.map((t) => {
+        // the tab in front shows the job as it is on the page (edits not handed over yet included)
+        const on = t.id === S.tabsInfo.active;
+        const name = on ? job.name : t.name;
+        const dirty = on ? !!(job.dirty && job.entities.length) : t.dirty;
+        return {
+          name, on, dirty, title: name + (t.path ? '\n' + t.path : '') + (dirty ? '\nUnsaved changes' : ''),
+          pick: R(() => this.switchTab(t.id)),
+          close: (e) => { e.stopPropagation(); R(() => this.closeTab(t.id))(); },
+          // middle-click closes, as in a browser
+          down: (e) => { if (e.button === 1) e.preventDefault(); },
+          aux: (e) => { if (e.button === 1) R(() => this.closeTab(t.id))(); }
+        };
+      }),
+      newJobTab: R(() => this.newJob()),
       sheetOpen: S.sheetOpen, sheetBd: S.sheetOpen ? accent : 'var(--line-strong)',
       toggleSheet: () => this.setState((s) => ({ sheetOpen: !s.sheetOpen, fill: false, menu: false, reg: false, bar: null })),
       sheetOn: !!SH.on, sheetOff: !SH.on,

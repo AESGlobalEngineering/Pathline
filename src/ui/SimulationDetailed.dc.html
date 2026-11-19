@@ -608,6 +608,13 @@ class Component extends DCLogic {
     // machine origin: where the head starts and finishes
     if (est.home) kids.push(h('circle', { key: 'home', cx: est.home[0], cy: est.home[1], r: 6 * px, strokeWidth: 2 * px, style: { fill: 'var(--bed)', stroke: 'var(--ink)' } }));
     const vec = vops.filter((o) => o.kind === 'op' && o.mode === 'vector');
+    // punch strikes: a ring at each
+    const hits = vops.filter((o) => o.kind === 'op' && o.mode === 'punch');
+    if (hits.length) {
+      const r = 3 * px;
+      const d = hits.flatMap((o) => o.path.p).slice(0, 20000).map(([x, y]) => 'M' + (x - r) + ' ' + y + 'a' + r + ' ' + r + ' 0 1 0 ' + 2 * r + ' 0a' + r + ' ' + r + ' 0 1 0 ' + -2 * r + ' 0').join('');
+      kids.push(h('path', { key: 'punches', d, strokeWidth: 1.5 * px, style: { fill: 'var(--bed)', stroke: 'var(--ink)' } }));
+    }
     const MAX_MARKS = 1500;
     if (S.vis.starts) {
       const d = vec.slice(0, MAX_MARKS).map((o) => { const [x, y] = o.path.p[0]; return 'M' + (x - 5 * px) + ' ' + y + 'a' + 5 * px + ' ' + 5 * px + ' 0 1 0 ' + 10 * px + ' 0a' + 5 * px + ' ' + 5 * px + ' 0 1 0 ' + -10 * px + ' 0'; }).join('');
@@ -638,7 +645,10 @@ class Component extends DCLogic {
         kids.push(h('text', { key: 'ord' + k, x: x + 6 * px, y: y - 6 * px, fontSize: 17 * px, fontWeight: 600, strokeWidth: 3 * px, paintOrder: 'stroke', fontFamily: 'IBM Plex Mono, monospace', style: { fill: 'var(--ink)', stroke: 'var(--ink-halo)' } }, String(k + 1)));
       });
     }
-    CC.regMarks(job, machine).forEach((mk, k) => kids.push(h('circle', { key: 'rm' + k, cx: mk.x, cy: mk.y, r: mk.d / 2, style: { fill: 'var(--ink)' } })));
+    // marks where the camera looks: dots and holes as discs, plate corners as an L along the two edges
+    CC.regMarks(job, machine).forEach((mk, k) => kids.push(mk.kind === 'corner'
+      ? h('path', { key: 'rm' + k, d: 'M' + (mk.x + mk.toward[0] * 12) + ' ' + mk.y + 'L' + mk.x + ' ' + mk.y + 'L' + mk.x + ' ' + (mk.y + mk.toward[1] * 12), fill: 'none', strokeWidth: 2.5 * px, strokeLinecap: 'round', strokeLinejoin: 'round', style: { stroke: 'var(--ink)' } })
+      : h('circle', { key: 'rm' + k, cx: mk.x, cy: mk.y, r: mk.d / 2, style: { fill: 'var(--ink)' } })));
     if (sim.total > 0) {
       kids.push(h('g', { key: 'head', transform: 'translate(' + head.x + ' ' + head.y + ')' },
         // light halo under the cursor so it reads on the bed and on the dark viewport

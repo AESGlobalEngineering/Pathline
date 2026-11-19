@@ -218,6 +218,74 @@
     return i < 0 ? 99 : i;
   }
   const toolSlot = (tool) => (String(tool || '').match(/T\d+/) || ['T?'])[0];
+
+  // The tool heads a plotter process can use: the machine's own heads (slot
+  // and tool, as read from it), else the standard four. toolFor gives the
+  // machine's head in the same slot as a process's tool (or the tool as is).
+  const STD_TOOLS = ['T1 · Knife', 'T2 · V-cut 45°', 'T3 · Crease wheel', 'T4 · Pen'];
+  function toolOptions(machine, current) {
+    const heads = ((machine && machine.info && machine.info.heads) || []).filter((h) => h && h.slot);
+    const list = heads.length ? heads.map((h) => h.slot + ' · ' + (h.tool || 'Tool')) : STD_TOOLS.slice();
+    if (current && !list.some((o) => toolSlot(o) === toolSlot(current))) list.push(current);
+    return list;
+  }
+  const toolFor = (machine, tool) => toolOptions(machine, tool).find((o) => toolSlot(o) === toolSlot(tool)) || tool;
+  // A material is offered on a machine when it has that machine's type and
+  // the machine hasn't been taken off it (mat.off: machine ids)
+  const matOnMachine = (mat, machine) => !!mat && !!machine && (mat.m || []).includes(machine.type) && !(mat.off || []).includes(machine.id);
+
+  // Frame: the job's box traced from its top-right corner down, left, up and
+  // right (path), at the machine's travel speed (the controller's own frame
+  // speed is slow on a plotter). PROTOCOL.md /frame.
+  function frameArgs(b, machine) {
+    const info = (machine && machine.info) || {};
+    const d = DEFAULTS[machine && machine.type === 'plotter' ? 'plotter' : 'laser'] || {};
+    const speed = Number(info.travelSpeed) || Number(info.speed) || d.speed || 1000;
+    return { box: [b.x0, b.y0, b.x1, b.y1], path: [[b.x1, b.y0], [b.x1, b.y1], [b.x0, b.y1], [b.x0, b.y0], [b.x1, b.y0]], speed };
+  }
+
+  // ---------------------------------------------------------------- punch (plotter)
+  // A plotter process can punch instead of cutting (mode 'punch'): the punch
+  // head strikes along each line every punchSpace mm, or with centre punch on,
+  // once at the centre of each closed shape.
+  const PUNCH_SPACE = 5;
+  const isPunch = (p) => !!p && p.mode === 'punch';
+  const punchSpaceOf = (p) => Math.max(0.5, Number(p && p.punchSpace) || PUNCH_SPACE);
+  // Where a punch process strikes on one path, in order. A closed line is
+  // divided evenly, so there's no double hit where it starts and ends; an open
+  // line is struck at both ends. Centre punch: the middle of a closed shape's
+  // box (an open line is still struck along its length).
+  function punchPoints(path, proc) {
+    const p = path && path.p;
+    if (!p || !p.length) return [];
+    if (proc && proc.centre && path.c && p.length > 2) {
+      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      for (const [x, y] of p) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+      return [[(x0 + x1) / 2, (y0 + y1) / 2]];
+    }
+    const pts = path.c ? p.concat([p[0]]) : p;
+    let L = 0;
+    for (let i = 1; i < pts.length; i++) L += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
+    if (L < 1e-9) return [p[0].slice()];
+    const sp = punchSpaceOf(proc);
+    const n = path.c ? Math.max(1, Math.round(L / sp)) : Math.max(1, Math.ceil(L / sp - 1e-9));
+    const count = path.c ? n : n + 1;
+    const step = L / n;
+    const out = [];
+    let seg = 1, before = 0;
+    for (let k = 0; k < count; k++) {
+      const want = k * step;
+      while (seg < pts.length - 1 && before + Math.hypot(pts[seg][0] - pts[seg - 1][0], pts[seg][1] - pts[seg - 1][1]) < want - 1e-9) {
+        before += Math.hypot(pts[seg][0] - pts[seg - 1][0], pts[seg][1] - pts[seg - 1][1]);
+        seg++;
+      }
+      const a = pts[seg - 1], b = pts[seg];
+      const l = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      const f = l > 0 ? Math.max(0, Math.min(1, (want - before) / l)) : 0;
+      out.push([a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f]);
+    }
+    return out;
+  }
   // Laser jobs engrave first, then mark, then cut (so parts don't move before
   // they're engraved); plotter jobs run marking tools first and through-cuts last.
   // With the "By process" cut order they run in the job's own process order.
@@ -250,6 +318,118 @@
     const vp = Math.sqrt(Math.max(v0 * v0, v1 * v1, (2 * a * L + v0 * v0 + v1 * v1) / 2));
     return Math.max(0, (vp - v0) / a) + Math.max(0, (vp - v1) / a);
   }
+  // How a Trotec really moves along a cut (Pathline Run's measured model,
+  // run/src/ctrl/trotec/compile.js cutProfile + runTime and arcs.js fitArcs;
+  // Run's estimate is within ≈ 1 % of Ruby's real runs, where Prepare's
+  // segment-by-segment time at the travel acc ran ≈ 10 % long):
+  //  - it holds the set speed on straight lines and speeds up and slows down
+  //    at 2000 mm/s² (not the 352 mm/s² GET /machine sends, which is travel);
+  //  - Run sends radii (chains of short segments on one circle) as true
+  //    arcs, taken at up to √(1000 · r) mm/s;
+  //  - at a corner turning by φ the speed is √(20 · c / (1 − c)), c = cos(φ/2)
+  //    (20: the Standard planner's vector setting);
+  //  - it stops at each end of a cut;
+  //  - travel between cuts accelerates about 4× harder than the planner's
+  //    travel setting (GET /machine travelAcc) and each move costs 0.03 s
+  //    more (stopping, the beam off and on): Run's travelTiming, fitted on 18 runs.
+  // A machine may send its own (info.cutModel).
+  const TROTEC_CUT = { acc: 2000, arc: 1000, corner: 20, travelAccScale: 4, moveExtra: 0.03 };
+  function cutModelOf(machine) {
+    const info = (machine && machine.info) || {};
+    const own = info.cutModel;
+    if (own && typeof own === 'object' && Number(own.acc) > 0) return { ...TROTEC_CUT, ...own };
+    return machine && /trotec/i.test(machine.ctrl || info.ctrl || '') ? TROTEC_CUT : null;
+  }
+  // Stretches of a polyline that lie on one circle, as arcs (Run's arcs.js):
+  // [{ to }] straight segments and [{ to, c, r, sweep }] arcs after pts[0]
+  const ARC_LIMITS = { tol: 0.01, sag: 0.1, turn: (16 * Math.PI) / 180, minSegs: 3, maxR: 1000, minR: 0.05, maxSweep: Math.PI };
+  function circle3(a, b, c) {
+    const bx = b[0] - a[0], by = b[1] - a[1], cx = c[0] - a[0], cy = c[1] - a[1];
+    const d = 2 * (bx * cy - by * cx);
+    if (Math.abs(d) < 1e-12) return null;
+    const b2 = bx * bx + by * by, c2 = cx * cx + cy * cy;
+    const ux = (cy * b2 - by * c2) / d, uy = (bx * c2 - cx * b2) / d;
+    return { c: [a[0] + ux, a[1] + uy], r: Math.hypot(ux, uy) };
+  }
+  const turnAngle = (ux, uy, vx, vy) => Math.atan2(ux * vy - uy * vx, ux * vx + uy * vy);
+  function fitArcs(pts) {
+    const L = ARC_LIMITS;
+    const p = [];
+    for (const q of pts) if (!p.length || Math.hypot(q[0] - p[p.length - 1][0], q[1] - p[p.length - 1][1]) > 1e-6) p.push(q);
+    const n = p.length;
+    const turn = new Float64Array(n);
+    for (let k = 1; k < n - 1; k++) turn[k] = turnAngle(p[k][0] - p[k - 1][0], p[k][1] - p[k - 1][1], p[k + 1][0] - p[k][0], p[k + 1][1] - p[k][1]);
+    const arcOf = (i, j) => {
+      if (j - i < L.minSegs) return null;
+      const sg = Math.sign(turn[i + 1]);
+      if (!sg) return null;
+      for (let k = i + 1; k < j; k++) if (Math.sign(turn[k]) !== sg || Math.abs(turn[k]) > L.turn) return null;
+      const C = circle3(p[i], p[(i + j) >> 1], p[j]);
+      if (!C || C.r > L.maxR || C.r < L.minR) return null;
+      let sweep = 0;
+      for (let k = i; k <= j; k++) {
+        if (Math.abs(Math.hypot(p[k][0] - C.c[0], p[k][1] - C.c[1]) - C.r) > L.tol) return null;
+        if (k === j) break;
+        const chord = Math.hypot(p[k + 1][0] - p[k][0], p[k + 1][1] - p[k][1]);
+        if (chord > 2 * C.r || C.r - Math.sqrt(C.r * C.r - (chord * chord) / 4) > L.sag) return null;
+        const a = turnAngle(p[k][0] - C.c[0], p[k][1] - C.c[1], p[k + 1][0] - C.c[0], p[k + 1][1] - C.c[1]);
+        if (Math.sign(a) !== sg) return null;
+        sweep += a;
+      }
+      if (Math.abs(sweep) > L.maxSweep + 1e-9) return null;
+      return { to: p[j], c: C.c, r: C.r, sweep };
+    };
+    const out = [];
+    let i = 0;
+    while (i < n - 1) {
+      let best = null, bj = i;
+      for (let j = i + L.minSegs; j < n; j++) {
+        const a = arcOf(i, j);
+        if (!a) break;
+        best = a; bj = j;
+      }
+      if (best) { out.push(best); i = bj; } else { out.push({ to: p[i + 1] }); i++; }
+    }
+    return out;
+  }
+  // Seconds to cut the polyline p (closed: back to its start) at speed v with a measured model
+  function cutModelTime(p, closed, v, prof) {
+    const pts = closed && p.length > 2 ? p.concat([p[0]]) : p;
+    if (pts.length < 2) return 0;
+    const pc = [];
+    let at = pts[0];
+    for (const m of fitArcs(pts)) {
+      if (m.c) {
+        const L = Math.abs(m.sweep) * m.r;
+        const a0 = Math.atan2(at[1] - m.c[1], at[0] - m.c[0]), sg = Math.sign(m.sweep);
+        if (L > 1e-6) pc.push({ L, cap: Math.min(v, Math.sqrt(prof.arc * m.r)), d0: a0 + (sg * Math.PI) / 2, d1: a0 + m.sweep + (sg * Math.PI) / 2 });
+      } else {
+        const L = Math.hypot(m.to[0] - at[0], m.to[1] - at[1]);
+        if (L > 1e-6) { const d = Math.atan2(m.to[1] - at[1], m.to[0] - at[0]); pc.push({ L, cap: v, d0: d, d1: d }); }
+      }
+      at = m.to;
+    }
+    if (!pc.length) return 0;
+    const vj = new Array(pc.length + 1).fill(0);
+    for (let i = 1; i < pc.length; i++) {
+      let th = Math.abs(pc[i].d0 - pc[i - 1].d1) % (2 * Math.PI);
+      if (th > Math.PI) th = 2 * Math.PI - th;
+      const c = Math.cos(th / 2);
+      const lim = th < 1e-3 ? Infinity : c <= 1e-4 ? 0 : c >= 0.9999 ? Infinity : Math.sqrt((prof.corner * c) / (1 - c));
+      vj[i] = Math.min(pc[i].cap, pc[i - 1].cap, lim);
+    }
+    for (let i = 0; i < pc.length; i++) vj[i + 1] = Math.min(vj[i + 1], Math.sqrt(vj[i] * vj[i] + 2 * prof.acc * pc[i].L));
+    for (let i = pc.length - 1; i >= 0; i--) vj[i] = Math.min(vj[i], Math.sqrt(vj[i + 1] * vj[i + 1] + 2 * prof.acc * pc[i].L));
+    let t = 0;
+    for (let i = 0; i < pc.length; i++) {
+      const u0 = vj[i], u1 = vj[i + 1], L = pc[i].L, a = prof.acc;
+      const peak = Math.max(1e-6, Math.min(pc[i].cap, Math.sqrt((2 * a * L + u0 * u0 + u1 * u1) / 2)));
+      const s1 = (peak * peak - u0 * u0) / (2 * a), s2 = (peak * peak - u1 * u1) / (2 * a);
+      t += (peak - u0) / a + (peak - u1) / a + Math.max(0, L - s1 - s2) / peak;
+    }
+    return t;
+  }
+
   const JUNCTION_DEV = 0.05; // mm, how far the head may round a corner at speed
 
   // Time to follow a polyline at feed speed v with acceleration a, slowing
@@ -377,10 +557,44 @@
     return uni ? t + travelTime(x1 - x0 + (speed * speed) / acc, Math.max(speed, vTravel || speed), acc) : t;
   }
 
+  // How a controller really engraves, measured, when known. A Trotec (Ruby,
+  // Q500; Pathline Run 0.7.13's PREPARE-ESTIMATE-FINDINGS, 1.6 % rms per
+  // island over 34 steps, 100–600 mm/s, both directions):
+  //  - lines are 25.4/DPI apart rounded down to its 6 µm steps (0.048 mm at 500 DPI);
+  //  - every line sweeps the whole island's box width plus 10 mm each side;
+  //  - each line costs a near-constant turnaround, 0.0770 s + 4.58e-5·v;
+  //  - the sweep runs ≈ 4.5 % quicker than the set speed (× 0.955);
+  //  - 0.32 s per island.
+  // Its `acc` from GET /machine is for travel only; a line's turnaround and
+  // overscan don't come from it. A machine may send its own (info.raster).
+  // null: lines timed from acc (lineTime), each line over its own artwork.
+  const TROTEC_RASTER = { grid: 0.006, over: 10, sweep: 0.955, turn: 0.077, turnPerV: 4.58e-5, island: 0.32, src: 'Trotec Q500, measured by Pathline Run 0.7.13' };
+  function rasterModelOf(machine) {
+    const info = (machine && machine.info) || {};
+    const own = info.raster;
+    if (own && typeof own === 'object' && Number(own.turn) >= 0 && Number(own.over) >= 0) return { ...TROTEC_RASTER, ...own };
+    return machine && /trotec/i.test(machine.ctrl || info.ctrl || '') ? TROTEC_RASTER : null;
+  }
+  // line spacing a model really engraves at, mm
+  const rasterPitch = (model, dpi) => {
+    const p = 25.4 / Math.max(1, dpi);
+    return model && model.grid > 0 ? Math.max(model.grid, Math.floor(p / model.grid + 1e-9) * model.grid) : p;
+  };
+  // seconds to engrave the art box `b` as one island with a measured model
+  function rasterModelTime(model, b, dpi, speed, uni, vTravel, acc) {
+    const p = rasterPitch(model, dpi);
+    const lines = Math.max(1, Math.round((b.y1 - b.y0) / p));
+    const W = b.x1 - b.x0 + 2 * model.over;
+    let t = lines * ((model.sweep * W) / speed + model.turn + model.turnPerV * speed) + model.island;
+    // one way hasn't been measured: the return stroke across the sweep, as before
+    if (uni) t += lines * travelTime(W, Math.max(speed, vTravel || speed), acc);
+    return { t, lines, p };
+  }
+
   // Split an engraving into islands: shapes whose outlines are within `gap` mm
   // of each other are engraved together, separate groups on their own. Each
   // island gets its own scan lines, time and box (in original drawing order).
-  function rasterIslands(ents, dpi, speed, acc, withYs, gap, uni, vTravel) {
+  function rasterIslands(ents, dpi, speed, acc, withYs, gap, uni, vTravel, model) {
     gap = gap === undefined ? 2 : gap;
     const boxes = ents.map((e) => entityBox(e));
     const parent = ents.map((_, i) => i);
@@ -412,9 +626,16 @@
       // round past each end, often most of a line's time, is with it off)
       let dur = 0, area = 0, on = 0;
       for (const [, x0, x1] of rows) {
-        dur += lineTime(x0, x1, speed, acc, uni, vTravel);
+        if (!model) dur += lineTime(x0, x1, speed, acc, uni, vTravel);
         area += (x1 - x0) * step;
         on += (x1 - x0) / speed;
+      }
+      if (model) {
+        // the whole art box, every line, at the controller's real spacing
+        const art = boxOf(list);
+        const m = rasterModelTime(model, art, dpi, speed, uni, vTravel, acc);
+        dur = m.t;
+        on *= step / m.p;
       }
       // sampled scan-line heights so the simulation can follow gaps
       const every = Math.max(1, Math.ceil(rows.length / 240));
@@ -428,9 +649,9 @@
   // scan at engrave speed over each island and travel speed across the gaps
   // between them. For each set of islands that overlap in height, whichever
   // is quicker is used — the islands one by one, or the shared scan.
-  function rasterBands(isl, ents, dpi, speed, acc, vTravel, withYs, uni) {
+  function rasterBands(isl, ents, dpi, speed, acc, vTravel, withYs, uni, model) {
     if (isl.length < 2) return isl;
-    const over = (speed * speed) / (2 * acc);
+    const over = model ? model.over : (speed * speed) / (2 * acc);
     const vGap = Math.max(speed, vTravel || speed);
     const startOf = (r) => [r.rows[0][1] - over, r.rows[0][0]];
     const endOf = (r) => { const l = r.rows[r.rows.length - 1]; return [uni || r.rows.length % 2 ? l[2] + over : l[1] - over, l[0]]; };
@@ -470,6 +691,7 @@
       }
       const rows = [];
       let dur = 0, on = 0;
+      const art = model ? boxOf(list.flatMap((r) => r.ents.map((id) => byId.get(id)).filter(Boolean))) : null;
       for (const k of [...lines.keys()].sort((a, b) => a - b)) {
         const { y, spans } = lines.get(k);
         spans.sort((a, b) => a[0] - b[0]);
@@ -489,6 +711,8 @@
         dur += t;
         rows.push([y, first, x1]);
       }
+      // a measured controller sweeps the whole shared box on every line
+      if (model) { const m = rasterModelTime(model, art, dpi, speed, uni, vTravel, acc); dur = m.t; on *= step / m.p; }
       if (!rows.length || dur >= apart) { list.forEach((r) => out.push(r)); continue; }
       const b = EMPTY_BOX();
       rows.forEach(([y, a, c]) => { growBox(b, a, y); growBox(b, c, y); });
@@ -1229,7 +1453,7 @@
     // a machine that doesn't report its motion is taken as slow: the Trotec's measured
     // travel (Ruby's Standard: 700 mm/s, 500 mm/s², jerk 5000 mm/s³)
     laser: { speed: 700, acc: 500, jerk: 5000 },
-    plotter: { speed: 1000, acc: 8000, toolDown: 0.15, toolUp: 0.12, toolChange: 8, feedSpeed: 200, feedSettle: 3, dashLift: 0.08 }
+    plotter: { speed: 1000, acc: 8000, toolDown: 0.15, toolUp: 0.12, toolChange: 8, feedSpeed: 200, feedSettle: 3, dashLift: 0.08, punch: 0.3 }
   };
 
   /**
@@ -1370,7 +1594,7 @@
 
     const per = job.processes.map((p, i) => ({ idx: i, name: p.name, time: 0, cut: 0, travel: 0, area: 0, ops: 0 }));
     const timeline = [];
-    let t = 0, travel = 0, travelT = 0, cutLen = 0, engArea = 0, toolChanges = 0, feeds = 0;
+    let t = 0, travel = 0, travelT = 0, cutLen = 0, engArea = 0, toolChanges = 0, feeds = 0, punches = 0;
     const trav = { fromOrigin: 0, between: 0, toOrigin: 0 };
     const cut = cutOrderOf(job);
     // the head starts (and ends) at the machine's origin corner
@@ -1381,8 +1605,12 @@
     // travel between cuts: top speed, acceleration and, when known, jerk (an
     // S-curve; short hops then cost ~0.35 s each however fast the top speed)
     const accTravel = Number(info.travelAcc) || acc;
+    // how a Trotec really cuts (measured), else segment by segment from acc
+    const cModel = isLaser ? cutModelOf(machine) : null;
     const jerk = Number(info.jerk) || (info.acc ? 0 : D.jerk || 0);
-    const moveT = (d) => travelTime(d, vTravel, accTravel, jerk);
+    const moveT = cModel
+      ? (d) => (d > 0 ? travelTime(d, vTravel, accTravel * (cModel.travelAccScale || 1), jerk) + (cModel.moveExtra || 0) : 0)
+      : (d) => travelTime(d, vTravel, accTravel, jerk);
     // the route itself is chosen to travel as little as possible: distance,
     // plus a fixed charge for every move so carrying straight on into the next
     // cut always wins (moveT still gives the time)
@@ -1440,7 +1668,7 @@
     marks.forEach((m, i) => {
       travelTo([m.x, m.y], 0, -1);
       inspectTime += markTime;
-      push({ kind: 'inspect', proc: regIdx, bed: 0, dur: markTime, at: [m.x, m.y], d: m.d, mark: i + 1, of: marks.length });
+      push({ kind: 'inspect', proc: regIdx, bed: 0, dur: markTime, at: [m.x, m.y], d: m.d, mark: i + 1, of: marks.length, markKind: m.kind, toward: m.toward, cornerR: m.r || 0 });
     });
     for (let bed = 0; bed < nBeds; bed++) {
       const bedEnts = isLaser ? ents : ents.filter((e) => (e.bed || 0) === bed);
@@ -1500,11 +1728,56 @@
         curTool = slot;
       }
 
+      if (!isLaser && isPunch(proc)) {
+        // each line's strikes in a row; lines nearest next. A ring of strikes
+        // starts at its strike nearest the head, an open line at its nearer end.
+        let items = cache.get(key);
+        if (!items) {
+          const left = [];
+          mine.forEach((e) => e.paths.forEach((path) => {
+            if (only && !only.has(path)) return;
+            const pts = punchPoints(path, proc);
+            if (pts.length) left.push({ ent: e.id, pts, ring: !!path.c && !(proc.centre && path.p.length > 2) && pts.length > 1 });
+          }));
+          items = [];
+          let p0 = at;
+          const d2 = (a, b) => (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2;
+          while (left.length) {
+            let bi = 0, bk = 0, bd = Infinity;
+            left.forEach((it, i) => {
+              const cand = it.ring ? it.pts.map((_, k) => k) : it.pts.length > 1 ? [0, it.pts.length - 1] : [0];
+              for (const k of cand) { const d = d2(it.pts[k], p0); if (d < bd) { bd = d; bi = i; bk = k; } }
+            });
+            const it = left.splice(bi, 1)[0];
+            const pts = it.ring ? it.pts.slice(bk).concat(it.pts.slice(0, bk)) : bk ? it.pts.slice().reverse() : it.pts;
+            items.push({ ent: it.ent, pts });
+            p0 = pts[pts.length - 1];
+          }
+          cache.set(key, items);
+        }
+        const hit = Math.max(0, Number(plot.punch) || 0);
+        const punchOne = (it, k) => {
+          travelTo(it.pts[0], bed, pi);
+          let dur = it.pts.length * hit, len = 0;
+          for (let i = 1; i < it.pts.length; i++) { const l = Math.hypot(it.pts[i][0] - it.pts[i - 1][0], it.pts[i][1] - it.pts[i - 1][1]); len += l; dur += moveT(l); }
+          per[pi].time += dur;
+          per[pi].ops++;
+          per[pi].hits = (per[pi].hits || 0) + it.pts.length;
+          punches += it.pts.length;
+          push({ kind: 'op', mode: 'punch', proc: pi, bed, dur, ent: it.ent, path: { p: it.pts, c: false }, len, hits: it.pts.length, passes: 1, pass: passNo(k) });
+          at = it.pts[it.pts.length - 1];
+        };
+        for (let k = 1; k <= passes; k++) items.forEach((it) => punchOne(it, k));
+        return;
+      }
+
       if (isLaser && proc.proc === 'Engrave') {
         // each separate island of artwork is engraved on its own, unless one
         // side-to-side scan across islands at the same height is quicker
         const dpi = Number(proc.f) || 500;
-        const over = (speed * speed) / (2 * acc);
+        // how this controller really engraves (measured), else from acc
+        const rModel = rasterModelOf(machine);
+        const over = rModel ? rModel.over : (speed * speed) / (2 * acc);
         const scan = engraveScan(proc);
         // an island's scan lines run top down, or bottom up (reversed)
         const rowsOf = (r, up) => (up ? r.rowsUp || (r.rowsUp = r.rows.slice().reverse()) : r.rows);
@@ -1515,7 +1788,7 @@
         const goesUp = (r, from) => scan.dir === 'up' || (scan.dir === 'fastest' && dist(startAt(rowsOf(r, true)), from) < dist(startAt(r.rows), from));
         let isl = cache.get(key);
         if (!isl) {
-          isl = rasterBands(rasterIslands(mine, dpi, speed, acc, opts.timeline, undefined, scan.uni, vTravel), mine, dpi, speed, acc, vTravel, opts.timeline, scan.uni);
+          isl = rasterBands(rasterIslands(mine, dpi, speed, acc, opts.timeline, undefined, scan.uni, vTravel, rModel), mine, dpi, speed, acc, vTravel, opts.timeline, scan.uni, rModel);
           isl.forEach((r) => { per[pi].area += r.area; engArea += r.area; });
           // order the islands like cuts: nearest next
           {
@@ -1578,7 +1851,8 @@
         if (p.length < 2) return;
         travelTo(p[0], bed, pi);
         const L = polyLen(p, it.path.c);
-        let dur = polyTime(p, it.path.c, speed, acc);
+        // a Trotec as measured (cutModelOf), else from acc segment by segment
+        let dur = cModel ? cutModelTime(p, it.path.c, speed, cModel) : polyTime(p, it.path.c, speed, acc);
         if (!isLaser) {
           dur += plot.toolDown + plot.toolUp;
           if (proc.dash) dur += Math.floor(L / Math.max(0.5, (Number(proc.dl) || 5) + (Number(proc.gl) || 2))) * plot.dashLift;
@@ -1605,7 +1879,7 @@
       total: t,
       perProcess: per.filter((p) => p.ops > 0),
       travel, travelTime: travelT, travelLegs: trav, home, cutOrder: cut, inspectTime, dwellTime, marks: marks.length,
-      cutLen, engArea, toolChanges, feeds, beds: nBeds, procOrder: order, repeats, moves,
+      cutLen, engArea, toolChanges, feeds, punches, beds: nBeds, procOrder: order, repeats, moves,
       machine: { speed: vMax, acc, travelSpeed: vTravel, travelAcc: accTravel, jerk },
       timeline: opts.timeline ? timeline : undefined
     };
@@ -1626,7 +1900,7 @@
     if (op.kind === 'travel') {
       x = op.from[0] + (op.to[0] - op.from[0]) * f;
       y = op.from[1] + (op.to[1] - op.from[1]) * f;
-    } else if (op.kind === 'op' && op.mode === 'vector') {
+    } else if (op.kind === 'op' && (op.mode === 'vector' || op.mode === 'punch')) {
       const p = op.path.c ? op.path.p.concat([op.path.p[0]]) : op.path.p;
       let want = f * (op.len || polyLen(op.path.p, op.path.c));
       x = p[0][0]; y = p[0][1];
@@ -1980,16 +2254,108 @@
     if (!job.regMode || job.regMode === 'off') return new Set();
     return new Set(job.processes.filter(isRegProc).flatMap((p) => p.aci || []));
   }
+  // What the camera looks for (job.regKind; Pathline Run reads it as each
+  // inspect step's kind, from Run 0.7.13):
+  //  - 'dot': a printed dark dot on white (the default, and what older jobs mean);
+  //  - 'hole': a hole already cut through the plate, white card under it;
+  //  - 'corner': the plate's own corners, on a white background. The plate is
+  //    a box (rectangle along X and Y, corners square or rounded) drawn in the
+  //    Registration marks colour; its corners are where its straight edges meet.
+  const REG_KINDS = ['dot', 'hole', 'corner'];
+  const regKindOf = (job) => (job && REG_KINDS.includes(job.regKind) ? job.regKind : 'dot');
+  // plate corners read: job.regCorners (1–3), else from the mode (2 for
+  // Position & rotation, 3 otherwise). Run fits corners by shift and turn
+  // only, whatever the mode, and one corner is enough (its two edges give the turn)
+  const regCornersOf = (job) => {
+    const n = Math.round(Number(job && job.regCorners));
+    return n >= 1 && n <= 3 ? n : job && job.regMode === 'pos' ? 2 : 3;
+  };
+  // what the operator has to do for each kind (job sheet and the marks menu)
+  const REG_TIPS = {
+    hole: 'Put white card or paper under the plate, so the holes show light.',
+    corner: 'Draw the plate\'s outline as a box in the Registration marks colour. Lay the plate on white, with at least 10 mm of white showing past both edges at each corner that\'s read. Don\'t push those corners against a fence.'
+  };
+  // which corners, by count: the diagonal for two (the longest baseline)
+  const CORNER_SETS = { 1: ['tl'], 2: ['tl', 'br'], 3: ['tl', 'tr', 'bl'] };
+  // toward: which way the plate lies from the corner, along X and Y
+  const CORNERS = { tl: { fx: 0, fy: 0, toward: [1, 1] }, tr: { fx: 1, fy: 0, toward: [-1, 1] }, bl: { fx: 0, fy: 1, toward: [1, -1] }, br: { fx: 1, fy: 1, toward: [-1, -1] } };
+  // The plate for plate corners: the biggest closed shape in the mark colour.
+  // { e, box, r: corner radius (0 for square corners), square: it is a
+  // rectangle along X and Y, count: objects in the mark colour } or null
+  function plateOutline(job) {
+    const acis = regMarkAci(job);
+    const ents = (job.entities || []).filter((e) => !e.hidden && acis.has(e.aci));
+    let best = null;
+    for (const e of ents) {
+      const p = e.paths.find((q) => q.c && q.p.length > 2);
+      if (!p) continue;
+      const a = Math.abs(polyArea(p.p));
+      if (!best || a > best.a) best = { e, p, a };
+    }
+    if (!best) return ents.length ? { e: null, count: ents.length } : null;
+    const b = entityBox({ paths: [best.p] });
+    const W = b.x1 - b.x0, H = b.y1 - b.y0;
+    // a rounded corner of radius r leaves its arc r·(√2 − 1) from the box's
+    // corner along the diagonal: the nearest outline point gives r
+    const near = (x, y) => best.p.p.reduce((m, q) => Math.min(m, Math.hypot(q[0] - x, q[1] - y)), Infinity);
+    const rs = [[b.x0, b.y0], [b.x1, b.y0], [b.x0, b.y1], [b.x1, b.y1]].map(([x, y]) => near(x, y) / (Math.SQRT2 - 1));
+    let r = Math.min(...rs);
+    if (r < 0.2) r = 0;
+    r = Math.round(r * 10) / 10;
+    // a rectangle along X and Y fills its box, less the rounded corners
+    const square = Math.abs(best.a - (W * H - (4 - Math.PI) * r * r)) <= 0.02 * W * H && W > 2 * r && H > 2 * r;
+    return { e: best.e, box: b, r, square, count: ents.length };
+  }
   // Print-and-cut registration marks: the objects drawn in a reg-mark colour
-  // (nothing is placed automatically). Each mark is reported by its centre.
+  // (nothing is placed automatically), each reported by its centre; or, for
+  // plate corners, the corners of the plate's outline (where its straight
+  // edges meet, so outside a rounded corner). { id, x, y, d, kind, toward?, r? }
   function regMarks(job, machine) {
     if (machine && machine.type === 'plotter') return [];
+    if (!job.regMode || job.regMode === 'off') return [];
+    const kind = regKindOf(job);
+    if (kind === 'corner') {
+      const pl = plateOutline(job);
+      if (!pl || !pl.e) return [];
+      const b = pl.box;
+      return CORNER_SETS[regCornersOf(job)].map((k) => {
+        const c = CORNERS[k];
+        return { id: pl.e.id + '-' + k, x: b.x0 + c.fx * (b.x1 - b.x0), y: b.y0 + c.fy * (b.y1 - b.y0), d: 0, kind, toward: c.toward.slice(), r: pl.r };
+      });
+    }
     const acis = regMarkAci(job);
     if (!acis.size) return [];
     return (job.entities || []).filter((e) => !e.hidden && acis.has(e.aci)).map((e) => {
       const b = entityBox(e);
-      return { id: e.id, x: (b.x0 + b.x1) / 2, y: (b.y0 + b.y1) / 2, d: Math.max(b.x1 - b.x0, b.y1 - b.y0) };
+      return { id: e.id, x: (b.x0 + b.x1) / 2, y: (b.y0 + b.y1) / 2, d: Math.max(b.x1 - b.x0, b.y1 - b.y0), kind };
     });
+  }
+  // Hole marks have to be holes before the job runs: the marks a cut in this
+  // same job goes through (within the mark, or right round it), numbered from 1
+  function marksCutByJob(job, machine) {
+    if (regKindOf(job) !== 'hole') return [];
+    const cutAci = new Set(job.processes.filter((p) => p.proc === 'Cut' && p.out !== false && !isRegProc(p)).flatMap((p) => p.aci || []));
+    const cuts = (job.entities || []).filter((e) => !e.hidden && cutAci.has(e.aci));
+    const segDist = (x, y, a, b) => {
+      const dx = b[0] - a[0], dy = b[1] - a[1], l2 = dx * dx + dy * dy;
+      const t = l2 ? Math.max(0, Math.min(1, ((x - a[0]) * dx + (y - a[1]) * dy) / l2)) : 0;
+      return Math.hypot(x - a[0] - t * dx, y - a[1] - t * dy);
+    };
+    const out = [];
+    regMarks(job, machine).forEach((m, i) => {
+      const r = m.d / 2 + 0.5;
+      const hit = cuts.some((e) => {
+        const b = entityBox(e);
+        if (m.x < b.x0 - r || m.x > b.x1 + r || m.y < b.y0 - r || m.y > b.y1 + r) return false;
+        return e.paths.some((p) => {
+          const q = p.c ? p.p.concat([p.p[0]]) : p.p;
+          for (let k = 1; k < q.length; k++) if (segDist(m.x, m.y, q[k - 1], q[k]) <= r) return true;
+          return false;
+        });
+      });
+      if (hit) out.push(i + 1);
+    });
+    return out;
   }
   // Where the head camera can read a registration mark: the machine's
   // markArea [x0, y0, x1, y1] (bed mm, from Pathline Run's GET /machine; Run
@@ -2116,13 +2482,28 @@
           : { ok: true, l: open ? 'Cut paths OK · ' + open + ' open line' + (open > 1 ? 's' : '') : 'All cut paths closed' });
       }
       if (job.regMode && job.regMode !== 'off') {
-        const need = REG_NEEDED[job.regMode] || 3;
-        const have = regMarks(job, machine).length;
-        const name = { pos: 'Position & rotation', linear: 'Full linear', nonlinear: 'Non-linear' }[job.regMode] || job.regMode;
-        // too many marks is ambiguous for the camera, so the job can't be sent
-        if (have > need) out.push({ ok: false, block: true, l: 'Registration marks · ' + have + ' found, ' + name + ' uses ' + need + ' — remove ' + (have - need) });
-        else out.push(have === need ? { ok: true, l: 'Registration marks · ' + have + ' · ' + name }
-          : { ok: false, warn: true, l: 'Registration marks · ' + have + ' of ' + need + ' — give the marks a Registration marks colour' });
+        const kind = regKindOf(job);
+        if (kind === 'corner') {
+          // the plate is one box in the mark colour: none, or several, and the camera can't be told where to look
+          const pl = plateOutline(job);
+          const n = regMarks(job, machine).length;
+          if (!pl || !pl.e) out.push({ ok: false, block: true, l: 'Plate corners: draw the plate\'s outline as a box in the Registration marks colour' });
+          else if (pl.count > 1) out.push({ ok: false, block: true, l: 'Plate corners use one box in the Registration marks colour; ' + pl.count + ' objects have it' });
+          else if (!pl.square) out.push({ ok: false, block: true, l: 'The plate outline must be a rectangle along X and Y (square or rounded corners)' });
+          else out.push({ ok: true, l: 'Registration marks · ' + n + ' plate corner' + (n > 1 ? 's' : '') + (pl.r ? ' · rounded, r ' + pl.r + ' mm' : '') });
+        } else {
+          const need = REG_NEEDED[job.regMode] || 3;
+          const have = regMarks(job, machine).length;
+          const name = { pos: 'Position & rotation', linear: 'Full linear', nonlinear: 'Non-linear' }[job.regMode] || job.regMode;
+          const what = kind === 'hole' ? 'holes' : 'marks';
+          // too many marks is ambiguous for the camera, so the job can't be sent
+          if (have > need) out.push({ ok: false, block: true, l: 'Registration ' + what + ' · ' + have + ' found, ' + name + ' uses ' + need + ' — remove ' + (have - need) });
+          else out.push(have === need ? { ok: true, l: 'Registration ' + what + ' · ' + have + ' · ' + name }
+            : { ok: false, warn: true, l: 'Registration ' + what + ' · ' + have + ' of ' + need + ' — give the ' + (kind === 'hole' ? 'hole circles' : 'marks') + ' a Registration marks colour' });
+          // a hole mark must already be in the plate: the camera reads it before any cutting
+          const cutHere = marksCutByJob(job, machine);
+          if (cutHere.length) out.push({ ok: false, warn: true, l: (cutHere.length > 1 ? 'Holes ' + cutHere.join(', ') + ' are' : 'Hole ' + cutHere[0] + ' is') + ' cut by this job; the camera reads ' + (cutHere.length > 1 ? 'them' : 'it') + ' before cutting starts — cut the holes in a job of their own first' });
+        }
         // the head camera has to reach every mark (it sits beside the beam):
         // the job can't be sent until they're in reach; Move into reach fixes it
         const far = marksOutOfReach(job, machine);
@@ -2143,9 +2524,9 @@
     ACI_HEX, ACI_NAMES, aciHex, aciName, aciFg, aciStroke, rgbToAci, hexToRgb,
     uid, EMPTY_BOX, growBox, entityBox, boxOf, boxValid, boxW, boxH,
     mapEntity, translate, scaleAbout, rotateAbout, polyLen, polyArea, pointInPoly, distToEntity, isClosedPts, cleanPath, shapes,
-    processOrder, processOfAci, engraveHoles, toolSlot, toolRank, polyTime, travelTime, rasterSpans, orderPaths,
-    estimate, headAt, fmtDuration, fmtLen, fmtArea, checkJob, regMarks, regMarkAci, camReach, marksOutOfReach, reachShift, regProcess, withPresets, ensureRegProcess, isRegProc, REG_PROC, REG_NEEDED,
+    processOrder, processOfAci, engraveHoles, toolSlot, isPunch, punchPoints, punchSpaceOf, PUNCH_SPACE, toolOptions, toolFor, STD_TOOLS, matOnMachine, frameArgs, toolRank, polyTime, travelTime, rasterSpans, orderPaths,
+    estimate, headAt, fmtDuration, fmtLen, fmtArea, checkJob, regMarks, regMarkAci, regKindOf, regCornersOf, marksCutByJob, plateOutline, REG_KINDS, REG_TIPS, camReach, marksOutOfReach, reachShift, regProcess, withPresets, ensureRegProcess, isRegProc, REG_PROC, REG_NEEDED,
     cutOrderOf, CUT_ORDER_DEFAULT, START_CLEAR, commonLines, bedOf, bedCount, defaultPresets, DEFAULTS,
-    rasterIslands, engraveScan, ENGRAVE_DIRS, DPI_STEPS, starterPresets, nestRects, THERMAL, thermalKey, thermalOf, colourOf, absorptionOf, thermalSim, bendLimit, isBareMetal, markingSprayOf, SPRAY_ABSORB, metalPresets, presetsFor
+    rasterIslands, engraveScan, ENGRAVE_DIRS, DPI_STEPS, starterPresets, nestRects, THERMAL, thermalKey, thermalOf, colourOf, absorptionOf, thermalSim, bendLimit, cutModelOf, cutModelTime, fitArcs, TROTEC_CUT, rasterModelOf, rasterPitch, rasterModelTime, TROTEC_RASTER, isBareMetal, markingSprayOf, SPRAY_ABSORB, metalPresets, presetsFor
   };
 });

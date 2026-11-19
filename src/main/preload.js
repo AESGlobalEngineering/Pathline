@@ -28,7 +28,9 @@ contextBridge.exposeInMainWorld('api', {
   job: {
     current: call('job:current'), update: call('job:update'), undo: call('job:undo'), redo: call('job:redo'), history: call('job:history'),
     create: call('job:new'), replace: call('job:replace'), open: call('job:open'), save: call('job:save'), saveToComputer: call('job:saveToComputer'),
-    exportAs: call('job:export'), importDialog: call('job:importDialog'), importPath: call('job:importPath'), recent: call('job:recent')
+    exportAs: call('job:export'), importDialog: call('job:importDialog'), importPath: call('job:importPath'), recent: call('job:recent'),
+    // several jobs open at once: { active, tabs: [{ id, name, dirty, path }] }
+    tabs: call('job:tabs'), switchTab: call('job:switchTab'), closeTab: call('job:closeTab'), moveTab: call('job:moveTab')
   },
   discover: { find: call('discover:find') },
   device: {

@@ -583,7 +583,7 @@ class Component extends DCLogic {
           card('Focus & air', [feat.autofocus && roToggle('Auto-focus', true), roText('Focus offset', info.focus, 'mm', setInfo('focus')), feat.air && roToggle('Air assist control', true), feat.air && roSeg('Air assist default', info.airDefault || 'High', ['Low', 'High'], setInfo('airDefault'))])
         ],
         'Camera': [
-          card('Print & cut camera', [roSeg('Mark type', info.markType || 'Dot', ['Dot', 'Cross'], setInfo('markType')), roText('Mark diameter', info.markD, 'mm', setInfo('markD')), roText('Time to read a mark', info.markTime ?? 1.5, 's', setInfo('markTime')), roPick('Default reg marks', info.defaultReg), roToggle('Ask before each job', info.askReg, setInfo('askReg'))]),
+          card('Print & cut camera', [roText('Mark diameter', info.markD, 'mm', setInfo('markD')), roText('Time to read a mark', info.markTime ?? 1.5, 's', setInfo('markTime')), roPick('Default reg marks', info.defaultReg), roToggle('Ask before each job', info.askReg, setInfo('askReg'))]),
           card('Calibration', [roText('Camera offset X', info.camX, 'mm', setInfo('camX')), roText('Camera offset Y', info.camY, 'mm', setInfo('camY')), !sim && { isAction: true, l: 'Calibrate', btn: 'Calibrate offset', result: info.calibrated ? 'Calibrated ' + info.calibrated : '', run: () => {}, tip: 'Run calibration on the machine\'s HMI', ...RO }])
         ],
         'Features': [

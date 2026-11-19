@@ -1073,14 +1073,14 @@
     hit(wx, wy) {
       const tol = 5 / this.state.view.s;
       const list = this.pickable();
-      const reg = CC.regMarkAci(this.props.job);
+      // printed dots are drawn solid: a click anywhere inside one picks it
+      const reg = CC.regKindOf(this.props.job) === 'dot' ? CC.regMarkAci(this.props.job) : new Set();
       let best = null, bd = tol, ba = Infinity;
       for (let i = list.length - 1; i >= 0; i--) {
         const e = list[i];
         const ox = this.off(e);
         const b = CC.entityBox(e);
         if (wx < b.x0 + ox - tol || wx > b.x1 + ox + tol || wy < b.y0 - tol || wy > b.y1 + tol) continue;
-        // reg marks are drawn solid, so a click anywhere inside one picks it
         const solid = reg.has(e.aci) && e.paths.some((q) => q.c && CC.pointInPoly(wx - ox, wy, q.p));
         const d = solid ? 0 : CC.distToEntity(e, wx - ox, wy);
         const a = CC.boxW(b) * CC.boxH(b);
@@ -1446,7 +1446,9 @@
         // drawn on the viewport, outside the bed, so it follows the theme
         kids.push(h('text', { key: 'l', x, y: -8 / v.s, fontSize: 13 / v.s, fontWeight: 600, style: { fill: now ? 'var(--accent-fg)' : 'var(--text)' }, fontFamily: 'IBM Plex Sans, sans-serif' }, 'Bed ' + (k + 1) + (now ? ' · on the table now' : ' · after feed ' + k)));
       }
-      kids.push(h('circle', { key: 'o', cx: x, cy: 0, r: 5 / v.s, strokeWidth: 2, vectorEffect: 'non-scaling-stroke', style: { fill: 'var(--bed)', stroke: this.accent() } }));
+      // the machine's origin corner (Machine setup → Origin)
+      const o = ((this.props.machine && this.props.machine.info) || {}).origin || 'tl';
+      kids.push(h('circle', { key: 'o', cx: x + (o.includes('r') ? bw : 0), cy: o.includes('b') ? bh : 0, r: 5 / v.s, strokeWidth: 2, vectorEffect: 'non-scaling-stroke', style: { fill: 'var(--bed)', stroke: this.accent() } }, h('title', null, 'Machine origin')));
       return h('g', { key: 'bed' + k }, kids);
     }
     // Screen-space rulers along the top and left, labelled in bed millimetres.
@@ -1497,10 +1499,11 @@
         const procByAci = new Map();
         p.job.processes.forEach((pr) => (pr.aci || []).forEach((a) => { if (!procByAci.has(a)) procByAci.set(a, pr); }));
         const regAci = CC.regMarkAci(p.job);
+        const regKind = CC.regKindOf(p.job);
         const drag = this.state.drag;
         const moving = drag && drag.kind === 'move';
         const scaling = drag && drag.kind === 'scale';
-        const normal = [], selected = [];
+        const normal = [], selected = [], punchD = [];
         // engraving fills even-odd: a shape inside another engraved shape is a
         // hole in it (CC.engraveHoles), so the host is filled with its holes
         // cut out and the hole itself is drawn as an outline
@@ -1516,19 +1519,47 @@
           const col = aci.stroke(e.aci);
           const isEng = pr && pr.proc === 'Engrave';
           const isReg = regAci.has(e.aci);
+          // printed dots are drawn solid, as the camera sees them; holes and a plate outline aren't
+          const regSolid = isReg && regKind === 'dot';
           const dash = pr && pr.dash && !isReg ? (pr.dl * v.s).toFixed(1) + ' ' + (pr.gl * v.s).toFixed(1) : null;
           const isHole = isEng && holes.has(e.id);
           const el = h('path', {
             key: e.id, d: entityD(e) + (isEng && hostD.has(e.id) ? hostD.get(e.id) : ''), transform: this.isPlot() && e.bed ? 'translate(' + this.bedX(e.bed) + ' 0)' : undefined,
-            fillOpacity: isReg ? 1 : isEng ? 0.22 : undefined, fillRule: 'evenodd',
+            fillOpacity: regSolid ? 1 : isEng ? 0.22 : undefined, fillRule: 'evenodd',
             strokeWidth: selSet.has(e.id) ? 2 : 1.3, strokeDasharray: dash || undefined,
             vectorEffect: 'non-scaling-stroke', opacity: pr && pr.hidden ? 0.2 : !pr || pr.out === false ? 0.35 : e.locked ? 0.7 : 1,
             // colours as CSS so ACI 7 and reg marks follow the theme; reg marks are drawn solid, the way the camera sees them
-            style: { fill: isReg ? 'var(--ink)' : isEng && !isHole ? col : 'none', stroke: col }
+            style: { fill: regSolid ? 'var(--ink)' : isEng && !isHole && !isReg ? col : 'none', stroke: col }
           });
           (selSet.has(e.id) ? selected : normal).push(el);
+          if (pr && CC.isPunch(pr) && this.isPlot()) {
+            const key = pr.mode + '|' + pr.punchSpace + '|' + !!pr.centre;
+            let pts = this._punch && this._punch.get(e);
+            if (!pts || pts.key !== key) {
+              pts = { key, list: e.paths.flatMap((q) => CC.punchPoints(q, pr)) };
+              (this._punch || (this._punch = new WeakMap())).set(e, pts);
+            }
+            punchD.push({ bed: e.bed || 0, list: pts.list, col });
+          }
         }
         kids.push(h('g', { key: 'ents' }, normal));
+        // punch strikes: a ring at each
+        if (punchD.length) {
+          const r = 2.6 / v.s;
+          punchD.forEach((pd, k) => {
+            const ox = this.isPlot() && pd.bed ? this.bedX(pd.bed) : 0;
+            const d = pd.list.slice(0, 5000).map(([x, y]) => 'M' + (x + ox - r) + ' ' + y + 'a' + r + ' ' + r + ' 0 1 0 ' + 2 * r + ' 0a' + r + ' ' + r + ' 0 1 0 ' + -2 * r + ' 0').join('');
+            kids.push(h('path', { key: 'punch' + k, d, strokeWidth: 1.4, vectorEffect: 'non-scaling-stroke', style: { fill: 'var(--bed)', stroke: pd.col }, pointerEvents: 'none' }));
+          });
+        }
+        // plate corners the camera reads (registration marks: Plate corners):
+        // an L along the plate's two edges at each corner, 12 mm each way
+        if (p.corners && p.corners.length) {
+          const L = 12;
+          const d = p.corners.map((c) => 'M' + (c.x + c.toward[0] * L) + ' ' + c.y + 'L' + c.x + ' ' + c.y + 'L' + c.x + ' ' + (c.y + c.toward[1] * L)).join('');
+          kids.push(h('path', { key: 'corners-halo', d, fill: 'none', strokeWidth: 5, strokeLinecap: 'round', strokeLinejoin: 'round', vectorEffect: 'non-scaling-stroke', style: { stroke: 'var(--ink-halo)' }, pointerEvents: 'none' }));
+          kids.push(h('path', { key: 'corners', d, fill: 'none', strokeWidth: 2.5, strokeLinecap: 'round', strokeLinejoin: 'round', vectorEffect: 'non-scaling-stroke', style: { stroke: 'var(--ink)' }, pointerEvents: 'none' }, h('title', null, 'Plate corner the camera reads')));
+        }
         let selXf;
         if (moving) selXf = 'translate(' + drag.dx + ' ' + drag.dy + ')';
         if (scaling) selXf = 'translate(' + drag.ax + ' ' + drag.ay + ') scale(' + drag.kx + ' ' + drag.ky + ') translate(' + -drag.ax + ' ' + -drag.ay + ')';

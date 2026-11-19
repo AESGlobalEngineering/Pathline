@@ -80,7 +80,7 @@ All are `POST` with a JSON body and return a small JSON object.
 |---|---|---|
 | `/jog` | `{ axis: "x" \| "y" \| "z", distance }` or `{ x, y }` | Relative jog, or absolute move |
 | `/home` | `{}` | Home all axes |
-| `/frame` | `{ box: [x0, y0, x1, y1], path?: [[x, y]…], speed?: mm/s }` | Trace the job outline (laser pointer / low power). `path`: the corners in order; none: the box from top right, down, left, up, right. `speed`: capped at the machine's own speed |
+| `/frame` | `{ box: [x0, y0, x1, y1], path: [[x, y]…], speed }` | Trace the job outline (laser pointer / low power). `path` is the box's corners in order: from the top-right corner down, left, up and back right (Prepare 1.6.18+). `speed` is mm/s (the machine's travel speed); Run caps it at the machine's own speed. Older Prepare sends `box` only: Run then traces the box in that same order at its default speed. |
 | `/start`, `/pause`, `/resume`, `/stop` | `{}` | Job control. `/stop` must always be accepted. |
 | `/io` | `{ air?, pointer?, vacuum? }` | Switch outputs |
 | `/autofocus` | `{}` | Laser auto-focus |
@@ -116,6 +116,8 @@ All are `POST` with a JSON body and return a small JSON object.
   "toolpath": [
     { "type": "engrave", "process": 3, "name": "Engrave fill", "ents": ["e…"], "dpi": 500, "passes": 1, "lines": 2047, "scan": "island", "direction": "up", "bidirectional": true, "box": [102, 122, 528, 334], "seconds": 2140.2 },
     { "type": "cut", "process": 0, "name": "Cut contour", "ent": "e…", "closed": true, "passes": 1, "seconds": 9.81, "p": [[216, 80], [216, 216], [80, 216], [80, 80]] }
+    // plotter punch process (mode "punch"): strike the punch head at each point of p, in order
+    { "type": "punch", "process": 1, "name": "Holes", "tool": "T3", "ent": "e…", "bed": 0, "centre": true, "passes": 1, "seconds": 0.3, "p": [[40, 60]] }
   ],
   "files": { "dxf": "…", "svg": "…", "sheet": "…", "cjob": { } }
 }

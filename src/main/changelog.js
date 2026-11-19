@@ -5,6 +5,63 @@
 
 module.exports = [
   {
+    version: '1.6.18', date: '18 Nov 2026',
+    added: [
+      'Punching on plotters: a process\'s Processing mode can be Punch. The punch head strikes along each line every Punch space mm, or with Centre punch on, once in the centre of each closed shape. The strikes show as rings on the Job and Simulation pages and are counted in the estimate. Picking a tool head with "punch" in its name sets the process to Punch. Needs Pathline Run updated to run punch jobs.',
+      'Materials: a machine can be taken off a material with the × on its tab, and added again with Add machine. A material taken off a machine isn\'t offered for it on the Job page.'
+    ],
+    fixed: [
+      'The origin dot on the bed is drawn at the machine\'s origin corner (Machine setup → Origin), not always top left.',
+      'Tool head lists (materials, new process and the process panel) show the tool heads the machine has, not a fixed list of four.',
+      'Frame sends the path and speed: from the top-right corner down, then left, up and right, at the machine\'s travel speed. The plotter framed very slowly before. Needs Pathline Run updated to use them.'
+    ]
+  },
+  {
+    version: '1.6.17', date: '18 Nov 2026',
+    added: [
+      'Several jobs can be open at once, a tab each under the app bar. New (Ctrl+N or +) and Open each open a new tab; a file that\'s already open comes to the front instead. Each tab keeps its own undo history, selection and zoom.',
+      'Ctrl+Tab and Ctrl+Shift+Tab move between tabs; Ctrl+W or the × closes one (a middle-click does too). A tab with unsaved changes has a dot, and closing it asks first. Quitting asks about every tab with unsaved changes.'
+    ],
+    fixed: [
+      'A material test grid no longer replaces the job you have open: it opens in a new tab.'
+    ]
+  },
+  {
+    version: '1.6.16', date: '18 Nov 2026',
+    added: [
+      'Plate corners now come from a box you draw: draw the plate\'s outline as a rectangle and give it the Registration marks colour, instead of using the sheet. Rounded corners are fine: the corner read is where the straight edges meet, and the radius is sent to Pathline Run with it.'
+    ],
+    fixed: [
+      'A box (or any shape) set as a registration mark is no longer drawn filled bright white. Only printed dots are drawn solid, as the camera sees them; holes and plate outlines are outlines, and a click inside one picks what\'s inside, not the outline.'
+    ]
+  },
+  {
+    version: '1.6.15', date: '18 Nov 2026',
+    added: [
+      'Registration marks → Mark type: Printed dots, Holes or Plate corners. Holes are holes already cut through the plate, with white card under it; draw each as a circle the size of the hole, in the Registration marks colour. Plate corners are the plate\'s own corners on a white background: they come from the sheet (turn Sheet on and set it to the plate), and you choose 1, 2 or 3 corners. Needs Pathline Run 0.7.13 or later.',
+      'Warnings: a hole this same job cuts (the camera reads it before cutting starts), plate corners without the sheet (blocks Send), and objects in the Registration marks colour that won\'t be read when the corners are. The job sheet and the marks menu say what to put under or around the plate.'
+    ],
+    fixed: [
+      'Setup → Machines no longer shows a Mark type (Dot / Cross) that nothing used.'
+    ]
+  },
+  {
+    version: '1.6.14', date: '17 Nov 2026',
+    added: [],
+    fixed: [
+      'Binary DXF files (AutoCAD\'s "Save as DXF, binary") now import. Before, they came in as errors.',
+      'A line drawn twice, one copy on top of the other (common in older drawings), is now kept once, so the shape it belongs to closes properly and isn\'t cut twice.'
+    ]
+  },
+  {
+    version: '1.6.13', date: '16 Nov 2026',
+    added: [],
+    fixed: [
+      'Engraving time on a Trotec was about 16 times too long (the Etch Calibration job showed 1 h 55 min; it is now 9 min 48 s). It now uses how the Q500 really engraves, as measured by Pathline Run: lines 0.048 mm apart at 500 DPI, each sweeping the island\'s full width plus 10 mm each side, with about 0.1 s to turn round. The thermal map follows, so engraving heats as fast as it really does.',
+      'Cutting and travel time on a Trotec were up to about 10 % too long. Cuts are now timed the way Pathline Run times them (within about 1 % of the real Q500): curves as arcs at nearly full speed, corners slowing by their angle, and the head speeding up and slowing at the rate it really does. Travel uses Run\'s measured timing too. On three cutting jobs Prepare and Run now agree to within 1 %.'
+    ]
+  },
+  {
     version: '1.6.12', date: '12 Nov 2026',
     added: [
       'Thermal map on sheet metal: shows where the sheet starts to bend from uneven heat, not where it melts. A hot area pushing against the cold sheet around it stays bent once it is about 123 °C hotter than the rest (0.9 mm stainless 304); a wide hot area on thin sheet bows sooner. The panel shows the hot area, the bending limit for it, how close the job comes and when.',

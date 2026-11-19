@@ -110,6 +110,7 @@ function processSummary(p, isLaser) {
     if (p.air) parts.push('air ' + p.air);
     return parts.join(' · ');
   }
+  if (CC.isPunch(p)) return [p.tool, p.centre ? 'centre punch (one in each closed shape)' : 'punch every ' + CC.punchSpaceOf(p) + ' mm', p.passes + '×'].join(' · ');
   const parts = [p.tool, p.speed + ' mm/s', p.passes + '×'];
   if (p.dash) parts.push('dash ' + p.dl + '/' + p.gl + ' mm');
   return parts.join(' · ');
@@ -128,7 +129,18 @@ function jobSheet(job, machine, material, est) {
   const b = CC.boxOf((job.entities || []).filter((e) => !e.hidden));
   if (CC.boxValid(b)) line('Job area:  ' + CC.boxW(b).toFixed(1) + ' × ' + CC.boxH(b).toFixed(1) + ' mm at X ' + b.x0.toFixed(1) + ' Y ' + b.y0.toFixed(1));
   if (job.sheet && job.sheet.on) line('Sheet:     ' + job.sheet.w + ' × ' + job.sheet.h + ' mm at X ' + job.sheet.x + ' Y ' + job.sheet.y);
-  if (isLaser) line('Reg marks: ' + ({ off: 'Off', pos: 'Position & rotation (2 marks)', linear: 'Full linear (3 marks)', nonlinear: 'Non-linear (3 marks)' }[job.regMode || 'off']) + (job.regMode && job.regMode !== 'off' ? ' · ' + regMarks(job, machine).length + ' in job' : ''));
+  if (isLaser) {
+    const on = job.regMode && job.regMode !== 'off';
+    const kind = CC.regKindOf(job);
+    if (on && kind === 'corner') {
+      const n = regMarks(job, machine).length;
+      const pl = CC.plateOutline(job);
+      line('Reg marks: plate corners · ' + n + ' read' + (pl && pl.e && pl.r ? ' · rounded corners, r ' + pl.r + ' mm' : '') + (n ? '' : ' (draw the plate\'s outline in the Registration marks colour)'));
+    } else {
+      line('Reg marks: ' + ({ off: 'Off', pos: 'Position & rotation (2 marks)', linear: 'Full linear (3 marks)', nonlinear: 'Non-linear (3 marks)' }[job.regMode || 'off']) + (on ? ' · ' + (kind === 'hole' ? 'holes in the plate' : 'printed dots') + ' · ' + regMarks(job, machine).length + ' in job' : ''));
+    }
+    if (on && CC.REG_TIPS[kind]) line('           ' + CC.REG_TIPS[kind]);
+  }
   const co = CC.cutOrderOf(job);
   line('Cut order: ' + { process: 'by process (list order)', speed: 'fastest', ordered: 'ordered (marks, engraving, cutting)' }[co.order] + ' · inside shapes ' + { part: 'first, part by part', all: 'all first', off: 'not prioritised' }[co.inside]);
   if (isLaser) { const g = Number.isFinite(Number(job.startClear)) && job.startClear !== null && job.startClear !== undefined ? Number(job.startClear) : CC.START_CLEAR; line('Start/stop: ' + g + ' mm from corners' + (g === 0 ? ' (may start on a corner)' : '')); }
@@ -152,7 +164,7 @@ function jobSheet(job, machine, material, est) {
   if (est.marks) line('Registration marks read first: ' + est.marks + ' marks · ' + CC.fmtDuration(est.inspectTime, true));
   line('Travel: ' + CC.fmtDuration(est.travelTime, true) + ' · ' + CC.fmtLen(est.travel) + ' (from and back to the origin included)');
   line('');
-  line('Cut length ' + CC.fmtLen(est.cutLen) + (isLaser ? ' · engraved ' + CC.fmtArea(est.engArea) : ' · tool changes ' + est.toolChanges));
+  line('Cut length ' + CC.fmtLen(est.cutLen) + (isLaser ? ' · engraved ' + CC.fmtArea(est.engArea) : ' · tool changes ' + est.toolChanges + (est.punches ? ' · punches ' + est.punches : '')));
   const checks = CC.checkJob(job, machine);
   line('');
   line('CHECKS');
@@ -188,11 +200,15 @@ function toolpath(job, est) {
     const p = o.proc >= 0 ? job.processes[o.proc] : null;
     if (o.kind === 'op' && o.mode === 'vector') {
       out.push({ type: 'cut', process: o.proc, name: p.name, ent: o.ent, bed: o.bed, closed: !!o.path.c, passes: o.passes || 1, pass: o.pass || undefined, round: o.round, seconds: +o.dur.toFixed(3), p: o.path.p.map(([x, y]) => [r3(x), r3(y)]) });
+    } else if (o.kind === 'op' && o.mode === 'punch') {
+      // the punch head strikes at each point of p, in order (PROTOCOL.md, punch)
+      out.push({ type: 'punch', process: o.proc, name: p.name, tool: CC.toolSlot(p.tool), ent: o.ent, bed: o.bed, centre: !!p.centre, passes: o.passes || 1, pass: o.pass || undefined, seconds: +o.dur.toFixed(3), p: o.path.p.map(([x, y]) => [r3(x), r3(y)]) });
     } else if (o.kind === 'op' && o.mode === 'raster') {
       // direction is resolved per step ("fastest" becomes up or down); bidirectional false = every line left to right
       out.push({ type: 'engrave', process: o.proc, name: p.name, ents: engraveEnts(o.ents), bed: o.bed, dpi: o.dpi, passes: o.passes || 1, pass: o.pass || undefined, round: o.round, lines: o.rows, scan: o.shared ? 'across' : 'island', direction: o.dir || 'down', bidirectional: !o.uni, seconds: +o.dur.toFixed(3), box: [r3(o.box.x0), r3(o.box.y0), r3(o.box.x1), r3(o.box.y1)] });
     } else if (o.kind === 'inspect') {
-      out.push({ type: 'inspect', mark: o.mark, of: o.of, at: [r3(o.at[0]), r3(o.at[1])], d: r3(o.d), seconds: +o.dur.toFixed(3) });
+      // kind: what the camera looks for (PROTOCOL.md, inspect); toward: which way a plate corner's plate lies
+      out.push({ type: 'inspect', mark: o.mark, of: o.of, at: [r3(o.at[0]), r3(o.at[1])], d: r3(o.d), seconds: +o.dur.toFixed(3), ...(o.markKind && o.markKind !== 'dot' ? { kind: o.markKind } : {}), ...(o.toward ? { toward: o.toward.slice() } : {}), ...(o.cornerR ? { r: o.cornerR } : {}) });
     } else if (o.kind === 'dwell') {
       out.push({ type: 'dwell', process: o.proc, name: p.name, pass: o.pass, seconds: +o.dur.toFixed(3) });
     } else if (o.kind === 'change') {
@@ -232,7 +248,7 @@ function buildPackage(job, machine, material, est) {
     machine: { id: machine.id, name: machine.name, type: machine.type, ctrl: machine.ctrl, bed: bedOf(machine) },
     material: material ? { id: material.id, name: material.name, thickness: material.t } : null,
     sheet: job.sheet && job.sheet.on ? { w: job.sheet.w, h: job.sheet.h, x: job.sheet.x, y: job.sheet.y } : null,
-    regMarks: isLaser ? { mode: job.regMode || 'off', aci: [...CC.regMarkAci(job)], marks: regMarks(job, machine) } : null,
+    regMarks: isLaser ? { mode: job.regMode || 'off', kind: CC.regKindOf(job), aci: [...CC.regMarkAci(job)], marks: regMarks(job, machine) } : null,
     beds: est.beds,
     cutOrder: CC.cutOrderOf(job),
     processes: order.map((i) => packageProcess(job.processes[i], i, isLaser)),
