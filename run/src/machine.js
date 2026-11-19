@@ -317,9 +317,10 @@ class Machine {
   }
 
   // Always the same way round, as the owner asked: from the box's top right corner down, left, up
-  // and right again (bed Y runs to the front, so y0 is the top), then back to where the head was
-  // (read from the machine now, not the last screen refresh). A path Prepare sends only gives the
-  // box when `box` is missing; its order isn't followed.
+  // and right again (bed Y runs to the front, so y0 is the top), and the head stays there, at the
+  // last corner (it went back to where it started, which after a job on the router is home, the
+  // origin: the owner wants it left on the job). A path Prepare sends only gives the box when
+  // `box` is missing; its order isn't followed.
   // opts.speed: mm/s, capped at the machine's travel speed; none: the link's own default
   async frame(box, opts = {}) {
     this.guard();
@@ -337,11 +338,8 @@ class Machine {
     // the job's (J0015 on the YC-1610): say so instead of tracing something else
     const far = this.reachText(corners, 'The frame');
     if (far) { this.log('frame refused: ' + far); throw busyErr(far); }
-    if (this.st.link === 'online') { try { this.apply(await this.link.poll()); } catch (e) { /* the last position */ } }
-    const start = { x: this.st.pos.x, y: this.st.pos.y };
     const ruida = this.cfg.controller === 'ruida';
-    this.log('frame: X ' + x0.toFixed(1) + '–' + x1.toFixed(1) + ', Y ' + y0.toFixed(1) + '–' + y1.toFixed(1) + ' mm' + (speed ? ' at ' + speed + ' mm/s' : '') +
-      (Number.isFinite(start.x) ? ', back to X ' + start.x.toFixed(1) + ' Y ' + start.y.toFixed(1) : ', head position unknown: it stays at the last corner'));
+    this.log('frame: X ' + x0.toFixed(1) + '–' + x1.toFixed(1) + ', Y ' + y0.toFixed(1) + '–' + y1.toFixed(1) + ' mm' + (speed ? ' at ' + speed + ' mm/s' : '') + ', ending at the top right corner');
     this.framing = true;
     this.st.state = 'framing';
     this.st.message = 'Framing';
@@ -364,11 +362,7 @@ class Machine {
             }
           }
         }
-        // then back to where the head was (after a corner it didn't reach too)
-        if (this.framing && Number.isFinite(start.x) && Number.isFinite(start.y)) {
-          await this.link.moveTo(start.x, start.y, speed ? { speed } : {});
-          await this.waitIdle(60000, 400);
-        }
+        // (no move afterwards: the head stays at the last corner)
       } catch (e) { this.log('frame: ' + e.message); }
       const failed = this.framing === 'failed' ? this.frameMsg : null;
       this.framing = false;
