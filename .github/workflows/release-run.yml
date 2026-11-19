@@ -39,7 +39,9 @@ jobs:
           HAVE=$(gh release view pathlinerun --json assets --jq '.assets[].name' 2>/dev/null || true)
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] || ! echo "$HAVE" | grep -qxF "Pathline-Run-Setup-$V.exe"; then echo "build=true" >> "$GITHUB_OUTPUT"; else echo "build=false" >> "$GITHUB_OUTPUT"; fi
 
-  windows:
+  # the self-test runs beside the build, not before it (it took ~10 of the release's 15 minutes);
+  # publish waits for both, so nothing is released unless it passes
+  test:
     needs: check
     if: needs.check.outputs.build == 'true'
     runs-on: windows-latest
@@ -53,6 +55,20 @@ jobs:
           node-version: 22
       - run: npm ci --no-audit --no-fund
       - run: npm test
+
+  windows:
+    needs: check
+    if: needs.check.outputs.build == 'true'
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: run
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - run: npm ci --no-audit --no-fund
       - run: npx electron-builder --win --publish never
       - uses: actions/upload-artifact@v4
         with:
@@ -87,7 +103,7 @@ jobs:
             run/dist/latest-linux*.yml
 
   publish:
-    needs: [check, windows]
+    needs: [check, test, windows]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5

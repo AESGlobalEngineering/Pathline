@@ -303,6 +303,10 @@ function toGrey(raw, w, h, fmt) {
 
 // ---------------------------------------------------------------- simulated
 // is p inside the polygon pts (even-odd)
+// within r of a point (dx, dy away)? A quick squared-distance test first; Math.hypot decides only
+// right at the edge, as it always did (so the simulated pictures come out exactly as before)
+function near(dx, dy, r) { const q = dx * dx + dy * dy, rr = r * r; return q <= rr * 1.000001 && (q <= rr * 0.999999 || Math.hypot(dx, dy) <= r); }
+
 function inPoly(p, pts) {
   let inside = false;
   for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
@@ -347,9 +351,38 @@ class SimCamera {
     (this.scene.cuts = this.scene.cuts || []).push({ pts: pts.concat([pts[0]]), v: through ? 35 : 250, box: [Math.min(...xs) - 0.3, Math.min(...ys) - 0.3, Math.max(...xs) + 0.3, Math.max(...ys) + 0.3] });
   }
 
-  // grey level of the bed at p (mm)
-  shade(p) {
-    for (const ct of this.scene.cuts || []) {
+  // what of the scene can show inside box [x0, y0, x1, y1] (bed mm), in the scene's own order (the
+  // first thing found at a point is what's drawn there, so leaving out only what can't be in the
+  // box draws the same picture). Every point was tried against everything on the bed: 2 s a
+  // picture, most of the self-test's 12 minutes.
+  view(box) {
+    const sc = this.scene;
+    const meets = (b) => !box || (b[0] <= box[2] && b[2] >= box[0] && b[1] <= box[3] && b[3] >= box[1]);
+    const ptsBox = (pts) => { let a = Infinity, b = Infinity, c = -Infinity, d = -Infinity; for (const [x, y] of pts) { if (x < a) a = x; if (y < b) b = y; if (x > c) c = x; if (y > d) d = y; } return [a, b, c, d]; };
+    const boardBox = (b) => {
+      // its squares (from one before the first corner), turned about its first corner
+      const sx = b.square * (b.print ? b.print[0] : 1), sy = b.square * (b.print ? b.print[1] : 1);
+      const a = (b.angle * Math.PI) / 180, ca = Math.cos(a), sa = Math.sin(a);
+      const corners = [[-sx, -sy], [((b.nx || 30) - 1) * sx, -sy], [-sx, ((b.ny || 20) - 1) * sy], [((b.nx || 30) - 1) * sx, ((b.ny || 20) - 1) * sy]];
+      const bb = ptsBox(corners.map(([u, v]) => [b.x + u * ca - v * sa, b.y + u * sa + v * ca]));
+      return [bb[0] - 1, bb[1] - 1, bb[2] + 1, bb[3] + 1];
+    };
+    // a bumped board can move its pattern any way: always kept
+    const boards = [sc.board].concat(sc.boards || []).filter((b) => b && (b.bump || meets(boardBox(b))));
+    return {
+      cuts: (sc.cuts || []).filter((ct) => meets(ct.box)),
+      dots: sc.dots.concat(sc.marks).filter((m) => meets([m.x - m.d / 2, m.y - m.d / 2, m.x + m.d / 2, m.y + m.d / 2])),
+      plates: (sc.plates || []).filter((pl) => meets(ptsBox(pl.pts))),
+      rects: (sc.rects || []).filter((r) => meets([r.x0, r.y0, r.x1, r.y1])),
+      boards,
+      turn: boards.map((b) => { const a = (-b.angle * Math.PI) / 180; return [Math.cos(a), Math.sin(a)]; })
+    };
+  }
+
+  // grey level of the bed at p (mm); vw: this.view(…) of what's near (default: everything)
+  shade(p, vw) {
+    const V = vw || this.view(null);
+    for (const ct of V.cuts) {
       if (p[0] < ct.box[0] || p[1] < ct.box[1] || p[0] > ct.box[2] || p[1] > ct.box[3]) continue;
       for (let k = 1; k < ct.pts.length; k++) {
         const A = ct.pts[k - 1], B = ct.pts[k], dx = B[0] - A[0], dy = B[1] - A[1], L2 = dx * dx + dy * dy;
@@ -357,21 +390,23 @@ class SimCamera {
         if (Math.hypot(A[0] + dx * u - p[0], A[1] + dy * u - p[1]) <= 0.1) return ct.v;
       }
     }
-    for (const m of this.scene.dots.concat(this.scene.marks)) if (Math.hypot(p[0] - m.x, p[1] - m.y) <= m.d / 2) return 25;
+    for (const m of V.dots) if (near(p[0] - m.x, p[1] - m.y, m.d / 2)) return 25;
     // plates (steel, brushed along X: fine streaks) lying on the bed: { pts: corners, v, holes:
     // [{ x, y, d }] }; through a hole, whatever is under it
-    for (const pl of this.scene.plates || []) {
+    for (const pl of V.plates) {
       if (!inPoly(p, pl.pts)) continue;
-      if ((pl.holes || []).some((o) => Math.hypot(p[0] - o.x, p[1] - o.y) <= o.d / 2)) break;
+      if ((pl.holes || []).some((o) => near(p[0] - o.x, p[1] - o.y, o.d / 2))) break;
       return (pl.v || 100) + 14 * Math.sin(p[1] * 11.3 + 2 * Math.sin(p[0] * 0.21));
     }
     // printed artwork: dark rectangles { x0, y0, x1, y1 }
-    for (const r of this.scene.rects || []) if (p[0] >= r.x0 && p[0] <= r.x1 && p[1] >= r.y0 && p[1] <= r.y1) return 40;
+    for (const r of V.rects) if (p[0] >= r.x0 && p[0] <= r.x1 && p[1] >= r.y0 && p[1] <= r.y1) return 40;
     // the bed checkerboard, and any others (scene.boards: e.g. the small 10 mm one for stage 1)
-    for (const b of [this.scene.board].concat(this.scene.boards || [])) {
+    for (let i = 0; i < V.boards.length; i++) {
+      const b = V.boards[i];
       if (!b) continue;
-      const a = (-b.angle * Math.PI) / 180, dx = p[0] - b.x, dy = p[1] - b.y;
-      let bu = dx * Math.cos(a) - dy * Math.sin(a), bv = dx * Math.sin(a) + dy * Math.cos(a);
+      // (each board's turn worked out once per picture: the same numbers as at every point)
+      const t = V.turn[i], dx = p[0] - b.x, dy = p[1] - b.y;
+      let bu = dx * t[0] - dy * t[1], bv = dx * t[1] + dy * t[0];
       if (b.bump) { const d = b.bump(bu, bv); bu -= d[0]; bv -= d[1]; }
       // b.print: [across, down] how far the print is from its size (a printer's scaling)
       const u = bu / (b.square * (b.print ? b.print[0] : 1)), v = bv / (b.square * (b.print ? b.print[1] : 1));
@@ -390,13 +425,17 @@ class SimCamera {
     let seed = 12345;
     const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff - 0.5; };
     const gain = this.exp / 50000;
+    // only what can show in this picture (its corners, turned any way, plus a little)
+    const R = (c + 0.5) * s * Math.SQRT2 + 0.05;
+    const vw = this.view([cam[0] - R, cam[1] - R, cam[0] + R, cam[1] + R]);
+    const OFF = [[-0.25, -0.25], [0.25, -0.25], [-0.25, 0.25], [0.25, 0.25]];
     for (let y = 0; y < n; y++) {
       for (let x = 0; x < n; x++) {
         // 2×2 samples per pixel: soft edges, like a real lens
         let v = 0;
-        for (const [ox, oy] of [[-0.25, -0.25], [0.25, -0.25], [-0.25, 0.25], [0.25, 0.25]]) {
+        for (const [ox, oy] of OFF) {
           const ix = (x + ox - c) * s, iy = (y + oy - c) * s;
-          v += this.shade([cam[0] + ca * ix - sa * iy, cam[1] + sa * ix + ca * iy]);
+          v += this.shade([cam[0] + ca * ix - sa * iy, cam[1] + sa * ix + ca * iy], vw);
         }
         const lit = this.light ? this.light((x - c) * s, (y - c) * s) : 1;
         data[y * n + x] = Math.max(0, Math.min(255, Math.round((v / 4) * lit * gain + this.noise * rnd())));
