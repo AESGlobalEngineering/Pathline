@@ -552,13 +552,14 @@ class Component extends DCLogic {
     } else connFields.push(roPick('Driver', raw.ctrl));
     const connCard = card('Connection', connFields);
     const jobCard = card('Job defaults', [
-      { isCorner: true, l: 'Origin', op: sim ? 1 : 0.45, corners: ['tl', 'tr', 'bl', 'br'].map((c) => ({ c, on: (info.origin || 'tl') === c, ro: !sim, label: { tl: 'Origin top left', tr: 'Origin top right', bl: 'Origin bottom left', br: 'Origin bottom right' }[c], bg: (info.origin || 'tl') === c ? accent : 'var(--line-hover)', pick: () => { if (sim) setInfo('origin')(c); } })) },
+      // the origin is Prepare's own setting for every machine (the controller's report isn't reliable)
+      { isCorner: true, l: 'Origin', op: 1, corners: ['tl', 'tr', 'bl', 'br'].map((c) => ({ c, on: CC.originOf(raw) === c, ro: false, label: { tl: 'Origin top left', tr: 'Origin top right', bl: 'Origin bottom left', br: 'Origin bottom right' }[c], bg: CC.originOf(raw) === c ? accent : 'var(--line-hover)', pick: () => this.patch((m) => ({ ...m, origin: c })) })) },
       roSeg('Units', info.units || 'mm', ['mm', 'inch'], setInfo('units')),
       roToggle('Home on start', info.home !== false, setInfo('home')),
       roText('Job name prefix', info.prefix || '', '', setInfo('prefix'))
     ]);
     const bed = info.bed || (isLaser ? [813, 508] : [1600, 1000]);
-    const origin = info.origin || 'tl';
+    const origin = CC.originOf(raw);
     const bedCard = card('Bed', [roText('Width', bed[0], 'mm', (v) => setInfo('bed')([v, bed[1]])), roText('Height', bed[1], 'mm', (v) => setInfo('bed')([bed[0], v])), roText('Max speed', info.speed, 'mm/s', setInfo('speed')), roText('Acceleration', info.acc, 'mm/s²', setInfo('acc'))]);
     // the preview uses the last sensible size while a number is being typed
     const bedN = bed.map((v, i) => (Number(v) > 0 ? Number(v) : (isLaser ? [813, 508] : [1600, 1000])[i]));

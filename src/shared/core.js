@@ -244,12 +244,25 @@
     return { box: [b.x0, b.y0, b.x1, b.y1], path: [[b.x1, b.y0], [b.x1, b.y1], [b.x0, b.y1], [b.x0, b.y0], [b.x1, b.y0]], speed };
   }
 
+  // The machine's origin corner (tl, tr, bl, br): where the head starts and
+  // parks. Set in Machine setup (machine.origin), which wins over what the
+  // controller reports (info.origin, refreshed from it): Pathline Run reports
+  // top left whatever the controller's own origin is.
+  const ORIGINS = ['tl', 'tr', 'bl', 'br'];
+  const originOf = (machine) => {
+    const o = machine && (ORIGINS.includes(machine.origin) ? machine.origin : machine.info && machine.info.origin);
+    return ORIGINS.includes(o) ? o : 'tl';
+  };
+
   // ---------------------------------------------------------------- punch (plotter)
   // A plotter process can punch instead of cutting (mode 'punch'): the punch
   // head strikes along each line every punchSpace mm, or with centre punch on,
   // once at the centre of each closed shape.
   const PUNCH_SPACE = 5;
-  const isPunch = (p) => !!p && p.mode === 'punch';
+  // a process punches when set to, or when its tool head is a punch (by the
+  // machine's name for that slot when the machine is given): a punch can't cut
+  const isPunch = (p, machine) => !!p && (p.mode === 'punch' || /punch/i.test(machine ? toolFor(machine, p.tool) : p.tool || ''));
+  const punchHead = (p, machine) => !!p && /punch/i.test(machine ? toolFor(machine, p.tool) : p.tool || '');
   const punchSpaceOf = (p) => Math.max(0.5, Number(p && p.punchSpace) || PUNCH_SPACE);
   // Where a punch process strikes on one path, in order. A closed line is
   // divided evenly, so there's no double hit where it starts and ends; an open
@@ -1531,7 +1544,7 @@
       // parts nearest next, from where the head is when cutting begins: the
       // machine origin, or the last registration mark read (the same order
       // the estimate reads them in)
-      const bedSize = bedOf(machine), o = ((machine && machine.info) || {}).origin || 'tl';
+      const bedSize = bedOf(machine), o = originOf(machine);
       const home = [o.includes('r') ? bedSize[0] : 0, o.includes('b') ? bedSize[1] : 0];
       let at = home;
       if (isLaser) {
@@ -1599,7 +1612,7 @@
     const cut = cutOrderOf(job);
     // the head starts (and ends) at the machine's origin corner
     const bedSize = bedOf(machine);
-    const o = info.origin || 'tl';
+    const o = originOf(machine);
     const home = [o.includes('r') ? bedSize[0] : 0, o.includes('b') ? bedSize[1] : 0];
     const vTravel = Math.min(vMax, Number(info.travelSpeed) || vMax);
     // travel between cuts: top speed, acceleration and, when known, jerk (an
@@ -1728,7 +1741,7 @@
         curTool = slot;
       }
 
-      if (!isLaser && isPunch(proc)) {
+      if (!isLaser && isPunch(proc, machine)) {
         // each line's strikes in a row; lines nearest next. A ring of strikes
         // starts at its strike nearest the head, an open line at its nearer end.
         let items = cache.get(key);
@@ -2524,7 +2537,7 @@
     ACI_HEX, ACI_NAMES, aciHex, aciName, aciFg, aciStroke, rgbToAci, hexToRgb,
     uid, EMPTY_BOX, growBox, entityBox, boxOf, boxValid, boxW, boxH,
     mapEntity, translate, scaleAbout, rotateAbout, polyLen, polyArea, pointInPoly, distToEntity, isClosedPts, cleanPath, shapes,
-    processOrder, processOfAci, engraveHoles, toolSlot, isPunch, punchPoints, punchSpaceOf, PUNCH_SPACE, toolOptions, toolFor, STD_TOOLS, matOnMachine, frameArgs, toolRank, polyTime, travelTime, rasterSpans, orderPaths,
+    processOrder, processOfAci, engraveHoles, toolSlot, isPunch, punchHead, punchPoints, punchSpaceOf, PUNCH_SPACE, toolOptions, toolFor, STD_TOOLS, matOnMachine, frameArgs, originOf, toolRank, polyTime, travelTime, rasterSpans, orderPaths,
     estimate, headAt, fmtDuration, fmtLen, fmtArea, checkJob, regMarks, regMarkAci, regKindOf, regCornersOf, marksCutByJob, plateOutline, REG_KINDS, REG_TIPS, camReach, marksOutOfReach, reachShift, regProcess, withPresets, ensureRegProcess, isRegProc, REG_PROC, REG_NEEDED,
     cutOrderOf, CUT_ORDER_DEFAULT, START_CLEAR, commonLines, bedOf, bedCount, defaultPresets, DEFAULTS,
     rasterIslands, engraveScan, ENGRAVE_DIRS, DPI_STEPS, starterPresets, nestRects, THERMAL, thermalKey, thermalOf, colourOf, absorptionOf, thermalSim, bendLimit, cutModelOf, cutModelTime, fitArcs, TROTEC_CUT, rasterModelOf, rasterPitch, rasterModelTime, TROTEC_RASTER, isBareMetal, markingSprayOf, SPRAY_ABSORB, metalPresets, presetsFor

@@ -7,11 +7,11 @@ module.exports = [
   {
     version: '1.6.18', date: '18 Nov 2026',
     added: [
-      'Punching on plotters: a process\'s Processing mode can be Punch. The punch head strikes along each line every Punch space mm, or with Centre punch on, once in the centre of each closed shape. The strikes show as rings on the Job and Simulation pages and are counted in the estimate. Picking a tool head with "punch" in its name sets the process to Punch. Needs Pathline Run updated to run punch jobs.',
+      'Punching on plotters: a process\'s Processing mode can be Punch. The punch head strikes along each line every Punch space mm, or with Centre punch on, once in the centre of each closed shape. The strikes show as rings on the Job and Simulation pages and are counted in the estimate. A process on a tool head with "punch" in its name always punches. Punch processes have no speed setting (the head moves between strikes at travel speed), on the Job page or in materials. Needs Pathline Run updated to run punch jobs.',
       'Materials: a machine can be taken off a material with the × on its tab, and added again with Add machine. A material taken off a machine isn\'t offered for it on the Job page.'
     ],
     fixed: [
-      'The origin dot on the bed is drawn at the machine\'s origin corner (Machine setup → Origin), not always top left.',
+      'The origin can be set in Machine setup → Origin for every machine, not only simulated ones, and it stays set when Pathline reads the machine\'s settings (Pathline Run reports top left whatever the controller uses). The origin dot on the bed, the Simulation and the time estimate use it. Before, the dot was always top left.',
       'Tool head lists (materials, new process and the process panel) show the tool heads the machine has, not a fixed list of four.',
       'Frame sends the path and speed: from the top-right corner down, then left, up and right, at the machine\'s travel speed. The plotter framed very slowly before. Needs Pathline Run updated to use them.'
     ]

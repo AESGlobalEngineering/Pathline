@@ -34,6 +34,10 @@ A plotter process can now punch instead of cutting. This follows the controller'
 - **`path`:** trace these corners in order. The owner wants the frame to always start at the **top-right** corner and go **down, then left, up and right**. When `path` is missing (older Prepare), trace the box in that same order.
 - **`speed`:** mm/s, the machine's travel speed. The owner reports that framing on the plotter is very slow, so frame at this speed, capped at the machine's own limit, rather than a slow default.
 
+## 3. Origin in /machine
+
+`GET /machine` reports `origin: cfg.origin`. That defaults to `tl`, which isn't the origin Run runs with on a Ruida (`cfg.ruida.origin`, `tr` by default), so Prepare showed the origin as top left whatever the machine did. Please report the controller's real origin corner in `origin`. Prepare 1.6.18 also lets the operator set the origin in Machine setup, and that setting wins.
+
 ## Check
 
 - `node tools/check-hmi.js --allow-motion` against the plotter: the frame visits top right → bottom right → bottom left → top left → top right, at the speed sent.
