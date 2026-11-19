@@ -1179,20 +1179,25 @@ class Component extends DCLogic {
       processes = processes.filter((_, k) => k !== regIdx);
       regIdx = -1;
     }
-    const corners = CC.regKindOf(job) === 'corner';
+    const kind = CC.regKindOf(job);
+    const corners = kind === 'corner' || kind === 'edge';
     const wasOn = job.regMode && job.regMode !== 'off';
-    // turning marks on: pick the colour the marks (or the plate's outline) use
-    this.setState({ reg: false, ...(mode !== 'off' && !wasOn ? { procSel: regIdx, picker: true, tab: 'Processes', edit: {} } : mode === 'off' ? { procSel: 0, edit: {} } : {}) });
+    // turning marks on: pick the colour the marks (or the plate's outline) use; part edges use no colour
+    const pick = mode !== 'off' && !wasOn && kind !== 'edge';
+    this.setState({ reg: false, ...(pick ? { procSel: regIdx, picker: true, tab: 'Processes', edit: {} } : mode === 'off' ? { procSel: 0, edit: {} } : {}) });
     this.commit({ ...job, regMode: mode, processes, ...(corners && n ? { regCorners: n } : {}) }, { record: true });
-    if (mode !== 'off' && !wasOn) LRC.toast(corners ? 'Registration marks on — draw the plate\'s outline as a box and give it the colour you pick for "Registration marks"' : 'Registration marks on — pick the colour(s) your mark objects use for "Registration marks", or right-click the marks and choose a colour', { ms: 7000 });
+    if (pick) LRC.toast(corners ? 'Registration marks on — draw the plate\'s outline as a box and give it the colour you pick for "Registration marks"' : 'Registration marks on — pick the colour(s) your mark objects use for "Registration marks", or right-click the marks and choose a colour', { ms: 7000 });
   }
   // What the camera looks for: printed dots, holes already in the plate, or the plate's corners
   setRegKind(kind) {
     const job = this.state.job;
     if (CC.regKindOf(job) === kind) return;
     const next = { ...job, regKind: kind };
-    if (kind === 'corner' && !job.regCorners) next.regCorners = CC.regCornersOf(job);
+    if ((kind === 'corner' || kind === 'edge') && !job.regCorners) next.regCorners = CC.regCornersOf(job);
+    // four corners is part edges only
+    if (kind !== 'edge' && job.regCorners > 3) next.regCorners = 3;
     this.commit(next, { record: true });
+    if (kind === 'edge') LRC.toast('Part edges: the camera reads the printed corners of the parts at the sheet\'s corners, on their own cut lines. Nothing to draw.', { ms: 7000 });
     if (kind === 'corner') LRC.toast('Plate corners: draw the plate\'s outline as a box (rounded corners are fine) in the Registration marks colour', { ms: 7000 });
   }
   // Give every selected object a colour (and so a process).
@@ -1757,8 +1762,15 @@ class Component extends DCLogic {
       { id: 'pos', n: 2, l: '2 corners', s: 'Top left and bottom right', dots: ['tl', 'br'] },
       { id: 'linear', n: 3, l: '3 corners', s: 'Top left, top right and bottom left', dots: ['tl', 'tr', 'bl'] }
     ];
-    const regModes = regKind === 'corner'
-      ? CORNER_MODES.map((x) => {
+    // part edges: 2, 3 or 4 parts' corners (the sheet's corners)
+    const EDGE_MODES = [
+      { id: 'off', n: 0, l: 'Off', s: 'No marks', dots: [] },
+      { id: 'pos', n: 2, l: '2 parts', s: 'Top left and bottom right', dots: ['tl', 'br'] },
+      { id: 'linear', n: 3, l: '3 parts', s: 'Top left, bottom left and top right', dots: ['tl', 'tr', 'bl'] },
+      { id: 'linear', n: 4, l: '4 parts', s: 'All four corners · large sheets', dots: ['tl', 'tr', 'bl', 'br'] }
+    ];
+    const regModes = regKind === 'corner' || regKind === 'edge'
+      ? (regKind === 'edge' ? EDGE_MODES : CORNER_MODES).map((x) => {
         const on = x.id === 'off' ? !regOn : regOn && x.n === nCorners;
         // corners drawn as small Ls at the box's corners
         return { l: x.l, n: x.s, on, bg: on ? accentSoft : 'transparent', dots: x.dots.map((k) => DOT[k]), pick: () => this.setRegMode(x.id, x.n) };
@@ -1770,8 +1782,9 @@ class Component extends DCLogic {
       }));
     const regLabel = !regOn ? 'Off'
       : regKind === 'corner' ? 'Plate corners · ' + nCorners
+        : regKind === 'edge' ? 'Part edges · ' + nCorners
         : regKind === 'hole' ? 'Holes · ' + (CC.REG_NEEDED[mode.id] || 3) : mode.l + ' · ' + mode.n;
-    const KINDS = [['dot', 'Printed dots'], ['hole', 'Holes'], ['corner', 'Plate corners']];
+    const KINDS = [['dot', 'Printed dots'], ['hole', 'Holes'], ['corner', 'Plate corners'], ['edge', 'Part edges']];
     const regKinds = KINDS.map(([id, l]) => ({ l, on: regKind === id, bg: regKind === id ? 'var(--seg-on)' : 'transparent', sh: regKind === id ? 'var(--shadow-1)' : 'none', fg: regKind === id ? 'var(--text)' : 'var(--text-3)', pick: () => this.setRegKind(id) }));
     const regTip = CC.REG_TIPS[regKind] || '';
 
@@ -1800,7 +1813,7 @@ class Component extends DCLogic {
         chips, none: chips.length === 0, name: p.name, badge,
         badgeBg: badge === 'Edited' ? 'var(--warn-soft)' : accent, badgeFg: badge === 'Edited' ? 'var(--warn)' : 'var(--on-accent)',
         proc: (isReg ? 'Camera marks, not cut' : isLaser ? p.proc : p.tool) + (nObj ? ' · ' + nObj + ' object' + (nObj > 1 ? 's' : '') : ''),
-        summary: isReg ? (regKind === 'corner' ? (nObj === 1 ? 'plate outline' : nObj + ' / 1 plate outline') : nObj + ' / ' + (CC.REG_NEEDED[job.regMode] || 3) + (regKind === 'hole' ? ' holes' : ' marks')) : isLaser ? p.power + '% · ' + p.speed + ' mm/s' : CC.isPunch(p, machine) ? (p.centre ? 'centre punch' : 'punch ' + CC.punchSpaceOf(p) + ' mm') : p.speed + ' mm/s',
+        summary: isReg ? (regKind === 'edge' ? 'part edges' : regKind === 'corner' ? (nObj === 1 ? 'plate outline' : nObj + ' / 1 plate outline') : nObj + ' / ' + (CC.REG_NEEDED[job.regMode] || 3) + (regKind === 'hole' ? ' holes' : ' marks')) : isLaser ? p.power + '% · ' + p.speed + ' mm/s' : CC.isPunch(p, machine) ? (p.centre ? 'centre punch' : 'punch ' + CC.punchSpaceOf(p) + ' mm') : p.speed + ' mm/s',
         dashOn: !!p.dash, on: i === selIdx,
         bg: i === selIdx ? accentSoft : 'var(--surface)', bd: i === selIdx ? accent : 'var(--line)', op: out && shown ? 1 : 0.55,
         // the eye only hides the objects here (still sent and simulated)
@@ -2281,7 +2294,7 @@ class Component extends DCLogic {
       job, machine, sel: selIds, tool: S.tool, accent, snap: S.snap, drawAci: this.drawAci(),
       // camera machine: where registration marks can go (shown fainter while they're off)
       reach: isLaser ? CC.camReach(machine) : null, reachOn: isLaser && !!job.regMode && job.regMode !== 'off',
-      corners: isLaser && regKind === 'corner' ? CC.regMarks(job, machine) : null,
+      corners: isLaser && (regKind === 'corner' || regKind === 'edge') ? CC.regMarks(job, machine) : null,
       canvasRef: (c) => { this.canvas = c; },
       onSelect: (sel) => this.setState({ sel }),
       onCommit: (j, opts, sel) => { this.commit(j, opts, sel); if (S.tool !== 'select' && S.tool !== 'measure') this.setState({ tool: 'select' }); },

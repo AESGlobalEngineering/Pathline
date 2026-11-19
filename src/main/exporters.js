@@ -132,7 +132,11 @@ function jobSheet(job, machine, material, est) {
   if (isLaser) {
     const on = job.regMode && job.regMode !== 'off';
     const kind = CC.regKindOf(job);
-    if (on && kind === 'corner') {
+    if (on && kind === 'edge') {
+      const ms = regMarks(job, machine);
+      const rs = [...new Set(ms.map((m) => m.r))];
+      line('Reg marks: part edges · the printed corners of ' + ms.length + ' parts at the sheet\'s corners' + (rs.length === 1 && rs[0] ? ' · rounded corners, r ' + rs[0] + ' mm' : ''));
+    } else if (on && kind === 'corner') {
       const n = regMarks(job, machine).length;
       const pl = CC.plateOutline(job);
       line('Reg marks: plate corners · ' + n + ' read' + (pl && pl.e && pl.r ? ' · rounded corners, r ' + pl.r + ' mm' : '') + (n ? '' : ' (draw the plate\'s outline in the Registration marks colour)'));
@@ -208,7 +212,7 @@ function toolpath(job, est) {
       out.push({ type: 'engrave', process: o.proc, name: p.name, ents: engraveEnts(o.ents), bed: o.bed, dpi: o.dpi, passes: o.passes || 1, pass: o.pass || undefined, round: o.round, lines: o.rows, scan: o.shared ? 'across' : 'island', direction: o.dir || 'down', bidirectional: !o.uni, seconds: +o.dur.toFixed(3), box: [r3(o.box.x0), r3(o.box.y0), r3(o.box.x1), r3(o.box.y1)] });
     } else if (o.kind === 'inspect') {
       // kind: what the camera looks for (PROTOCOL.md, inspect); toward: which way a plate corner's plate lies
-      out.push({ type: 'inspect', mark: o.mark, of: o.of, at: [r3(o.at[0]), r3(o.at[1])], d: r3(o.d), seconds: +o.dur.toFixed(3), ...(o.markKind && o.markKind !== 'dot' ? { kind: o.markKind } : {}), ...(o.toward ? { toward: o.toward.slice() } : {}), ...(o.cornerR ? { r: o.cornerR } : {}) });
+      out.push({ type: 'inspect', mark: o.mark, of: o.of, at: [r3(o.at[0]), r3(o.at[1])], d: r3(o.d), seconds: +o.dur.toFixed(3), ...(o.markKind && o.markKind !== 'dot' ? { kind: o.markKind } : {}), ...(o.toward ? { toward: o.toward.slice() } : {}), ...(o.cornerR ? { r: o.cornerR } : {}), ...(o.part ? { part: o.part } : {}) });
     } else if (o.kind === 'dwell') {
       out.push({ type: 'dwell', process: o.proc, name: p.name, pass: o.pass, seconds: +o.dur.toFixed(3) });
     } else if (o.kind === 'change') {

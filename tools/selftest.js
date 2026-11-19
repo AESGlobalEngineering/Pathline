@@ -693,13 +693,32 @@ async function main() {
     ok(CC.regMarks(none, cam).length === 0 && CC.checkJob(none, cam).some((c) => c.block && /draw the plate\'s outline/.test(c.l)), 'plate corners without a box in the mark colour can\'t be sent');
     ok(CC.checkJob({ ...corners, entities: corners.entities.concat(base.entities.slice(1)) }, cam).some((c) => c.block && /one box/.test(c.l)), 'more than one object in the mark colour can\'t be sent with plate corners');
     ok(CC.checkJob({ ...corners, entities: [base.entities[0], { id: 'disc', aci: 5, paths: [{ p: CC.shapes.ellipse(200, 140, 90, 90), c: true }] }] }, cam).some((c) => c.block && /rectangle along X and Y/.test(c.l)), 'a plate outline that isn\'t a rectangle can\'t be sent');
+    // part edges: a full printed sheet of parts, no marks; the camera reads the corners of the parts at the sheet's corners
+    const grid = [];
+    for (let r = 0; r < 3; r++) for (let c = 0; c < 4; c++) {
+      const x = 60 + c * 80, y = 50 + r * 120;
+      grid.push({ id: 'p' + r + c, aci: 1, paths: [{ p: CC.shapes.rect(x, y, 80, 120, 10), c: true }] }, { id: 's' + r + c, aci: 1, paths: [{ p: CC.shapes.rect(x + 20, y + 50, 40, 2.5, 0), c: true }] });
+    }
+    const edges = { ...base, regKind: 'edge', sheet: { on: false }, processes: [base.processes[0], CC.regProcess()], entities: grid };
+    const es = CC.regMarks(edges, cam);
+    const wantE = { 'p00-tl': [60, 50, 1, 1], 'p03-tr': [380, 50, -1, 1], 'p20-bl': [60, 410, 1, -1] };
+    ok(es.length === 3 && es.every((m) => { const w = wantE[m.id]; return w && near(m.x, w[0], 0.01) && near(m.y, w[1], 0.01) && m.toward[0] === w[2] && m.toward[1] === w[3] && m.kind === 'corner' && near(m.r, 10, 0.15); }), 'part edges: the outer corners of the parts at the top left, top right and bottom left of the sheet, with the corner radius');
+    ok(CC.regMarks({ ...edges, regCorners: 4 }, cam).map((m) => m.id).join() === 'p00-tl,p03-tr,p20-bl,p23-br', 'four part corners adds the bottom right part for a large sheet');
+    const est = inspect(edges);
+    ok(est.length === 3 && est.map((x) => x.at.map((v) => +v.toFixed(1)).join(',')).join(' ') === '60,50 60,410 380,50' && est.every((x) => x.kind === 'corner' && x.part && near(x.r, 10, 0.15)), 'part edges are sent as plate corners, read top left, bottom left, top right, naming the part');
+    const pkgE = ex.buildPackage(edges, cam, null, CC.estimate(edges, cam, { timeline: true }));
+    ok(grid.every((e) => pkgE.toolpath.some((x) => x.type === 'cut' && x.ent === e.id)), 'with part edges every part outline is still cut');
+    ok(CC.checkJob(edges, cam).some((c) => c.ok && /3 part corners · rounded, r 10 mm/.test(c.l)), 'the check says how many part corners are read');
+    ok(CC.checkJob({ ...edges, entities: [{ id: 'disc', aci: 1, paths: [{ p: CC.shapes.ellipse(200, 140, 50, 50), c: true }] }] }, cam).some((c) => c.block && /no part outline/.test(c.l)), 'part edges need rectangular part outlines to read');
+    ok(CC.checkJob({ ...edges, entities: [grid[0]] }, cam).some((c) => c.block && /one part outline/.test(c.l)), 'part edges need parts at different corners of the sheet');
+    ok(/part edges/.test(ex.jobSheet(edges, cam, null, CC.estimate(edges, cam))), 'the job sheet says the job is lined up by part edges');
     const sheetText = ex.jobSheet(rounded, cam, null, CC.estimate(rounded, cam));
     ok(/plate corners/.test(sheetText) && /r 8 mm/.test(sheetText) && /10 mm of white/.test(sheetText) && /white card or paper/.test(ex.jobSheet(holes, cam, null, CC.estimate(holes, cam))), 'the job sheet says the mark type, the corner radius and what to put under or around the plate');
     // Pathline Run's own check, once its mark kinds are in this repository
     const validateFile = path.join(__dirname, '..', 'run', 'src', 'job', 'validate.js');
     if (fs.existsSync(validateFile) && /toward/.test(fs.readFileSync(validateFile, 'utf8'))) {
       const v = require(validateFile);
-      for (const [name, job] of [['corner', corners], ['hole', holes]]) {
+      for (const [name, job] of [['corner', corners], ['hole', holes], ['part edges', edges]]) {
         let err = null;
         const runCfg = { controller: 'trotec', type: 'laser', name: cam.name, bed: CC.bedOf(cam), f: {}, regMarks: 'ignore', vision: { enabled: true } };
         try { v.check(ex.buildPackage(job, cam, null, CC.estimate(job, cam, { timeline: true })), runCfg); } catch (e) { err = e; }

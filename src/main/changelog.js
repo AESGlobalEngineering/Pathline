@@ -5,6 +5,13 @@
 
 module.exports = [
   {
+    version: '1.6.19', date: '19 Nov 2026',
+    added: [
+      'Registration by part edges, for full printed sheets with no marks: Registration marks → Mark type → Part edges. The camera reads the printed corners of the parts at the corners of the sheet (top left, bottom left and top right, and bottom right with 4 parts) on their own cut lines, and the whole job is lined up to them. Parts must be rectangles (square or rounded corners). Nothing extra to draw. Print those corner parts with a sharp edge on the cut line, and put white card under clear material there. Needs Pathline Run updated to read printed edges.'
+    ],
+    fixed: []
+  },
+  {
     version: '1.6.18', date: '18 Nov 2026',
     added: [
       'Punching on plotters: a process\'s Processing mode can be Punch. The punch head strikes along each line every Punch space mm, or with Centre punch on, once in the centre of each closed shape. The strikes show as rings on the Job and Simulation pages and are counted in the estimate. A process on a tool head with "punch" in its name always punches. Punch processes have no speed setting (the head moves between strikes at travel speed), on the Job page or in materials. Needs Pathline Run updated to run punch jobs.',
