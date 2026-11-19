@@ -707,10 +707,12 @@ function jogView() {
   const mw = st.markWait;
   // print and cut waiting for a mark: what to do, Accept and Stop
   const markBox = mw ? '<div role="alert" class="warnbox" style="display:flex;flex-wrap:wrap;align-items:center;gap:12px 16px">' +
-    '<div style="flex:1 1 260px;min-width:0;display:flex;flex-direction:column;gap:4px"><strong>' + (mw.kind === 'corner' ? 'Plate corner ' : mw.kind === 'hole' ? 'Registration hole ' : 'Registration mark ') + mw.mark + ' of ' + mw.of + (mw.again ? ' still not found' : ' not found') + '</strong>' +
+    '<div style="flex:1 1 260px;min-width:0;display:flex;flex-direction:column;gap:4px"><strong>' + (mw.kind === 'corner' && mw.part ? 'Part corner ' : mw.kind === 'corner' ? 'Plate corner ' : mw.kind === 'hole' ? 'Registration hole ' : 'Registration mark ') + mw.mark + ' of ' + mw.of + (mw.again ? ' still not found' : ' not found') + '</strong>' +
     '<span>' + (mw.again ? 'There was no ' + (mw.kind === 'corner' ? 'corner' : mw.kind === 'hole' ? 'hole' : 'mark') + ' under the crosshair. ' : 'It wasn\'t near X ' + mw.near[0].toFixed(1) + ', Y ' + mw.near[1].toFixed(1) + ' mm. ') +
     (mw.why ? 'The camera ' + (/^the camera /.test(mw.why) ? mw.why.slice(11) : 'found ' + mw.why) + '. ' : '') +
-    (mw.kind === 'corner' && mw.r > 0
+    (mw.kind === 'corner' && mw.part
+      ? 'Jog the camera over the printed corner of the part at the ' + esc(mw.where || 'top left') + (mw.r > 0 ? ' (rounded, radius ' + mw.r + ' mm): put the red circle where its two straight edges would meet if they carried on' : ': put its corner in the red circle') + ', with the edge of the print sharp and plain card or material showing past it, then press Accept: the camera finds the corner from the print\'s straight edges.'
+      : mw.kind === 'corner' && mw.r > 0
       ? 'This plate\'s corners are rounded (radius ' + mw.r + ' mm). Jog the camera until the red circle is where its two straight edges would meet if they carried on, with white background showing past both edges, then press Accept: the camera looks a little way inside the plate and finds the corner from the straight edges.'
       : mw.kind === 'corner'
       ? 'Jog the camera until the plate\'s corner is in the red circle, with white background showing past both edges, then press Accept: the camera finds the corner from its edges.'

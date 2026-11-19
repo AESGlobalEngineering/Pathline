@@ -877,8 +877,11 @@ class Machine {
     this.markWait = w;
     // kind: 'dot' (printed), 'hole' (in the plate) or 'corner' (the plate's corner)
     // (r: a rounded corner's radius; why: what the camera couldn't see, when moving it may help)
-    this.st.markWait = { mark: info.mark, of: info.of, near: info.near.map((v) => +v.toFixed(2)), again: !!info.again, kind: info.kind || 'dot', r: info.r || 0, why: info.why || null };
-    this.st.message = 'Mark ' + info.mark + ' of ' + info.of + (info.again ? ' still not found' : ' not found') + ': jog the camera over ' + (info.kind === 'corner' ? 'the plate\'s corner' : 'it') + ', then Accept';
+    // (part: a printed part's corner, Part edges; where: which of the sheet's corners it's at)
+    const tw = Array.isArray(info.toward) ? info.toward : [1, 1];
+    const where = (tw[1] < 0 ? 'bottom' : 'top') + ' ' + (tw[0] < 0 ? 'right' : 'left');
+    this.st.markWait = { mark: info.mark, of: info.of, near: info.near.map((v) => +v.toFixed(2)), again: !!info.again, kind: info.kind || 'dot', r: info.r || 0, why: info.why || null, part: !!info.part, where };
+    this.st.message = 'Mark ' + info.mark + ' of ' + info.of + (info.again ? ' still not found' : ' not found') + ': jog the camera over ' + (info.kind === 'corner' ? (info.part ? 'the printed corner of the part at the ' + where : 'the plate\'s corner') : 'it') + ', then Accept';
     try {
       while (!w.accepted) {
         if (ctl.aborted) throw busyErr('Stopped');

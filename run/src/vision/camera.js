@@ -412,6 +412,9 @@ class SimCamera {
       const u = bu / (b.square * (b.print ? b.print[0] : 1)), v = bv / (b.square * (b.print ? b.print[1] : 1));
       if (u >= -1 && v >= -1 && u < (b.nx || 30) - 1 && v < (b.ny || 20) - 1) return (Math.floor(u) + Math.floor(v)) % 2 === 0 ? 30 : 220;
     }
+    // scene.under(p): what shows through clear material where nothing's printed (the bed's
+    // honeycomb, say), a grey level or null for the plain sheet
+    if (this.scene.under) { const u = this.scene.under(p); if (u !== null && u !== undefined) return u; }
     return this.scene.sheet === undefined ? 225 : this.scene.sheet;
   }
 

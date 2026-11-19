@@ -986,6 +986,16 @@ async function visionTests() {
       const why = {};
       const big = await new SimCamera({ size: 700, truth: { offset: [0, 0], pixel: 0.05, rotation: 90 }, scene: { plates: [pl] }, headAt: () => ({ x: 510, y: 110 }) }).grab();
       ok(!detect.findPlateCorner(big, { M, toward: [1, 1], r: 40, c0: [-10, -10], why }) && why.view && /straight edge/.test(why.reason), 'a corner radius too big for the picture: not found, and says the camera can\'t see enough straight edge', JSON.stringify(why));
+      // Part edges (Prepare 1.6.19): a printed part's corner (r 10, dark print with a light panel 3 mm
+      // inside its edge) on clear acrylic, the bed's honeycomb showing past it; turned 0.5°
+      const t5 = (p) => { const a = (0.5 * Math.PI) / 180, dx = p[0] - 300, dy = p[1] - 300; return [300 + dx * Math.cos(a) - dy * Math.sin(a), 300 + dx * Math.sin(a) + dy * Math.cos(a)]; };
+      const honey = (p) => { for (const a of [0, 60, 120]) { const t = (a * Math.PI) / 180, u = p[0] * Math.sin(t) - p[1] * Math.cos(t); if ((((u % 7) + 7) % 7) < 0.35) return 70; } return 165; };
+      const part = [{ pts: rr(303, 303, 377, 417, 7).map(t5), v: 190 }, { pts: rr(300, 300, 380, 420, 10).map(t5), v: 55 }];
+      const pc = t5([300, 300]), pl5 = [pc[0] + 8, pc[1] + 8];
+      const pf = await new SimCamera({ size: 500, truth: { offset: [0, 0], pixel: 0.06, rotation: 90 }, scene: { plates: part, under: honey }, headAt: () => ({ x: pl5[0], y: pl5[1] }) }).grab();
+      const ph = detect.findPlateCorner(pf, { M: [0, -0.06, 0.06, 0], toward: [1, 1], r: 10, c0: [-8, -8], printed: true });
+      const pe = ph ? Math.hypot(pl5[0] + ph.bed[0] - pc[0], pl5[1] + ph.bed[1] - pc[1]) : null;
+      ok(pe !== null && pe < 0.05 && ph.printed && Math.abs(ph.rotation - 0.5) < 0.3, 'printed part corner on clear acrylic over the honeycomb (r 10, panel inside): found ' + (pe === null ? 'nothing' : pe.toFixed(3) + ' mm off, edges at ' + ph.rotation.toFixed(2) + '° (0.5)'), JSON.stringify(ph && ph.angles));
     }
     // (the angle only aims the scan at the next corner; the board's angle comes from the corners found)
     ok(c && Math.abs(c.x - (239.5 - 25)) < 0.5 && Math.abs(c.y - (239.5 + 12.5)) < 0.5 && Math.abs(c.angle - 25) < 3, 'checkerboard corner at 25°: found to a fraction of a pixel, angle ' + (c && c.angle.toFixed(1)) + '° (a hint, within 3°)', JSON.stringify(c));
@@ -1227,6 +1237,13 @@ async function visionTests() {
     const corners = await runMarks(onPlate([{ at: [430, 60], kind: 'corner', toward: [1, 1] }, { at: [630, 60], kind: 'corner', toward: [-1, 1] }, { at: [430, 250], kind: 'corner', toward: [1, -1] }]));
     ok(corners.s.state === 'idle' && corners.s.progress === 1 && Math.abs(corners.rot - 0.6) < 0.05 && /print and cut: rigid/.test(corners.fitL) && corners.log.filter((l) => /plate corner, edges at/.test(l)).length === 3 && Math.hypot(corners.found1[0] - 431.2, corners.found1[1] - 59.3) < 0.15,
       'plate corners on white: 3 read from their edges, moved and turned only (rigid), ' + corners.rot + '° (0.6), first corner at ' + corners.found1.join(', ') + ' (431.2, 59.3)', corners.fitL + ' / ' + corners.log.slice(0, 4).join(' | '));
+    // Part edges (regMarks.kind 'edge', each corner a part's): the same corners read as printed edges,
+    // and the job fitted to them like marks (affine from three), logged with each part and radius
+    const edgeJob = onPlate([{ at: [430, 60], kind: 'corner', toward: [1, 1], r: 0, part: 'pA' }, { at: [630, 60], kind: 'corner', toward: [-1, 1], r: 0, part: 'pB' }, { at: [430, 250], kind: 'corner', toward: [1, -1], r: 0, part: 'pC' }]);
+    edgeJob.regMarks = { ...(edgeJob.regMarks || {}), kind: 'edge' };
+    const pe = await runMarks(edgeJob);
+    ok(pe.s.state === 'idle' && pe.s.progress === 1 && Math.abs(pe.rot - 0.6) < 0.05 && /print and cut: affine/.test(pe.fitL) && /part corners r 0 mm/.test(pe.fitL) && pe.log.filter((l) => /printed corner of part p[ABC], r 0 mm/.test(l)).length === 3,
+      'part edges: 3 printed corners read (part and r logged), fitted affine, ' + pe.rot + '° (0.6)', pe.fitL + ' / ' + pe.log.slice(0, 4).join(' | '));
     const one = await runMarks(onPlate([{ at: [430, 60], kind: 'corner', toward: [1, 1] }]));
     ok(one.s.state === 'idle' && one.s.progress === 1 && Math.abs(one.rot - 0.6) < 0.1 && /print and cut: corner/.test(one.fitL),
       'one plate corner: its edges give the turn, ' + one.rot + '° (0.6)', one.fitL + ' / ' + JSON.stringify(one.s));

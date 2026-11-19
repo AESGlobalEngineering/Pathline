@@ -178,7 +178,7 @@ class Vision {
   // opts.alsoLight: a registration mark not found as a dark dot is looked for as a hole too
   find(img, kind, d, opts = {}) {
     if (kind === 'corner') return detect.findCorner(img);
-    if (kind === 'plate') return detect.findPlateCorner(img, { M: this.cfg.matrix, toward: opts.toward || [1, 1], r: opts.r || 0, c0: opts.expect, why: opts.why });
+    if (kind === 'plate') return detect.findPlateCorner(img, { M: this.cfg.matrix, toward: opts.toward || [1, 1], r: opts.r || 0, c0: opts.expect, why: opts.why, printed: !!opts.printed });
     const px = this.pixelSize();
     // registration marks (d given) sit in plain white: only those count; calibration targets
     // (the cut mark on scrap, a dot under the camera) may have darker surroundings
@@ -277,6 +277,10 @@ class Vision {
     const turns = []; // each plate corner's edges: how the plate lies (degrees)
     const squares = []; // each plate corner: its radius and how far its edges are off square
     let byHand = false;
+    // Part edges (regMarks.kind 'edge'): each corner is a printed part's, on its own cut line (the
+    // part is cut as normal). Found from the print's edges, and the job fitted to the corners like
+    // marks: printed sheets stretch, so it's stretched to them too (Full linear from three corners)
+    const edges = (pkg.regMarks && pkg.regMarks.kind === 'edge') || steps.some((s) => s.kind === 'corner' && s.part);
     this.clearMarkFrames();
     for (const s of steps) {
       // what the mark is (PROTOCOL.md): a printed dot (the default), a hole in the plate (white under
@@ -287,11 +291,14 @@ class Vision {
       // once the camera has taken one), and why says what the corner finder last missed
       const rad = kind === 'plate' ? Math.max(0, Number(s.r) || 0) : 0;
       const why = {};
-      const what = () => ({ kind, toward: s.toward, alsoLight: kind === 'dot', r: rad, why, ...(kind === 'plate' ? { aim: this.cornerAim(rad, s.toward || [1, 1]) } : {}) });
+      const what = () => ({ kind, toward: s.toward, alsoLight: kind === 'dot', r: rad, why, printed: kind === 'plate' && edges, ...(kind === 'plate' ? { aim: this.cornerAim(rad, s.toward || [1, 1]) } : {}) });
       // predict from the marks found so far: the shift from one; shift and rotation from two (their
       // scale is one distance, and carried 740 mm out to the third mark it put a 6 % stretch's
       // worth, 45 mm, into the prediction); the full fit from three
-      const pred = E.length ? fitting.fit(E, D, E.length === 1 ? 'shift' : E.length === 2 ? 'rigid' : 'affine')(s.at) : s.at;
+      // (after one corner: turned as its edges lie, as well as moved; a sheet turned 0.5° puts the
+      // corner diagonally across it 13 mm from where a shift alone would look)
+      const pred = E.length === 1 && turns.length === 1 ? fitting.pose(E[0], D[0], turns[0])(s.at)
+        : E.length ? fitting.fit(E, D, E.length === 1 ? 'shift' : E.length === 2 ? 'rigid' : 'affine')(s.at) : s.at;
       status('Reading mark ' + s.mark + ' of ' + s.of);
       // where each mark's time goes (logged): sending the move, the head travelling and settling,
       // the pictures and finding the dot
@@ -313,7 +320,7 @@ class Vision {
       for (let again = false; !r; again = true) {
         byHand = true;
         this.log('mark ' + s.mark + (again ? ' still not found' : ' not found near ' + pred.map((v) => v.toFixed(1)).join(', ') + ' mm') + (why.reason ? ' (' + why.reason + ')' : '') + ': waiting for the camera to be jogged over it');
-        const at = await this.m.waitForMark({ mark: s.mark, of: s.of, near: pred, again, kind: s.kind === 'corner' || s.kind === 'hole' ? s.kind : 'dot', r: rad, why: why.view ? why.reason : null }, ctl);
+        const at = await this.m.waitForMark({ mark: s.mark, of: s.of, near: pred, again, kind: s.kind === 'corner' || s.kind === 'hole' ? s.kind : 'dot', r: rad, why: why.view ? why.reason : null, part: kind === 'plate' && edges, toward: s.toward }, ctl);
         delete why.reason; delete why.view;
         status('Reading mark ' + s.mark + ' of ' + s.of + ' where the camera was put');
         r = await this.measure(at, kind, { d: s.d, ctl, whiteRing: false, ...what() });
@@ -325,7 +332,9 @@ class Vision {
       if (kind === 'dot' && !r.hit.light && r.dotMm && s.d) sizes.push(r.dotMm / s.d);
       if (kind === 'plate') { turns.push(r.hit.rotation); squares.push({ r: rad, sq: r.hit.squareness }); }
       const sec = (ms) => (ms / 1000).toFixed(2) + ' s';
-      const seen = kind === 'plate'
+      const seen = kind === 'plate' && edges
+        ? '; printed corner of part ' + (s.part || '?') + ', r ' + rad + ' mm (where its straight edges meet), edges at ' + r.hit.angles.map((v) => v.toFixed(2) + '°').join(' and ') + ' (' + Math.abs(r.hit.squareness).toFixed(2) + '° off square), print ' + (r.hit.plateBrighter ? 'lighter' : 'darker') + ' than past it'
+        : kind === 'plate'
         ? '; plate corner' + (rad ? ' (rounded, r ' + rad + ' mm: where its straight edges meet)' : '') + ', edges at ' + r.hit.angles.map((v) => v.toFixed(2) + '°').join(' and ') + ' (' + Math.abs(r.hit.squareness).toFixed(2) + '° off square), plate ' + (r.hit.plateBrighter ? 'lighter' : 'darker') + ' than the background'
         : r.dotMm ? '; ' + (r.hit.light ? (kind === 'hole' ? 'hole ' : 'found as a hole (light, in a darker surround) ') : kind === 'hole' ? 'hole (darker than the plate round it) ' : 'dot ') + r.dotMm.toFixed(2) + ' mm across (' + s.d + ' expected)' : '';
       this.log('mark ' + s.mark + ': expected ' + s.at.map((v) => v.toFixed(2)).join(', ') + ', found ' + r.found.map((v) => v.toFixed(3)).join(', ') + ' (' + r.tries + ' frame' + (r.tries > 1 ? 's' : '') + '); ' +
@@ -353,17 +362,27 @@ class Vision {
     // a plate's corners: the plate is its own size, so it's only moved and turned (never stretched
     // to the corners, whatever the job's mode); one corner gives the turn from its edges
     let type = fitting.typeFor(pkg.regMarks && pkg.regMarks.mode, E.length);
-    if (turns.length) type = E.length === 1 ? 'corner' : 'rigid';
+    // Printed part corners are fitted like marks, stretch and all: Full linear from three (the
+    // job's Non-linear kept with four or more), shift, turn and one scale from two
+    if (turns.length) {
+      if (E.length === 1) type = 'corner';
+      else if (!edges) type = 'rigid';
+      else if (E.length === 2) type = 'similar';
+      else if (type !== 'nonlinear') type = 'affine';
+    }
     const f = type === 'corner' ? fitting.pose(E[0], D[0], turns[0]) : fitting.fit(E, D, type);
     const i = f.info;
-    // (plate corners: their radius, and the angle between each corner's two edges)
-    const cornerNote = turns.length ? ', plate corners r ' + [...new Set(squares.map((q) => q.r))].join(' / ') + ' mm, edges off square by ' + squares.map((q) => Math.abs(q.sq).toFixed(2) + '°').join(', ') : '';
+    // (plate corners: their radius, and the angle between each corner's two edges; four or more
+    // printed corners: how far the worst lies from the fit, as the print may not be straight)
+    const cornerNote = turns.length ? ', ' + (edges ? 'part' : 'plate') + ' corners r ' + [...new Set(squares.map((q) => q.r))].join(' / ') + ' mm, edges off square by ' + squares.map((q) => Math.abs(q.sq).toFixed(2) + '°').join(', ') +
+      (edges && E.length >= 4 && type !== 'nonlinear' ? ', residual ' + i.residual.toFixed(3) + ' mm' : '') : '';
     this.log('print and cut: ' + i.type + ', shift ' + i.shift.map((v) => v.toFixed(3)).join(', ') + ' mm, rotation ' + i.rotation.toFixed(3) + '°, scale ' + ((i.scaleX - 1) * 1000).toFixed(2) + ' / ' + ((i.scaleY - 1) * 1000).toFixed(2) + ' mm/m' + cornerNote);
     // the plate's edges against the corners' positions: more than 1° apart, a corner found may be
     // something else's edge, or the plate isn't straight-sided (only logged)
     if (turns.length && E.length > 1) {
       const off = turns.map((t) => t - i.rotation), worst = Math.max(...off.map(Math.abs));
-      if (worst > 1) this.log('print and cut: the plate\'s edges lie ' + turns.map((t) => t.toFixed(2) + '°').join(', ') + ', the corners together ' + i.rotation.toFixed(2) + '°: a corner may not be the plate\'s, or its edges aren\'t straight');
+      const what = edges ? 'part' : 'plate';
+      if (worst > 1) this.log('print and cut: the ' + what + 's\' edges lie ' + turns.map((t) => t.toFixed(2) + '°').join(', ') + ', the corners together ' + i.rotation.toFixed(2) + '°: a corner may not be the ' + what + '\'s, or its edges aren\'t straight');
     }
     const height = await this.heightCheck(sizes);
     return { f, expected: E, found: D, info: i, byHand, height };

@@ -5,6 +5,13 @@
 
 module.exports = [
   {
+    version: '0.7.16', date: '19 Nov 2026',
+    added: [
+      'Print and cut by Part edges (Pathline Prepare 1.6.19): a printed sheet without registration marks is lined up from the printed corners of the parts at its corners, on their own cut lines. The camera finds the edge of the print, dark on light or light on dark, from the longest straight runs along the expected directions, so the bed\'s honeycomb through clear acrylic and the artwork\'s own edges don\'t count. With three or four corners the job is fitted like marks, stretch included (Full linear); with two, moved, turned and scaled. Each corner\'s part and radius are logged, and with four corners how far the worst lies from the fit. When one isn\'t found, the jog dialog asks for the printed corner of the part at the top left (and so on). For a clean read, print a sharp edge on those parts with no bleed past it, and put white card under them on clear material.',
+      'Corners (plates and parts): after the first, the next is looked for where the first corner\'s edges say the sheet is turned, not only moved. A sheet turned 0.5° put the corner diagonally across it 13 mm from where the camera looked.'
+    ]
+  },
+  {
     version: '0.7.15', date: '19 Nov 2026',
     added: [
       'Ruida uploads are quicker. The controller\'s list of files is kept after the first look, so later uploads read one file name (or none) instead of every file\'s name again, which slowed down as Send to machine filled its memory; the whole list is read again only when files were added or deleted on the panel. A file name that doesn\'t come back costs 1.5 s, not 4. The job\'s name and end go in the same packets as the job itself.',

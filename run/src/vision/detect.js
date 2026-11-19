@@ -261,8 +261,16 @@ function findPlateCorner(img, opts = {}) {
     const c = l.steps.filter((p) => Math.abs(p.d) > Math.max(0.08, 0.3 * big)).sort((p, q) => p.t * l.tSide - q.t * l.tSide)[0];
     return c ? { s: l.s, t: c.t, d: c.d } : null;
   }).filter(Boolean);
-  const A = pick(LA0), B = pick(LB0);
-  if (A.length < 5 || B.length < 5) return fail('not two edges meeting at a corner (' + A.length + ' and ' + B.length + ' points along them)');
+  // Printed edges (opts.printed: the edge of a part's print, Part edges in Prepare): every clear
+  // step on each line is a candidate, not just the first. On clear acrylic the bed's honeycomb
+  // shows past the print, and the artwork has edges of its own inside it; the edge is the longest
+  // straight run along the expected direction (line(), below), so a honeycomb wall or a printed
+  // detail that crosses only a few lines doesn't count
+  const pickAll = (lines) => lines.flatMap((l) => l.steps.filter((p) => Math.abs(p.d) > Math.max(0.08, 0.15 * big)).map((c) => ({ s: l.s, t: c.t, d: c.d })));
+  const printed = !!opts.printed;
+  const A = printed ? pickAll(LA0) : pick(LA0), B = printed ? pickAll(LB0) : pick(LB0);
+  const nS = (P) => new Set(P.map((p) => p.s)).size;
+  if (nS(A) < 5 || nS(B) < 5) return fail('not two edges meeting at a corner (' + nS(A) + ' and ' + nS(B) + ' points along them)');
   // a straight line t = k0 + k1·s through the points. The line through two of them that the most
   // others lie within 0.1 mm of is taken first (a glare boundary, a scratch, a line that grazed the
   // other edge can be a third of the points and pull a plain fit away; on J0111's plate a hazy
@@ -277,25 +285,55 @@ function findPlateCorner(img, opts = {}) {
     const k1 = (m * sst - ss * st) / dd;
     return { k0: (st - k1 * ss) / m, k1 };
   };
-  const line = (P) => {
+  // (printed: several candidates per line, so a line counts once, by its point nearest the run)
+  const inliers = (P, k0, k1) => {
+    if (!printed) return P.filter((p) => Math.abs(p.t - (k0 + k1 * p.s)) < tol);
+    const by = new Map();
+    for (const p of P) { const e = Math.abs(p.t - (k0 + k1 * p.s)); if (e < tol && (!by.has(p.s) || e < by.get(p.s).e)) by.set(p.s, { p, e }); }
+    return [...by.values()].map((x) => x.p);
+  };
+  // side (printed): which way the part lies across this edge. Of the runs nearly as long as the
+  // longest (80 %), the one nearest the outside is the print's edge (a printed border inside it
+  // can run as far)
+  const line = (P, side) => {
     if (P.length < 4) return null;
     let best = null, bestErr = Infinity;
+    const runs = [];
     for (let i = 0; i < P.length; i++) for (let j = i + 1; j < P.length; j++) {
       if (Math.abs(P[j].s - P[i].s) < 1) continue;
       const k1 = (P[j].t - P[i].t) / (P[j].s - P[i].s);
       if (Math.abs(k1) > 0.27) continue; // more than 15° from the job's axes: not this edge
       const k0 = P[i].t - k1 * P[i].s;
-      const inl = P.filter((p) => Math.abs(p.t - (k0 + k1 * p.s)) < tol);
+      const inl = inliers(P, k0, k1);
       const e = inl.reduce((a, p) => a + Math.abs(p.t - (k0 + k1 * p.s)), 0);
-      if (!best || inl.length > best.length || (inl.length === best.length && e < bestErr)) { best = inl; bestErr = e; }
+      if (printed) runs.push({ inl, e, out: inl.reduce((a, p) => a + p.t * side, 0) / inl.length });
+      else if (!best || inl.length > best.length || (inl.length === best.length && e < bestErr)) { best = inl; bestErr = e; }
+    }
+    if (printed && runs.length) {
+      const most = Math.max(...runs.map((r) => r.inl.length));
+      const long = runs.filter((r) => r.inl.length >= Math.max(4, 0.8 * most));
+      if (long.length) {
+        const outer = Math.min(...long.map((r) => r.out));
+        best = long.filter((r) => r.out <= outer + 2 * tol).sort((a, b) => b.inl.length - a.inl.length || a.e - b.e)[0].inl;
+      }
     }
     if (!best || best.length < 4) return null;
     let Q = best, f = lsq(Q);
-    for (let k = 0; f && k < 2; k++) { const next = P.filter((p) => Math.abs(p.t - (f.k0 + f.k1 * p.s)) < tol); if (next.length < 4) break; Q = next; f = lsq(Q); }
+    for (let k = 0; f && k < 2; k++) { const next = inliers(P, f.k0, f.k1); if (next.length < 4) break; Q = next; f = lsq(Q); }
     if (!f) return null;
-    f.n = Q.length;
+    // printed: a honeycomb wall touching the print's edge moves that line's step a tenth of a mm
+    // or so, still inside the band; points well off the rest (3 × their typical spread, 0.04 mm
+    // at least) are left out and the line fitted again
+    if (printed && Q.length >= 6) {
+      const res = Q.map((p) => Math.abs(p.t - (f.k0 + f.k1 * p.s)));
+      const med = res.slice().sort((a, b) => a - b)[res.length >> 1];
+      const keep = Q.filter((_, k) => res[k] <= Math.max(0.04, 3 * 1.4826 * med));
+      const f2 = keep.length >= 5 && keep.length < Q.length ? lsq(keep) : null;
+      if (f2) { Q = keep; f = f2; }
+    }    f.n = Q.length;
     f.span = Math.max(...Q.map((p) => p.s)) - Math.min(...Q.map((p) => p.s));
     f.rms = Math.sqrt(Q.reduce((a, p) => a + (p.t - (f.k0 + f.k1 * p.s)) ** 2, 0) / Q.length);
+    f.d = Q.reduce((a, p) => a + p.d, 0) / Q.length;
     return f;
   };
   // the edges meet at the corner; lines at or past it (near the corner a line along one edge can
@@ -303,7 +341,7 @@ function findPlateCorner(img, opts = {}) {
   // the edges fitted again
   let A1 = A, B1 = B, LA, LB, X, Y;
   for (let k = 0; k < 6; k++) {
-    LA = line(A1); LB = line(B1);
+    LA = line(A1, sy); LB = line(B1, sx);
     if (!LA || !LB) return fail('the edges aren\'t straight');
     // edge X: Y = a0 + a1·X; edge Y: X = b0 + b1·Y
     X = (LB.k0 + LB.k1 * LA.k0) / (1 - LB.k1 * LA.k1); Y = LA.k0 + LA.k1 * X;
@@ -319,7 +357,9 @@ function findPlateCorner(img, opts = {}) {
   if (Math.abs(angX - angY) > 3) return fail('the two edges found meet ' + Math.abs(angX - angY).toFixed(1) + '° off square: not the plate\'s corner');
   const [u, v] = toPx(X, Y);
   if (u < 0 || v < 0 || u > w - 1 || v > h - 1) return fail('the corner the edges meet at is outside the picture');
-  return { x: u, y: v, bed: [X, Y], r: R, angles: [angX, angY], rotation: (angX + angY) / 2, squareness: angX - angY, contrast: Math.abs(big), plateBrighter: sign > 0, points: LA.n + LB.n, rms: Math.max(LA.rms, LB.rms) };
+  // (printed: lighter or darker than what's past it, from the edges' own steps)
+  const brighter = printed ? LA.d + LB.d > 0 : sign > 0;
+  return { x: u, y: v, bed: [X, Y], r: R, angles: [angX, angY], rotation: (angX + angY) / 2, squareness: angX - angY, contrast: Math.abs(big), plateBrighter: brighter, printed, points: LA.n + LB.n, rms: Math.max(LA.rms, LB.rms) };
 }
 
 // A dot's centre without the light's slope: fit the paper round it as a tilted plane
