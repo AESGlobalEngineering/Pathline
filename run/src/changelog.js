@@ -7,7 +7,7 @@ module.exports = [
   {
     version: '0.7.20', date: '20 Nov 2026',
     added: [
-      'Raspberry Pi: a Pi can be a Pathline Run station and nothing else. Switched on, it goes straight into Pathline Run full screen (no desktop, no login), starts it again by itself if it ever stops, keeps the screen on, and is safe to switch off at the wall. One setup line on a fresh Raspberry Pi OS Lite (64-bit) does it all: run/deploy/pi/README.md.',
+      'Raspberry Pi: a Pi can be a Pathline Run station and nothing else. Switched on, it goes straight into Pathline Run full screen (no desktop, no login), starts it again by itself if it ever stops, keeps the screen on, and is safe to switch off at the wall. One setup line on a fresh Raspberry Pi OS Lite (64-bit) does it all: run/deploy/pi/README.md. Raspberry Pi\'s 10" Touch Display 2 is found by itself and Pathline Run is shown 1.5 times bigger on it (its own 1280×800 layout); it can be turned on its side.',
       'Touch screen without a keyboard (the Pi): Pathline Run brings its own on-screen keyboard. It comes up when a field is tapped, with a number pad for numbers, and goes when the field is left or Hide is tapped; Enter saves as it does on a real keyboard. A real keyboard\'s first key puts it away. The mouse pointer hides while fingers are used.',
       'If the screen\'s page ever crashes (out of memory on a small Pi), it comes back by itself a second later; a running job carries on underneath.'
     ],

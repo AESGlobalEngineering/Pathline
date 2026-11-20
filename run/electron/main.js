@@ -1,7 +1,7 @@
 // Pathline Run, the installed app: runs the HMI server (src/server.js) and
 // shows its screen in a window, full screen with --kiosk (the Raspberry Pi
 // touchscreen). Checks for updates the way Pathline does.
-//   Pathline Run.exe [--kiosk] [--sim] [--keyboard | --no-keyboard] [--hide-cursor]
+//   Pathline Run.exe [--kiosk] [--sim] [--keyboard | --no-keyboard] [--hide-cursor] [--zoom=1.5]
 // On the Raspberry Pi (deploy/pi) it is the only thing on the screen: started full screen at boot
 // by a systemd service, which starts it again if it ever stops.
 'use strict';
@@ -23,6 +23,9 @@ const keyboard = process.argv.includes('--keyboard') || (kiosk && process.platfo
 // --hide-cursor: no mouse pointer at all (touch screens that pretend to be a mouse); otherwise the
 // kiosk hides it while fingers are used and shows it again when a mouse moves
 const hideCursor = process.argv.includes('--hide-cursor');
+// --zoom=1.5: everything on the screen bigger, for a sharp small screen (the Pi's 10" Touch
+// Display 2 is 1200×1920: at 1.5 it lays out as 1280×800, Pathline Run's own size)
+const zoom = Math.min(3, Math.max(0.5, Number((process.argv.find((a) => a.startsWith('--zoom=')) || '').slice(7)) || 1));
 
 let win = null;
 let srv = null;
@@ -49,7 +52,7 @@ function createWindow(port) {
     backgroundColor: '#0E0F11', title: 'Pathline Run', show: false,
     kiosk, fullscreen: kiosk, autoHideMenuBar: true,
     icon: path.join(__dirname, '..', 'ui', 'icon-512.png'),
-    webPreferences: { contextIsolation: true, sandbox: true }
+    webPreferences: { contextIsolation: true, sandbox: true, zoomFactor: zoom }
   });
   win.once('ready-to-show', () => { if (!kiosk) win.maximize(); win.show(); });
   // links that open a new window (help, GitHub) go to the browser

@@ -8,9 +8,13 @@
 # Options (after "sudo bash -s --" when piped, or after the file name):
 #   --appimage FILE   install this Pathline Run AppImage instead of downloading it (a USB stick)
 #   --reinstall       download Pathline Run again even if it's already there (it updates itself)
-#   --rotate N        turn the picture and the touch: 0, 90, 180 or 270 (a screen mounted turned)
+#   --rotate N        turn the picture and the touch: 0, 90, 180 or 270 (a screen mounted turned;
+#                     the 10" Touch Display 2 is tall: 90 or 270 lays it on its side)
+#   --touch-rotate N  turn only the touch, when taps land in the wrong place after --rotate
+#                     (0 if the screen already turns its own touch)
 #   --scale N         make everything on the screen bigger: 1 (as it is), 1.25, 1.5, 1.75 or 2.
-#                     For sharp small screens: a 10" at 1920×1200 wants 1.5; at 1280×800 leave it
+#                     For sharp small screens: a 10" at 1920×1200 wants 1.5; at 1280×800 leave it.
+#                     Raspberry Pi's 10" Touch Display 2 is found by itself and gets 1.5
 #   --hide-cursor     never show a mouse pointer (touch screens that pretend to be a mouse)
 #   --reboot          restart the Pi at the end
 # Running it again is safe: it only puts back what it set (and keeps Pathline Run's data).
@@ -22,12 +26,13 @@ APP_DIR=$RUN_HOME/Applications
 APP=$APP_DIR/Pathline-Run.AppImage
 RELEASE=https://github.com/AESGlobalEngineering/Pathline/releases/download/pathlinerun
 
-APPIMAGE_FILE="" REINSTALL=0 ROTATE="" SCALE="" HIDE_CURSOR="" REBOOT=0
+APPIMAGE_FILE="" REINSTALL=0 ROTATE="" TOUCH_ROTATE="" SCALE="" HIDE_CURSOR="" REBOOT=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --appimage) APPIMAGE_FILE="$2"; shift ;;
     --reinstall) REINSTALL=1 ;;
     --rotate) ROTATE="$2"; shift ;;
+    --touch-rotate) TOUCH_ROTATE="$2"; shift ;;
     --scale) SCALE="$2"; shift ;;
     --hide-cursor) HIDE_CURSOR=1 ;;
     --reboot) REBOOT=1 ;;
@@ -46,13 +51,21 @@ case "$(uname -m)" in
   *) die "Pathline Run needs the 64-bit Raspberry Pi OS (this one is $(uname -m))." ;;
 esac
 case "$ROTATE" in ""|0|90|180|270) ;; *) die "--rotate takes 0, 90, 180 or 270" ;; esac
-case "$SCALE" in ""|1|1.25|1.5|1.75|2) ;; *) die "--scale takes 1, 1.25, 1.5, 1.75 or 2" ;; esac
+case "$TOUCH_ROTATE" in ""|0|90|180|270) ;; *) die "--touch-rotate takes 0, 90, 180 or 270" ;; esac
+case "$SCALE" in ""|auto|1|1.25|1.5|1.75|2) ;; *) die "--scale takes auto, 1, 1.25, 1.5, 1.75 or 2" ;; esac
 if [ -n "$APPIMAGE_FILE" ] && [ ! -s "$APPIMAGE_FILE" ]; then die "there's no file at $APPIMAGE_FILE"; fi
 
 # ---------------------------------------------------------------- packages
 say "Installing what Pathline Run needs (a few minutes the first time)"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
+# A first install brings Raspberry Pi OS and the Pi's firmware up to date (Raspberry Pi asks for
+# this for the 10" Touch Display 2); running the setup again later leaves them be
+if [ ! -s "$APP" ] || [ "$REINSTALL" = 1 ]; then
+  say "Bringing Raspberry Pi OS up to date first (this can take a while)"
+  apt-get full-upgrade -y -qq >/dev/null
+  if command -v rpi-eeprom-update >/dev/null 2>&1; then rpi-eeprom-update -a >/dev/null || true; fi
+fi
 # the first name that exists in this release of Raspberry Pi OS (Trixie renamed some: …t64)
 pick() { for p in "$@"; do if apt-cache show "$p" >/dev/null 2>&1; then echo "$p"; return; fi; done; }
 PKGS=(cage wlr-randr curl ca-certificates)
@@ -96,18 +109,27 @@ if [ ! -f /etc/default/pathline-run ]; then
 # (never while a job is running).
 #   ROTATE   turn the picture: 0, 90, 180 or 270 (set it with the setup script's --rotate, which
 #            turns the touch to match)
-#   SCALE    make everything bigger: 1, 1.25, 1.5, 1.75 or 2 (a 10" screen at 1920×1200: 1.5)
+#   TOUCH_ROTATE  turn the touch differently from the picture (the setup's --touch-rotate);
+#            empty: the same as ROTATE
+#   SCALE    make everything bigger: 1, 1.25, 1.5, 1.75 or 2 (a 10" screen at 1920×1200: 1.5).
+#            auto: 1.5 on Raspberry Pi's 10" Touch Display 2, otherwise 1
 #   ARGS     more for Pathline Run: --hide-cursor (no mouse pointer ever), --no-keyboard (no
 #            on-screen keyboard: a real keyboard is plugged in)
 ROTATE=0
-SCALE=1
+TOUCH_ROTATE=
+SCALE=auto
 ARGS=""
 EOF
 fi
 set_setting() { # name value
   if grep -q "^$1=" /etc/default/pathline-run; then sed -i "s|^$1=.*|$1=$2|" /etc/default/pathline-run; else echo "$1=$2" >> /etc/default/pathline-run; fi
 }
-if [ -n "$ROTATE" ]; then set_setting ROTATE "$ROTATE"; fi
+if [ -n "$ROTATE" ]; then
+  set_setting ROTATE "$ROTATE"
+  # a new turn: the touch follows it, unless told otherwise in the same run
+  if [ -z "$TOUCH_ROTATE" ]; then set_setting TOUCH_ROTATE ""; fi
+fi
+if [ -n "$TOUCH_ROTATE" ]; then set_setting TOUCH_ROTATE "$TOUCH_ROTATE"; fi
 if [ -n "$SCALE" ]; then set_setting SCALE "$SCALE"; fi
 if [ -n "$HIDE_CURSOR" ] && ! grep -q -- '--hide-cursor' /etc/default/pathline-run; then
   sed -i 's|^ARGS="\(.*\)"|ARGS="\1 --hide-cursor"|; s|^ARGS=" |ARGS="|' /etc/default/pathline-run
@@ -115,7 +137,7 @@ fi
 
 # touch turned with the picture (libinput reads this for every touch screen)
 . /etc/default/pathline-run
-case "${ROTATE:-0}" in
+case "${TOUCH_ROTATE:-${ROTATE:-0}}" in
   90)  MATRIX="0 1 0 -1 0 1" ;;
   180) MATRIX="-1 0 1 0 -1 1" ;;
   270) MATRIX="0 -1 1 1 0 0" ;;
@@ -141,15 +163,25 @@ PREV="$APP.prev"
 if [ ! -s "$APP" ] && [ -s "$PREV" ]; then cp "$PREV" "$APP.part" && chmod 755 "$APP.part" && mv -f "$APP.part" "$APP"; fi
 # keep that copy aside: a second name for the same file, so it takes no extra space
 ln -f "$APP" "$PREV" 2>/dev/null || true
-# a screen mounted turned
+# a screen mounted turned: turned before Pathline Run opens, so it lays out once (the Pi's own
+# DSI screen first, if there's one; the screen can take a moment to be listed)
 if [ -n "$ROTATE" ] && [ "$ROTATE" != 0 ]; then
-  ( sleep 1; OUT=$(wlr-randr 2>/dev/null | awk '/^[^ ]/{print $1; exit}'); [ -n "$OUT" ] && wlr-randr --output "$OUT" --transform "$ROTATE" ) &
+  for i in 1 2 3 4 5 6 7 8 9 10; do
+    OUT=$(wlr-randr 2>/dev/null | awk '/^[^ ]/{ if (!first) first = $1; if ($1 ~ /^DSI/ && !dsi) dsi = $1 } END { print (dsi ? dsi : first) }')
+    if [ -n "$OUT" ]; then wlr-randr --output "$OUT" --transform "$ROTATE" && break; fi
+    sleep 0.3
+  done
 fi
 # Pathline Run's "already running" lock, left behind if the power went: nothing else can be
 # running here (systemd stops everything the last one started before starting it again)
 rm -f "$HOME/.config/Pathline Run/SingletonLock" "$HOME/.config/Pathline Run/SingletonSocket" "$HOME/.config/Pathline Run/SingletonCookie"
-# everything bigger on a sharp small screen
-case "$SCALE" in ""|1) ;; *) ARGS="--force-device-scale-factor=$SCALE $ARGS" ;; esac
+# everything bigger on a sharp small screen. auto: Raspberry Pi's 10" Touch Display 2
+# (1200×1920, about 225 dots an inch) gets 1.5, which lays Pathline Run out at its own 1280×800
+if [ -z "$SCALE" ] || [ "$SCALE" = auto ]; then
+  SCALE=1
+  if grep -qs '^1200x1920' /sys/class/drm/card*-DSI-*/modes; then SCALE=1.5; fi
+fi
+case "$SCALE" in 1) ;; *) ARGS="--zoom=$SCALE $ARGS" ;; esac
 # shellcheck disable=SC2086
 exec "$APP" --kiosk --ozone-platform=wayland $ARGS
 EOF
@@ -255,4 +287,8 @@ say "Done"
 echo "Restart the Pi: Pathline Run then comes up full screen by itself whenever it's switched on."
 echo "In Pathline: Setup → Machines → Add machine → Ethernet, IP ${IP:-(this Pi's address)}, port 8470."
 echo "Pathline Run checks for updates itself and asks on its screen before installing one."
+if grep -qs '^1200x1920' /sys/class/drm/card*-DSI-*/modes; then
+  echo "Found Raspberry Pi's 10\" Touch Display 2: Pathline Run is shown 1.5 times bigger on it."
+  if [ "${ROTATE:-0}" = 0 ]; then echo "It stands tall as it is. On its side (Pathline Run's own layout): run this setup again with --rotate 90 (or 270)."; fi
+fi
 if [ "$REBOOT" = 1 ]; then echo "Restarting now…"; sleep 2; systemctl reboot; fi

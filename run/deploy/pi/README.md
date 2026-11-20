@@ -11,8 +11,8 @@ A Raspberry Pi with a touch screen can be the Pathline Run station next to the l
 
 ## What you need
 
-- A Raspberry Pi 4 or 5 (4 GB or more is best), with its own power supply.
-- A touch screen: a 10" HDMI touch screen (its touch plugs into a USB port) is a good size; the official Raspberry Pi touch display works too.
+- A Raspberry Pi 5 (4 GB or more is best), with its official 27 W power supply. A Pi 4 works with other screens, but not with the 10" Touch Display 2.
+- A touch screen: **Raspberry Pi Touch Display 2, 10"** (the one this was set up for, see below), or a 10" HDMI touch screen whose touch plugs into a USB port.
 - A microSD card, 16 GB or bigger (a good brand: it holds Pathline Run's data).
 - An Ethernet cable to the network Pathline is on.
 - For a Trotec: its USB cable, plugged into the Pi. For a Ruida: the Ruida on the same network.
@@ -31,6 +31,15 @@ A Raspberry Pi with a touch screen can be the Pathline Run station next to the l
 
 No network at the Pi? Copy `Pathline-Run-arm64.AppImage` (from the pathlinerun release on GitHub) and `install-pi.sh` to a USB stick, plug it in, and run `sudo bash install-pi.sh --appimage /media/…/Pathline-Run-arm64.AppImage` with the stick's folder.
 
+## Raspberry Pi Touch Display 2, 10"
+
+Raspberry Pi's own 10" touch screen (1200×1920, ten-finger touch). It plugs into a Raspberry Pi 5 with the short wide ribbon cable that comes with it (in one of the Pi 5's CAM/DISP ports) and the power cable onto the Pi's pins. Raspberry Pi's leaflet shows which pins: get those right, as the wrong way round can damage the screen.
+
+- **Size:** the setup finds this screen by itself and shows Pathline Run 1.5 times bigger on it, which lays it out exactly as on a 1280×800 screen. Nothing to set.
+- **On its side or standing tall:** the screen stands tall as it comes. Pathline Run works that way, but the bed drawing is small in its narrow column. On its side it gets Pathline Run's own wide layout, and that's the way to mount it. Run the setup again with `--rotate 90` at the end (see below) and restart the Pi. If the picture comes out upside down, use `--rotate 270` instead.
+- **If taps land in the wrong place after turning it:** run the setup again with `--touch-rotate` and the other number. For example, after `--rotate 90`, try `--touch-rotate 270`, and if that's still wrong, `--touch-rotate 0`. Each run, then restart the Pi.
+- The first setup also brings the Pi's software and firmware up to date, as Raspberry Pi asks for this screen.
+
 ## A screen mounted turned or upside down
 
 Run the setup again with `--rotate` and how far to turn it: 90, 180 or 270. The touch is turned to match. For example, upside down:
@@ -43,7 +52,7 @@ Then restart the Pi. If 90 comes out the wrong way, use 270 instead (and the oth
 
 Pathline Run fits a 10" screen as it is. At the usual 1280×800 the on-screen keyboard's keys are about 18 mm wide and 9 mm tall, and the field being typed in stays in sight above it; at 1024×600 they're the same size on the glass. Nothing to set.
 
-A sharper 10" screen (1920×1200) shows everything about two thirds that size. Make it bigger by running the setup again with `--scale 1.5` at the end, like `--rotate` above, then restart the Pi. (1.25, 1.75 and 2 work too.)
+A sharper 10" screen (1920×1200) shows everything about two thirds that size. Raspberry Pi's own 10" Touch Display 2 is made bigger by itself (above). For another sharp screen, run the setup again with `--scale 1.5` at the end, like `--rotate` above, then restart the Pi. (1.25, 1.75 and 2 work too; `--scale auto` goes back to choosing by itself.)
 
 ## Other choices
 
