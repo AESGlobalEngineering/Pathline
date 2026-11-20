@@ -192,11 +192,43 @@ console.log('Trotec job stream');
     'the screen\'s engraving rows take the estimate\'s time (lines and the island\'s own 0.203 s)', JSON.stringify(rows));
   const rowsK = trotec.engraveRows(pkg, { ...cfg, timeScale: { engrave: 0.99 } })[0];
   ok(Math.abs(rowsK.sec - rows.sec * 0.99) < 0.01, 'the drawing takes the fitted engraving scale, as the estimate does');
-  // drawn: each line at an even pace, the island's time in all
+  // the lines as sent, for the screen: how many, how far apart, which way, how fast
+  ok(Array.isArray(rows.runs) && rows.runs.reduce((a, r) => a + r[1], 0) === n && rows.v === 400 && Math.abs(rows.dy + 0.048) < 1e-9 && Math.abs(rows.runs[0][0] - rows.y0) < 0.001,
+    'the screen gets the lines as sent: ' + n + ' in ' + rows.runs.length + ' run, 0.048 mm apart going up, at 400 mm/s', JSON.stringify({ runs: rows.runs, dy: rows.dy, v: rows.v, y0: rows.y0 }));
+  // drawn line by line: each across at the speed (speeding up and slowing down at its ends), then
+  // the turn: w/v + (82.8 ms at 500 mm/s) + 0.29 ms per mm under 50 mm wide + the step to the next
+  // line, 9.5 ms at 0.048 mm (follow.js)
   const F = require('../ui/follow');
-  const route = F.routeOf({ ...pkg, rows: trotec.engraveRows(pkg, cfg) }, F.motionFor(null, cfg));
-  const drawn = route.segs.filter((g) => g.step === 0 && g.kind !== 'travel').reduce((a, g) => a + g.dt, 0);
-  ok(Math.abs(drawn - st.parts.engrave) < 0.3, 'drawn: the island takes the estimate\'s time (' + drawn.toFixed(2) + ' s of ' + st.parts.engrave + ')');
+  const pkgR = { ...pkg, rows: { 0: rows } };
+  const route = F.routeOf(pkgR, F.motionFor(null, cfg));
+  const segs = route.segs.filter((g) => g.step === 0 && g.kind !== 'travel');
+  const lines = [];
+  for (const g of segs) if (g.kind === 'row') { const l = lines[lines.length - 1]; if (l && l[2] === g.a[1]) l[1] = g.b[0]; else lines.push([g.a[0], g.b[0], g.a[1]]); }
+  const R = F.TROTEC.row, per = 40 / 400 + R.c + R.cv * 400 - R.sh / 400 + R.nk * (R.nw - 40) + (R.kp * 0.048) / (1 + 0.048 / R.ps);
+  ok(Math.abs(R.c + R.cv * 500 - R.sh / 500 - 0.0828) < 0.0002 && Math.abs((R.kp * 0.048) / (1 + 0.048 / R.ps) - 0.0095) < 0.0002,
+    'a line at 500 mm/s costs 82.8 ms more than its sweep, and 9.5 ms for the step at 500 DPI (as measured)');
+  const drawn = segs.reduce((a, g) => a + g.dt, 0);
+  ok(lines.length === n && lines[0][0] === 90 && lines[0][1] === 130 && lines[1][0] === 130 && lines[1][1] === 90 && Math.abs(drawn - n * per) < 0.3,
+    'drawn: ' + lines.length + ' lines from 90 to 130 and back, ' + ((drawn / n) * 1000).toFixed(1) + ' ms each (' + (per * 1000).toFixed(1) + ')', JSON.stringify(lines.slice(0, 2)));
+  // followed: reports 0.4 s apart at the laser's position steps (0.01 mm, less than the 0.048 mm
+  // between lines): each is put on the line the drawing's time says, not merely the nearest, so
+  // the head drawn at the next report is where that report is (the nearest line went the wrong
+  // way across the box half the time)
+  const fol = F.follower(), M = F.motionFor(null, cfg), step = 0.010125;
+  const t0 = segs[0].t0, errs = [];
+  let next = t0 + 0.2;
+  // (drawn every 33 ms, as the screen does: it eases from frame to frame)
+  for (let ms = Math.round(t0 * 1000) + 200; ms < (t0 + drawn - 0.5) * 1000; ms += 33) {
+    const t = ms / 1000;
+    if (fol.found) F.draw(fol, true, ms);
+    if (t < next) continue;
+    const q = F.routeAt(route, t).p;
+    if (t > t0 + 1) { const d = F.draw(fol, true, ms).p; errs.push(Math.hypot(d[0] - q[0], d[1] - q[1])); }
+    F.place(fol, { job: 'E', pos: { x: Math.round(q[0] / step) * step, y: Math.round(q[1] / step) * step }, posAge: 0, progress: t / route.end, marker: 0 }, pkgR, ms, M);
+    next += 0.4;
+  }
+  errs.sort((a, b) => a - b);
+  ok(errs.length > 50 && errs[Math.floor(errs.length * 0.9)] < 1, 'engraving followed: the head drawn within ' + errs[Math.floor(errs.length * 0.9)].toFixed(2) + ' mm of the next report 9 times in 10 (' + errs.length + ' reports)');
 }
 {
   // travel between cuts: the planner's S-curve (motion.js), the profiles, and Run's own estimate

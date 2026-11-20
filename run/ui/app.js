@@ -134,16 +134,32 @@ const predicted = () => PF.draw(follow, S.status.state === 'running', performanc
 // following this package's run (its route fits the reported positions)?
 const following = (pkg) => !!(follow.job && follow.route && follow.found && S && S.status.job === follow.job && pkg && pkg !== 'loading' && follow.miss < 6 && ui.pkgs[follow.job] === pkg);
 
-// what's been run: the cut and engraved parts of the route up to segment k (and point p on it)
+// what's been run: the cut and engraved parts of the route up to segment k (and point p on it).
+// Engraving lines are drawn one each (their pieces joined), and only one every ROW_GAP mm: an island
+// has up to thousands of lines 0.024 mm apart, far finer than the screen shows
+const ROW_GAP = 0.1;
 function doneD(k0, k1, p) {
   let d = '';
   const segs = follow.route.segs;
+  const f = (q) => q[0].toFixed(2) + ' ' + q[1].toFixed(2);
+  // (a cut's segments joined where one starts at the last one's end: half the path's size)
+  let a = null, b = null, lastY = null, pen = null;
+  const flush = () => { if (a && (lastY === null || Math.abs(a[1] - lastY) >= ROW_GAP)) { d += 'M' + f(a) + 'L' + f(b); lastY = a[1]; } a = null; pen = null; };
   for (let k = k0; k <= k1 && k < segs.length; k++) {
     const g = segs[k];
-    if (g.kind === 'travel' || g.kind === 'wait' || g.kind === 'step') continue;
-    const b = k === k1 && p ? p : g.b;
-    d += 'M' + g.a[0].toFixed(2) + ' ' + g.a[1].toFixed(2) + 'L' + b[0].toFixed(2) + ' ' + b[1].toFixed(2);
+    const end = k === k1 && p ? p : g.b;
+    if (g.kind === 'row') {
+      if (a && g.a[1] === a[1]) b = end;
+      else { flush(); a = g.a; b = end; }
+      continue;
+    }
+    if (a) flush();
+    if (g.kind === 'travel' || g.kind === 'wait') { lastY = null; pen = null; continue; }
+    if (g.kind === 'step') continue;
+    d += (pen && pen[0] === g.a[0] && pen[1] === g.a[1] ? '' : 'M' + f(g.a)) + 'L' + f(end);
+    pen = end;
   }
+  flush();
   return d;
 }
 

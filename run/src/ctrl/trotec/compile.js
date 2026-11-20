@@ -376,8 +376,10 @@ function exportFiles(plan, cfg) {
 
 // For the screen's route (and the follow fit): each engraving step as sent, by toolpath index:
 // { n lines, y0, y1 (first and last line), xs, xe (the row with overscan), sec (whole step,
-// lines only), lead (the step's own) }. The screen draws the head along these at this pace. With
-// the job's timeScale.engrave, as the estimate (so the drawing keeps up with the laser the same way).
+// lines only), lead (the step's own), v (mm/s), dy (the pitch, signed: the way the lines go),
+// runs: [[y, count], …] the lines really sent, dy apart within a run (blank lines are skipped, so
+// an island of text is several runs) }. The screen draws the head line by line along these
+// (ui/follow.js times them itself). sec and lead with the job's timeScale.engrave, as the estimate.
 function engraveRows(pkg, cfg) {
   const S = settings(cfg);
   const out = {};
@@ -388,9 +390,17 @@ function engraveRows(pkg, cfg) {
     if (step.op !== 'engrave') continue;
     const E = engraveLines(step, S);
     if (!E.lines.length) continue;
+    const dy = step.down ? E.pitch : -E.pitch;
+    const runs = [];
+    for (const ln of E.lines) {
+      const r = runs[runs.length - 1];
+      if (r && Math.abs(ln.y - (r[0] + r[1] * dy)) < E.pitch / 4) r[1]++;
+      else runs.push([ln.y, 1]);
+    }
     out[step.i] = {
       n: E.lines.length, y0: +E.lines[0].y.toFixed(3), y1: +E.lines[E.lines.length - 1].y.toFixed(3), xs: +E.xs.toFixed(3), xe: +E.xe.toFixed(3), bidi: step.bidi,
-      sec: +(E.lines.length * E.secPerLine * k).toFixed(3), lead: +(E.lead * k).toFixed(3)
+      sec: +(E.lines.length * E.secPerLine * k).toFixed(3), lead: +(E.lead * k).toFixed(3),
+      v: E.v, dy, runs: runs.map(([y, c]) => [+y.toFixed(4), c])
     };
   }
   return out;

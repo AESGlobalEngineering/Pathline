@@ -1,8 +1,9 @@
 // Fitting the screen's head drawing to where the head really was, from the jobs this machine has
 // run (data/runs: every reported position, with when it was asked for and when it came back).
 //
-// Each run is replayed through the screen's own code (ui/follow.js) as the screen sees it: a
-// refresh every 0.7 s with the newest position and its age, frames every 33 ms. The error is how
+// Each run is replayed through the screen's own code (ui/follow.js) as the screen sees it: the
+// newest position and its age every 0.25 s (the queue asks for the head four times a second while a
+// job runs; this replayed 0.7 s, the full refresh), frames every 33 ms. The error is how
 // far the drawn head is from each reported position at that position's own time, before the
 // screen has seen it. Three things are fitted, in turn:
 //  1. when the laser read each position, between asking (sent) and the reply (rx): at = sent +
@@ -177,8 +178,8 @@ function replay(run, pkg, M, stamp, opts = {}) {
   const firstM = (tl.find((t) => t[3] != null) || [])[3];
   let stale = firstM !== undefined && steps.length && firstM !== steps[0].marker ? firstM : undefined;
   const errs = [];
-  const poll = opts.poll || 700, bias = opts.bias || 0;
-  let nextPoll = tl[0][0] + (opts.phase || 350);
+  const poll = opts.poll || 250, bias = opts.bias || 0;
+  let nextPoll = tl[0][0] + (opts.phase || poll / 2);
   const endMs = tl[tl.length - 1][0];
   for (let clock = tl[0][0]; clock <= endMs; clock += 33) {
     // the server's progress, as machine.js works it out
@@ -204,10 +205,15 @@ function replay(run, pkg, M, stamp, opts = {}) {
       }
     }
     if (!follow.found || !follow.route) { while (ri < tl.length && tl[ri][0] <= clock) ri++; continue; }
-    const d = F.draw(follow, tl[Math.max(0, ti - 1)][4] !== 'paused', clock);
+    const going = tl[Math.max(0, ti - 1)][4] !== 'paused';
+    const d0 = F.draw(follow, going, clock);
     while (ri < tl.length && tl[ri][0] <= clock) {
       const r = tl[ri];
       if (ri > seen && r[4] === 'busy' && clock - r[0] < 33) {
+        // the drawing as it was at the report's own time, up to a frame (33 ms) before this one:
+        // compared a frame late, a drawing running a little behind looked closer (up to 16 mm at
+        // the engraving speed), and the fit preferred a slower route and a later stamp
+        const d = going ? { ...d0, ...F.routeAt(follow.route, Math.max(0, follow.shown.t - ((clock - r[0]) / 1000) * (follow.rate || 1))) } : d0;
         const e = Math.hypot(d.p[0] - r[1], d.p[1] - r[2]);
         // opts.detail: what the drawing was on (cut, row, travel …) with each error
         errs.push(opts.detail ? { e, dx: d.p[0] - r[1], dy: d.p[1] - r[2], kind: follow.route.segs[d.k].kind, speed: (pkg.processes || []).find((q) => q.index === ((pkg.toolpath || [])[follow.route.segs[d.k].step] || {}).process) } : e);

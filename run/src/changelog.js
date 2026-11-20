@@ -5,6 +5,17 @@
 
 module.exports = [
   {
+    version: '0.7.18', date: '19 Nov 2026',
+    fixed: [
+      'Queue: the head drawn during an engraving is where the head is. It was drawn on the right line but 8–21 mm along it from the real head (median, Ruby\'s engraving jobs), and 13.9 mm off over all of them; now 2.9 mm. The screen now draws every line the laser is sent, blank lines skipped as the laser skips them, each swept at the engraving speed with the head slowing for the turn at each end (it drew at most 200 lines spread over the island at an even pace). Each line\'s time was measured from the jobs run: 82.8 ms more than its sweep at 500 mm/s, more for narrow islands and coarse pitches (5.4 ms at 1000 DPI, 24.5 ms at 100 DPI), within 0.9 ms a line on jobs left out of the measuring.',
+      'Queue: the head drawn picks the right line. At 1000 DPI the lines are 0.024 mm apart, closer than the laser\'s position steps, so a report alone can\'t tell which line the head is on or which way it\'s going, and the nearest line sent the drawing back across the island half the time. Of places that fit a report about as well, the one nearest where the drawing has the head by then now wins. On cuts this halves the times the head is drawn more than 10 mm off (8 % → 4 %).',
+      'Queue: the head drawn learns how fast each shape of part really goes in the job, from the parts already cut. On the X jobs the 3.5 mm holes took 0.6 s and the drawing allowed 1.0 s, so it fell behind at every hole; J0113\'s slots took the drawing\'s own time. Cutting is now drawn 2.0 mm from the real head (median, was 2.35) and within 5.7 mm 9 times in 10 (was 8.0).',
+      'Queue: the head was drawn a steady ~10 ms behind (5 mm at the engraving speed): each new report was eased in from where the head was drawn the frame before, the frame\'s own move counted as a gap to close.',
+      'The head drawing\'s fit (after each job) replays the screen as it is now, with the head\'s position four times a second (was every 0.7 s), and measures the drawing at each report\'s own time, not up to a frame (33 ms) later. Measured a frame late, a drawing running slightly behind looked closer, so the fit preferred a slower route and a later stamp. Over every job run so far the head is drawn 2.15 mm from the reports (median, was 3.15) and within 9.0 mm 9 times in 10 (was 24.0).',
+      'Queue: the engraved and cut parts drawn over the job stay small: an island\'s lines are drawn one every 0.1 mm, and a cut\'s segments joined (J0113\'s whole job: 0.49 MB, was 0.95 MB, rebuilt at every part).'
+    ]
+  },
+  {
     version: '0.7.17', date: '19 Nov 2026',
     added: [
       'Part edges: the print\'s own edge is read, not its shadow. On clear acrylic the print casts a soft shadow on the card underneath, just outside its edge, and the corner finder took the outermost edge it saw: J0112\'s corners were read 0.1–1 mm outside the parts, and the job was cut about 1 mm low at the bottom. Now each edge close to another is told apart, and the sharpest is taken (the print is in focus on the top surface; the shadow 3 mm below is soft). How sharp each corner\'s edges were is logged.',
