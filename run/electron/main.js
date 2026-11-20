@@ -1,12 +1,14 @@
 // Pathline Run, the installed app: runs the HMI server (src/server.js) and
 // shows its screen in a window, full screen with --kiosk (the Raspberry Pi
 // touchscreen). Checks for updates the way Pathline does.
-//   Pathline Run.exe [--kiosk] [--sim]
+//   Pathline Run.exe [--kiosk] [--sim] [--keyboard | --no-keyboard] [--hide-cursor]
+// On the Raspberry Pi (deploy/pi) it is the only thing on the screen: started full screen at boot
+// by a systemd service, which starts it again if it ever stops.
 'use strict';
 
 const fs = require('fs');
 const path = require('path');
-const { app, BrowserWindow, Menu, dialog, shell } = require('electron');
+const { app, BrowserWindow, Menu, dialog, shell, powerSaveBlocker } = require('electron');
 const updates = require('./updates');
 const server = require('../src/server');
 
@@ -15,6 +17,12 @@ const server = require('../src/server');
 const UPDATE_EVERY_MS = 60 * 1000;
 const kiosk = process.argv.includes('--kiosk');
 const sim = process.argv.includes('--sim');
+// The screen's own on-screen keyboard: a Linux kiosk (the Pi) has no system one to pop up, so it's
+// on there; Windows brings its own touch keyboard. --keyboard / --no-keyboard decide either way.
+const keyboard = process.argv.includes('--keyboard') || (kiosk && process.platform === 'linux' && !process.argv.includes('--no-keyboard'));
+// --hide-cursor: no mouse pointer at all (touch screens that pretend to be a mouse); otherwise the
+// kiosk hides it while fingers are used and shows it again when a mouse moves
+const hideCursor = process.argv.includes('--hide-cursor');
 
 let win = null;
 let srv = null;
@@ -55,7 +63,15 @@ function createWindow(port) {
     if (r === 0) e.preventDefault();
   });
   win.on('closed', () => { win = null; });
-  win.loadURL('http://127.0.0.1:' + port + '/');
+  // the screen's page crashed or was killed (out of memory on a small Pi): show it again. The
+  // server and a running job live in this process, not the page, so they carry on regardless
+  win.webContents.on('render-process-gone', (e, d) => {
+    if (srv) srv.log('screen: the page stopped (' + d.reason + '), reloading it');
+    if (!quitting && d.reason !== 'clean-exit') setTimeout(() => { if (win && !win.isDestroyed()) win.loadURL(url); }, 1000);
+  });
+  const q = [kiosk ? 'kiosk=1' : '', keyboard ? 'osk=1' : '', hideCursor ? 'cursor=0' : ''].filter(Boolean).join('&');
+  const url = 'http://127.0.0.1:' + port + '/' + (q ? '?' + q : '');
+  win.loadURL(url);
 }
 
 if (!app.requestSingleInstanceLock()) {
@@ -77,6 +93,8 @@ if (!app.requestSingleInstanceLock()) {
       return;
     }
     createWindow(srv.port);
+    // a machine's screen stays on: no blanking or sleep while Pathline Run is up full screen
+    if (kiosk) powerSaveBlocker.start('prevent-display-sleep');
     // check when the app opens and every few minutes while it runs;
     // a found update is offered on the screen, which asks the operator first
     setTimeout(() => updates.check(), 3000);

@@ -7,6 +7,7 @@
 const fs = require('fs');
 const path = require('path');
 const anchor = require('./job/anchor');
+const safefile = require('./safefile');
 
 const KEEP_DONE = 30;      // finished jobs listed in GET /jobs
 const KEEP_HISTORY = 200;
@@ -44,8 +45,8 @@ class Store {
   }
 
   flush() {
-    fs.writeFileSync(path.join(this.dir, 'queue.json'), JSON.stringify(this.jobs, null, 1));
-    fs.writeFileSync(path.join(this.dir, 'history.json'), JSON.stringify(this.history.slice(0, KEEP_HISTORY), null, 1));
+    safefile.write(path.join(this.dir, 'queue.json'), JSON.stringify(this.jobs, null, 1));
+    safefile.write(path.join(this.dir, 'history.json'), JSON.stringify(this.history.slice(0, KEEP_HISTORY), null, 1));
   }
 
   jobDir(id) { return path.join(this.jobsDir, id); }

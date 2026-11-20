@@ -56,9 +56,7 @@ function createReporter(o) {
   try { saved = JSON.parse(fs.readFileSync(file, 'utf8')) || {}; } catch (e) { /* not set up */ }
   const save = () => {
     try {
-      const tmp = file + '.tmp';
-      fs.writeFileSync(tmp, JSON.stringify(saved));
-      fs.renameSync(tmp, file);
+      require('./safefile').write(file, JSON.stringify(saved));
     } catch (e) { log('couldn\'t save the connection (' + e.message + ')'); }
   };
   const st = { lastSent: null, failingSince: null, failure: null, removed: !!saved.removed };

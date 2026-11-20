@@ -23,7 +23,7 @@ function createMonitor(o) {
     interlock: !!machine.st.interlock, interlockSince: saved.interlock === !!machine.st.interlock && saved.interlock && Number.isFinite(saved.interlockSince) ? saved.interlockSince : machine.st.interlock ? now0 : null,
     markKey: null, markSince: null
   };
-  const save = () => { try { fs.writeFileSync(file, JSON.stringify({ state: t.state, since: t.since, interlock: t.interlock, interlockSince: t.interlockSince })); } catch (e) { /* not kept */ } };
+  const save = () => { try { require('./safefile').write(file, JSON.stringify({ state: t.state, since: t.since, interlock: t.interlock, interlockSince: t.interlockSince })); } catch (e) { /* not kept */ } };
 
   // what a plotter job over several beds is on: [bed, of]
   function beds(job) {

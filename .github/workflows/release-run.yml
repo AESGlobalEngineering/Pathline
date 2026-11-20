@@ -78,12 +78,12 @@ jobs:
             run/dist/*.blockmap
             run/dist/latest.yml
 
-  # Linux (Pi) builds are paused while the camera work settles on Windows: installed Pi copies keep
-  # the last Linux version (its files stay in the release). To build them again, set this back to
-  # `needs.check.outputs.build == 'true'` and add `linux` to publish's needs.
+  # Linux: the Raspberry Pi station (run/deploy/pi) and Linux PCs. AppImages can only be packed
+  # on Linux, so this is where they're made. To pause them again, set `if: false` and take `linux`
+  # out of publish's needs: installed Pi copies then keep the last Linux version.
   linux:
     needs: check
-    if: false
+    if: needs.check.outputs.build == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -103,7 +103,7 @@ jobs:
             run/dist/latest-linux*.yml
 
   publish:
-    needs: [check, test, windows]
+    needs: [check, test, windows, linux]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -123,7 +123,7 @@ jobs:
           cp ../run/deploy/pi/install-pi.sh .
           ls -l
           NOTES="Windows: Pathline-Run-Setup.exe installs Pathline Run and keeps it up to date (or Pathline-Run-portable.exe, no install).
-          Raspberry Pi: curl -fsSL https://github.com/${{ github.repository }}/releases/download/pathlinerun/install-pi.sh | bash
+          Raspberry Pi (Raspberry Pi OS Lite 64-bit; it then boots straight into Pathline Run): curl -fsSL https://github.com/${{ github.repository }}/releases/download/pathlinerun/install-pi.sh | sudo bash
           Installed copies offer each new version themselves. This release always holds the newest version ($V)."
           # this version's files, the update files, and fixed names for the download links
           mkdir latest

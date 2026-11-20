@@ -46,6 +46,12 @@ function usbTransport(choice) {
   }
   const home = process.env.VIMBA_X_HOME;
   const own = [home && path.join(home, 'cti', 'VimbaUSBTL.cti'), 'C:\\Program Files\\Allied Vision\\Vimba X\\cti\\VimbaUSBTL.cti'];
+  // Linux (the Raspberry Pi): Vimba X unpacks into a folder named for its version, /opt/VimbaX_2025-1
+  if (process.platform !== 'win32') {
+    for (const base of ['/opt', process.env.HOME || '/root']) {
+      try { for (const d of fs.readdirSync(base)) if (/^VimbaX/i.test(d)) own.push(path.join(base, d, 'cti', 'VimbaUSBTL.cti')); } catch (e) { /* no folder */ }
+    }
+  }
   const ruby = found.find((f) => /VimbaUSBTL_1\.4/i.test(f));
   return own.find((f) => f && fs.existsSync(f)) || ruby || found[0] || null;
 }

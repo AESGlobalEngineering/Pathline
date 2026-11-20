@@ -19,7 +19,7 @@ function load(dir) {
 }
 
 function save(dir, list) {
-  fs.writeFileSync(path.join(dir, FILE), JSON.stringify(list.slice(-KEEP)));
+  require('./safefile').write(path.join(dir, FILE), JSON.stringify(list.slice(-KEEP)));
 }
 
 // What a map says, from its own grid (the same for every map, however it was made): a straight

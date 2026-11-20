@@ -248,6 +248,28 @@ body{overflow:hidden}
   .hmi .tb:hover{border-color:var(--line-strong)}
 }
 
+/* ---- the kiosk's on-screen keyboard (keyboard.js, ?osk=1) ----
+   Fixed along the bottom; while it's up the screen above gets shorter by its height, so the
+   field being typed in scrolls into sight above it. Keys are finger-sized on the Pi's 7" 800×480
+   screen too (a bit under 7 % of the height each, never below 40 px). */
+.hmi.osk{position:fixed;left:0;right:0;bottom:0;top:auto;height:auto;overflow:visible;z-index:300;display:flex;flex-direction:column;gap:6px;padding:8px;background:var(--sunken);border-top:1px solid var(--line-strong);box-shadow:0 -8px 24px rgba(0,0,0,0.18);-webkit-user-select:none;user-select:none;touch-action:none}
+.hmi.osk[hidden]{display:none}
+.hmi.osk .osk-row{display:flex;gap:6px}
+.hmi.osk .osk-k{min-width:0;height:clamp(40px,6.8vh,60px);padding:0 4px;border:1px solid var(--line-strong);border-radius:8px;background:var(--surface);color:var(--text);font:500 clamp(16px,2.6vh,22px) var(--font);box-shadow:var(--shadow-1);cursor:pointer;touch-action:none}
+.hmi.osk .osk-k.fn{background:var(--surface-2);color:var(--text-2);font-size:clamp(14px,2.2vh,17px)}
+.hmi.osk .osk-k.on{background:var(--accent-soft);border-color:var(--accent);color:var(--accent-fg)}
+.hmi.osk .osk-k.go{background:var(--accent);border-color:var(--accent);color:var(--on-accent);font-weight:600}
+.hmi.osk .osk-k.down{background:var(--hover);transform:translateY(1px)}
+.hmi.osk .osk-k.go.down{background:var(--accent-hover)}
+.hmi.osk[data-layout="num"]{align-items:center}
+.hmi.osk[data-layout="num"] .osk-row{width:min(100%,520px)}
+.hmi.osk[data-layout="num"] .osk-k{flex:1 1 0 !important}
+.osk-open #app{height:calc(100vh - var(--osk-h,0px))}
+.osk-open .hmi .scrim{bottom:var(--osk-h,0px)}
+.osk-open .hmi .toast{bottom:calc(var(--osk-h,0px) + 16px)}
+/* no mouse pointer (keyboard.js: ?cursor=0, or fingers in use on the kiosk) */
+html.no-cursor,html.no-cursor *{cursor:none !important}
+
 /* not running: the big Estimated time says it, so the small one under the bar goes (it stays
    on a narrow screen, where the big one is hidden) */
 @media (min-width:1101px){.hmi .qest-idle{visibility:hidden}}

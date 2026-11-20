@@ -15,19 +15,19 @@ Pathline Run installs and updates like Pathline.
 |---|---|---|
 | **Windows PC** | **[⬇ Pathline-Run-Setup.exe](https://github.com/AESGlobalEngineering/Pathline/releases/download/pathlinerun/Pathline-Run-Setup.exe)** | Run the installer. It adds a Start menu entry and a desktop shortcut, and **Pathline Run updates itself**. |
 | Windows, no install | [Pathline-Run-portable.exe](https://github.com/AESGlobalEngineering/Pathline/releases/download/pathlinerun/Pathline-Run-portable.exe) | A single file. It can't update itself. |
-| **Raspberry Pi** | The line below, in a terminal on the Pi | Installs the AppImage, which opens full screen at login and updates itself |
+| **Raspberry Pi** | The line below, on a fresh Raspberry Pi OS Lite (64-bit) | Makes the Pi a Pathline Run station: switched on, it goes straight into Pathline Run full screen, and **updates itself** |
 
 ```bash
-curl -fsSL https://github.com/AESGlobalEngineering/Pathline/releases/download/pathlinerun/install-pi.sh | bash
+curl -fsSL https://github.com/AESGlobalEngineering/Pathline/releases/download/pathlinerun/install-pi.sh | sudo bash
 ```
 
 These links always give the newest version. They all live in one release, [**pathlinerun**](https://github.com/AESGlobalEngineering/Pathline/releases/tag/pathlinerun), titled with the current version. The builds aren't code-signed, so Windows SmartScreen warns the first time ("More info" → "Run anyway"). The first time Pathline Run starts, Windows Firewall asks about it: allow private networks, so Pathline can connect.
 
-**Raspberry Pi:** Raspberry Pi OS Bookworm 64-bit with desktop, on a Pi 4 or 5 with a touchscreen. The script puts `Pathline-Run.AppImage` in `~/Applications`, adds it to the menu, and starts it full screen (`--kiosk`) at login. It also installs `libfuse2` (AppImages need it) and allows the USB port (`/dev/ttyACM0` for a Trotec). Restart the Pi afterwards. There's also an x64 AppImage for Linux PCs (`Pathline-Run-x86_64.AppImage`).
+**Raspberry Pi:** a Pi 4 or 5 with a touch screen, on Raspberry Pi OS Lite (64-bit), Bookworm or newer. After the setup line and a restart, the Pi boots straight into Pathline Run full screen (no desktop, no login), starts it again if it ever stops, keeps the screen on, and is safe to switch off at the wall. Pathline Run brings its own on-screen keyboard there. The whole guide, in plain words, with turned screens and what the setup changes: [deploy/pi/README.md](deploy/pi/README.md). There's also an x64 AppImage for Linux PCs (`Pathline-Run-x86_64.AppImage`).
 
 **Then:** Pathline Run opens on **Setup → Add a machine**. Name the machine, choose Trotec or Ruida and how it's connected, check the bed size, then **Add machine**. (☰ → Remove machine… removes it again, after two checks.) In Pathline, **Setup → Machines → Add machine** → Ethernet, the Pathline Run computer's IP address, port 8470.
 
-Settings, the queue and received jobs are kept in `%APPDATA%\Pathline Run\data` (Windows) or `~/.config/Pathline Run/data` (Pi), so updates and reinstalls keep them. Pathline Run 0.1.0's data is brought across the first time.
+Settings, the queue and received jobs are kept in `%APPDATA%\Pathline Run\data` (Windows) or `/home/pathline/.config/Pathline Run/data` (Pi), so updates and reinstalls keep them. Pathline Run 0.1.0's data is brought across the first time.
 
 ## Updates
 
@@ -147,4 +147,4 @@ Run then sends what `GET /api/v1/monitor` answers to the server over https: stra
 - `src/vision/`: the Trotec's head camera (print and cut, calibration, checkerboard bed map)
 - `src/monitor.js`, `src/report.js`: the status for watchers (`GET /api/v1/monitor`, `/events`), and its report out to Pathline Monitor
 - `electron/`: the app window and updates (`electron-updater`, as in Pathline). `src/changelog.js`: What's new
-- `ui/`: touchscreen page (plain JS). `tools/`: convert, decode, self-test. `deploy/pi/install-pi.sh`: Raspberry Pi install
+- `ui/`: touchscreen page (plain JS). `tools/`: convert, decode, self-test. `deploy/pi/`: the Raspberry Pi station (`install-pi.sh`, and its guide `README.md`). `ui/keyboard.js`: the kiosk's on-screen keyboard. `src/safefile.js`: saving files so a power cut can't leave them half written

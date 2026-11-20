@@ -175,7 +175,7 @@ class ZAxis {
       m.box = box;
       m.seconds = Math.round((Date.now() - t0) / 1000);
       this.mesh = m;
-      fs.writeFileSync(this.file, JSON.stringify(m));
+      require('../safefile').write(this.file, JSON.stringify(m));
       this.log('z axis: sheet scanned, ' + m.nx + ' × ' + m.ny + ' points in ' + m.seconds + ' s: height ' + m.min.toFixed(2) + ' to ' + m.max.toFixed(2) + ' mm, steepest ' + (m.slope * 100).toFixed(1) + ' %' + (m.dropped.length ? ', ' + m.dropped.length + ' readings dropped (edges or holes)' : ''));
       return this.meshView();
     });

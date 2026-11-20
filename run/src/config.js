@@ -7,6 +7,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const safefile = require('./safefile');
 
 function dataDir(override) {
   if (override) return path.resolve(override);
@@ -102,7 +103,7 @@ function load(dir, overrides) {
 
 function save(dir, cfg) {
   fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify(cfg, null, 2));
+  safefile.write(path.join(dir, 'config.json'), JSON.stringify(cfg, null, 2));
 }
 
 // laser or plotter (a Trotec is always a laser)

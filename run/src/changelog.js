@@ -5,6 +5,17 @@
 
 module.exports = [
   {
+    version: '0.7.20', date: '20 Nov 2026',
+    added: [
+      'Raspberry Pi: a Pi can be a Pathline Run station and nothing else. Switched on, it goes straight into Pathline Run full screen (no desktop, no login), starts it again by itself if it ever stops, keeps the screen on, and is safe to switch off at the wall. One setup line on a fresh Raspberry Pi OS Lite (64-bit) does it all: run/deploy/pi/README.md.',
+      'Touch screen without a keyboard (the Pi): Pathline Run brings its own on-screen keyboard. It comes up when a field is tapped, with a number pad for numbers, and goes when the field is left or Hide is tapped; Enter saves as it does on a real keyboard. A real keyboard\'s first key puts it away. The mouse pointer hides while fingers are used.',
+      'If the screen\'s page ever crashes (out of memory on a small Pi), it comes back by itself a second later; a running job carries on underneath.'
+    ],
+    fixed: [
+      'Settings, the queue and history, the head drawing\'s fit and the other saved files are written whole or not at all: a power cut while one was being saved could leave it half written, and Pathline Run then started with no machine set up or an empty queue.'
+    ]
+  },
+  {
     version: '0.7.19', date: '20 Nov 2026',
     fixed: [
       'Trotec estimate: engraving is timed line by line as the Q500 was measured doing it, the same way the Queue draws the head: each line\'s turn is shorter on wide islands and longer on narrow ones, and the step to the next line takes longer at coarse pitches (5.4 ms a line at 1000 DPI, 24.5 ms at 100 DPI). On the 65 engraved islands of the 8 engraving jobs run, each job timed from the others: 3.3 % off an island (was 9.1 %) and each job within −0.3 … +1.4 % (was −3.9 … +2.8 %). J0106\'s 107 mm wide island had run 7 s long in 349. Whole jobs over the last 21 run: 2.7 % off (was 3.1 %).'

@@ -28,6 +28,7 @@ const accuracy = require('./accuracy');
 const { DEFAULTS: VisionDefaults } = require('./vision/vision');
 const { controller, CONTROLLERS } = require('./ctrl');
 const pkgJson = require('../package.json');
+const safefile = require('./safefile');
 
 const UI = path.join(__dirname, '..', 'ui');
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.json': 'application/json' };
@@ -193,7 +194,7 @@ function start(opts = {}) {
           if (machine.link) machine.link.stamp = kept.stamp || null;
         }
         followState = { learnt: r.stampUse || r.use ? kept : followState.learnt || null, last: r };
-        try { fs.writeFileSync(FOLLOW_FILE, JSON.stringify(followState, null, 2)); } catch (e) { log('follow fit: not saved (' + e.message + ')'); }
+        try { safefile.write(FOLLOW_FILE, JSON.stringify(followState, null, 2)); } catch (e) { log('follow fit: not saved (' + e.message + ')'); }
       };
       const done = () => { fitting = null; resolve(followState); };
       w.on('error', (e) => { log('follow fit: ' + e.message); done(); });
@@ -251,7 +252,7 @@ function start(opts = {}) {
       const r = await machine.cameraTask('Checking the test grid', (ctl, say) => require('./vision/grid').inspect(machine.vision, grid, ctl, say));
       r.job = { id, name: job.name };
       fs.mkdirSync(GRIDS, { recursive: true });
-      fs.writeFileSync(path.join(GRIDS, id + '.json'), JSON.stringify(r));
+      safefile.write(path.join(GRIDS, id + '.json'), JSON.stringify(r));
       gridState = { job: id, name: job.name, state: 'done', at: r.at, best: r.best, confident: r.confident };
       const n = r.squares.filter((s) => s.through).length;
       log('test grid: ' + job.name + ': ' + n + ' of ' + r.squares.length + ' cut through (by ' + r.measure + ', separation ' + r.separation + (r.confident ? '' : ', not sure') + ')' + (r.best ? '; best ' + r.best.power + ' % at ' + r.best.speed + ' mm/s' : '') + ': ' + r.why);
@@ -280,7 +281,7 @@ function start(opts = {}) {
     materials.write(DATA, JSON.stringify(doc));
     log('test grid: ' + mat.name + ', ' + (procs[k].name || 'cut') + ': ' + before.power + ' % at ' + before.speed + ' mm/s → ' + r.best.power + ' % at ' + r.best.speed + ' mm/s (Pathline Prepare takes it on its next sync)');
     r.saved = { at: mat.updatedAt, material: mat.name, process: procs[k].name || 'Cut', before };
-    fs.writeFileSync(path.join(GRIDS, id + '.json'), JSON.stringify(r));
+    safefile.write(path.join(GRIDS, id + '.json'), JSON.stringify(r));
     return r.saved;
   }
 
@@ -341,7 +342,7 @@ function start(opts = {}) {
     const prev = s.lastRunVersion;
     if (prev && newer(pkgJson.version, prev)) whatsNew = changelog.filter((c) => newer(c.version, prev) && !newer(c.version, pkgJson.version));
     deviceId = /^run-[0-9a-f]{8}$/.test(s.deviceId || '') ? s.deviceId : 'run-' + require('crypto').randomBytes(4).toString('hex');
-    if (prev !== pkgJson.version || deviceId !== s.deviceId) fs.writeFileSync(f, JSON.stringify({ ...s, lastRunVersion: pkgJson.version, deviceId }, null, 2));
+    if (prev !== pkgJson.version || deviceId !== s.deviceId) safefile.write(f, JSON.stringify({ ...s, lastRunVersion: pkgJson.version, deviceId }, null, 2));
   }
 
   // the request body as text (what: what's too large, for the message)
@@ -526,7 +527,7 @@ function start(opts = {}) {
     // still converts for this controller; the estimate as it now is
     let program;
     try { program = controller(cfg.controller).compile(plan.build(require('./job/anchor').apply(pkg, job.anchor)), cfg); } catch (e) { throw err(400, 'Can\'t convert the job with that setting: ' + e.message); }
-    fs.writeFileSync(path.join(store.jobDir(id), 'package.json'), JSON.stringify(pkg));
+    safefile.write(path.join(store.jobDir(id), 'package.json'), JSON.stringify(pkg));
     if (program && program.estimated) job.seconds = Math.round(program.seconds);
     job.edited = pkg.processes.some((x) => x.was);
     store.flush();

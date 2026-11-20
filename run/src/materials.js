@@ -30,10 +30,7 @@ function write(dir, text) {
   try { doc = JSON.parse(text.replace(/^﻿/, '')); } catch (e) { /* not JSON */ }
   if (!doc || doc.format !== 'pathline-materials' || !Array.isArray(doc.materials)) throw Object.assign(new Error('Not a materials list'), { code: 400 });
   fs.mkdirSync(dir, { recursive: true });
-  const tmp = file(dir) + '.tmp';
-  const fd = fs.openSync(tmp, 'w');
-  try { fs.writeSync(fd, text); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
-  fs.renameSync(tmp, file(dir));
+  require('./safefile').write(file(dir), text);
   return doc.materials.length;
 }
 
