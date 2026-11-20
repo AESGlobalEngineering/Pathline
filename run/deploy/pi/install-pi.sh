@@ -9,6 +9,8 @@
 #   --appimage FILE   install this Pathline Run AppImage instead of downloading it (a USB stick)
 #   --reinstall       download Pathline Run again even if it's already there (it updates itself)
 #   --rotate N        turn the picture and the touch: 0, 90, 180 or 270 (a screen mounted turned)
+#   --scale N         make everything on the screen bigger: 1 (as it is), 1.25, 1.5, 1.75 or 2.
+#                     For sharp small screens: a 10" at 1920×1200 wants 1.5; at 1280×800 leave it
 #   --hide-cursor     never show a mouse pointer (touch screens that pretend to be a mouse)
 #   --reboot          restart the Pi at the end
 # Running it again is safe: it only puts back what it set (and keeps Pathline Run's data).
@@ -20,12 +22,13 @@ APP_DIR=$RUN_HOME/Applications
 APP=$APP_DIR/Pathline-Run.AppImage
 RELEASE=https://github.com/AESGlobalEngineering/Pathline/releases/download/pathlinerun
 
-APPIMAGE_FILE="" REINSTALL=0 ROTATE="" HIDE_CURSOR="" REBOOT=0
+APPIMAGE_FILE="" REINSTALL=0 ROTATE="" SCALE="" HIDE_CURSOR="" REBOOT=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --appimage) APPIMAGE_FILE="$2"; shift ;;
     --reinstall) REINSTALL=1 ;;
     --rotate) ROTATE="$2"; shift ;;
+    --scale) SCALE="$2"; shift ;;
     --hide-cursor) HIDE_CURSOR=1 ;;
     --reboot) REBOOT=1 ;;
     *) echo "Unknown option: $1 (see the top of this script)" >&2; exit 2 ;;
@@ -43,6 +46,7 @@ case "$(uname -m)" in
   *) die "Pathline Run needs the 64-bit Raspberry Pi OS (this one is $(uname -m))." ;;
 esac
 case "$ROTATE" in ""|0|90|180|270) ;; *) die "--rotate takes 0, 90, 180 or 270" ;; esac
+case "$SCALE" in ""|1|1.25|1.5|1.75|2) ;; *) die "--scale takes 1, 1.25, 1.5, 1.75 or 2" ;; esac
 if [ -n "$APPIMAGE_FILE" ] && [ ! -s "$APPIMAGE_FILE" ]; then die "there's no file at $APPIMAGE_FILE"; fi
 
 # ---------------------------------------------------------------- packages
@@ -92,9 +96,11 @@ if [ ! -f /etc/default/pathline-run ]; then
 # (never while a job is running).
 #   ROTATE   turn the picture: 0, 90, 180 or 270 (set it with the setup script's --rotate, which
 #            turns the touch to match)
+#   SCALE    make everything bigger: 1, 1.25, 1.5, 1.75 or 2 (a 10" screen at 1920×1200: 1.5)
 #   ARGS     more for Pathline Run: --hide-cursor (no mouse pointer ever), --no-keyboard (no
 #            on-screen keyboard: a real keyboard is plugged in)
 ROTATE=0
+SCALE=1
 ARGS=""
 EOF
 fi
@@ -102,6 +108,7 @@ set_setting() { # name value
   if grep -q "^$1=" /etc/default/pathline-run; then sed -i "s|^$1=.*|$1=$2|" /etc/default/pathline-run; else echo "$1=$2" >> /etc/default/pathline-run; fi
 }
 if [ -n "$ROTATE" ]; then set_setting ROTATE "$ROTATE"; fi
+if [ -n "$SCALE" ]; then set_setting SCALE "$SCALE"; fi
 if [ -n "$HIDE_CURSOR" ] && ! grep -q -- '--hide-cursor' /etc/default/pathline-run; then
   sed -i 's|^ARGS="\(.*\)"|ARGS="\1 --hide-cursor"|; s|^ARGS=" |ARGS="|' /etc/default/pathline-run
 fi
@@ -141,6 +148,8 @@ fi
 # Pathline Run's "already running" lock, left behind if the power went: nothing else can be
 # running here (systemd stops everything the last one started before starting it again)
 rm -f "$HOME/.config/Pathline Run/SingletonLock" "$HOME/.config/Pathline Run/SingletonSocket" "$HOME/.config/Pathline Run/SingletonCookie"
+# everything bigger on a sharp small screen
+case "$SCALE" in ""|1) ;; *) ARGS="--force-device-scale-factor=$SCALE $ARGS" ;; esac
 # shellcheck disable=SC2086
 exec "$APP" --kiosk --ozone-platform=wayland $ARGS
 EOF

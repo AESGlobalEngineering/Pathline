@@ -250,8 +250,9 @@ body{overflow:hidden}
 
 /* ---- the kiosk's on-screen keyboard (keyboard.js, ?osk=1) ----
    Fixed along the bottom; while it's up the screen above gets shorter by its height, so the
-   field being typed in scrolls into sight above it. Keys are finger-sized on the Pi's 7" 800×480
-   screen too (a bit under 7 % of the height each, never below 40 px). */
+   field being typed in scrolls into sight above it. Keys are finger-sized on a 10" screen (1280×800:
+   106×54 px, about 18×9 mm) and on a 7" 800×480 too (a bit under 7 % of the height each, never
+   below 40 px). */
 .hmi.osk{position:fixed;left:0;right:0;bottom:0;top:auto;height:auto;overflow:visible;z-index:300;display:flex;flex-direction:column;gap:6px;padding:8px;background:var(--sunken);border-top:1px solid var(--line-strong);box-shadow:0 -8px 24px rgba(0,0,0,0.18);-webkit-user-select:none;user-select:none;touch-action:none}
 .hmi.osk[hidden]{display:none}
 .hmi.osk .osk-row{display:flex;gap:6px}

@@ -12,7 +12,7 @@ A Raspberry Pi with a touch screen can be the Pathline Run station next to the l
 ## What you need
 
 - A Raspberry Pi 4 or 5 (4 GB or more is best), with its own power supply.
-- A touch screen: the official Raspberry Pi touch display, or an HDMI screen whose touch works over USB.
+- A touch screen: a 10" HDMI touch screen (its touch plugs into a USB port) is a good size; the official Raspberry Pi touch display works too.
 - A microSD card, 16 GB or bigger (a good brand: it holds Pathline Run's data).
 - An Ethernet cable to the network Pathline is on.
 - For a Trotec: its USB cable, plugged into the Pi. For a Ruida: the Ruida on the same network.
@@ -39,6 +39,12 @@ Run the setup again with `--rotate` and how far to turn it: 90, 180 or 270. The 
 
 Then restart the Pi. If 90 comes out the wrong way, use 270 instead (and the other way round). Running the setup again keeps Pathline Run, its data and its updates as they are.
 
+## Screen size
+
+Pathline Run fits a 10" screen as it is. At the usual 1280×800 the on-screen keyboard's keys are about 18 mm wide and 9 mm tall, and the field being typed in stays in sight above it; at 1024×600 they're the same size on the glass. Nothing to set.
+
+A sharper 10" screen (1920×1200) shows everything about two thirds that size. Make it bigger by running the setup again with `--scale 1.5` at the end, like `--rotate` above, then restart the Pi. (1.25, 1.75 and 2 work too.)
+
 ## Other choices
 
 - **A touch screen that shows a mouse pointer under the finger** (some pretend to be a mouse): run the setup again with `--hide-cursor` at the end, like `--rotate` above.
@@ -51,7 +57,7 @@ Then restart the Pi. If 90 comes out the wrong way, use 270 instead (and the oth
 | --- | --- |
 | Pathline Run | `/home/pathline/Applications/Pathline-Run.AppImage` (it updates this file itself) |
 | Its data: settings, queue, history, received jobs, logs | `/home/pathline/.config/Pathline Run/data` |
-| Kiosk settings (turning, extra options) | `/etc/default/pathline-run` |
+| Kiosk settings (turning, size, extra options) | `/etc/default/pathline-run` |
 | What starts it at power on | `/etc/systemd/system/pathline-run.service` and `/usr/local/bin/pathline-run-kiosk` |
 
 Pathline Run runs as its own user, `pathline`, which has no password: nobody logs in as it. To work on the Pi, press Ctrl+Alt+F2 on a plugged-in keyboard for a login prompt (Ctrl+Alt+F1 goes back to Pathline Run), or connect over SSH.
