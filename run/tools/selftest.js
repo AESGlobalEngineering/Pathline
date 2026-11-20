@@ -1853,6 +1853,108 @@ async function reportTests() {
   }
 }
 
+// ---------------------------------------------------------------- pulls through Pathline Monitor
+// pull.js against a stand-in Monitor: Run waits on GET /api/v1/asks with its key, answers each
+// ask from the fixed list with a gzipped bundle (or a refusal), reads nothing else, and stops
+// listening when Setup's switch is off. Times scaled 0.2, as in reportTests.
+async function pullTests() {
+  console.log('Pulls through Pathline Monitor');
+  const zlib = require('zlib');
+  const asks = [], answers = [], polls = [];
+  const mon = http.createServer((rq, rs) => {
+    const parts = [];
+    rq.on('data', (c) => parts.push(c));
+    rq.on('end', () => {
+      const s = Buffer.concat(parts);
+      if (rq.url === '/api/v1/enrol') { rs.writeHead(200, { 'content-type': 'application/json' }); return rs.end(JSON.stringify({ key: 'stand-in-key-2' })); }
+      if (rq.url === '/api/v1/report') { rs.writeHead(204); return rs.end(); }
+      if (rq.url === '/api/v1/asks') {
+        polls.push({ at: Date.now(), auth: rq.headers.authorization });
+        const give = () => { const list = asks.splice(0, 5); if (list.length) { rs.writeHead(200, { 'content-type': 'application/json' }); rs.end(JSON.stringify(list)); } else { rs.writeHead(204); rs.end(); } };
+        return asks.length ? give() : setTimeout(give, 300);
+      }
+      const m = /^\/api\/v1\/answer\/(.+)$/.exec(rq.url);
+      if (m) {
+        const a = { id: decodeURIComponent(m[1]), status: Number(rq.headers['x-pathline-status']), type: rq.headers['content-type'], name: rq.headers['x-pathline-name'], auth: rq.headers.authorization, body: s, at: Date.now() };
+        try { a.bundle = a.type === 'application/gzip' ? JSON.parse(zlib.gunzipSync(s).toString('utf8')) : JSON.parse(s.toString('utf8')); } catch (e) { a.bundle = null; }
+        answers.push(a);
+        rs.writeHead(204); return rs.end();
+      }
+      rs.writeHead(404); rs.end();
+    });
+  });
+  await new Promise((r) => mon.listen(0, '127.0.0.1', r));
+  const monAddr = 'http://127.0.0.1:' + mon.address().port + '/';
+  const data = fs.mkdtempSync(path.join(os.tmpdir(), 'pathline-pull-'));
+  fs.writeFileSync(path.join(data, 'config.json'), JSON.stringify({ controller: 'trotec', regMarks: 'ignore', bed: [813, 508], sim: { speedup: 30 } }));
+  const port = 19980 + Math.floor(Math.random() * 300);
+  const srv = spawn(process.execPath, [path.join(__dirname, '..', 'src', 'server.js'), '--sim', '--port', String(port), '--data', data], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, PATHLINE_RUN_REPORT_SCALE: '0.2' } });
+  let out = '';
+  srv.stdout.on('data', (d) => { out += d; }); srv.stderr.on('data', (d) => { out += d; });
+  const base = 'http://127.0.0.1:' + port + '/api/';
+  const call = async (m, r, b) => { const res = await fetch(base + r, { method: m, headers: b ? { 'content-type': 'application/json' } : {}, body: b ? JSON.stringify(b) : undefined }); return { status: res.status, data: await res.json().catch(() => null) }; };
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  let n = 0;
+  // ask, and wait for Run's answer to it
+  const ask = async (a, ms = 6000) => { const id = 'ask-test-' + String(++n).padStart(4, '0'); asks.push({ id, ...a }); for (let t = 0; t < ms / 50 && !answers.some((x) => x.id === id); t++) await wait(50); return answers.find((x) => x.id === id) || null; };
+  const names = (a) => (a && a.bundle && a.bundle.files ? a.bundle.files.map((f) => f.name) : []);
+  const text = (a, name) => { const f = a && a.bundle && a.bundle.files && a.bundle.files.find((x) => x.name === name); return f ? Buffer.from(f.data, 'base64').toString('utf8') : ''; };
+  const day = (() => { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); })();
+  try {
+    for (let i = 0; i < 60; i++) { try { await call('GET', 'v1/info'); break; } catch (e) { await wait(100); } }
+    const c = await call('POST', 'local/monitor-report/connect', { address: monAddr, code: 'K7M2QX' });
+    for (let i = 0; i < 60 && !polls.length; i++) await wait(50);
+    ok(c.data.pull === true && polls.length && polls[0].auth === 'Bearer stand-in-key-2', 'connected: pulls are on, and Run waits for asks with its own key', JSON.stringify({ c: c.data, polls: polls.length }));
+    const q = await call('POST', 'v1/jobs', example);
+    const J = q.data.id;
+    let a = await ask({ what: 'list' });
+    const list = JSON.parse(text(a, 'list.json') || '{}');
+    ok(a && a.status === 200 && a.type === 'application/gzip' && a.auth === 'Bearer stand-in-key-2' && a.bundle.format === 'pathline-run-pull' && list.logs.includes(day) && list.jobs.some((j) => j.id === J && j.files), 'list: its days of logs and its jobs, as a gzipped bundle with the key', JSON.stringify({ status: a && a.status, list }).slice(0, 300));
+    a = await ask({ what: 'log', day });
+    ok(a && a.status === 200 && /connected: reporting to/.test(text(a, 'run-' + day + '.log')), 'log: the day\'s diagnostics log', JSON.stringify(names(a)));
+    a = await ask({ what: 'job', job: J.toLowerCase(), path: 'C:/Windows/win.ini', file: '../config.json' });
+    ok(a && a.status === 200 && names(a).includes(J + '/package.json') && names(a).every((f) => f.startsWith(J + '/')), 'job: that job\'s files and nothing else (a path or file in the ask is ignored)', JSON.stringify(names(a)));
+    a = await ask({ what: 'settings' });
+    const raw = a ? zlib.gunzipSync(a.body).toString('utf8') : '';
+    ok(a && a.status === 200 && names(a).includes('config.json') && !names(a).some((f) => /monitor-report/.test(f)) && !raw.includes('stand-in-key') && !Buffer.from(raw).toString('base64').includes(Buffer.from('stand-in-key').toString('base64')), 'settings: the config and materials, never the Monitor key', JSON.stringify(names(a)));
+    a = await ask({ what: 'health' });
+    const h = JSON.parse(text(a, 'health.json') || '{}');
+    ok(a && a.status === 200 && h.app === require('../package.json').version && h.memory.totalMB > 0 && h.startsToday >= 1 && h.machine && h.machine.state, 'health: versions, memory, disk, starts today, the machine\'s state', JSON.stringify(h).slice(0, 300));
+    // refused: not on the list, a day or job that isn't one; nothing read
+    const bad = [await ask({ what: 'exec', cmd: 'shutdown' }), await ask({ what: 'log', day: '../../config' }), await ask({ what: 'job', job: '..\\..\\config' }), await ask({ what: 'marks', job: 'J0' + J.slice(1) + '9' })];
+    ok(bad.slice(0, 3).every((x) => x && x.status === 400 && x.type === 'application/json' && x.bundle.error) && bad[3] && bad[3].status === 404 && /No mark pictures/.test(bad[3].bundle.error), 'anything not on the list, or a day or job that isn\'t one, is refused; a job with no pictures says so', JSON.stringify(bad.map((x) => x && [x.status, x.bundle && x.bundle.error])));
+    // a job running: answered, the job carries on
+    await call('POST', 'local/jobs/' + J + '/anchor', { clear: true });
+    await call('POST', 'v1/start', { id: J });
+    for (let i = 0; i < 40 && (await call('GET', 'v1/status')).data.state !== 'running'; i++) await wait(100);
+    const p0 = (await call('GET', 'v1/status')).data.progress;
+    a = await ask({ what: 'job', job: J });
+    await wait(300);
+    const sRun = (await call('GET', 'v1/status')).data;
+    ok(a && a.status === 200 && sRun.state === 'running' && sRun.progress > p0, 'a job running: the ask is answered and the job carries on (' + Math.round(p0 * 100) + ' → ' + Math.round(sRun.progress * 100) + ' %)', JSON.stringify({ state: sRun.state }));
+    await call('POST', 'v1/stop');
+    for (let i = 0; i < 40 && (await call('GET', 'v1/status')).data.state !== 'idle'; i++) await wait(100);
+    const logLines = (await call('GET', 'local/log')).data;
+    ok(logLines.some((l) => /Pathline Monitor asked for the .* log: sent/.test(l)) && logLines.some((l) => /Pathline Monitor asked for "exec": refused/.test(l)), 'every ask is in the diagnostics log, sent or refused', JSON.stringify(logLines.filter((l) => /asked/.test(l)).slice(-3)));
+    // the switch off: Run stops listening and answers nothing; on again: it answers
+    const cfg0 = JSON.stringify((await call('GET', 'local/state')).data.config);
+    const off = await call('POST', 'local/monitor-report/pull', { on: false });
+    await wait(700);
+    const p1 = polls.length;
+    const id = 'ask-test-off';
+    asks.push({ id, what: 'health' });
+    await wait(2500);
+    ok(off.data.pull === false && polls.length <= p1 + 1 && !answers.some((x) => x.id === id) && JSON.parse(fs.readFileSync(path.join(data, 'monitor-report.json'), 'utf8')).pull === false, 'switched off in Setup: Run stops waiting for asks and answers none (kept with the connection)', JSON.stringify({ more: polls.length - p1 }));
+    await call('POST', 'local/monitor-report/pull', { on: true });
+    for (let i = 0; i < 100 && !answers.some((x) => x.id === id); i++) await wait(50);
+    ok(answers.some((x) => x.id === id && x.status === 200), 'switched on again: it listens, and the ask that waited is answered');
+    ok(JSON.stringify((await call('GET', 'local/state')).data.config) === cfg0, 'asks changed nothing in the settings');
+  } catch (e) { ok(false, 'pulls', e.stack + '\n' + out.slice(-1500)); } finally {
+    srv.kill();
+    mon.close();
+  }
+}
+
 async function discoveryTests() {
   console.log('Found on the network (mDNS)');
   const disc = require('../src/discovery');
@@ -2030,7 +2132,7 @@ async function zaxisTests() {
   ok(zf.state === 'up', 'paused or stopped: the nozzle goes up');
 }
 
-jogTests().then(linkTests).then(serverTests).then(editTests).then(upkeepTests).then(monitorTests).then(reportTests).then(gridTests).then(discoveryTests).then(followFitTests).then(zaxisTests).then(materialsTests).then(visionTests).then(() => {
+jogTests().then(linkTests).then(serverTests).then(editTests).then(upkeepTests).then(monitorTests).then(reportTests).then(pullTests).then(gridTests).then(discoveryTests).then(followFitTests).then(zaxisTests).then(materialsTests).then(visionTests).then(() => {
   console.log(failed ? '\n' + failed + ' FAILED' : '\nAll passed');
   process.exit(failed ? 1 : 0);
 });

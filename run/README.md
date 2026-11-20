@@ -138,6 +138,8 @@ From 0.7.13, Pathline Run reports this machine's status to the workshop's Pathli
 
 Run then sends what `GET /api/v1/monitor` answers to the server over https: straight away when anything changes, every 5 s while a job runs, every 10 s otherwise. The panel shows when it last sent, or since when it can't reach the server. Reporting is one way: Run reads back only its key (once) and each report's status code, never instructions, and it runs on its own timer, apart from the machine. A machine removed in the app shows "Removed in Pathline Monitor" and stops. **Disconnect** forgets the key. The key is kept in `data/monitor-report.json`, not in the config. Details: *Reporting* in `PROTOCOL.md`. Once connected, ☰ → **Pathline Monitor on a phone** shows the server's address as a QR code.
 
+**Pulls (from 0.7.21, with Pathline Monitor 0.6):** someone with Monitor's pull token can ask this machine for a day's diagnostics log, a job's drawings, the camera's pictures of its marks, its run records, the head drawing fit and bed maps, its settings (never the key) or its health (temperature and a Pi's power warnings among them). Run listens over its own outgoing connection, reads what's asked and sends it; Monitor passes it on and keeps nothing. An ask can only ever make Run read one of those things: it can't change a setting or touch the machine or a job. Each ask is in the diagnostics log, and the switch **Let Pathline Monitor ask for logs, drawings and camera pictures** in Setup → Pathline Monitor turns it off (on the machine's own screen only). Details: *Pulls* in `PROTOCOL.md`; the tool that pulls is `monitor/tools/pull.js`.
+
 ## Layout
 
 - `src/server.js`: HTTP server, Pathline protocol (`/api/v1`) and the screen's own calls (`/api/local`)
@@ -145,6 +147,6 @@ Run then sends what `GET /api/v1/monitor` answers to the server over https: stra
 - `src/job/`: package checks and the controller-neutral plan
 - `src/ctrl/trotec`, `src/ctrl/ruida`: converters, links and decoders. `src/ctrl/sim.js`: simulated link
 - `src/vision/`: the Trotec's head camera (print and cut, calibration, checkerboard bed map)
-- `src/monitor.js`, `src/report.js`: the status for watchers (`GET /api/v1/monitor`, `/events`), and its report out to Pathline Monitor
+- `src/monitor.js`, `src/report.js`, `src/pull.js`: the status for watchers (`GET /api/v1/monitor`, `/events`), its report out to Pathline Monitor, and answering Monitor's asks for logs and pictures
 - `electron/`: the app window and updates (`electron-updater`, as in Pathline). `src/changelog.js`: What's new
 - `ui/`: touchscreen page (plain JS). `tools/`: convert, decode, self-test. `deploy/pi/`: the Raspberry Pi station (`install-pi.sh`, and its guide `README.md`). `ui/keyboard.js`: the kiosk's on-screen keyboard. `src/safefile.js`: saving files so a power cut can't leave them half written

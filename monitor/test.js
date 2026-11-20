@@ -278,6 +278,117 @@ async function theServer() {
   fs.rmSync(dir, { recursive: true, force: true });
 }
 
+// ---------------------------------------------------------------- pulls (lib/pulls.js)
+// The pull token asks a machine for one thing; the machine, waiting on GET /api/v1/asks, answers;
+// the answer is collected once and forgotten. Nothing about a pull is written to disk.
+async function pulls() {
+  console.log('Pulls');
+  const { Pulls, checkAsk } = require('./lib/pulls');
+  const throws = (f) => { try { f(); return null; } catch (e) { return e; } };
+  ok(checkAsk({ what: 'log', day: '2026-11-20', job: 'J1' }).job === null && checkAsk({ what: 'job', job: 'j0123' }).job === 'J0123' && checkAsk({ what: 'runs', day: '2026-11-20' }).day === '2026-11-20',
+    'asks are checked: a log has a day, a job a job number (in any case), and nothing that isn\'t needed is passed on');
+  ok(['exec', '', '../config'].every((w) => throws(() => checkAsk({ what: w })).code === 400) && throws(() => checkAsk({ what: 'log', day: '../../etc' })).code === 400 && throws(() => checkAsk({ what: 'job', job: '../x' })).code === 400 && throws(() => checkAsk({ what: 'log' })).code === 400,
+    'anything not on the list, a day or job that isn\'t one, or a missing one, is refused');
+
+  // times in lib/pulls.js, swept by hand
+  const P = new Pulls({ scale: 0.001, maxHeld: 100 });
+  const a1 = P.add('m1', checkAsk({ what: 'health' }), 0);
+  P.sweep(86400000 * 0.001 + 1);
+  ok((await P.collect(a1.id)).state === 'failed' && !P.asks.size, 'an ask nobody takes in a day (the machine is off) is given up, said once, then forgotten');
+  const a2 = P.add('m1', checkAsk({ what: 'health' }), Date.now());
+  const got = await P.next('m1');
+  ok(got.length === 1 && got[0].id === a2.id && !('machine' in got[0]), 'the machine is given its ask (id, what, day, job: nothing else)');
+  P.sweep(Date.now() + 600000 * 0.001 + 5);
+  ok((await P.collect(a2.id)).ask.error.includes('never answered'), 'taken and never answered: given up');
+  const a3 = P.add('m1', checkAsk({ what: 'health' }));
+  await P.next('m1');
+  ok(throws(() => P.answer('m1', a3.id, { status: 200, type: 'x', name: '', body: Buffer.alloc(101) })).code === 507 && P.asks.get(a3.id).state === 'taken', 'more than it may hold: the answer is refused, the ask still open');
+  P.answer('m1', a3.id, { status: 200, type: 'x', name: '', body: Buffer.alloc(10) });
+  P.sweep(Date.now() + 3600000 * 0.001 + 5);
+  ok(!P.asks.size && P.held === 0, 'an answer nobody collects is dropped after the hour');
+  ok(throws(() => { for (let i = 0; i < 21; i++) P.add('m2', checkAsk({ what: 'list' })); }).code === 429, 'at most 20 asks wait for one machine');
+  P.close();
+
+  // the server
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pm-pull-'));
+  const TOKEN = 'pull-token-for-the-test-0123456789';
+  // no token: pulling is off
+  let s = start(dir, 'correct horse battery');
+  let base = await s.base();
+  let r = await fetch(base + '/api/pull/machines', { headers: { authorization: 'Bearer ' + TOKEN } });
+  ok(r.status === 404 && /isn't set up/.test((await r.json()).error), 'no pull token on the server: pulling is off');
+  await s.stop();
+  const child = spawn(process.execPath, [path.join(__dirname, 'server.js'), '--config', path.join(dir, 'config.json'), '--data', path.join(dir, 'data'), '--port', '0'], { env: { ...process.env, MONITOR_PASSWORD: 'correct horse battery', MONITOR_PULL_TOKEN: TOKEN, MONITOR_PULL_SCALE: '0.02' }, stdio: ['ignore', 'pipe', 'pipe'] });
+  let out = '';
+  child.stdout.on('data', (c) => { out += c; }); child.stderr.on('data', (c) => { out += c; });
+  await until(() => /on http:\/\/[\d.]+:(\d+)/.test(out));
+  base = /on (http:\/\/[\d.]+:\d+)/.exec(out)[1];
+  try {
+    const p = phone(base);
+    await p.signIn('correct horse battery');
+    const enrol = async (id, name) => { const code = (await p.call('/api/machine-code', {})).json.code; return (await (await fetch(base + '/api/v1/enrol', { method: 'POST', body: JSON.stringify({ code, id, name }) })).json()).key; };
+    const key = await enrol('run-aaaa0001', 'Laser A');
+    const key2 = await enrol('run-bbbb0002', 'Laser B');
+    const pull = (route, data, token = TOKEN) => fetch(base + route, { method: data ? 'POST' : 'GET', headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' }, body: data ? JSON.stringify(data) : undefined });
+    const asks = (k) => fetch(base + '/api/v1/asks', { headers: { authorization: 'Bearer ' + k } });
+    const answer = (k, id, bodyBuf, headers = {}) => fetch(base + '/api/v1/answer/' + id, { method: 'POST', headers: { authorization: 'Bearer ' + k, 'content-type': 'application/gzip', ...headers }, body: bodyBuf });
+
+    ok((await pull('/api/pull/machines', undefined, 'wrong-token-wrong-token-wrong')).status === 401 && (await fetch(base + '/api/pull/machines')).status === 401, 'the wrong pull token, or none, gets nothing');
+    ok((await fetch(base + '/api/pull/machines', { headers: { cookie: p.cookie } })).status === 401 && (await fetch(base + '/api/device', { headers: { authorization: 'Bearer ' + TOKEN } })).status === 401, 'a signed-in phone can\'t pull, and the pull token can\'t open the phones\' side');
+    ok((await asks('not-a-key')).status === 401, 'a machine\'s asks need its key');
+    // listening: the machine's GET /api/v1/asks waits, then says nothing (204)
+    const t0 = Date.now();
+    r = await asks(key);
+    ok(r.status === 204 && Date.now() - t0 >= 400, 'nothing asked: the machine\'s wait ends with nothing (' + (Date.now() - t0) + ' ms, 25 s scaled)');
+    let list = (await (await pull('/api/pull/machines')).json()).machines;
+    ok(list.length === 2 && list.find((m) => m.name === 'Laser A').listening && !list.find((m) => m.name === 'Laser B').listening, 'the machines, and which is listening');
+    ok((await pull('/api/pull', { machine: 'Laser A', what: 'exec' })).status === 400 && (await pull('/api/pull', { machine: 'Laser Z', what: 'list' })).status === 404, 'an ask not on the list, or for a machine that isn\'t there, is refused');
+
+    // an ask while the machine waits: it hears it at once
+    const waiting = asks(key);
+    await wait(50);
+    r = await pull('/api/pull', { machine: 'laser a', what: 'log', day: '2026-11-20', path: '/etc/passwd' });
+    const a = await r.json();
+    ok(r.status === 202 && a.machine.id === 'run-aaaa0001' && a.listening, 'asked by name (any case): taken, and the machine is listening');
+    const heard = await (await waiting).json();
+    ok(heard.length === 1 && heard[0].id === a.id && heard[0].what === 'log' && heard[0].day === '2026-11-20' && !JSON.stringify(heard).includes('passwd'), 'the waiting machine hears it straight away, without anything that isn\'t on the list');
+    ok((await answer(key2, a.id, Buffer.from('x'))).status === 404, 'another machine can\'t answer it');
+    // collecting before the answer: "not yet"
+    r = await pull('/api/pull/' + a.id);
+    ok(r.status === 202 && (await r.json()).state === 'taken', 'collected before it\'s answered: not yet');
+    const secret = 'MARKER-' + crypto.randomBytes(8).toString('hex');
+    const gz = require('zlib').gzipSync(JSON.stringify({ format: 'pathline-run-pull', files: [{ name: 'run-2026-11-20.log', data: Buffer.from(secret).toString('base64') }] }));
+    const collecting = pull('/api/pull/' + a.id);
+    await wait(50);
+    ok((await answer(key, a.id, gz, { 'x-pathline-name': 'Laser-A-log.pull.json.gz' })).status === 204, 'the machine answers');
+    r = await collecting;
+    const back = Buffer.from(await r.arrayBuffer());
+    ok(r.status === 200 && back.equals(gz) && r.headers.get('x-pathline-name') === 'Laser-A-log.pull.json.gz', 'a collector waiting gets the answer as the machine sent it');
+    ok((await pull('/api/pull/' + a.id)).status === 404, 'and once collected it\'s gone');
+    ok(!fs.readdirSync(path.join(dir, 'data')).some((f) => fs.readFileSync(path.join(dir, 'data', f)).includes(secret) || fs.readFileSync(path.join(dir, 'data', f), 'utf8').includes(a.id)), 'nothing about the pull was written to disk');
+    // the machine's own error goes through as it is
+    const b = await (await pull('/api/pull', { machine: 'run-aaaa0001', what: 'job', job: 'J0099' })).json();
+    await (await asks(key)).json();
+    await answer(key, b.id, JSON.stringify({ error: 'No files for J0099' }), { 'content-type': 'application/json', 'x-pathline-status': '404' });
+    r = await pull('/api/pull/' + b.id);
+    ok(r.status === 404 && (await r.json()).error === 'No files for J0099', 'the machine\'s "not there" reaches the collector');
+    ok((await answer(key, 'nosuchask0', Buffer.from('x'))).status === 404, 'an answer to no ask is refused');
+    // removed from Monitor: its asks are given up
+    const c = await (await pull('/api/pull', { machine: 'Laser B', what: 'health' })).json();
+    await p.call('/api/machine-remove', { id: 'run-bbbb0002' });
+    r = await pull('/api/pull/' + c.id);
+    ok(r.status === 404 || r.status === 410, 'a machine removed from Pathline Monitor: its asks go with it');
+    ok((await asks(key2)).status === 401, 'and its key no longer waits for asks');
+    // too many wrong tokens: paused like wrong passwords
+    for (let i = 0; i < 5; i++) await pull('/api/pull/machines', undefined, 'guess-' + i + '-xxxxxxxxxxxxxxxxxxxxxxx');
+    ok((await pull('/api/pull/machines')).status === 429, 'five wrong pull tokens from one address: pulling pauses for it, even with the right one');
+  } finally {
+    child.kill();
+    await new Promise((res) => child.on('exit', res));
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 // ---------------------------------------------------------------- a server to look at
 async function demo(port) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pm-demo-'));
@@ -301,6 +412,7 @@ async function demo(port) {
   alertRules();
   notifications();
   await theServer();
+  await pulls();
   console.log(failed ? '\n' + failed + ' failed' : '\nAll passed');
   process.exit(failed ? 1 : 0);
 })().catch((e) => { console.error(e); process.exit(1); });

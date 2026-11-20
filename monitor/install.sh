@@ -25,7 +25,7 @@ mkdir -p /opt/pathline-monitor
 rm -rf /opt/pathline-monitor/lib /opt/pathline-monitor/app
 cp -r "$HERE/server.js" "$HERE/package.json" "$HERE/lib" "$HERE/app" /opt/pathline-monitor/
 
-echo "3/5  The workshop password"
+echo "3/5  The workshop password and the pull token"
 if [ ! -s /etc/pathline-monitor/password ]; then
   printf 'Choose the password phones sign in with (8 characters or more): '
   read -r PW
@@ -35,6 +35,12 @@ if [ ! -s /etc/pathline-monitor/password ]; then
   (umask 077; printf '%s\n' "$PW" > /etc/pathline-monitor/password)
 else
   echo "     kept (to change it: edit /etc/pathline-monitor/password, then sudo systemctl restart pathline-monitor)"
+fi
+# the pull token: whoever has it can ask the machines for their logs, drawings and camera
+# pictures (read only). Made once; delete the file and run this again for a new one
+if [ ! -s /etc/pathline-monitor/pull-token ]; then
+  (umask 077; node -e "process.stdout.write(require('crypto').randomBytes(24).toString('base64url') + '\n')" > /etc/pathline-monitor/pull-token)
+  echo "     a pull token made, for pulling logs and pictures from the machines: sudo cat /etc/pathline-monitor/pull-token"
 fi
 
 echo "4/5  The certificate for $DOMAIN"
@@ -57,6 +63,7 @@ if systemctl is-active --quiet pathline-monitor; then
   echo
   echo "Pathline Monitor is running: https://$DOMAIN"
   echo "Open it on a phone and sign in with the workshop password."
+  echo "To pull logs and pictures from the machines (monitor/tools/pull.js), the pull token is in /etc/pathline-monitor/pull-token."
 else
   echo
   echo "Pathline Monitor didn't start. What it said:"

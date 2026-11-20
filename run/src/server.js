@@ -389,6 +389,15 @@ function start(opts = {}) {
     dataDir: DATA, view: () => monitor.view(), onChange: monitor.onChange, running: () => !!machine.run,
     info: () => ({ id: deviceId, name: cfg.name }), log, scale: Number(process.env.PATHLINE_RUN_REPORT_SCALE) || 1
   });
+  // pulls (pull.js): Pathline Monitor asks for one thing from a fixed list (a day's log, a job's
+  // drawings, its mark pictures, health …) over the same outgoing connection; Run reads it and
+  // sends it, and does nothing else for an ask
+  const puller = require('./pull').createPuller({
+    dataDir: DATA, connection: reporter.connection, enabled: reporter.pullOn, log, version: pkgJson.version,
+    info: () => ({ id: deviceId, name: cfg.name }), jobs: () => store.jobs.concat(store.history), machine: () => machine.status(),
+    scale: Number(process.env.PATHLINE_RUN_REPORT_SCALE) || 1
+  });
+  const monitorStatus = () => ({ ...reporter.status(), pulls: puller.status() });
   // who has been watching (ip → when): the Pathline Monitor hub asks every 2 s or keeps a stream
   const watchers = new Map();
   // streams still open (ip → how many): a hub holding /api/v1/events open is watching now, however
@@ -640,11 +649,17 @@ function start(opts = {}) {
     // /events) lately, or the address typed in (monitorHub: "host" or "host:port")
     'GET /monitor-hub': () => findMonitorHub(),
     // Setup → Pathline Monitor: { address, code } from the app's Settings → Add a machine
-    'GET /monitor-report': () => reporter.status(),
-    'POST /monitor-report/connect': (b) => reporter.connect(b || {}),
-    'POST /monitor-report/disconnect': () => reporter.disconnect(),
+    'GET /monitor-report': () => monitorStatus(),
+    'POST /monitor-report/connect': async (b) => { await reporter.connect(b || {}); return monitorStatus(); },
+    'POST /monitor-report/disconnect': () => { reporter.disconnect(); return monitorStatus(); },
+    // the switch for pulls: on this screen only, so nobody elsewhere can turn it back on
+    'POST /monitor-report/pull': (b, req) => {
+      if (!isLocalReq(req)) throw err(403, 'Only on the machine\'s own screen');
+      reporter.setPull(!!(b && b.on));
+      return monitorStatus();
+    },
     'GET /state': (b, req) => ({
-      monitorReport: reporter.status(),
+      monitorReport: monitorStatus(),
       app: pkgJson.version, update: updates.status(), here: isLocalReq(req), config: cfg, status: machine.status(), info: machine.info, ruidaModels: ruidaModels.MODELS,
       fromController: machine.ctrl || null,
       // a test grid's camera check: the screen opens its results when one is done
@@ -968,6 +983,7 @@ function start(opts = {}) {
           try { if (discovery) await discovery.close(); } catch (e) { /* closing anyway */ }
           try { await machine.zaxis.close(); } catch (e) { /* closing anyway */ }
           try { reporter.close(); } catch (e) { /* closing anyway */ }
+          try { puller.close(); } catch (e) { /* closing anyway */ }
           try { monitor.close(); } catch (e) { /* closing anyway */ }
           try { await machine.stop('Pathline Run was closed'); } catch (e) { /* closing anyway */ }
           try { if (machine.link) await machine.link.close(); } catch (e) { /* closing anyway */ }

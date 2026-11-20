@@ -9,6 +9,7 @@ Wants=network-online.target
 [Service]
 ExecStart=/usr/bin/env node /opt/pathline-monitor/server.js --data /var/lib/pathline-monitor
 LoadCredential=password:/etc/pathline-monitor/password
+LoadCredential=pull-token:/etc/pathline-monitor/pull-token
 LoadCredential=fullchain.pem:/etc/letsencrypt/live/DOMAIN/fullchain.pem
 LoadCredential=privkey.pem:/etc/letsencrypt/live/DOMAIN/privkey.pem
 DynamicUser=yes

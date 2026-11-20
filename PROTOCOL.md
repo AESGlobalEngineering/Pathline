@@ -68,6 +68,32 @@ From Pathline Monitor 0.5, the device sends its status out instead of being aske
 
 `GET /monitor` and `GET /events` stay as they are, for anything else that watches.
 
+### Pulls (Pathline Monitor 0.6, Pathline Run 0.7.21)
+
+Someone with Monitor's **pull token** can ask one machine for one thing from a fixed list, and the device sends just that. It's the one thing the device does because of the server, and it only ever **reads and sends**: an ask can't change a setting, touch the machine or a job, or name a file. Run's **Setup → Pathline Monitor** has a switch for it (on unless turned off, and only on the machine's own screen), and every ask goes in the diagnostics log. Monitor hands each answer over once and keeps nothing on disk.
+
+| Method | Path (on the Monitor server) | Body | Answer |
+|---|---|---|---|
+| GET | `/api/v1/asks` with the machine's key | | `200 [{ "id", "what", "day", "job" }]` (up to 5) as soon as there are any; `204` after 25 s with none. The device asks again straight away. `401` the machine was removed; `404` a Monitor older than 0.6 (asks again in 5 minutes) |
+| POST | `/api/v1/answer/<id>` with the machine's key | The answer: `content-type: application/gzip`, the bundle below; or `application/json` `{ "error" }`. `x-pathline-status`: `200`, or the refusal's status (`400` not on the list, `404` not there, `413` too big) | `204` |
+
+What can be asked for, and nothing else (`day` is `YYYY-MM-DD`, `job` is `J` and digits):
+
+| `what` | Needs | Sends (from the data folder) |
+|---|---|---|
+| `list` | | `list.json`: the days of logs kept, the jobs (with whether their files, mark pictures and run records are still there), the days with run records |
+| `log` | `day` | `logs/run-<day>.log` |
+| `job` | `job` | `jobs/<job>/`: the package, drawings and `.cjob` |
+| `marks` | `job` | `marks/<job>/`: the camera's pictures of its marks |
+| `runs` | `job` or `day` | `runs/<job>-*.json`, or every run started that day (UTC) |
+| `fit` | | `follow.json`, `bedmaps.json` |
+| `settings` | | `config.json`, `materials.json`, `app.json`; never `monitor-report.json` |
+| `health` | | `health.json`: versions, memory, disk, load, when the computer and Run started, starts today, the machine's state; on Linux the temperature and a Raspberry Pi's power flags (`vcgencmd get_throttled`: under-voltage and slowing, now and since boot) |
+
+The bundle is gzipped JSON: `{ "format": "pathline-run-pull", "version": 1, "machine": { "id", "name" }, "what", "day", "job", "at", "app", "files": [{ "name", "size", "mtime", "data" (base64) }] }`, 48 MB of files at most. One ask at a time, on its own connection, read and packed in small steps so a running job is never held up.
+
+On the Monitor side, with `authorization: Bearer <pull token>`: `GET /api/pull/machines`, `POST /api/pull { "machine": "<name or id>", "what", "day", "job" }` → `202 { "id" }`, then `GET /api/pull/<id>`: `202` not yet (it waits up to 25 s each time), the machine's answer once it's sent (then forgotten), `410` given up. `monitor/tools/pull.js` does all of this and unpacks the bundle.
+
 ## Send a job
 
 `POST /jobs` with a **job package** (below). Respond `{ id, status: "queued" }`. The app may then call `POST /start`.

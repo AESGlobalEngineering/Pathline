@@ -60,6 +60,9 @@ function createReporter(o) {
     } catch (e) { log('couldn\'t save the connection (' + e.message + ')'); }
   };
   const st = { lastSent: null, failingSince: null, failure: null, removed: !!saved.removed };
+  // pulls (pull.js): on unless switched off in Setup → Pathline Monitor; the choice outlives a
+  // disconnect
+  const keepPull = () => (saved.pull === false ? { pull: false } : {});
 
   // https, the certificate checked as usual; one connection, kept open between reports
   const agents = { 'http:': new http.Agent({ keepAlive: true, maxSockets: 1 }), 'https:': new https.Agent({ keepAlive: true, maxSockets: 1 }) };
@@ -114,7 +117,7 @@ function createReporter(o) {
       st.lastSent = now; st.failingSince = null; st.failure = null;
     } else if (r.status === 401) {
       log('this machine was removed in Pathline Monitor: reporting stopped');
-      saved = { address: base, removed: true };
+      saved = { address: base, removed: true, ...keepPull() };
       save();
       Object.assign(st, { lastSent: null, failingSince: null, failure: null, removed: true });
     } else {
@@ -144,7 +147,7 @@ function createReporter(o) {
     const r = await post(a.base + '/api/v1/enrol', { code: c, id: me.id, name: me.name || me.id }, {}, true);
     const err = r.body && typeof r.body.error === 'string' ? r.body.error.slice(0, 300) : '';
     if (r.status === 200 && r.body && typeof r.body.key === 'string' && r.body.key) {
-      saved = { address: a.base, key: r.body.key };
+      saved = { address: a.base, key: r.body.key, ...keepPull() };
       save();
       Object.assign(st, { lastSent: null, failingSince: null, failure: null, removed: false });
       lastAttempt = 0; changed = true;
@@ -157,19 +160,33 @@ function createReporter(o) {
   }
   function disconnect() {
     if (saved.key) log('disconnected from ' + address(saved.address).label);
-    saved = saved.address ? { address: saved.address } : {};
+    saved = saved.address ? { address: saved.address, ...keepPull() } : { ...keepPull() };
     save();
     Object.assign(st, { lastSent: null, failingSince: null, failure: null, removed: false });
+    return status();
+  }
+  // Setup → Pathline Monitor's switch for pulls
+  function setPull(on) {
+    if ((saved.pull !== false) !== !!on) log(on ? 'Pathline Monitor may ask for logs, drawings and camera pictures again' : 'Pathline Monitor may no longer ask for logs, drawings or camera pictures');
+    saved = { ...saved, pull: !!on };
+    if (on) delete saved.pull;
+    save();
     return status();
   }
   // for the panel (never the key)
   function status() {
     let label = null;
     try { label = saved.address ? address(saved.address).label : null; } catch (e) { /* kept as typed */ }
-    return { connected: !!saved.key, address: label, lastSent: st.lastSent, failingSince: st.failingSince, failure: st.failure, removed: !saved.key && st.removed };
+    return { connected: !!saved.key, address: label, lastSent: st.lastSent, failingSince: st.failingSince, failure: st.failure, removed: !saved.key && st.removed, pull: saved.pull !== false };
   }
 
-  return { connect, disconnect, status, tick, close: () => { clearInterval(timer); for (const a of Object.values(agents)) a.destroy(); }, _T: T };
+  return {
+    connect, disconnect, status, tick, setPull,
+    // for pull.js: where to listen for asks, with which key (never shown), and whether it may
+    connection: () => (saved.key && saved.address ? { base: saved.address, key: saved.key } : null),
+    pullOn: () => saved.pull !== false,
+    close: () => { clearInterval(timer); for (const a of Object.values(agents)) a.destroy(); }, _T: T
+  };
 }
 
 module.exports = { createReporter, address, code };

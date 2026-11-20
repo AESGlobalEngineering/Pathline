@@ -2,6 +2,8 @@ node_modules/
 dist/
 received-jobs/
 tools/scratch/
+# what monitor/tools/pull.js pulls from the machines (their logs, customers' drawings)
+pulled/
 
 # generated packages and scratch output (rebuilt by the tools/ scripts)
 design-handoff/

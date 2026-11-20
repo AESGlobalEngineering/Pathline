@@ -2,6 +2,8 @@
 
 From Pathline Monitor 0.5.0 (16 Nov 2026). It replaces the way Monitor got its data in [RUN-MONITOR-BRIEF.md](RUN-MONITOR-BRIEF.md).
 
+> **Since Pathline Monitor 0.6 and Pathline Run 0.7.21 (20 Nov 2026)** the one rule below has one exception, chosen by the owner: **pulls**. Someone with Monitor's pull token can ask a machine for one thing from a fixed list (a day's log, a job's drawings, its mark pictures, health …), and Run reads it and sends it. It still never changes anything because of the server. See *Pulls* in [PROTOCOL.md](../PROTOCOL.md).
+
 ## What changed in Monitor
 
 Monitor used to be a hub on the workshop network that asked each Run what it was doing. That only worked on the workshop Wi-Fi. Now Monitor is one small server on the company's own AWS server ([monitor/README.md](../monitor/README.md)), and phones open it from anywhere.

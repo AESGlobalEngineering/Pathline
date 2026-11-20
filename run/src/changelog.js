@@ -5,6 +5,13 @@
 
 module.exports = [
   {
+    version: '0.7.21', date: '20 Nov 2026',
+    added: [
+      'Pathline Monitor can ask this machine for a day\'s diagnostics log, a job\'s drawings, the camera\'s pictures of its marks, its run records, the head drawing fit and bed maps, its settings or its health (temperature, and a Raspberry Pi\'s power warnings), when someone at the company needs them (Pathline Monitor 0.6 or newer, with its pull token). Pathline Run reads what\'s asked and sends just that, over its own outgoing connection; Monitor passes it on and keeps nothing. An ask can only ever make Pathline Run read one of those things: it can\'t change a setting, or touch the machine or a job, and a running job is never held up. Each ask is in the diagnostics log.',
+      'Setup → Pathline Monitor: a switch, Let Pathline Monitor ask for logs, drawings and camera pictures. On unless turned off, and only changed on the machine\'s own screen. The settings sent never include the Monitor key.'
+    ]
+  },
+  {
     version: '0.7.20', date: '20 Nov 2026',
     added: [
       'Raspberry Pi: a Pi can be a Pathline Run station and nothing else. Switched on, it goes straight into Pathline Run full screen (no desktop, no login), starts it again by itself if it ever stops, keeps the screen on, and is safe to switch off at the wall. One setup line on a fresh Raspberry Pi OS Lite (64-bit) does it all: run/deploy/pi/README.md. Raspberry Pi\'s 10" Touch Display 2 is found by itself and Pathline Run is shown 1.5 times bigger on it (its own 1280×800 layout); it can be turned on its side.',
