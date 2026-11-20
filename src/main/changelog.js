@@ -5,12 +5,25 @@
 
 module.exports = [
   {
+    version: '1.6.22', date: '20 Nov 2026',
+    added: [
+      'Scale buttons beside Rotation (Objects): ×0.1, ×10 and Revert, which goes back to the size before scaling.',
+      'Simulation: Job peak shows the hottest point of the whole job wherever the timeline is.'
+    ],
+    fixed: [
+      'Cutting and plotting never run faster than 200 mm/s; engraving no faster than the machine\'s travel speed. The speed controls stop there and a process set faster runs at the limit.',
+      'Part edges reads a box in the Registration marks colour when that process has a colour, else the cut lines; no choice to make. It is described as "4 Corners - Linear Only".',
+      'Less text: explanations removed from the pages, dialogs, toasts and checks. The Queue tab only shows for a machine on the network.'
+    ]
+  },
+  {
     version: '1.6.21', date: '20 Nov 2026',
     added: [
       'Send jobs from anywhere: sign in to your workshop\'s Pathline Monitor once, with the workshop password and the 6-digit code from an authenticator app (Google or Microsoft Authenticator), and add any of its machines. Pathline Prepare asks on its first start; after that it\'s under Setup → Machines → Add machine → Machines in your workshop.',
       'On the workshop network Pathline Prepare talks to a machine directly, as before. Anywhere else it goes through Pathline Monitor, where jobs are queued only: Start is pressed at the machine. Send and start queues the job and says so.',
       'A machine already set up on the workshop network is linked to the workshop by itself. Machines reached through Pathline Monitor show it on the Machines page.'
-    ]
+    ],
+    fixed: []
   },
   {
     version: '1.6.20', date: '20 Nov 2026',

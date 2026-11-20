@@ -227,7 +227,7 @@
           </sc-if>
           <sc-if value="{{fill.showRot}}" hint-placeholder-val="{{false}}">
             <div class="fcol">
-              <span class="lbl">Turn parts 90° where it fits better</span>
+              <span class="lbl">Rotate 90°</span>
               <div role="radiogroup" aria-label="Turn parts" class="seg fill">
                 <sc-for list="{{fill.rots}}" as="o" hint-placeholder-count="2">
                   <button role="radio" aria-checked="{{o.on}}" onClick="{{o.pick}}" style="background: {{o.bg}}; box-shadow: {{o.sh}}; color: {{o.fg}}">{{o.l}}</button>
@@ -296,7 +296,6 @@
       </div>
     </sc-for>
     <span style="flex: 1"></span>
-    <span class="lbl mach-tools-lbl" style="margin-right: 2px">{{mach.toolsLabel}}</span>
     <sc-if value="{{regAvail}}" hint-placeholder-val="{{true}}">
       <div style="position: relative">
         <button class="tb v-bd" onClick="{{toggleReg}}" aria-haspopup="menu" aria-expanded="{{regOpen}}" style="--v-bd: {{regBd}}; box-shadow: {{regSh}}">
@@ -319,17 +318,6 @@
                 <sc-if value="{{r.on}}" hint-placeholder-val="{{false}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="color: var(--accent-fg)"><path d="{{icons.check}}"></path></svg></sc-if>
               </button>
             </sc-for>
-            <sc-if value="{{regEdge}}" hint-placeholder-val="{{false}}">
-              <div class="h-sec" style="padding: 10px 10px 4px">Box the camera reads</div>
-              <div style="padding: 0 6px 6px">
-                <div role="radiogroup" aria-label="Box the camera reads" class="seg fill sm">
-                  <sc-for list="{{edgeSources}}" as="k" hint-placeholder-count="2">
-                    <button role="radio" aria-checked="{{k.on}}" onClick="{{k.pick}}" title="{{k.tip}}" style="background: {{k.bg}}; box-shadow: {{k.sh}}; color: {{k.fg}}">{{k.l}}</button>
-                  </sc-for>
-                </div>
-              </div>
-              <div class="lbl" style="padding: 2px 10px 8px; line-height: 1.4">{{regTip}}</div>
-            </sc-if>
           </div>
         </sc-if>
       </div>
@@ -610,6 +598,14 @@
                   <span class="fld"><input type="text" value="{{p.v}}" onChange="{{p.set}}" onBlur="{{p.commit}}" onKeyDown="{{p.key}}" disabled="{{p.ro}}"><span class="lbl">{{p.u}}</span></span>
                 </label>
               </sc-for>
+              <div class="fcol">
+                <span class="lbl">Scale</span>
+                <div role="group" aria-label="Scale" style="display: flex; gap: 4px">
+                  <button class="tb" onClick="{{scaleDown}}" title="Scale to a tenth (e.g. drawn in the wrong units)" style="flex: 1; padding: 0 4px">×0.1</button>
+                  <button class="tb" onClick="{{scaleUp}}" title="Scale ten times" style="flex: 1; padding: 0 4px">×10</button>
+                  <button class="tb" onClick="{{scaleRevert}}" disabled="{{scaleSame}}" title="Back to the size before scaling" style="flex: 1.4; padding: 0 4px; opacity: {{scaleRevertOp}}">Revert</button>
+                </div>
+              </div>
             </div>
             <label style="display: flex; align-items: center; gap: 8px">
               <input type="checkbox" checked="{{lockRatio}}" onChange="{{toggleLockRatio}}" style="width: 16px; height: 16px; margin: 0; accent-color: {{accent}}">
@@ -926,7 +922,7 @@ class Component extends DCLogic {
     if (!t) return;
     if (t.dirty) {
       await this.switchTab(id); // in front while asking
-      const r = await LRC.dialog({ title: 'Save changes to "' + t.name + '"?', message: 'Closing this tab loses the changes that are not saved to a file.', buttons: [{ label: 'Cancel', value: null }, { label: "Don't save", value: 'discard', danger: true }, { label: 'Save', value: 'save', primary: true }] });
+      const r = await LRC.dialog({ title: 'Save changes to "' + t.name + '"?', buttons: [{ label: 'Cancel', value: null }, { label: "Don't save", value: 'discard', danger: true }, { label: 'Save', value: 'save', primary: true }] });
       if (!r || !r.button) return;
       if (r.button === 'save' && !(await this.save())) return;
     }
@@ -992,7 +988,7 @@ class Component extends DCLogic {
       notes.push(r.name + ': ' + r.entities.length + ' shape' + (r.entities.length === 1 ? '' : 's') + ' · ' + r.width.toFixed(1) + ' × ' + r.height.toFixed(1) + ' mm' + (isPlot && bedNo ? ' · bed ' + (bedNo + 1) : '') + (skipped.length ? ' · skipped ' + skipped.map(([k, v]) => v + ' ' + k).join(', ') : ''));
     }
     if (isPlot && beds > (job.beds || 1)) job = { ...job, beds };
-    if (outside) notes.push(outside + ' drawing' + (outside === 1 ? " didn't" : " didn't") + ' fit on the ' + (sh ? 'sheet' : 'bed') + ' and ' + (outside === 1 ? 'was' : 'were') + ' placed beside it. Use Nest & fill to fit what you can.');
+    if (outside) notes.push(outside + ' drawing' + (outside === 1 ? " didn't" : " didn't") + ' fit on the ' + (sh ? 'sheet' : 'bed') + ' and ' + (outside === 1 ? 'was' : 'were') + ' placed beside it.');
     this.commit(job, { record: true }, newIds);
     notes.forEach((n) => LRC.toast(n, { ms: 6000 }));
     if (this.canvas && newIds.length) setTimeout(() => this.canvas.fit(), 50);
@@ -1030,7 +1026,6 @@ class Component extends DCLogic {
     const one = ents.length === 1;
     const r = await LRC.dialog({
       title: one ? 'Rename object' : 'Rename ' + ents.length + ' objects',
-      message: one ? '' : 'They are numbered in order: Name, Name 2, Name 3…',
       fields: [{ key: 'name', label: 'Name', value: one ? ents[0].name : ents[0].name.replace(/ \d+$/, ''), full: true }],
       buttons: [{ label: 'Cancel', value: null }, { label: 'Rename', value: 'ok', primary: true }]
     });
@@ -1074,7 +1069,6 @@ class Component extends DCLogic {
     const v = cur || { cols: 3, rows: 2, gx: 5, gy: 5 };
     const r = await LRC.dialog({
       title: cur ? 'Edit array' : 'Array',
-      message: cur ? 'This array has ' + cur.cols + ' × ' + cur.rows + ' (' + cur.copies + ' copies of the original). New values replace the copies; 1 × 1 removes them. Copies you moved or changed are replaced too.' : undefined,
       fields: [{ key: 'c', label: 'Columns', value: String(v.cols), type: 'number' }, { key: 'r', label: 'Rows', value: String(v.rows), type: 'number' }, { key: 'gx', label: 'Gap X', value: String(v.gx), unit: 'mm', type: 'number' }, { key: 'gy', label: 'Gap Y', value: String(v.gy), unit: 'mm', type: 'number' }],
       buttons: [{ label: 'Cancel', value: null }, { label: cur ? 'Update' : 'Create', value: 'ok', primary: true }]
     });
@@ -1091,7 +1085,7 @@ class Component extends DCLogic {
     if (r && Number.isFinite(r.values.a)) this.op((j, s) => LRC.ops.rotate(j, s, r.values.a));
   }
   async textAt(x, y, bed) {
-    const r = await LRC.dialog({ title: 'Text', message: 'Text is converted to outlines in IBM Plex Sans.', fields: [{ key: 't', label: 'Text', value: '', full: true }, { key: 's', label: 'Height', value: '10', unit: 'mm', type: 'number' }], buttons: [{ label: 'Cancel', value: null }, { label: 'Add', value: 'ok', primary: true }] });
+    const r = await LRC.dialog({ title: 'Text', fields: [{ key: 't', label: 'Text', value: '', full: true }, { key: 's', label: 'Height', value: '10', unit: 'mm', type: 'number' }], buttons: [{ label: 'Cancel', value: null }, { label: 'Add', value: 'ok', primary: true }] });
     if (!r || !r.values.t) return;
     const ent = await LRC.textEntity(r.values.t, r.values.s || 10, x, y, this.drawAci());
     this.commit({ ...this.state.job, entities: this.state.job.entities.concat({ ...ent, bed: bed || 0 }) }, { record: true }, [ent.id]);
@@ -1123,11 +1117,12 @@ class Component extends DCLogic {
     const kind = CC.regKindOf(job);
     const corners = kind === 'corner';
     const wasOn = job.regMode && job.regMode !== 'off';
-    // turning marks on: pick the colour the marks (or the plate's outline) use; part edges on the cut lines use no colour
-    const pick = mode !== 'off' && !wasOn && !(kind === 'edge' && CC.edgeSourceOf(job) === 'cut');
+    // turning marks on: pick the colour the marks (or the plate's outline) use; part edges
+    // read the cut lines unless a box is given the Registration marks colour
+    const pick = mode !== 'off' && !wasOn && kind !== 'edge';
     this.setState({ reg: false, ...(pick ? { procSel: regIdx, picker: true, tab: 'Processes', edit: {} } : mode === 'off' ? { procSel: 0, edit: {} } : {}) });
     this.commit({ ...job, regMode: mode, processes, ...(corners && n ? { regCorners: n } : {}) }, { record: true });
-    if (pick) LRC.toast(kind === 'edge' ? 'Part edges on — give the box the colour you pick for "Registration marks" (it isn\'t cut)' : corners ? 'Registration marks on — draw the plate\'s outline as a box and give it the colour you pick for "Registration marks"' : 'Registration marks on — pick the colour(s) your mark objects use for "Registration marks", or right-click the marks and choose a colour', { ms: 7000 });
+    if (pick) LRC.toast('Pick the Registration marks colour');
   }
   // The marks menu: Off, Position & rotation, Full linear, Non-linear (printed
   // dots) or Part edges (four printed corners, always linear)
@@ -1136,8 +1131,8 @@ class Component extends DCLogic {
     if (id === 'edge') {
       const was = CC.regKindOf(job) === 'edge' && job.regMode && job.regMode !== 'off';
       if (was) return this.setState({ reg: true });
-      // part edges from the cut lines need no colour; the box in the mark colour does
-      let next = { ...job, regKind: 'edge', edgeSource: CC.edgeSourceOf(job) };
+      // the cut lines, or a box once the Registration marks process has a colour
+      const next = { ...job, regKind: 'edge' };
       this.state.job = next; // setRegMode reads the job from state
       this.setRegMode('linear');
       this.setState({ reg: true });
@@ -1145,19 +1140,6 @@ class Component extends DCLogic {
     }
     if (id !== 'off' && CC.regKindOf(job) !== 'dot') this.state.job = { ...job, regKind: 'dot' };
     this.setRegMode(id);
-  }
-  // Part edges: read boxes in the Registration marks colour (not cut) or the cut lines
-  setEdgeSource(src) {
-    const job = this.state.job;
-    if (CC.edgeSourceOf(job) === src) return;
-    // the corners chosen were on the other boxes
-    const next = { ...job, edgeSource: src, edgeCorners: undefined };
-    this.commit(next, { record: true });
-    if (src === 'mark') {
-      const regIdx = next.processes.findIndex(CC.isRegProc);
-      this.setState({ reg: false, procSel: regIdx, picker: true, tab: 'Processes', edit: {} });
-      LRC.toast('Give the box the colour you pick for "Registration marks": it is read by the camera and not cut', { ms: 7000 });
-    }
   }
   // Part edges: a corner dragged on the bed goes to the nearest box corner
   moveEdgeCorner(slot, x, y) {
@@ -1403,7 +1385,7 @@ class Component extends DCLogic {
     const sheet = job.sheet && job.sheet.on ? { ...job.sheet, x: job.sheet.x + sh.dx, y: job.sheet.y + sh.dy } : job.sheet;
     this.commit({ ...job, entities, sheet }, { record: true });
     const dir = [sh.dx ? Math.abs(sh.dx) + ' mm ' + (sh.dx > 0 ? 'right' : 'left') : '', sh.dy ? Math.abs(sh.dy) + ' mm ' + (sh.dy > 0 ? 'forward' : 'back') : ''].filter(Boolean).join(' and ');
-    LRC.toast('Moved the job ' + dir + ' so the camera can reach every mark. Place the printed sheet there too.', { kind: 'ok', ms: 7000 });
+    LRC.toast('Moved the job ' + dir + ' into camera reach', { kind: 'ok' });
   }
   // Move a process in the list (the run order with By process); edits in
   // progress and the open process move with it
@@ -1421,7 +1403,7 @@ class Component extends DCLogic {
     const i = this.state.procSel;
     const p = this.state.job.processes[i];
     if (!p) return;
-    if (!(await LRC.confirm('Delete "' + p.name + '"?', 'Objects in its colours will have no process until you assign them to another one.', 'Delete', true))) return;
+    if (!(await LRC.confirm('Delete "' + p.name + '"?', '', 'Delete', true))) return;
     const processes = this.state.job.processes.filter((_, k) => k !== i);
     this.setState({ procSel: Math.max(0, i - 1), edit: {} });
     this.commit({ ...this.state.job, processes }, { record: true });
@@ -1680,8 +1662,8 @@ class Component extends DCLogic {
 
     // ---- header: machine + device status
     const TYPE = { laser: { type: 'LASER', tbg: 'var(--badge-laser)' }, plotter: { type: 'PLOTTER', tbg: 'var(--badge-plotter)' } };
-    const subOf = (x) => (x.sim ? 'Simulated' + (x.ctrl ? ' · ' + x.ctrl : '') + ' · jobs saved as files' : (x.ctrl ? x.ctrl + ' · ' : '') + (x.placeholder ? 'not set up' : x.conn === 'Ethernet' ? (x.ip || 'no IP') : 'save locally'));
-    const mach = { ...TYPE[m], name: machine.name, sub: machine.placeholder ? (machine.kind || '') : (machine.kind || '') + (machine.kind ? ' · ' : '') + subOf(machine), toolsLabel: machine.ctrl };
+    const subOf = (x) => [x.ctrl, x.placeholder ? 'Not set up' : x.sim ? 'Simulated' : x.conn === 'Ethernet' ? (x.ip || 'No IP') : null].filter(Boolean).join(' · ');
+    const mach = { ...TYPE[m], name: machine.name, sub: subOf(machine), toolsLabel: '' };
     const machines = S.machines.map((x) => ({ ...TYPE[x.type], name: x.name, sub: subOf(x), on: x.id === machine.id, bg: x.id === machine.id ? accentSoft : 'transparent', pick: R(() => this.pickMachine(x.id)) }));
     const online = S.dev && S.dev.mid === machine.id;
     let dev;
@@ -1717,7 +1699,7 @@ class Component extends DCLogic {
     const mode = MODES.find((x) => x.id === (job.regMode || 'off')) || MODES[0];
     const regOn = mode.id !== 'off';
     const isEdge = regOn && regKind === 'edge';
-    const FIVE = MODES.concat({ id: 'edge', l: 'Part edges', n: '4 printed corners · full linear', dots: ['tl', 'tr', 'bl', 'br'] });
+    const FIVE = MODES.concat({ id: 'edge', l: 'Part edges', n: '4 Corners - Linear Only', dots: ['tl', 'tr', 'bl', 'br'] });
     const regModes = FIVE.map((x) => {
       const on = x.id === 'edge' ? isEdge : x.id === 'off' ? !regOn : !isEdge && x.id === mode.id;
       return { ...x, on, bg: on ? accentSoft : 'transparent', dots: x.dots.map((k) => DOT[k]), pick: () => this.setRegChoice(x.id) };
@@ -1726,9 +1708,7 @@ class Component extends DCLogic {
       : regKind === 'edge' ? 'Part edges'
         : regKind === 'corner' ? 'Plate corners · ' + CC.regCornersOf(job)
         : regKind === 'hole' ? 'Holes · ' + (CC.REG_NEEDED[mode.id] || 3) : mode.l + ' · ' + mode.n;
-    const regTip = CC.REG_TIPS[regKind] || '';
-    const edgeSrc = CC.edgeSourceOf(job);
-    const edgeSources = [['cut', 'Cut lines', 'The parts\' own cut outlines: cut as normal'], ['mark', 'Mark colour', 'A box in the Registration marks colour: read, not cut']].map(([id, l, tip]) => ({ l, tip, on: edgeSrc === id, ...{ bg: edgeSrc === id ? 'var(--seg-on)' : 'transparent', sh: edgeSrc === id ? 'var(--shadow-1)' : 'none', fg: edgeSrc === id ? 'var(--text)' : 'var(--text-3)' }, pick: () => this.setEdgeSource(id) }));
+
 
     // ---- processes
     const ACI = [1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => ({ n, name: CC.aciName(n), hex: LRC.aci.hex(n), fg: LRC.aci.fg(n) }));
@@ -1785,7 +1765,9 @@ class Component extends DCLogic {
     const dpiSelect = (v, set) => LRC.dpiSelect(v, set);
     const num = (k) => (e) => {
       const raw = e.target.value;
-      const v = parseFloat(raw);
+      let v = parseFloat(raw);
+      // processing never goes faster than the limit
+      if (k === 'speed' && hasSel && v > CC.speedLimitOf(this.effective(selIdx), machine)) v = CC.speedLimitOf(this.effective(selIdx), machine);
       this.setEdit(k, Number.isFinite(v) ? v : raw);
     };
     let sel = { chips: [], adv: [], sliders: [], nums: [], selectOpts: [] };
@@ -1805,8 +1787,8 @@ class Component extends DCLogic {
         selectLabel: isLaser ? 'Process' : 'Tool head',
         selectValue: isLaser ? sc.proc : CC.toolFor(machine, sc.tool),
         sliders: isLaser
-          ? [{ l: 'Power', v: sc.power, u: '%', min: 0, max: 100, step: 1, set: num('power') }, { l: 'Speed', v: sc.speed, u: 'mm/s', min: 1, max: Math.max(1000, Number(sc.speed) || 0), step: 1, set: num('speed') }]
-          : CC.isPunch(sc, machine) ? [] : [{ l: 'Speed', v: sc.speed, u: 'mm/s', min: 10, max: Math.max(1000, Number(sc.speed) || 0), step: 10, set: num('speed') }],
+          ? [{ l: 'Power', v: sc.power, u: '%', min: 0, max: 100, step: 1, set: num('power') }, { l: 'Speed', v: Math.min(Number(sc.speed) || 0, CC.speedLimitOf(sc, machine)), u: 'mm/s', min: 1, max: CC.speedLimitOf(sc, machine), step: 1, set: num('speed') }]
+          : CC.isPunch(sc, machine) ? [] : [{ l: 'Speed', v: Math.min(Number(sc.speed) || 0, CC.MAX_PROCESS_SPEED), u: 'mm/s', min: 5, max: CC.MAX_PROCESS_SPEED, step: 5, set: num('speed') }],
         nums: isLaser
           ? [isCut ? { isNum: true, l: 'Frequency', v: String(sc.f), u: 'Hz', set: num('f') } : { isSel: true, l: 'DPI', el: dpiSelect(sc.f, (v) => this.setEdit('f', v)) }, { isNum: true, l: 'Passes', v: String(sc.passes), u: '×', set: num('passes') }]
             .concat(Number(sc.passes) > 1 ? [{ isNum: true, l: 'Dwell between passes', v: String(sc.dwell || 0), u: 's', set: num('dwell') }] : [])
@@ -2187,8 +2169,7 @@ class Component extends DCLogic {
         remove: R(() => this.queueAction((mid) => window.api.device.removeJob(mid, q.id), 'Removed "' + q.name + '" from ' + machine.name))
       };
     });
-    const queueNote = machine.conn !== 'Ethernet' ? machine.name + ' saves jobs locally, so it has no queue.'
-      : !online ? 'Not connected to ' + machine.name + '.'
+    const queueNote = !online ? 'Not connected'
         : !qList.length ? 'No jobs waiting.' : false;
 
     // ---- tools
@@ -2248,7 +2229,7 @@ class Component extends DCLogic {
       toggleMenu: machine.placeholder ? () => this.flushJob().then(() => { location.href = 'MachineSetupDetailed.dc.html#add'; }) : () => this.setState((s) => ({ menu: !s.menu, reg: false, fill: false, bar: null })),
       regOpen: S.reg, regBd: regOn ? accent : 'var(--line-strong)', regSh: regOn ? 'inset 0 0 0 1px ' + accent : 'none', regIc: regOn ? accentFg : 'var(--text-3)',
       toggleReg: () => this.setState((s) => ({ reg: !s.reg, menu: false, fill: false })),
-      regModes, regLabel, regAvail: isLaser && feat('camera'), regOn, regEdge: isEdge, edgeSources, regTip,
+      regModes, regLabel, regAvail: isLaser && feat('camera'), regOn,
       fillOpen: S.fill, fillBd: S.fill ? accent : 'var(--line-strong)', toggleFill: () => this.setState((s) => ({ fill: !s.fill, menu: false, reg: false, sheetOpen: false })), fill,
       sheetFields, sheetPresets,
       saveName: job.name, savedLabel: fmtSaved, renameJob: R(() => this.renameJob()),
@@ -2283,6 +2264,12 @@ class Component extends DCLogic {
       hasObjSel: selEnts.length > 0, objName, objProps, objColours, objColourLabel,
       objColourOther: R(() => this.recolourOther()),
       lockRatio: S.lockRatio, toggleLockRatio: () => this.setState((s) => ({ lockRatio: !s.lockRatio })),
+      // scale the selection about its top left; Revert goes back to the size before
+      scaleDown: () => this.commit(LRC.ops.scaleBy(job, selIds, 0.1), { record: true }),
+      scaleUp: () => this.commit(LRC.ops.scaleBy(job, selIds, 10), { record: true }),
+      scaleRevert: () => this.commit(LRC.ops.revertScale(job, selIds), { record: true }),
+      scaleSame: selIds.length ? LRC.ops.revertFactor(job, selIds) === 1 : true,
+      scaleRevertOp: selIds.length && LRC.ops.revertFactor(job, selIds) !== 1 ? 1 : 0.45,
       lockLabel: anyLocked ? 'Unlock' : 'Lock',
       lockSel: () => this.commit(LRC.ops.setFlag(job, selIds, 'locked', !anyLocked), { record: true }),
       hideSel: () => this.commit(LRC.ops.setFlag(job, selIds, 'hidden', true), { record: true }, []),
@@ -2325,7 +2312,7 @@ class Component extends DCLogic {
       noRemoveBed: est.beds <= 1 && (job.beds || 1) <= 1, removeBedOp: est.beds <= 1 && (job.beds || 1) <= 1 ? 0.45 : 1,
       selInfo: selIds.length ? selIds.length + ' selected · ' + CC.boxW(sb).toFixed(1) + ' × ' + CC.boxH(sb).toFixed(1) + ' mm' : '',
       snaps: [snap('Grid', 'grid'), snap('Objects', 'objects'), snap('Centre', 'centre')],
-      tabs: [tab('Processes'), tab('Objects', job.entities.length ? String(job.entities.length) : false), tab('Queue', waitingIds.length ? String(waitingIds.length) : false)],
+      tabs: [tab('Processes'), tab('Objects', job.entities.length ? String(job.entities.length) : false), ...(machine.conn === 'Ethernet' && !machine.sim ? [tab('Queue', waitingIds.length ? String(waitingIds.length) : false)] : [])],
       aci, pickerOpen: S.picker, pickerBd: S.picker ? accent : 'var(--line-strong)', aciOther: R(() => this.aciOther()),
       togglePicker: () => this.setState((s) => ({ picker: !s.picker })),
       canRecolour: selIds.length > 0 && hasSel && (procs[selIdx].aci || []).length > 0,
@@ -2335,7 +2322,7 @@ class Component extends DCLogic {
       matOpen: S.matOpen, matBd: S.matOpen ? accent : 'var(--line-strong)', toggleMat: matList.length ? () => this.setState((s) => ({ matOpen: !s.matOpen })) : () => this.flushJob().then(() => { location.href = 'MaterialsDetailed.dc.html#new'; }), matList,
       mat: material ? { name: material.name + ' · ' + material.t + ' mm', sub: material.locked ? 'Locked' : '', sw: material.sw } : { name: 'No material', sub: '', sw: 'var(--sunken)' },
       coloursUsed: procs.length + ' process' + (procs.length === 1 ? '' : 'es'),
-      orphanNote: orphans.length ? orphans.map((a) => 'ACI ' + a).join(', ') + ' ' + (orphans.length > 1 ? 'have' : 'has') + ' no process and won’t be output' : false,
+      orphanNote: orphans.length ? orphans.map((a) => 'ACI ' + a).join(', ') + ' · no process' : false,
       addOrphan: R(() => this.newProcess(orphans[0])),
       colours, hasSel, sel, newProcess: R(() => this.newProcess()), deleteProcess: R(() => this.deleteProcess()),
       toggleDash: () => this.setEdit('dash', !(sc && sc.dash)),      saveGlobal: R(() => this.saveToMaterial()), revertJob: R(() => this.revertToPreset()),
@@ -2375,7 +2362,7 @@ class Component extends DCLogic {
     const i = this.state.procSel;
     const p = this.effective(i);
     if (!p) return;
-    const r = await LRC.dialog({ title: 'Bridges · ' + p.name, message: 'Leaves small uncut bridges so parts stay in the sheet.', fields: [{ key: 'on', label: 'Bridges on', type: 'check', value: !!p.dash }, { key: 'dl', label: 'Cut length', value: String(p.dl), unit: 'mm', type: 'number' }, { key: 'gl', label: 'Bridge width', value: String(p.gl), unit: 'mm', type: 'number' }], buttons: [{ label: 'Cancel', value: null }, { label: 'Apply', value: 'ok', primary: true }] });
+    const r = await LRC.dialog({ title: 'Bridges · ' + p.name, fields: [{ key: 'on', label: 'Bridges on', type: 'check', value: !!p.dash }, { key: 'dl', label: 'Cut length', value: String(p.dl), unit: 'mm', type: 'number' }, { key: 'gl', label: 'Bridge width', value: String(p.gl), unit: 'mm', type: 'number' }], buttons: [{ label: 'Cancel', value: null }, { label: 'Apply', value: 'ok', primary: true }] });
     if (!r) return;
     this.setState((s) => ({ edit: { ...s.edit, [i]: { ...(s.edit[i] || {}), dash: !!r.values.on, dl: r.values.dl || p.dl, gl: r.values.gl || p.gl } } }));
   }

@@ -154,6 +154,21 @@ async function main() {
     ok(!CC.matOnMachine(mat, { id: 'trotec', type: 'laser' }) && CC.matOnMachine(mat, { id: 'laser2', type: 'laser' }) && CC.matOnMachine(mat, plotter), 'a machine taken off a material isn\'t offered it; other machines still are');
   }
 
+  console.log('Processing speed limit');
+  {
+    const { job, laser, plotter } = testJob();
+    const cutSpeeds = (l) => l.filter((p) => p.proc !== 'Engrave').every((p) => p.speed <= 200);
+    ok(CC.MAX_PROCESS_SPEED === 200 && ['laser', 'plotter'].every((t) => cutSpeeds(CC.defaultPresets(t, 3))) && cutSpeeds(CC.metalPresets(1)) && CC.defaultPresets('laser', 3).some((p) => p.proc === 'Engrave' && p.speed > 200), 'starting cut and plot presets never go above 200 mm/s; engraving keeps its speed');
+    const setCut = (v) => ({ ...job, processes: job.processes.map((p) => (p.proc === 'Cut' ? { ...p, speed: v } : p)) });
+    ok(near(CC.estimate(setCut(400), laser).total, CC.estimate(setCut(200), laser).total, 1e-6) && CC.estimate(setCut(150), laser).total > CC.estimate(setCut(200), laser).total, 'a cut set above 200 mm/s is timed at 200 mm/s');
+    const pkg = ex.buildPackage(setCut(400), laser, null, CC.estimate(setCut(400), laser, { timeline: true }));
+    ok(pkg.processes.every((p) => p.proc === 'Engrave' || !(p.speed > 200)), 'the package never asks a cut for more than 200 mm/s');
+    ok(CC.checkJob(setCut(400), laser).some((c) => c.warn && /set above 200 mm\/s/.test(c.l)), 'the check says when a cut is set above 200 mm/s');
+    const eng = { ...job, processes: job.processes.map((p) => (p.proc === 'Engrave' ? { ...p, speed: 9000 } : p)) };
+    ok(CC.speedLimitOf({ proc: 'Engrave' }, laser) === laser.info.speed && !CC.checkJob(eng, laser).some((c) => /set above 200/.test(c.l)), 'engraving is limited by the machine’s travel speed (' + laser.info.speed + ' mm/s), not 200');
+    ok(ex.buildPackage(eng, laser, null, CC.estimate(eng, laser, { timeline: true })).processes.filter((p) => p.proc === 'Engrave').every((p) => p.speed === laser.info.speed), 'an engraving set faster than the machine is sent at the machine’s speed');
+  }
+
   console.log('Estimator');
   {
     // a straight 100 mm line at 10 mm/s with huge acceleration ≈ 10 s
@@ -271,7 +286,7 @@ async function main() {
       const far = CC.marksOutOfReach(x28, q500);
       ok(far.length === 2 && far.every((f) => f.edge === 'left' && f.from === 13 && f.see === 26.9), 'the X28 job: marks 1 and 3 are 13 mm from the left edge, the camera sees from 26.9 mm');
       const chk = CC.checkJob(x28, q500).find((c) => c.reach);
-      ok(chk && chk.block && /Mark 1 is 13 mm from the left edge; this laser's camera can only see from 26.9 mm/.test(chk.l), 'out-of-reach marks block Send and name the mark and the edge (' + (chk && chk.l) + ')');
+      ok(chk && chk.block && /Mark 1 .*out of camera reach .left edge./.test(chk.l), 'out-of-reach marks block Send and name the mark and the edge (' + (chk && chk.l) + ')');
       const sh = CC.reachShift(x28, q500);
       const moved = { ...x28, entities: x28.entities.map((e) => CC.translate(e, sh.dx, sh.dy)) };
       const mk = CC.regMarks(moved, q500);
@@ -288,7 +303,7 @@ async function main() {
       ok(!CC.marksOutOfReach(inside, q500).length && !CC.checkJob(inside, q500).some((c) => c.block), 'parts right up to the bed edge are fine when the marks are inside markArea');
       // marks further apart than markArea: no placement works
       const big = pc([dot('m1', 2, 100), dot('m2', 1299, 100), dot('m3', 2, 500)]);
-      const bs = CC.reachShift(big, q500), bc = CC.checkJob(big, q500).find((c) => c.block && /too big for print and cut/.test(c.l));
+      const bs = CC.reachShift(big, q500), bc = CC.checkJob(big, q500).find((c) => c.block && /too big/.test(c.l));
       ok(bs.tooWide === 'x' && bc, 'marks further apart than markArea: the job is too big for print and cut on this machine (' + (bc && bc.l) + ')');
       // no markArea (camera off, older Run, even with camX/camY), camera off, or a plotter: nothing is checked
       ok(!CC.camReach(mach(undefined)) && !CC.camReach(mach([26.9, 3.5, 1300, 900], { f: { camera: false } })) && !CC.camReach({ type: 'plotter', info: { markArea: [10, 10, 100, 100] } }), 'no markArea, camera off or a plotter: marks are not checked');
@@ -688,11 +703,11 @@ async function main() {
     ok(rs.length === 3 && rs.every((m) => near(m.r, 8, 0.15)) && near(rs[0].x, 50, 1e-6) && near(rs[0].y, 40, 1e-6), 'a box with rounded corners gives the corners where its straight edges meet, and the radius (' + rs.map((m) => m.r).join(', ') + ' mm)');
     const cst = inspect(rounded);
     ok(cst.length === 3 && cst.every((x) => x.kind === 'corner' && Array.isArray(x.toward) && x.d === 0 && near(x.r, 8, 0.15)) && cst.map((x) => x.at.join(',')).join(' ') === '50,40 50,240 350,40', 'corner inspect steps carry kind, toward and the radius, read top left, bottom left, top right');
-    ok(CC.checkJob(rounded, cam).some((c) => c.ok && /3 plate corners · rounded, r 8 mm/.test(c.l)), 'the check says the plate\'s corners are rounded');
+    ok(CC.checkJob(rounded, cam).some((c) => c.ok && /Plate corners · 3 · r 8 mm/.test(c.l)), 'the check says the plate\'s corners are rounded');
     const none = { ...corners, entities: [base.entities[0]] };
-    ok(CC.regMarks(none, cam).length === 0 && CC.checkJob(none, cam).some((c) => c.block && /draw the plate\'s outline/.test(c.l)), 'plate corners without a box in the mark colour can\'t be sent');
+    ok(CC.regMarks(none, cam).length === 0 && CC.checkJob(none, cam).some((c) => c.block && /no box in the Registration marks colour/.test(c.l)), 'plate corners without a box in the mark colour can\'t be sent');
     ok(CC.checkJob({ ...corners, entities: corners.entities.concat(base.entities.slice(1)) }, cam).some((c) => c.block && /one box/.test(c.l)), 'more than one object in the mark colour can\'t be sent with plate corners');
-    ok(CC.checkJob({ ...corners, entities: [base.entities[0], { id: 'disc', aci: 5, paths: [{ p: CC.shapes.ellipse(200, 140, 90, 90), c: true }] }] }, cam).some((c) => c.block && /rectangle along X and Y/.test(c.l)), 'a plate outline that isn\'t a rectangle can\'t be sent');
+    ok(CC.checkJob({ ...corners, entities: [base.entities[0], { id: 'disc', aci: 5, paths: [{ p: CC.shapes.ellipse(200, 140, 90, 90), c: true }] }] }, cam).some((c) => c.block && /must be a rectangle/.test(c.l)), 'a plate outline that isn\'t a rectangle can\'t be sent');
     // part edges: a full printed sheet of parts, no marks; the camera reads the corners of the parts at the sheet's corners
     const grid = [];
     for (let r = 0; r < 3; r++) for (let c = 0; c < 4; c++) {
@@ -708,7 +723,7 @@ async function main() {
     ok(est.length === 4 && est.map((x) => x.at.map((v) => +v.toFixed(1)).join(',')).join(' ') === '60,50 60,410 380,50 380,410' && est.every((x) => x.kind === 'corner' && x.part && near(x.r, 10, 0.15)), 'part edges are sent as plate corners, read top left, bottom left, top right, bottom right, naming the part');
     const pkgE = ex.buildPackage(edges, cam, null, CC.estimate(edges, cam, { timeline: true }));
     ok(grid.every((e) => pkgE.toolpath.some((x) => x.type === 'cut' && x.ent === e.id)), 'part edges on the cut lines: every part outline is still cut');
-    ok(CC.checkJob(edges, cam).some((c) => c.ok && /part edges · 4 corners · rounded, r 10 mm/.test(c.l)), 'the check says four part corners are read');
+    ok(CC.checkJob(edges, cam).some((c) => c.ok && /Part edges · 4 corners · r 10 mm/.test(c.l)), 'the check says four part corners are read');
     ok(CC.checkJob({ ...edges, entities: [{ id: 'disc', aci: 1, paths: [{ p: CC.shapes.ellipse(200, 140, 50, 50), c: true }] }] }, cam).some((c) => c.block && /no part outline/.test(c.l)), 'part edges need rectangular outlines to read');
     // moving a corner: it snaps to the nearest box corner and stays there
     const sn = CC.snapEdgeCorner(edges, 143, 166);
@@ -720,7 +735,7 @@ async function main() {
     ok(CC.checkJob({ ...edges, edgeCorners: { tr: { part: 'p00', corner: 'tl' } } }, cam).some((c) => c.block && /same corner/.test(c.l)), 'two corners on the same spot can\'t be sent');
     // the box in the Registration marks colour: read, not cut
     const box = { id: 'box', aci: 5, paths: [{ p: CC.shapes.rect(40, 30, 360, 400, 8), c: true }] };
-    const marked = { ...edges, edgeSource: 'mark', processes: [base.processes[0], { ...CC.regProcess(), aci: [5] }], entities: grid.concat(box) };
+    const marked = { ...edges, processes: [base.processes[0], { ...CC.regProcess(), aci: [5] }], entities: grid.concat(box) };
     const mk = CC.regMarks(marked, cam);
     ok(mk.length === 4 && mk.every((m) => m.part === 'box' && near(m.r, 8, 0.15)) && near(mk[3].x, 400, 0.01) && near(mk[3].y, 430, 0.01), 'part edges from a box in the mark colour: its four corners');
     const pkgM = ex.buildPackage(marked, cam, null, CC.estimate(marked, cam, { timeline: true }));

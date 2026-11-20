@@ -1730,7 +1730,7 @@
         dwellTime += dwell;
         push({ kind: 'dwell', proc: pi, bed, dur: dwell, pass: k });
       };
-      const speed = Math.max(0.1, Math.min(Number(proc.speed) || 1, vMax));
+      const speed = Math.max(0.1, Math.min(Number(proc.speed) || 1, vMax, isEngraveProc(proc) ? Infinity : MAX_PROCESS_SPEED));
       if (!isLaser) {
         const slot = toolSlot(proc.tool);
         if (curTool !== null && slot !== curTool) {
@@ -1973,9 +1973,26 @@
     return Array.isArray(own) ? own : mat.presets[machine.type] || [];
   }
 
+  // ---------------------------------------------------------------- processing speed limit
+  // No machine moves faster than this while cutting or plotting (owner's
+  // rule): the speed controls stop here, presets are held to it, and a
+  // process set faster runs at this speed (the estimate and the package).
+  // Engraving is limited by the machine's own travel speed instead.
+  const MAX_PROCESS_SPEED = 200;
+  const isEngraveProc = (p) => !!p && p.proc === 'Engrave';
+  // the fastest a process may run on a machine
+  const speedLimitOf = (p, machine) => {
+    if (!isEngraveProc(p)) return MAX_PROCESS_SPEED;
+    const info = (machine && machine.info) || {};
+    return Number(info.speed) || DEFAULTS[machine && machine.type === 'plotter' ? 'plotter' : 'laser'].speed;
+  };
+  const processSpeedOf = (p, machine) => Math.min(speedLimitOf(p, machine), Number(p && p.speed) || 0);
+  const capSpeeds = (list) => list.map((p) => (!isEngraveProc(p) && Number(p.speed) > MAX_PROCESS_SPEED ? { ...p, speed: MAX_PROCESS_SPEED } : p));
+
   // ---------------------------------------------------------------- default presets
   // Starting presets for a material, scaled by thickness (mm).
-  function defaultPresets(type, t) {
+  function defaultPresets(type, t) { return capSpeeds(defaultPresetsRaw(type, t)); }
+  function defaultPresetsRaw(type, t) {
     t = Number(t) || 3;
     if (type === 'plotter') {
       const ks = Math.max(150, Math.round(450 - t * 30));
@@ -2008,7 +2025,8 @@
   // Starting presets for metal sheet. On a CO2 laser bare metal is marked
   // through a marking spray/coating (anodised aluminium marks directly);
   // cutting needs a fibre source or very thin sheet, hence the slow cut.
-  function metalPresets(t) {
+  function metalPresets(t) { return capSpeeds(metalPresetsRaw(t)); }
+  function metalPresetsRaw(t) {
     t = Number(t) || 1;
     return [
       { name: 'Cut contour', proc: 'Cut', power: 100, speed: Math.max(1, Math.round(10 / t)), f: 5000, passes: t > 1 ? 2 : 1, air: 'On', dash: false, dl: 5, gl: 2, out: true, aci: [1, 6] },
@@ -2276,9 +2294,9 @@
   //    Registration marks colour; its corners are where its straight edges meet.
   //  - 'edge': part edges, for a full printed sheet with no printed marks.
   //    The camera reads four printed corners, fitted linearly. The boxes it
-  //    reads are rectangles along X and Y (square or rounded): the parts' own
-  //    cut outlines (job.edgeSource 'cut', the default), or boxes drawn in the
-  //    Registration marks colour, which aren't cut ('mark'). By default the
+  //    reads are rectangles along X and Y (square or rounded): boxes in the
+  //    Registration marks colour, which aren't cut, when that process has a
+  //    colour; otherwise the parts' own cut outlines. By default the
   //    corners are the outer corners of the boxes at the sheet's corners; each
   //    can be moved to any corner of any box (job.edgeCorners). Sent to Run as
   //    plate corners ('corner', with toward and r).
@@ -2293,13 +2311,15 @@
     const n = Math.round(Number(job && job.regCorners));
     return n >= 1 && n <= 3 ? n : job && job.regMode === 'pos' ? 2 : 3;
   };
-  const edgeSourceOf = (job) => (job && job.edgeSource === 'mark' ? 'mark' : 'cut');
+  // part edges read boxes in the Registration marks colour when that process
+  // has a colour, else the parts' cut lines
+  const edgeSourceOf = (job) => (job && (job.processes || []).some((p) => isRegProc(p) && (p.aci || []).length) ? 'mark' : 'cut');
   const EDGE_SLOTS = ['tl', 'tr', 'bl', 'br'];
   // what the operator has to do for each kind (job sheet and the marks menu)
   const REG_TIPS = {
     hole: 'Put white card or paper under the plate, so the holes show light.',
     corner: 'Draw the plate\'s outline as a box in the Registration marks colour. Lay the plate on white, with at least 10 mm of white showing past both edges at each corner that\'s read. Don\'t push those corners against a fence.',
-    edge: 'The camera reads four printed corners (the Ls on the bed; drag one to read another corner). Print a sharp edge there (no bleed past it), and on clear material put white paper or card under those corners.'
+    edge: 'The camera reads four printed corners (the Ls on the bed; drag one to read another corner): on the cut lines, or on a box given the Registration marks colour, which is not cut. Print a sharp edge there (no bleed past it), and on clear material put white paper or card under those corners.'
   };
   // which corners, by count: the diagonal for two (the longest baseline)
   const CORNER_SETS = { 1: ['tl'], 2: ['tl', 'br'], 3: ['tl', 'tr', 'bl'], 4: ['tl', 'tr', 'bl', 'br'] };
@@ -2346,9 +2366,9 @@
     const square = W > 2 * r && H > 2 * r && Math.abs(a - (W * H - (4 - Math.PI) * r * r)) <= 0.02 * W * H;
     return { box: b, r, square };
   }
-  // Part edges: the boxes the camera can read. From the parts' cut outlines
-  // (output laser Cut processes) or from boxes in the Registration marks
-  // colour (edgeSource 'mark'): an object's biggest closed path that is a
+  // Part edges: the boxes the camera can read. From boxes in the Registration
+  // marks colour when it has one, else the parts' cut outlines (output laser
+  // Cut processes): an object's biggest closed path that is a
   // rectangle along X and Y, 10 mm or more each way. [{ e, box, r }]
   function edgeBoxes(job) {
     const acis = edgeSourceOf(job) === 'mark'
@@ -2562,10 +2582,10 @@
     if (orphan.length) out.push({ ok: false, l: 'No process for ACI ' + orphan.join(', ') });
     // objects whose process has output switched off are not sent: say so (by process)
     const offNames = job.processes.filter((p) => p.out === false && !isRegProc(p) && (p.aci || []).some((a) => used.has(a))).map((p) => p.name);
-    if (offNames.length) out.push({ ok: false, warn: true, l: 'Output off: ' + offNames.join(', ') + ' — those objects won\'t be sent' });
+    if (offNames.length) out.push({ ok: false, warn: true, l: 'Output off: ' + offNames.join(', ') });
     // a whole-job repeat is easy to forget (e.g. a job that started as a test grid): always say so
     const rep = Math.max(1, Math.round(Number(job.repeat) || 1));
-    if (rep > 1 && ents.length) out.push({ ok: false, warn: true, repeat: true, l: 'Runs the whole job ' + rep + ' times (Job settings)' });
+    if (rep > 1 && ents.length) out.push({ ok: false, warn: true, repeat: true, l: 'Whole job ×' + rep });
     if (isLaser) {
       const cutAci = new Set(job.processes.filter((p) => p.proc === 'Cut' && p.out !== false).flatMap((p) => p.aci || []));
       // open lines are fine (tear-off lines, perforations); a contour whose ends
@@ -2586,6 +2606,9 @@
         out.push(nearly ? { ok: false, warn: true, l: nearly + ' cut contour' + (nearly > 1 ? 's' : '') + ' not quite closed' }
           : { ok: true, l: open ? 'Cut paths OK · ' + open + ' open line' + (open > 1 ? 's' : '') : 'All cut paths closed' });
       }
+      // processing speed limit: a process set faster runs at the limit
+      const fast = job.processes.filter((p) => p.out !== false && !isRegProc(p) && !isEngraveProc(p) && !isPunch(p, machine) && Number(p.speed) > MAX_PROCESS_SPEED && ents.some((e) => (p.aci || []).includes(e.aci)));
+      if (fast.length) out.push({ ok: false, warn: true, l: fast.map((p) => p.name).join(', ') + ' set above ' + MAX_PROCESS_SPEED + ' mm/s · runs at ' + MAX_PROCESS_SPEED });
       if (job.regMode && job.regMode !== 'off') {
         const kind = regKindOf(job);
         if (kind === 'edge') {
@@ -2595,18 +2618,17 @@
           const rs = [...new Set(ms.map((m) => m.r))];
           const fromMark = edgeSourceOf(job) === 'mark';
           const spots = new Set(ms.map((m) => m.x.toFixed(2) + ',' + m.y.toFixed(2)));
-          if (!pc.count) out.push({ ok: false, block: true, l: fromMark ? 'Part edges: draw the box as a rectangle (square or rounded corners) in the Registration marks colour' : 'Part edges: no part outline to read. The cut lines must include rectangles along X and Y (square or rounded corners)' });
-          else if (spots.size < 4) out.push({ ok: false, block: true, l: 'Part edges read four different corners; two are on the same corner — drag one to another corner' });
-          else out.push({ ok: true, l: 'Registration marks · part edges · 4 corners' + (rs.length === 1 && rs[0] ? ' · rounded, r ' + rs[0] + ' mm' : '') + (fromMark ? ' · box not cut' : '') });
-          if (!fromMark && job.processes.some((p) => isRegProc(p) && (p.aci || []).length)) out.push({ ok: false, warn: true, l: 'Part edges read the cut lines: objects in the Registration marks colour aren\'t read or cut' });
+          if (!pc.count) out.push({ ok: false, block: true, l: fromMark ? 'Part edges: no box in the Registration marks colour' : 'Part edges: no part outline' });
+          else if (spots.size < 4) out.push({ ok: false, block: true, l: 'Part edges: two on the same corner' });
+          else out.push({ ok: true, l: 'Part edges · 4 corners' + (rs.length === 1 && rs[0] ? ' · r ' + rs[0] + ' mm' : '') });
         } else if (kind === 'corner') {
           // the plate is one box in the mark colour: none, or several, and the camera can't be told where to look
           const pl = plateOutline(job);
           const n = regMarks(job, machine).length;
-          if (!pl || !pl.e) out.push({ ok: false, block: true, l: 'Plate corners: draw the plate\'s outline as a box in the Registration marks colour' });
-          else if (pl.count > 1) out.push({ ok: false, block: true, l: 'Plate corners use one box in the Registration marks colour; ' + pl.count + ' objects have it' });
-          else if (!pl.square) out.push({ ok: false, block: true, l: 'The plate outline must be a rectangle along X and Y (square or rounded corners)' });
-          else out.push({ ok: true, l: 'Registration marks · ' + n + ' plate corner' + (n > 1 ? 's' : '') + (pl.r ? ' · rounded, r ' + pl.r + ' mm' : '') });
+          if (!pl || !pl.e) out.push({ ok: false, block: true, l: 'Plate corners: no box in the Registration marks colour' });
+          else if (pl.count > 1) out.push({ ok: false, block: true, l: 'Plate corners: one box only (' + pl.count + ' in the colour)' });
+          else if (!pl.square) out.push({ ok: false, block: true, l: 'Plate corners: the box must be a rectangle' });
+          else out.push({ ok: true, l: 'Plate corners · ' + n + (pl.r ? ' · r ' + pl.r + ' mm' : '') });
         } else {
           const need = REG_NEEDED[job.regMode] || 3;
           const have = regMarks(job, machine).length;
@@ -2615,7 +2637,7 @@
           // too many marks is ambiguous for the camera, so the job can't be sent
           if (have > need) out.push({ ok: false, block: true, l: 'Registration ' + what + ' · ' + have + ' found, ' + name + ' uses ' + need + ' — remove ' + (have - need) });
           else out.push(have === need ? { ok: true, l: 'Registration ' + what + ' · ' + have + ' · ' + name }
-            : { ok: false, warn: true, l: 'Registration ' + what + ' · ' + have + ' of ' + need + ' — give the ' + (kind === 'hole' ? 'hole circles' : 'marks') + ' a Registration marks colour' });
+            : { ok: false, warn: true, l: 'Registration ' + what + ' · ' + have + ' of ' + need });
           // a hole mark must already be in the plate: the camera reads it before any cutting
           const cutHere = marksCutByJob(job, machine);
           if (cutHere.length) out.push({ ok: false, warn: true, l: (cutHere.length > 1 ? 'Holes ' + cutHere.join(', ') + ' are' : 'Hole ' + cutHere[0] + ' is') + ' cut by this job; the camera reads ' + (cutHere.length > 1 ? 'them' : 'it') + ' before cutting starts — cut the holes in a job of their own first' });
@@ -2628,8 +2650,8 @@
           const f = far[0];
           const more = far.length > 1 ? ' (and ' + (far.length - 1) + ' more)' : '';
           out.push(sh.tooWide
-            ? { ok: false, block: true, l: 'Registration marks are ' + sh.span + ' mm apart ' + (sh.tooWide === 'x' ? 'across' : 'front to back') + '; the camera can only read marks across ' + sh.reach + ' mm — the job is too big for print and cut on this machine' }
-            : { ok: false, block: true, reach: true, l: 'Mark ' + f.n + ' is ' + f.from + ' mm from the ' + f.edge + ' edge; this laser\'s camera can only see from ' + f.see + ' mm' + more + ' — click to move the job into reach' });
+            ? { ok: false, block: true, l: 'Marks ' + sh.span + ' mm apart · camera reach ' + sh.reach + ' mm · too big' }
+            : { ok: false, block: true, reach: true, l: 'Mark ' + f.n + more + ' out of camera reach (' + f.edge + ' edge) · click to move the job' });
         }
       }
     }
@@ -2643,6 +2665,6 @@
     processOrder, processOfAci, engraveHoles, toolSlot, isPunch, punchHead, punchPoints, punchSpaceOf, PUNCH_SPACE, toolOptions, toolFor, STD_TOOLS, matOnMachine, frameArgs, originOf, toolRank, polyTime, travelTime, rasterSpans, orderPaths,
     estimate, headAt, fmtDuration, fmtLen, fmtArea, checkJob, regMarks, regMarkAci, regKindOf, regCornersOf, marksCutByJob, plateOutline, partCorners, rectShape, edgeBoxes, snapEdgeCorner, edgeSourceOf, EDGE_SLOTS, REG_KINDS, REG_TIPS, camReach, marksOutOfReach, reachShift, regProcess, withPresets, ensureRegProcess, isRegProc, REG_PROC, REG_NEEDED,
     cutOrderOf, CUT_ORDER_DEFAULT, START_CLEAR, commonLines, bedOf, bedCount, defaultPresets, DEFAULTS,
-    rasterIslands, engraveScan, ENGRAVE_DIRS, DPI_STEPS, starterPresets, nestRects, THERMAL, thermalKey, thermalOf, colourOf, absorptionOf, thermalSim, bendLimit, cutModelOf, cutModelTime, fitArcs, TROTEC_CUT, rasterModelOf, rasterPitch, rasterModelTime, TROTEC_RASTER, isBareMetal, markingSprayOf, SPRAY_ABSORB, metalPresets, presetsFor
+    rasterIslands, engraveScan, ENGRAVE_DIRS, DPI_STEPS, starterPresets, nestRects, THERMAL, thermalKey, thermalOf, colourOf, absorptionOf, thermalSim, bendLimit, cutModelOf, cutModelTime, fitArcs, TROTEC_CUT, rasterModelOf, rasterPitch, rasterModelTime, TROTEC_RASTER, isBareMetal, markingSprayOf, SPRAY_ABSORB, metalPresets, presetsFor, MAX_PROCESS_SPEED, processSpeedOf, speedLimitOf, capSpeeds
   };
 });

@@ -324,7 +324,7 @@ class Component extends DCLogic {
     this.setState((s) => ({ test: { ...s.test, [m.id]: { busy: true } } }));
     try {
       if (m.conn !== 'Ethernet') {
-        this.setState((s) => ({ test: { ...s.test, [m.id]: { ok: true, text: 'Jobs are saved where you choose when you send' } } }));
+        this.setState((s) => ({ test: { ...s.test, [m.id]: { ok: true, text: 'Saves locally' } } }));
         return;
       }
       const r = await window.api.device.test(m);
@@ -566,9 +566,8 @@ class Component extends DCLogic {
     } else if (raw.conn === 'Ethernet') {
       connFields.push(text('IP address', 'ip', '', raw.monitorId ? 'Found on the network' : '192.168.1.60'), text('Port', 'port', '', '8470'), text('Timeout', 'timeout', 'ms', '3000'));
       // added from the workshop's Pathline Monitor: reached from anywhere, for queuing only
-      if (raw.monitorId) connFields.push({ isNote: true, l: 'In your workshop\'s Pathline Monitor. On the workshop network Pathline Prepare talks to it directly; anywhere else it goes through Pathline Monitor, where jobs are queued only: Start is pressed at the machine.' });
+      if (raw.monitorId) connFields.push({ isNote: true, l: 'Via Pathline Monitor away from the workshop · queue only' });
     }
-    else connFields.push({ isNote: true, l: 'Send to machine saves the job as a file to load on the controller.' });
     if (sim) {
       // a simulated machine still has a controller type: the operator picks it
       const key = raw.id + '|ctrl', open = S.openPick === key;

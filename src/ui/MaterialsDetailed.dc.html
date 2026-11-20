@@ -650,7 +650,7 @@ class Component extends DCLogic {
   async makeGrid(base, A, B, cellOf, what) {
     const mat = this.mat();
     const machine = this.tabMachine();
-    if (!(await LRC.confirm('Create a test grid job?', 'This opens a new job tab on the Job page with a ' + A.vals.length + ' × ' + B.vals.length + ' grid of 10 mm squares (' + what.toLowerCase() + ') for ' + base.proc.toLowerCase() + ' on ' + mat.name + ' (' + machine.name + ').', 'Create grid'))) return;
+    if (!(await LRC.confirm('Create a test grid job?', 'A new job tab with a ' + A.vals.length + ' × ' + B.vals.length + ' grid of 10 mm squares (' + what.toLowerCase() + ') for ' + base.proc.toLowerCase() + ' on ' + mat.name + ' (' + machine.name + ').', 'Create grid'))) return;
     const job = await window.api.job.create(machine.id);
     const processes = [], entities = [];
     const cell = 10, gap = 4, x0 = 30, y0 = 20;
@@ -810,7 +810,7 @@ class Component extends DCLogic {
         // hold-and-drag on the ⋮ button: the held row follows the pointer, the rows it passes make room
         hold: (e) => this.holdDrag(e, i, 300), grip: (e) => this.holdDrag(e, i, 0), grab: locked ? '' : D ? 'grabbing' : 'grab',
         dragT: ds.dragT, dragZ: ds.dragZ, dragSh: ds.dragSh,
-        setSpeed: setF(i, 'speed', true), setPasses: setF(i, 'passes', true), setDl: setF(i, 'dl', true), setGl: setF(i, 'gl', true),
+        setSpeed: (e) => { const v = Number(e.target.value), lim = CC.speedLimitOf(b, machine); setF(i, 'speed', true)({ target: { value: Number.isFinite(v) && v > lim ? String(lim) : e.target.value } }); }, setPasses: setF(i, 'passes', true), setDl: setF(i, 'dl', true), setGl: setF(i, 'gl', true),
         toggleDash: flip(i, 'dash'), toggleOut: () => this.patchRows((list) => { list[i] = { ...list[i], out: !out }; return list; }),
         more: R(() => this.rowMore(i))
       };
@@ -901,7 +901,7 @@ class Component extends DCLogic {
       // how it goes into a process (power correction is an advanced setting, as text)
       const AX = {
         p: { name: 'Power', unit: '%', vals: range('p', 0, 100, (v) => Math.round(v * 10) / 10), label: (v) => v + ' %', short: (v) => v + '%', put: (o, v) => { o.power = v; } },
-        s: { name: 'Speed', unit: 'mm/s', vals: range('s', 0.1, 10000, (v) => (v < 10 ? Math.round(v * 10) / 10 : Math.round(v))), label: (v) => v + ' mm/s', short: (v) => String(v), put: (o, v) => { o.speed = v; } },
+        s: { name: 'Speed', unit: 'mm/s', vals: range('s', 0.1, CC.speedLimitOf(tBase, machine), (v) => (v < 10 ? Math.round(v * 10) / 10 : Math.round(v))), label: (v) => v + ' mm/s', short: (v) => String(v), put: (o, v) => { o.speed = v; } },
         c: { name: 'Power correction', unit: '%', vals: range('c', 0, 100, (v) => Math.round(v)), label: (v) => 'PC ' + v + ' %', short: (v) => 'PC' + v, put: (o, v) => { o.adv = { ...(o.adv || {}), 'Power correction': String(v) }; } },
         f: { name: 'Frequency', unit: 'Hz', vals: range('f', 100, 60000, (v) => Math.round(v / 100) * 100), label: (v) => v + ' Hz', short: (v) => (v >= 1000 ? +(v / 1000).toFixed(1) + 'k' : String(v)), put: (o, v) => { o.f = v; } }
       };

@@ -94,7 +94,6 @@
           <label class="fcol" style="gap: 4px"><span class="lbl">Material</span>{{thermal.pick}}</label>
           <sc-if value="{{thermal.none}}" hint-placeholder-val="{{false}}"><span class="lbl">{{thermal.msg}}</span></sc-if>
           <sc-if value="{{thermal.has}}" hint-placeholder-val="{{false}}">
-          <span class="lbl">{{thermal.mat}}</span>
           <sc-if value="{{thermal.canSpray}}" hint-placeholder-val="{{false}}">
             <div class="sim-row" style="align-items: center"><span>Marking spray</span>
               <button role="switch" class="sw" aria-checked="{{thermal.sprayOn}}" aria-label="Marking spray" title="Marked through a marking spray: the coating takes far more of the beam than bare metal" onClick="{{thermal.sprayToggle}}" style="background: {{thermal.sprayBg}}; justify-content: {{thermal.sprayJ}}"></button>
@@ -367,6 +366,24 @@ class Component extends DCLogic {
     if (!this.th || this.th.sim !== sim || this.th.mat !== mat || this.th.spray !== spray) this.th = { sim, mat, spray, model: CC.thermalSim(sim.job, sim.m, mat, sim.tl), img: null };
     return this.th.model;
   }
+  // The whole job's peak (and worst bending), whatever time is shown: a second
+  // model run to the end, once per timeline and material, just after drawing
+  thermalPeak() {
+    const th = this.th;
+    if (!th) return null;
+    if (th.full) return th.full;
+    if (!th.fullPending) {
+      th.fullPending = true;
+      setTimeout(() => {
+        if (this.th !== th) return;
+        const m2 = CC.thermalSim(th.sim.job, th.sim.m, th.mat, th.sim.tl);
+        m2.to(th.sim.total);
+        th.full = { peak: m2.peak, peakAt: m2.peakAt, bend: m2.bend, bendAt: m2.bendAt };
+        this.setState({ thFull: Date.now() });
+      }, 30);
+    }
+    return null;
+  }
   // Colour for a temperature as a fraction of the way from ambient to the
   // material's limit: clear → yellow → orange → red, purple past the limit.
   heatCol(f) {
@@ -462,11 +479,12 @@ class Component extends DCLogic {
         thermal = {
           on: true, none: true, rows: [], pick,
           msg: !mat ? (mats.length ? 'Choose a material.' : 'No materials yet.')
-            : !ref ? 'No reference thermal data for ' + mat.name + '. The map covers acrylic, wood, MDF, card, foam board, PET film, magnetic sheet, stainless 304/316, mild steel, aluminium and brass.'
+            : !ref ? 'No thermal data for ' + mat.name
               : 'Nothing to simulate yet.'
         };
       } else {
         model.to(t);
+        const full = this.thermalPeak();
         const pr = model.props;
         // sheet metal: the limit that matters is where the sheet starts to
         // bend (CC.bendLimit), far below melting; the colour scale tops out
@@ -492,26 +510,26 @@ class Component extends DCLogic {
           rows: [
             { l: 'Under the head', v: deg(model.at(head.x, head.y)) },
             { l: 'Hottest now', v: deg(model.max()) },
-            { l: 'Peak', v: deg(model.peak) + (model.peak > model.T0 + 0.5 ? ' at ' + fmt(model.peakAt) : '') },
+            // the whole job's, wherever the time is
+            { l: 'Job peak', v: full ? deg(full.peak) + (full.peak > model.T0 + 0.5 ? ' at ' + fmt(full.peakAt) : '') : 'working…' },
             ...(metal ? [
               { l: 'Hot area', v: hot.rise > 0.5 ? Math.round(hot.dia) + ' mm across' : '–' },
               { l: 'Bends at', v: '+' + Math.round(hot.limit.rise) + ' °C' },
-              { l: 'Towards bending', v: Math.round((hot.rise / hot.limit.rise) * 100) + ' % now · ' + Math.round(model.bend * 100) + ' % worst' }
+              { l: 'Towards bending', v: Math.round((hot.rise / hot.limit.rise) * 100) + ' % now · ' + (full ? Math.round(full.bend * 100) + ' % worst' : 'worst: working…') }
             ] : []),
-            { l: 'Colour', v: model.colour ? model.colour.label : 'not given' },
-            { l: 'Beam absorbed', v: Math.round(model.absorb * 100) + ' %' + (model.spray ? ' (estimate)' : '') }
+
           ],
           legend: 'linear-gradient(90deg, ' + [0, 0.1, 0.35, 0.65, 1].map((f) => { const c = this.heatCol(f); return 'rgba(' + c[0] + ', ' + c[1] + ', ' + c[2] + ', ' + Math.max(0.15, c[3] / 255).toFixed(2) + ') ' + f * 100 + '%'; }).join(', ') + ')',
           lo: deg(model.T0), mid: deg((model.T0 + top) / 2), hi: deg(top),
           overCol: 'rgb(' + this.heatCol(1.2).slice(0, 3).join(', ') + ')',
           limit: metal
             ? 'bends ' + Math.round(hot.limit.set) + ' °C over the rest of the sheet (stays bent' + (hot.limit.by === 'bow' ? '; this ' + Math.round(hot.dia) + ' mm hot area bows from +' + Math.round(hot.limit.bow) + ' °C' : '') + ')'
-            : deg(pr.limit) + ' · ' + pr.limitLabel,
+            : deg(pr.limit),
           warn: metal
             ? (hot.limit && hot.rise >= hot.limit.rise ? 'Bending now: the hot area (' + Math.round(hot.dia) + ' mm) is ' + Math.round(hot.rise) + ' °C over the rest of the sheet; ' + mat.t + ' mm ' + pr.name.toLowerCase() + ' ' + (hot.limit.by === 'bow' ? 'bows' : 'stays bent') + ' from ' + Math.round(hot.limit.rise) + ' °C over'
               : model.bend >= 1 ? 'Went past the bending limit at ' + fmt(model.bendAt)
                 : model.bend >= 0.8 ? 'Close to bending: ' + Math.round(model.bend * 100) + ' % of the way at ' + fmt(model.bendAt) : '')
-            : over > 0 ? 'Over ' + deg(pr.limit) + ' now across ' + CC.fmtArea(overArea) + ' — ' + pr.limitLabel : model.peak >= pr.limit ? 'Went over ' + deg(pr.limit) + ' at ' + fmt(model.peakAt) + ' — ' + pr.limitLabel : '',
+            : over > 0 ? 'Over ' + deg(pr.limit) + ' now across ' + CC.fmtArea(overArea) : model.peak >= pr.limit ? 'Went over ' + deg(pr.limit) + ' at ' + fmt(model.peakAt) : '',
           note: 'Approximate: averages over ' + model.dx.toFixed(1) + ' mm cells from the material, its colour, its thickness and the laser power, with forced airflow from the extraction. The spot under the beam is far hotter. '
             + (metal ? 'Bending: the hot area pushes against the cold sheet around it; past ' + Math.round(hot.limit.set) + ' °C over the rest it yields and stays bent, and a wide hot area on thin sheet bows sooner. Strengths are room-temperature values (' + pr.mech.src + '), so hot sheet bends a little sooner still. Bare metal reflects most of a CO2 beam; through a marking spray it takes far more. ' : '')
             + (model.fibre ? 'On a fibre laser colour matters a lot: clear and white sheet let most of the beam through, black takes most of it.' : 'On a CO2 laser colour changes little: plastics, wood and paper take nearly all of the 10.6 µm beam whatever their colour.')
@@ -752,7 +770,7 @@ class Component extends DCLogic {
     const marker = ((sim.total ? t / T : 0) * 100).toFixed(2) + '%';
 
     return {
-      accent, icons, isLaser, isPlotter: !isLaser, modes, beds, thermal, multiBed: nBeds > 1, speeds, toggles, procs, noProcs: !procs.length, sendTip: procs.length ? 'Check and send this job' : 'Nothing to send yet: add objects with a process on the Job page',
+      accent, icons, isLaser, isPlotter: !isLaser, modes, beds, thermal, multiBed: nBeds > 1, speeds, toggles, procs, noProcs: !procs.length, sendTip: procs.length ? 'Check and send this job' : 'Nothing to send',
       jobName: job.name + (job.dirty ? ' · unsaved' : ''),
       machLine: machine.name + ' · travel ' + Math.round(est.machine.travelSpeed) + ' mm/s · ' + Math.round(est.machine.travelAcc) + ' mm/s²' + (est.machine.jerk ? ' · jerk ' + Math.round(est.machine.jerk) + ' mm/s³' : ''),
       scene,

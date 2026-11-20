@@ -226,9 +226,12 @@ function toolpath(job, est) {
 
 // A process as sent: engrave processes always carry dir/uni (older jobs kept
 // the direction in adv.Direction), and fields no longer used are left out.
-function packageProcess(p, index, isLaser) {
+function packageProcess(p, index, isLaser, machine) {
   const { ratio, hidden, src, ...rest } = p;
   const out = { index, ...rest };
+  // cutting never runs faster than the processing speed limit; engraving no faster than the machine travels
+  const lim = CC.speedLimitOf(p, machine);
+  if (Number(out.speed) > lim) out.speed = lim;
   if (isLaser && p.proc === 'Engrave') {
     const s = CC.engraveScan(p);
     out.dir = s.dir;
@@ -255,7 +258,7 @@ function buildPackage(job, machine, material, est) {
     regMarks: isLaser ? { mode: job.regMode || 'off', kind: CC.regKindOf(job), aci: [...CC.regMarkAci(job)], marks: regMarks(job, machine) } : null,
     beds: est.beds,
     cutOrder: CC.cutOrderOf(job),
-    processes: order.map((i) => packageProcess(job.processes[i], i, isLaser)),
+    processes: order.map((i) => packageProcess(job.processes[i], i, isLaser, machine)),
     disabledProcesses: job.processes.filter((p) => p.out === false).map((p) => p.name),
     estimate: {
       totalSeconds: Math.round(est.total),

@@ -696,6 +696,33 @@
     return mapSel(job, ids, (e) => ({ ...CC.rotateAbout(e, deg, (b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2), rot: ((e.rot || 0) + deg) % 360 }));
   };
   ops.scale = (job, ids, sx, sy, cx, cy) => mapSel(job, ids, (e) => CC.scaleAbout(e, sx, sy, cx, cy));
+  // Scale the selection by k about its top left (X and Y stay put). Each object
+  // remembers the size it had before the first such scaling (size0), for Revert.
+  const sizeOf = (e) => { const b = CC.entityBox(e); return [b.x1 - b.x0, b.y1 - b.y0]; };
+  ops.scaleBy = (job, ids, k) => {
+    const set = new Set(ids);
+    const b = CC.boxOf(job.entities.filter((e) => set.has(e.id)));
+    if (!CC.boxValid(b)) return job;
+    const kept = { ...job, entities: job.entities.map((e) => (set.has(e.id) && !e.size0 ? { ...e, size0: sizeOf(e) } : e)) };
+    return ops.scale(kept, ids, k, k, b.x0, b.y0);
+  };
+  // the factor Revert would scale the selection by (1: nothing to revert)
+  ops.revertFactor = (job, ids) => {
+    const set = new Set(ids);
+    const e = job.entities.find((x) => set.has(x.id) && x.size0);
+    if (!e) return 1;
+    const [w, h] = sizeOf(e), [w0, h0] = e.size0;
+    const k = w > 1e-9 && w0 > 0 ? w0 / w : h > 1e-9 && h0 > 0 ? h0 / h : 1;
+    return Math.abs(k - 1) < 1e-9 ? 1 : k;
+  };
+  // back to the size before ×0.1 / ×10 (and any resizing since)
+  ops.revertScale = (job, ids) => {
+    const k = ops.revertFactor(job, ids);
+    const set = new Set(ids);
+    const b = CC.boxOf(job.entities.filter((e) => set.has(e.id)));
+    const j = k === 1 || !CC.boxValid(b) ? job : ops.scale(job, ids, k, k, b.x0, b.y0);
+    return { ...j, entities: j.entities.map((e) => (set.has(e.id) && e.size0 ? (({ size0, ...rest }) => rest)(e) : e)) };
+  };
   ops.order = (job, ids, how) => {
     const set = new Set(ids);
     const sel = job.entities.filter((e) => set.has(e.id));
@@ -1464,13 +1491,6 @@
         const bands = [[0, 0, K.x0, bh], [K.x1, 0, bw - K.x1, bh], [K.x0, 0, K.x1 - K.x0, K.y0], [K.x0, K.y1, K.x1 - K.x0, bh - K.y1]].filter((b) => b[2] > 0.01 && b[3] > 0.01);
         bands.forEach(([bx, by, w, hh], i) => kids.push(h('rect', { key: 'rb' + i, x: x + bx, y: by, width: w, height: hh, style: { fill: 'var(--warn-soft)', opacity: on ? 0.75 : 0.4 } }, h('title', null, tip))));
         kids.push(h('rect', { key: 'rk', x: x + K.x0, y: K.y0, width: K.x1 - K.x0, height: K.y1 - K.y0, fill: 'none', strokeWidth: 1, strokeDasharray: '5 4', vectorEffect: 'non-scaling-stroke', style: { stroke: 'var(--warn)', opacity: on ? 1 : 0.5, pointerEvents: 'none' } }));
-        // the label goes in the widest strip, along it, when there's room for it
-        const big = bands.slice().sort((a, b) => Math.min(b[2], b[3]) - Math.min(a[2], a[3]))[0];
-        const fs = 11 / v.s;
-        if (big && Math.min(big[2], big[3]) > fs * 1.6) {
-          const tall = big[3] > big[2], cx = x + big[0] + big[2] / 2, cy = big[1] + big[3] / 2;
-          kids.push(h('text', { key: 'rl', x: cx, y: cy, fontSize: fs, textAnchor: 'middle', dominantBaseline: 'central', transform: tall ? 'rotate(-90 ' + cx + ' ' + cy + ')' : undefined, fontFamily: 'IBM Plex Sans, sans-serif', style: { fill: 'var(--warn)', opacity: on ? 1 : 0.6, pointerEvents: 'none' } }, 'Registration marks can\'t go here'));
-        }
       }
       if (this.isPlot()) {
         const now = k === 0;
