@@ -5,6 +5,14 @@
 
 module.exports = [
   {
+    version: '1.6.21', date: '20 Nov 2026',
+    added: [
+      'Send jobs from anywhere: sign in to your workshop\'s Pathline Monitor once, with the workshop password and the 6-digit code from an authenticator app (Google or Microsoft Authenticator), and add any of its machines. Pathline Prepare asks on its first start; after that it\'s under Setup → Machines → Add machine → Machines in your workshop.',
+      'On the workshop network Pathline Prepare talks to a machine directly, as before. Anywhere else it goes through Pathline Monitor, where jobs are queued only: Start is pressed at the machine. Send and start queues the job and says so.',
+      'A machine already set up on the workshop network is linked to the workshop by itself. Machines reached through Pathline Monitor show it on the Machines page.'
+    ]
+  },
+  {
     version: '1.6.20', date: '20 Nov 2026',
     added: [
       'Registration marks has five choices: Off, Position & rotation, Full linear, Non-linear and Part edges. The Mark type section is gone.',

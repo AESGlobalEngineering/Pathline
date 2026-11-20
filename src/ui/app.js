@@ -162,7 +162,8 @@
   }
 
   // ------------------------------------------------------------ dialogs
-  // fields: [{ key, label, type: text|textarea|number|select|seg|check|info|note|custom, value, options, unit, full, warn, rows, placeholder }]
+  // fields: [{ key, label, type: text|password|textarea|number|select|seg|check|info|note|custom, value, options, unit, full, warn, rows, placeholder, code }]
+  // (code: a one-time code field: digits, no autofill but the code's own)
   // custom: { mount(el, box) } fills its own element (e.g. Add machine's list of machines found);
   // box.setValue(key, value) changes another field from there.
   // buttons: [{ label, value, primary, danger }] — resolves { button, values } or null on cancel.
@@ -273,7 +274,9 @@
               inp.onchange = () => { values[f.key] = inp.value; };
             } else {
               inp = add('input', f.type === 'number' ? '' : 'sans');
-              inp.type = 'text';
+              inp.type = f.type === 'password' ? 'password' : 'text';
+              if (f.type === 'password' || f.code) { inp.autocomplete = f.code ? 'one-time-code' : 'off'; inp.spellcheck = false; }
+              if (f.code) { inp.inputMode = 'numeric'; inp.classList.add('mono'); }
               inp.value = f.value === undefined || f.value === null ? '' : String(f.value);
               if (f.placeholder) inp.placeholder = f.placeholder;
               inp.oninput = () => { values[f.key] = f.type === 'number' ? inp.value : inp.value; if (f.onInput) f.onInput(inp.value, values, box); };
@@ -308,6 +311,8 @@
         el.onclick = () => close(b.value);
         btns.appendChild(el);
       });
+      // a custom field can end the dialog itself (Add machine → Machines in your workshop)
+      box.close = (val) => close(val);
       box.appendChild(btns);
       const onKey = (e) => {
         if (e.key === 'Escape') { e.stopPropagation(); e.preventDefault(); close(null); }
@@ -1818,5 +1823,112 @@
     window.api.update.status().then((s) => { if (s.state === 'downloading') updateWindow(s); }).catch(() => {});
   }
 
-  window.LRC = { toast, fail, dialog, sendDialog, confirm, keys, guardNav, clip, ops, textEntity, JobCanvas, entityD, PX_PER_MM, contextMenu, closeMenu, theme, aci, support, dpiSelect, rowDrag, rowDragStyle };
+  // ------------------------------------------------------------ the workshop's Pathline Monitor
+  // Sign in once (the address phones open, the workshop password and a code from the authenticator
+  // app), then add any of the workshop's machines. On the workshop network Prepare talks to them
+  // directly; anywhere else through Pathline Monitor, where jobs are queued only (Start is pressed
+  // at the machine). Asked once on the first start; after that Setup → Machines → Add machine.
+  const workshop = {
+    // the sign-in window: resolves the workshop's machines, or null when closed
+    async signIn(first) {
+      const st = await window.api.workshop.status().catch(() => ({}));
+      let vals = { address: st.label || '', password: '' }, msg = '';
+      for (;;) {
+        const r = await dialog({
+          title: first ? 'Connect to your workshop' : 'Sign in to your workshop',
+          message: (first ? 'Pathline Prepare can send jobs to every machine in your workshop\'s Pathline Monitor, from anywhere. ' : '') +
+            'Type the address the phones open and the workshop password, then the 6-digit code the authenticator app shows (Google or Microsoft Authenticator, set up on a phone in Pathline Monitor: Settings, Pathline Prepare).',
+          fields: [
+            ...(msg ? [{ key: 'msg', type: 'note', label: msg, warn: true }] : []),
+            { key: 'address', label: 'Pathline Monitor address', value: vals.address, full: true, placeholder: 'monitor.example.com' },
+            { key: 'password', label: 'Workshop password', type: 'password', value: vals.password, full: true },
+            { key: 'code', label: 'Code from the authenticator app', value: '', full: true, code: true, placeholder: '6 digits, or a spare code' }
+          ],
+          buttons: [{ label: first ? 'Not now' : 'Cancel', value: null }, { label: 'Sign in', value: 'ok', primary: true }]
+        });
+        if (!r) {
+          if (first) toast('You can connect later: Setup → Machines → Add machine → Machines in your workshop.', { ms: 8000 });
+          return null;
+        }
+        vals = { address: r.values.address, password: r.values.password };
+        try {
+          const out = await window.api.workshop.join({ address: r.values.address, password: r.values.password, code: r.values.code });
+          toast('Signed in to your workshop', { kind: 'ok' });
+          return out.machines || [];
+        } catch (e) {
+          msg = e.message;
+          // a wrong password is typed again; a wrong code keeps the password
+          if (/password/i.test(msg)) vals.password = '';
+        }
+      }
+    },
+    // which of the workshop's machines to add: resolves the machines added
+    async pick(list) {
+      const chosen = new Set();
+      const free = list.filter((x) => !x.added);
+      const mount = (el) => {
+        const mk = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
+        const box = mk('div', 'found');
+        box.setAttribute('role', 'listbox');
+        box.setAttribute('aria-multiselectable', 'true');
+        box.setAttribute('aria-label', 'Machines in your workshop');
+        if (!list.length) box.appendChild(mk('div', 'fmsg', 'No machines in Pathline Monitor yet. Each machine is added there once, from its Pathline Run.'));
+        for (const x of list) {
+          const b = mk('button', 'list-item');
+          b.type = 'button';
+          b.setAttribute('role', 'option');
+          const t = mk('span', 'fm');
+          t.appendChild(mk('b', '', x.name));
+          t.appendChild(mk('span', '', [x.kind === 'plotter' ? 'Plotter' : 'Laser', x.model, x.listening ? '' : 'not connected right now'].filter(Boolean).join(' · ')));
+          b.appendChild(t);
+          if (x.added) { b.disabled = true; b.title = 'Already added as ' + x.added.name; b.appendChild(mk('span', 'tag', 'Added')); }
+          else {
+            b.setAttribute('aria-selected', 'false');
+            b.onclick = () => { const on = !chosen.has(x.id); if (on) chosen.add(x.id); else chosen.delete(x.id); b.classList.toggle('on', on); b.setAttribute('aria-selected', String(on)); };
+          }
+          box.appendChild(b);
+        }
+        el.appendChild(box);
+      };
+      const r = await dialog({
+        title: 'Machines in your workshop',
+        message: free.length ? 'Choose the machines to add. On the workshop network Pathline Prepare talks to them directly; anywhere else through Pathline Monitor, where jobs are queued only: Start is pressed at the machine.' : list.length ? 'Every machine in your workshop is added already.' : '',
+        noFocus: true,
+        fields: [{ key: 'list', type: 'custom', mount }],
+        buttons: [{ label: 'Sign out of the workshop', value: 'leave' }, { label: free.length ? 'Cancel' : 'Close', value: null }].concat(free.length ? [{ label: 'Add', value: 'ok', primary: true }] : [])
+      });
+      if (!r) return [];
+      if (r.button === 'leave') {
+        if (await confirm('Sign out of your workshop?', 'Machines added from it are then reached on the workshop network only, until this computer signs in again.', 'Sign out')) {
+          await window.api.workshop.leave();
+          toast('Signed out of your workshop');
+        }
+        return [];
+      }
+      if (!chosen.size) return [];
+      const added = await window.api.workshop.add([...chosen]);
+      if (added.length) toast((added.length === 1 ? added[0].name + ' is' : added.length + ' machines are') + ' added. Their settings are read now.', { kind: 'ok' });
+      return added;
+    },
+    // Setup → Machines → Add machine → Machines in your workshop: signs in first if need be
+    async add() {
+      const st = await window.api.workshop.status();
+      let list = null;
+      if (st.connected) {
+        try { list = await window.api.workshop.machines(); } catch (e) { if ((await window.api.workshop.status()).connected) throw e; }
+      }
+      if (!list) list = await workshop.signIn(false);
+      return list ? workshop.pick(list) : [];
+    },
+    // the first start (the Job page): asked once
+    async firstStart() {
+      const st = await window.api.workshop.status();
+      if (st.connected || st.asked) return [];
+      await window.api.workshop.asked();
+      const list = await workshop.signIn(true);
+      return list ? workshop.pick(list) : [];
+    }
+  };
+
+  window.LRC = { toast, fail, dialog, sendDialog, confirm, keys, guardNav, clip, ops, textEntity, JobCanvas, entityD, PX_PER_MM, contextMenu, closeMenu, theme, aci, support, dpiSelect, rowDrag, rowDragStyle, workshop };
 })();

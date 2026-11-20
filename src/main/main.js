@@ -11,6 +11,7 @@ const { importFile, EXTENSIONS } = require('./importers');
 const ex = require('./exporters');
 const device = require('./device');
 const discover = require('./discover');
+const { createWorkshop } = require('./workshop');
 const { createTabs } = require('./tabs');
 const { Reports } = require('./reports');
 const updates = require('./updates');
@@ -33,6 +34,10 @@ const UPDATE_EVERY_MS = 5 * 60 * 1000;
 let store;
 let win;
 let reports = null;
+// the workshop's Pathline Monitor: machines reached from anywhere (workshop.js); set once ready
+let workshop = null;
+// a machine with a network address, or one added from the workshop while signed in to it
+const reachable = (m) => !!(m && (String(m.ip || '').trim() || (m.monitorId && workshop && workshop.connected())));
 const clone = (o) => JSON.parse(JSON.stringify(o));
 
 // Crash reports: errors in this process and crashed pages are written to the
@@ -210,13 +215,14 @@ async function deliver(job, via) {
   const mat = materialFor(m.type, job.materialId);
   // a simulated machine has nothing to connect to: its jobs are always saved as files
   const conn = !m.sim && (via || m.conn) === 'Ethernet' ? 'Ethernet' : 'Local';
-  let where, total;
+  let where, total, relayed = false;
   if (conn === 'Ethernet') {
     const est = CC.estimate(job, m, { timeline: true });
     const pkg = ex.buildPackage(job, m, mat, est);
     total = pkg.estimate.total;
     const res = await device.sendPackage(m, { ...pkg, files: { dxf: ex.toDxf(job, m, { onlyOutput: true }), svg: ex.toSvg(job, m), sheet: ex.jobSheet(job, m, mat, est), cjob: jobFileContent(job) } });
-    where = m.name + ' (' + m.ip + ')' + (res && res.id ? ' · device job ' + res.id : '');
+    relayed = !!(res && res.via === 'monitor');
+    where = m.name + (relayed ? ' via Pathline Monitor' : ' (' + m.ip + ')') + (res && res.id ? ' · device job ' + res.id : '');
   } else {
     const file = await askJobFile(job, 'Save job for ' + m.name);
     if (!file) return null;
@@ -226,7 +232,8 @@ async function deliver(job, via) {
     total = content.run.estimate.total;
   }
   bumpMaterialUsage(mat);
-  return { ok: true, where, conn, total };
+  // relayed: it went through Pathline Monitor, so it waits for Start at the machine
+  return { ok: true, where, conn, total, relayed };
 }
 
 // ------------------------------------------------------------------ machine settings from the controller
@@ -323,7 +330,7 @@ function mergeMachineMaterials(m, doc) {
 }
 // pull, then push what the machine is missing or has older
 async function syncMaterials(m) {
-  if (!m || m.sim || m.conn !== 'Ethernet' || !String(m.ip || '').trim()) return;
+  if (!m || m.sim || m.conn !== 'Ethernet' || !reachable(m)) return;
   const remote = await device.materials(m);
   if (remote === null) return; // this HMI doesn't keep materials
   if (mergeMachineMaterials(m, remote) && win && !win.isDestroyed()) win.webContents.send('materials:updated', store.get('materials'));
@@ -342,7 +349,7 @@ function schedulePushMaterials() {
 // quietly, in the background (an offline machine is normal); not more than every 30 s unless forced
 function autoSync(id, force) {
   const m = store.find('machines', id);
-  if (!m || m.sim || m.conn !== 'Ethernet' || !String(m.ip || '').trim() || syncing.has(id)) return;
+  if (!m || m.sim || m.conn !== 'Ethernet' || !reachable(m) || syncing.has(id)) return;
   if (!force && Date.now() - (lastSync.get(id) || 0) < 30000) return;
   syncing.set(id, syncMachine(id)
     .catch((e) => reports && reports.log('sync', m.name + ': ' + e.message))
@@ -374,6 +381,36 @@ async function follow(id) {
     reports && reports.log('discover', m.name + ' moved from ' + moved.was + ' to ' + moved.ip + ':' + moved.port);
     if (win && !win.isDestroyed()) win.webContents.send('machines:updated', next);
   } catch (e) { reports && reports.log('discover', m.name + ': ' + e.message); }
+}
+
+// Machines added from the workshop: where each is on this network, if it is (then Prepare talks to
+// it directly, and through Pathline Monitor only when it doesn't answer there)
+async function findOnNetwork(list) {
+  const want = list.filter((m) => m.monitorId && m.deviceId && !m.sim);
+  if (!want.length) return;
+  try {
+    for (const moved of await discover.relocate(want)) {
+      const cur = store.find('machines', moved.id);
+      if (!cur) continue;
+      const next = { ...cur, ip: moved.ip, port: moved.port };
+      store.upsert('machines', next);
+      reports && reports.log('discover', next.name + ' is on this network at ' + moved.ip + ':' + moved.port);
+      if (win && !win.isDestroyed()) win.webContents.send('machines:updated', next);
+    }
+  } catch (e) { reports && reports.log('discover', e.message); }
+}
+// the workshop's machines, each marked with the machine it already is here (by its id). One set
+// up here on the network before is linked: it's reached through Pathline Monitor too from now on
+function workshopMachines(list) {
+  const saved = store.get('machines');
+  const linked = [];
+  for (const x of list) {
+    const m = saved.find((s) => s.monitorId === x.id || (s.deviceId && s.deviceId === x.id && s.conn === 'Ethernet' && !s.sim));
+    if (m && !m.monitorId) { const next = { ...m, monitorId: x.id }; store.upsert('machines', next); linked.push(next.name); }
+  }
+  if (linked.length) reports && reports.log('workshop', 'reached through Pathline Monitor too: ' + linked.join(', '));
+  const now = store.get('machines');
+  return list.map((x) => { const m = now.find((s) => s.monitorId === x.id); return { ...x, added: m ? { id: m.id, name: m.name } : null }; });
 }
 
 // ------------------------------------------------------------------ IPC
@@ -459,7 +496,9 @@ function registerIpc() {
   handle('machines:save', (m) => store.upsert('machines', m));
   handle('machines:saveAll', (list) => {
     if (!Array.isArray(list)) throw new Error('Not a machine list');
-    return store.set('machines', list.filter((m) => !m.placeholder));
+    // a machine linked to the workshop while the page had it open keeps the link
+    const cur = store.get('machines');
+    return store.set('machines', list.filter((m) => !m.placeholder).map((m) => { const c = cur.find((x) => x.id === m.id); return c && c.monitorId && !m.monitorId ? { ...m, monitorId: c.monitorId } : m; }));
   });
   handle('machines:remove', (id) => {
     store.remove('machines', id);
@@ -635,6 +674,35 @@ function registerIpc() {
   });
   handle('device:command', (id, cmd, args) => device.command(machineById(id), cmd, args));
   handle('device:send', (job, via) => deliver(job, via));
+
+  // the workshop's Pathline Monitor (workshop.js): sign in once, then add its machines
+  // (test runs don't ask, unless LRC_WORKSHOP is set)
+  const workshopStatus = () => ({ ...workshop.status(), asked: !!store.get('settings').workshopAsked || (testRun && !process.env.LRC_WORKSHOP) });
+  const askedNow = () => { const s = store.get('settings'); if (!s.workshopAsked) store.set('settings', { ...s, workshopAsked: true }); };
+  handle('workshop:status', () => workshopStatus());
+  // the first start asks once; after that it's under Setup → Machines → Add machine
+  handle('workshop:asked', () => { askedNow(); return workshopStatus(); });
+  handle('workshop:join', async (b) => {
+    const r = await workshop.join(b || {});
+    askedNow();
+    return { ...workshopStatus(), machines: workshopMachines(r.machines) };
+  });
+  handle('workshop:machines', async () => workshopMachines(await workshop.machines()));
+  handle('workshop:add', async (ids) => {
+    const want = new Set(Array.isArray(ids) ? ids.map(String) : []);
+    const list = workshopMachines(await workshop.machines()).filter((x) => want.has(x.id) && !x.added);
+    const added = [];
+    for (const x of list) {
+      const type = x.kind === 'plotter' ? 'plotter' : 'laser';
+      // its name, bed and speeds are read from it straight after (through Pathline Monitor if need be)
+      added.push(store.upsert('machines', { ...seed.machineTemplate(type), id: CC.uid('m'), name: x.name, hmiName: true, type, conn: 'Ethernet', ip: '', port: 8470, deviceId: x.id, monitorId: x.id }));
+    }
+    if (added.length) reports && reports.log('workshop', 'added from Pathline Monitor: ' + added.map((m) => m.name).join(', '));
+    await findOnNetwork(added);
+    for (const m of added) autoSync(m.id, true);
+    return added.map((m) => store.find('machines', m.id) || m);
+  });
+  handle('workshop:leave', async () => { await workshop.leave(); return workshopStatus(); });
 }
 
 // ------------------------------------------------------------------ window
@@ -846,6 +914,16 @@ if (!testRun && !app.requestSingleInstanceLock()) {
     }
     // the job is no longer restored between runs: drop the old autosave file
     try { fs.unlinkSync(store.file('session')); } catch (e) { /* not there */ }
+    // the workshop's Pathline Monitor: its key sealed with Windows' own protection (DPAPI) when it can be
+    const { safeStorage } = require('electron');
+    workshop = createWorkshop({
+      store, log: (s) => reports && reports.log('workshop', s),
+      seal: (s) => (safeStorage.isEncryptionAvailable() ? 'dpapi:' + safeStorage.encryptString(s).toString('base64') : 'plain:' + s),
+      unseal: (s) => (String(s).startsWith('dpapi:') ? safeStorage.decryptString(Buffer.from(String(s).slice(6), 'base64')) : String(s).replace(/^plain:/, ''))
+    });
+    device.setRelay((m, method, route, body, timeout) => workshop.call(m, method, route, body, timeout));
+    // workshop machines not yet found on this network: look once, in the background
+    setTimeout(() => findOnNetwork(store.get('machines').filter((m) => m.monitorId && !String(m.ip || '').trim())), 4000);
     registerIpc();
     currentJob();
     openFromArgs(process.argv);

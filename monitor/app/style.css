@@ -206,3 +206,10 @@ img{max-width:100%}
 #signmsg{color:var(--err);font-size:13px}
 .addm{display:flex;flex-direction:column;gap:14px;align-items:flex-start}
 .code{align-self:stretch;text-align:center;font-size:34px;font-weight:500;letter-spacing:.12em;padding:14px 8px;background:var(--sunken);border-radius:12px;color:var(--text);user-select:all}
+
+/* ---- Settings, Pathline Prepare: the authenticator app's QR code, its key, the spare codes ---- */
+.qr{display:flex;justify-content:center;padding:4px 14px 8px}
+.qr svg{width:min(240px,70vw);height:auto;border-radius:8px;box-shadow:0 0 0 1px var(--line-strong)}
+.key{margin-top:8px;font-size:15px;letter-spacing:.06em;word-spacing:.2em;color:var(--text);user-select:all;overflow-wrap:anywhere;padding:10px 12px;background:var(--sunken);border-radius:10px}
+.spares{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;padding:4px 14px 14px;user-select:all}
+.spares span{font-size:16px;letter-spacing:.06em;text-align:center;padding:10px 4px;background:var(--sunken);border-radius:10px;color:var(--text)}

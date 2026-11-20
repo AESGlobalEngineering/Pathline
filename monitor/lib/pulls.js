@@ -26,6 +26,13 @@ const WHAT = {
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 const JOB = /^J\d{1,8}$/;
 
+// Calls (Monitor 0.7): a signed-in Pathline Prepare computer reaches a machine the same way, for
+// what Prepare does with a machine and nothing more: read it, queue a job, reorder or remove queued
+// jobs, and the materials list. Never Start, moving the head, framing or outputs: a job sent from
+// anywhere waits in the queue for someone at the machine. Pathline Run checks this list again.
+const CALLS = [/^GET \/(info|machine|status|jobs|materials)$/, /^POST \/jobs$/, /^POST \/jobs\/order$/, /^DELETE \/jobs\/J\d{1,8}$/, /^PUT \/materials$/];
+const callOk = (c) => typeof c === 'string' && c.length < 80 && CALLS.some((r) => r.test(c));
+
 const fail = (code, msg) => Object.assign(new Error(msg), { code });
 
 // { what, day?, job? } checked, or an error to give back
@@ -69,7 +76,10 @@ class Pulls {
   add(machine, a, now = Date.now()) {
     const open = [...this.asks.values()].filter((x) => x.machine === machine && (x.state === 'waiting' || x.state === 'taken')).length;
     if (open >= 20) throw fail(429, 'This machine already has 20 asks waiting: collect those first');
+    const size = a.body ? a.body.length : 0;
+    if (size && this.held + size > this.maxHeld) throw fail(507, 'Pathline Monitor is holding too much: try again in a minute');
     const ask = { id: crypto.randomBytes(9).toString('base64url'), machine, ...a, at: now, state: 'waiting', takenAt: 0, answeredAt: 0, reply: null, waiters: [] };
+    this.held += size;
     this.asks.set(ask.id, ask);
     const wake = this.polls.get(machine);
     if (wake) wake();
@@ -85,7 +95,8 @@ class Pulls {
       const now = Date.now();
       const list = [...this.asks.values()].filter((x) => x.machine === machine && x.state === 'waiting').slice(0, 5);
       for (const x of list) { x.state = 'taken'; x.takenAt = now; }
-      return list.map((x) => ({ id: x.id, what: x.what, day: x.day, job: x.job }));
+      // a call's body (a job package can be megabytes) is fetched on its own: GET /api/v1/asks/<id>/body
+      return list.map((x) => (x.kind === 'call' ? { id: x.id, kind: 'call', call: x.call, from: x.from, size: x.body ? x.body.length : 0, type: x.type || null } : { id: x.id, what: x.what, day: x.day, job: x.job }));
     };
     const ready = take();
     if (ready.length) return Promise.resolve(ready);
@@ -112,13 +123,48 @@ class Pulls {
     const a = this.asks.get(id);
     if (!a || a.machine !== machine) throw fail(404, 'No such ask for this machine');
     if (a.state !== 'taken') throw fail(409, 'That ask isn\'t waiting for an answer');
+    // a call whose Prepare gave up waiting: the answer has nobody to go to
+    if (a.orphan) { this.forget(a); return; }
     if (this.held + reply.body.length > this.maxHeld) throw fail(507, 'Pathline Monitor is holding too many answers: they\'re collected first');
+    this.dropBody(a);
     a.state = 'answered';
     a.answeredAt = now;
     a.reply = reply;
     this.held += reply.body.length;
-    this.log('pull: ' + machine + ' sent ' + label(a) + ' (' + kb(reply.body.length) + (reply.status >= 400 ? ', ' + reply.status : '') + ')');
+    if (a.kind !== 'call') this.log('pull: ' + machine + ' sent ' + label(a) + ' (' + kb(reply.body.length) + (reply.status >= 400 ? ', ' + reply.status : '') + ')');
     for (const w of a.waiters.splice(0)) w();
+  }
+
+  // a call's body, for the machine that took it
+  bodyOf(machine, id) {
+    const a = this.asks.get(id);
+    if (!a || a.machine !== machine || a.kind !== 'call') throw fail(404, 'No such ask for this machine');
+    return { body: a.body || Buffer.alloc(0), type: a.type || 'application/json' };
+  }
+  dropBody(a) { if (a.body) { this.held -= a.body.length; a.body = null; } }
+
+  // a Prepare computer's call, start to finish: { status, type, body } once the machine has
+  // answered, or an error (504 when it hasn't within `ms`). onClose(fn): the caller went away.
+  call(machine, a, ms, onClose) {
+    const ask = this.add(machine, { kind: 'call', ...a });
+    return new Promise((resolve, reject) => {
+      let over = false;
+      const finish = (why) => {
+        if (over) return;
+        over = true;
+        clearTimeout(t);
+        ask.waiters = ask.waiters.filter((w) => w !== done);
+        if (ask.state === 'answered') { this.forget(ask); return resolve(ask.reply); }
+        if (ask.state === 'failed') { this.forget(ask); return reject(fail(503, ask.error || 'The machine didn\'t answer')); }
+        // not answered: a waiting call is dropped; one the machine took is answered into nothing
+        if (ask.state === 'waiting') this.forget(ask); else { ask.orphan = true; this.dropBody(ask); }
+        reject(fail(why === 'gone' ? 499 : 504, 'The machine didn\'t answer in ' + Math.round(ms / 1000) + ' s'));
+      };
+      const done = () => finish();
+      const t = setTimeout(() => finish('late'), ms);
+      ask.waiters.push(done);
+      if (onClose) onClose(() => finish('gone'));
+    });
   }
 
   // a collector's GET /api/pull/<id>: resolves with the ask once answered (then forgotten), or
@@ -145,6 +191,7 @@ class Pulls {
   forget(a) {
     if (!this.asks.has(a.id)) return;
     if (a.reply) this.held -= a.reply.body.length;
+    this.dropBody(a);
     this.asks.delete(a.id);
   }
 
@@ -160,7 +207,7 @@ class Pulls {
     for (const a of [...this.asks.values()]) {
       const failNow = (why) => { a.state = 'failed'; a.error = why; a.answeredAt = now; for (const w of a.waiters.splice(0)) w(); };
       if (a.state === 'waiting' && now - a.at > this.T.waiting) failNow('The machine didn\'t ask for it within a day: it\'s been switched off, or isn\'t connected');
-      else if (a.state === 'taken' && now - a.takenAt > this.T.answerBy) failNow('The machine took the ask but never answered');
+      else if (a.state === 'taken' && now - a.takenAt > this.T.answerBy) { if (a.orphan) this.forget(a); else failNow('The machine took the ask but never answered'); }
       else if ((a.state === 'answered' || a.state === 'failed') && now - a.answeredAt > this.T.keep) {
         if (a.state === 'answered') this.log('pull: ' + label(a) + ' from ' + a.machine + ' wasn\'t collected within the hour: dropped');
         this.forget(a);
@@ -174,4 +221,4 @@ class Pulls {
 const label = (a) => a.what + (a.day ? ' ' + a.day : '') + (a.job ? ' ' + a.job : '');
 const kb = (n) => (n < 1048576 ? Math.max(1, Math.round(n / 1024)) + ' KB' : (n / 1048576).toFixed(1) + ' MB');
 
-module.exports = { Pulls, checkAsk, WHAT };
+module.exports = { Pulls, checkAsk, WHAT, CALLS, callOk };

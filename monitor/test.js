@@ -389,6 +389,154 @@ async function pulls() {
   }
 }
 
+// ---------------------------------------------------------------- Pathline Prepare (Monitor 0.7)
+// A computer signs in with the workshop password and an authenticator app code (set up on a
+// phone), gets its own key, and calls machines: only the calls on the list, passed to the machine
+// over its own GET /api/v1/asks, its answer handed straight back. Never Start or the head.
+async function prepare() {
+  console.log('Pathline Prepare');
+  const totp = require('./lib/totp');
+  const QR = require('./app/qr.js');
+  const { Pulls, callOk } = require('./lib/pulls');
+  // the authenticator codes (RFC 6238's own test values) and the spare codes
+  const sec = totp.toBase32(Buffer.from('12345678901234567890'));
+  ok(totp.code(sec, Math.floor(59 / 30)) === '287082' && totp.code(sec, Math.floor(1111111109 / 30)) === '081804' && totp.code(sec, Math.floor(2000000000 / 30)) === '279037', 'authenticator codes match the standard\'s test values (Google and Microsoft Authenticator make the same)');
+  const now = 1700000000000, s = totp.stepAt(now);
+  ok(totp.check(sec, totp.code(sec, s), now) === s && totp.check(sec, totp.code(sec, s - 1), now) === s - 1 && totp.check(sec, totp.code(sec, s - 2), now) === -1 && totp.check(sec, totp.code(sec, s), now, s) === -1 && totp.check(sec, '12345', now) === -1,
+    'a code counts for its 30 s and one either side, never once used, and only as 6 digits');
+  const sp = totp.newSpares();
+  ok(sp.length === 10 && new Set(sp).size === 10 && sp.every((c) => /^[A-HJ-NP-Z2-9]{5}-[A-HJ-NP-Z2-9]{5}$/.test(c)) && totp.hashSpare(sp[0].toLowerCase().replace('-', ' ')) === totp.hashSpare(sp[0]), 'ten spare codes, typed any way');
+  const uri = totp.uri(totp.newSecret(), 'monitor.example.com');
+  const q = QR.encode(uri);
+  ok(/^otpauth:\/\/totp\/Pathline%20Monitor:monitor\.example\.com\?secret=[A-Z2-7]{32}&issuer=Pathline%20Monitor/.test(uri) && q.modules.length === 17 + 4 * q.version && q.modules[0].slice(0, 7).every(Boolean) && !q.modules[1][1] && q.modules[3][3],
+    'the setup link authenticator apps take, as a QR code (version ' + q.version + ')');
+  // what may go to a machine
+  ok(['GET /info', 'GET /status', 'GET /machine', 'GET /jobs', 'GET /materials', 'POST /jobs', 'POST /jobs/order', 'DELETE /jobs/J0042', 'PUT /materials'].every(callOk), 'reading, queuing, reordering and removing jobs, and the materials list pass');
+  ok(!['POST /start', 'POST /jog', 'POST /home', 'POST /frame', 'POST /io', 'POST /stop', 'POST /marks/accept', 'POST /feed', 'GET /monitor-report', 'PUT /config', 'DELETE /jobs/../x', 'GET /jobs/J1/package', 'GET /info ', ''].some(callOk), 'Start, the head, framing, outputs, marks, settings and anything else don\'t');
+  // a call, start to finish (lib/pulls.js)
+  const P = new Pulls({ scale: 0.01 });
+  const c1 = P.call('m1', { call: 'POST /jobs', from: { id: 'p', name: 'Office PC' }, body: Buffer.from('{"job":1}') }, 2000);
+  const got = await P.next('m1');
+  ok(got.length === 1 && got[0].kind === 'call' && got[0].call === 'POST /jobs' && got[0].size === 9 && !('body' in got[0]) && P.bodyOf('m1', got[0].id).body.toString() === '{"job":1}', 'the machine is told the call, and fetches its body on its own');
+  P.answer('m1', got[0].id, { status: 200, type: 'application/json', name: '', body: Buffer.from('{"id":"J0001"}') });
+  ok((await c1).body.toString() === '{"id":"J0001"}' && !P.asks.size && P.held === 0, 'its answer goes back to the caller, and nothing is kept');
+  const c2 = P.call('m1', { call: 'GET /status', from: { id: 'p', name: 'Office PC' } }, 60).catch((e) => e);
+  const g2 = await P.next('m1');
+  ok((await c2).code === 504, 'no answer in time: the caller is told so');
+  P.answer('m1', g2[0].id, { status: 200, type: 'x', name: '', body: Buffer.from('late') });
+  ok(!P.asks.size && P.held === 0, 'an answer that comes too late is dropped');
+  P.close();
+
+  // the server
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pm-prep-'));
+  const run = (password) => {
+    const child = spawn(process.execPath, [path.join(__dirname, 'server.js'), '--config', path.join(dir, 'config.json'), '--data', path.join(dir, 'data'), '--port', '0'], { env: { ...process.env, MONITOR_PASSWORD: password, MONITOR_PULL_SCALE: '0.02' }, stdio: ['ignore', 'pipe', 'pipe'] });
+    let out = '';
+    child.stdout.on('data', (c) => { out += c; }); child.stderr.on('data', (c) => { out += c; });
+    return { child, out: () => out, base: async () => { await until(() => /on http:\/\/[\d.]+:(\d+)/.test(out)); return /on (http:\/\/[\d.]+:\d+)/.exec(out)[1]; }, stop: () => new Promise((res) => { child.on('exit', res); child.kill(); }) };
+  };
+  let srv = run('correct horse battery');
+  try {
+    let base = await srv.base();
+    const p = phone(base);
+    await p.signIn('correct horse battery');
+    await p.listen();
+    const code = (await p.call('/api/machine-code', {})).json.code;
+    const key = (await (await fetch(base + '/api/v1/enrol', { method: 'POST', body: JSON.stringify({ code, id: 'run-aaaa0001', name: 'Laser A' }) })).json()).key;
+    const join = (b) => fetch(base + '/api/v1/prepare/join', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: 'prep-0123456789abcdef', name: 'Office PC', password: 'correct horse battery', ...b }) }).then(async (r) => ({ status: r.status, json: await r.json() }));
+    const prep = (k, route, call, body, type = 'application/json') => fetch(base + route, { method: call === undefined ? 'GET' : 'POST', headers: { authorization: 'Bearer ' + k, ...(call ? { 'x-pathline-call': call, 'content-type': type } : {}) }, body });
+    const asks = (k) => fetch(base + '/api/v1/asks', { headers: { authorization: 'Bearer ' + k } });
+
+    let r = await p.call('/api/prepare');
+    ok(r.status === 200 && r.json.twoStep.on === false && r.json.computers.length === 0, 'a phone sees Pathline Prepare\'s sign-in isn\'t set up yet');
+    ok((await fetch(base + '/api/prepare')).status === 401, 'and only a signed-in phone sees it');
+    let j = await join({ password: 'not the password' });
+    ok(j.status === 403 && j.json.need === 'password', 'Prepare: a wrong workshop password is refused');
+    j = await join({});
+    ok(j.status === 409 && j.json.need === 'setup' && !j.json.key, 'the right password, but no authenticator app set up yet: no sign-in at all');
+
+    // setting up the authenticator app on the phone
+    r = await p.call('/api/prepare/two-step', {});
+    const secret = r.json.secret;
+    ok(r.status === 200 && /^[A-Z2-7]{32}$/.test(secret) && r.json.uri.startsWith('otpauth://totp/Pathline%20Monitor:') && r.json.uri.includes('secret=' + secret), 'the phone gets the secret and the setup link for the app');
+    ok((await p.call('/api/prepare/two-step/confirm', { code: '000000' === totp.code(secret, totp.stepAt(Date.now())) ? '111111' : '000000' })).status === 403 && !fs.existsSync(path.join(dir, 'data', 'two-step.json')), 'a code that doesn\'t match doesn\'t turn it on');
+    r = await p.call('/api/prepare/two-step/confirm', { code: totp.code(secret, totp.stepAt(Date.now())) });
+    const spare = r.json && r.json.spare;
+    ok(r.status === 200 && r.json.twoStep.on && spare.length === 10 && !fs.readFileSync(path.join(dir, 'data', 'two-step.json'), 'utf8').includes(spare[0]), 'the app\'s code turns it on, with ten spare codes shown once (kept only as fingerprints)');
+    ok((await p.call('/api/prepare/two-step', {})).status === 403, 'set up: setting it up again takes a code from the app first');
+
+    // signing Prepare in
+    j = await join({});
+    ok(j.status === 401 && j.json.need === 'code', 'Prepare: the password alone isn\'t enough, a code is asked for');
+    const cur = totp.code(secret, totp.stepAt(Date.now()));
+    j = await join({ code: cur === '123456' ? '654321' : '123456' });
+    ok(j.status === 403 && j.json.need === 'code' && !j.json.key, 'a wrong code is refused');
+    const used = totp.code(secret, totp.stepAt(Date.now()));
+    j = await join({ code: used });
+    const pkey = j.json.key;
+    ok(j.status === 200 && pkey.length === 43 && j.json.machines.length === 1 && j.json.machines[0].name === 'Laser A', 'password and code: the computer gets its own key, and the machines');
+    ok((await join({ code: used })).status === 403, 'the same code doesn\'t work twice');
+    j = await join({ id: 'prep-fedcba9876543210', name: 'Laptop', code: spare[3].toLowerCase() });
+    const pkey2 = j.json.key;
+    ok(j.status === 200 && !!pkey2, 'a spare code works instead (typed in small letters)');
+    ok((await join({ id: 'prep-fedcba9876543210', code: spare[3] })).status === 403 && (await p.call('/api/prepare')).json.twoStep.spareLeft === 9, 'once: it\'s used up');
+    ok(await until(() => p.got.some((v) => v.alert && v.alert.title === 'Pathline Prepare signed in on Office PC' && !v.alert.tags.length)), 'every phone\'s Alerts list says a computer signed in');
+    ok(!fs.readFileSync(path.join(dir, 'data', 'prepare.json'), 'utf8').includes(pkey), 'its key isn\'t kept on the server, only its fingerprint');
+    r = await p.call('/api/prepare');
+    ok(r.json.computers.length === 2 && r.json.computers.some((c) => c.name === 'Office PC'), 'the phone lists the computers signed in');
+
+    // calls
+    ok((await prep('wrong-key-wrong-key', '/api/v1/prepare/machines')).status === 401 && (await prep(key, '/api/v1/prepare/machines')).status === 401, 'without its key (a machine\'s won\'t do), nothing');
+    r = await prep(pkey, '/api/v1/prepare/call/run-aaaa0001', 'GET /status');
+    ok(r.status === 503 && (await r.json()).offline === true, 'a machine that isn\'t listening: told so at once');
+    for (const c of ['POST /start', 'POST /jog', 'POST /frame', 'GET /monitor-report', 'PUT /config']) {
+      r = await prep(pkey, '/api/v1/prepare/call/run-aaaa0001', c, '{}');
+      if (r.status !== 403) { ok(false, c + ' got ' + r.status); break; }
+    }
+    ok(true, 'Start, the head, framing and settings are refused before the machine hears of them');
+    // the machine listening: a job is queued through it
+    const pkg = JSON.stringify({ job: { name: 'Coasters' }, big: 'x'.repeat(200000) });
+    const hear = asks(key);
+    await wait(60);
+    const sending = prep(pkey, '/api/v1/prepare/call/run-aaaa0001', 'POST /jobs', pkg);
+    const list = await (await hear).json();
+    const a = list[0];
+    ok(list.length === 1 && a.kind === 'call' && a.call === 'POST /jobs' && a.from.name === 'Office PC' && a.size === pkg.length && JSON.stringify(list).length < 1000, 'the machine hears the call and who sent it, without the job in it');
+    r = await fetch(base + '/api/v1/asks/' + a.id + '/body', { headers: { authorization: 'Bearer ' + key } });
+    ok(r.status === 200 && (await r.text()) === pkg, 'it fetches the job itself');
+    await fetch(base + '/api/v1/answer/' + a.id, { method: 'POST', headers: { authorization: 'Bearer ' + key, 'content-type': 'application/json', 'x-pathline-status': '200' }, body: '{"id":"J0007","status":"queued"}' });
+    r = await sending;
+    ok(r.status === 200 && (await r.json()).id === 'J0007' && r.headers.get('x-pathline-via') === 'monitor', 'and its answer comes back to Prepare');
+    // the machine's refusal goes back as it is
+    const hear2 = asks(key);
+    await wait(60);
+    const del = prep(pkey, '/api/v1/prepare/call/run-aaaa0001', 'DELETE /jobs/J0007');
+    const b = (await (await hear2).json())[0];
+    await fetch(base + '/api/v1/answer/' + b.id, { method: 'POST', headers: { authorization: 'Bearer ' + key, 'content-type': 'application/json', 'x-pathline-status': '409' }, body: '{"error":"Job is running — stop it first"}' });
+    r = await del;
+    ok(r.status === 409 && /running/.test((await r.json()).error), 'the machine\'s "no" reaches Prepare');
+    // no answer in time (60 s, scaled)
+    const hear3 = asks(key);
+    await wait(60);
+    r = await prep(pkey, '/api/v1/prepare/call/run-aaaa0001', 'GET /status');
+    await hear3;
+    ok(r.status === 504, 'a machine that doesn\'t answer in time: Prepare is told');
+    ok(!fs.readdirSync(path.join(dir, 'data')).some((f) => fs.readFileSync(path.join(dir, 'data', f), 'utf8').includes('Coasters')), 'nothing a call carried was written to disk');
+    // removing a computer; changing the password
+    r = await p.call('/api/prepare/remove', { id: 'prep-fedcba9876543210' });
+    ok(r.status === 200 && r.json.computers.length === 1 && (await prep(pkey2, '/api/v1/prepare/machines')).status === 401, 'removed on a phone: that computer\'s key stops working');
+    ok((await prep(pkey, '/api/v1/prepare/machines')).status === 200 && (await p.signIn('correct horse battery')).status === 200, 'the other keeps working, and wrong keys didn\'t lock the workshop out');
+    p.close();
+    await srv.stop();
+    srv = run('a new workshop password');
+    base = await srv.base();
+    ok((await fetch(base + '/api/v1/prepare/machines', { headers: { authorization: 'Bearer ' + pkey } })).status === 401, 'a new workshop password: every computer signs in again');
+  } finally {
+    await srv.stop();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 // ---------------------------------------------------------------- a server to look at
 async function demo(port) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pm-demo-'));
@@ -413,6 +561,7 @@ async function demo(port) {
   notifications();
   await theServer();
   await pulls();
+  await prepare();
   console.log(failed ? '\n' + failed + ' failed' : '\nAll passed');
   process.exit(failed ? 1 : 0);
 })().catch((e) => { console.error(e); process.exit(1); });

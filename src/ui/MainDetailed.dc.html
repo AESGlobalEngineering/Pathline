@@ -754,7 +754,13 @@ class Component extends DCLogic {
       .then(([job, machines, materials, recent, hist, settings, none, tabsInfo]) => {
         // no machines set up yet: lay the job out on the stand-in bed
         this.setState({ ready: true, job, machines: machines.length ? machines : [none], materials, recent, hist, settings, tabsInfo });
-        if (!machines.length) LRC.toast('No machines yet. Add one under Setup → Machines.', { ms: 6000 });
+        // the first start: connect to the workshop's Pathline Monitor and add its machines (asked once)
+        setTimeout(() => LRC.workshop.firstStart().then((added) => {
+          if (!added.length) { if (!machines.length) LRC.toast('No machines yet. Add one under Setup → Machines.', { ms: 6000 }); return; }
+          // the job was laid out on the stand-in bed: open it again on a real machine
+          if (!machines.length) location.reload();
+          else api.machines.list().then((ms) => this.setState({ machines: ms }));
+        }).catch(LRC.fail), 400);
         // "Send to machine" from the Simulation page lands here
         if (location.hash === '#send') {
           history.replaceState(null, '', location.pathname);
@@ -1462,15 +1468,17 @@ class Component extends DCLogic {
       blocked: checks.filter((c) => c.block).map((c) => c.l),
       warnings: checks.filter((c) => !c.ok && !c.block).map((c) => c.l),
       overrides: over.length ? { text: (over.length === 1 ? over[0].name + ' uses' : over.length + ' processes use') + ' job settings, not the material presets', label: 'Revert to presets', revert: () => this.revertOverrides() } : null,
-      check: () => (m.ip
-        ? window.api.device.status(m.id).catch((err) => { throw new Error(m.name + ' did not answer at ' + m.ip + ':' + (m.port || 8470) + ' (' + err.message + ')'); })
+      // a machine added from the workshop is reached through Pathline Monitor when it isn't on this network
+      check: () => (m.ip || m.monitorId
+        ? window.api.device.status(m.id).catch((err) => { throw new Error(m.name + ' did not answer ' + (m.ip ? 'at ' + m.ip + ':' + (m.port || 8470) : 'through Pathline Monitor') + ' (' + err.message + ')'); })
         : Promise.reject(new Error(m.name + ' has no IP address — set it on the Machines page'))),
       send: async (via) => {
         const r = await window.api.device.send(this.state.job, via); // the job as it is now (after a revert, too)
-        if (r && andStart && via === 'Ethernet') await window.api.device.command(m.id, 'start', {});
+        // through Pathline Monitor a job is only queued: Start is pressed at the machine
+        if (r && andStart && via === 'Ethernet' && !r.relayed) await window.api.device.command(m.id, 'start', {});
         return r;
       },
-      doneLabel: (r, via) => (via === 'Ethernet' ? (andStart ? 'Sent and started on ' : 'Sent to ') + m.name : 'Saved ' + r.where.split(/[\\/]/).pop())
+      doneLabel: (r, via) => (via === 'Ethernet' ? (r.relayed ? 'Queued on ' + m.name + ' through Pathline Monitor. Press Start at the machine.' : (andStart ? 'Sent and started on ' : 'Sent to ') + m.name) : 'Saved ' + r.where.split(/[\\/]/).pop())
     });
     if (!res) return;
     if (res.conn !== 'Ethernet') LRC.toast('Saved ' + res.where.split(/[\\/]/).pop(), { kind: 'ok', action: 'Show', onAction: () => window.api.app.showItem(res.where) });

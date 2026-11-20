@@ -11,7 +11,28 @@ function baseUrl(m) {
   return 'http://' + host + ':' + (Number(m.port) || 8470) + API;
 }
 
+// A machine added from the workshop's Pathline Monitor (m.monitorId) is reached directly on the
+// network when it answers there, and through Pathline Monitor when it doesn't (workshop.js):
+// relay(m, method, route, body, timeout) → { data, ms, via: 'monitor' }. After the network
+// didn't answer, the next minute goes straight through Pathline Monitor.
+let relay = null;
+const away = new Map(); // machine id → until when it's reached through Pathline Monitor
+const setRelay = (fn) => { relay = fn; };
 async function request(m, method, route, body) {
+  const canRelay = !!(relay && m.monitorId);
+  if (canRelay && (!String(m.ip || '').trim() || (away.get(m.id) || 0) > Date.now())) return relay(m, method, route, body, m.timeout);
+  try {
+    const r = await direct(m, method, route, body);
+    away.delete(m.id);
+    return r;
+  } catch (e) {
+    if (!canRelay || !e.offline) throw e;
+    away.set(m.id, Date.now() + 60000);
+    return relay(m, method, route, body, m.timeout);
+  }
+}
+
+async function direct(m, method, route, body) {
   const timeout = Math.max(300, Number(m.timeout) || 3000);
   const t0 = Date.now();
   let res;
@@ -36,11 +57,12 @@ async function request(m, method, route, body) {
 }
 
 const test = async (m) => {
-  const { data, ms } = await request(m, 'GET', '/info');
-  return { ok: true, ms, info: data };
+  const { data, ms, via } = await request(m, 'GET', '/info');
+  return { ok: true, ms, info: data, ...(via ? { via } : {}) };
 };
 const machineSettings = async (m) => (await request(m, 'GET', '/machine')).data;
-const status = async (m) => (await request(m, 'GET', '/status')).data;
+// via: 'monitor' when it came through Pathline Monitor
+const status = async (m) => { const r = await request(m, 'GET', '/status'); return r.via && r.data ? { ...r.data, via: r.via } : r.data; };
 // The material settings kept on the machine (see HMI-BRIEF §5.3). null when the
 // HMI doesn't keep them (an HMI from before this was added answers 404).
 async function materials(m) {
@@ -55,7 +77,7 @@ async function command(m, cmd, args) {
   return (await request(m, 'POST', '/' + cmd, args || {})).data;
 }
 
-const sendPackage = async (m, pkg) => (await request(m, 'POST', '/jobs', pkg)).data;
+const sendPackage = async (m, pkg) => { const r = await request(m, 'POST', '/jobs', pkg); return r.via ? { ...(r.data || {}), via: r.via } : r.data; };
 
 // The controller's own job queue.
 const jobs = async (m) => (await request(m, 'GET', '/jobs')).data || [];
@@ -65,4 +87,4 @@ const orderJobs = async (m, ids) => (await request(m, 'POST', '/jobs/order', { i
 // File/folder name without characters Windows refuses.
 const safeName = (s) => String(s || 'job').replace(/[\\/:*?"<>|]+/g, '-').replace(/\s+/g, ' ').trim().slice(0, 80) || 'job';
 
-module.exports = { test, machineSettings, status, materials, putMaterials, command, sendPackage, jobs, removeJob, orderJobs, safeName };
+module.exports = { test, machineSettings, status, materials, putMaterials, command, sendPackage, jobs, removeJob, orderJobs, safeName, setRelay };

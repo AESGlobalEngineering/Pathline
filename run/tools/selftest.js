@@ -1884,7 +1884,7 @@ async function reportTests() {
 async function pullTests() {
   console.log('Pulls through Pathline Monitor');
   const zlib = require('zlib');
-  const asks = [], answers = [], polls = [];
+  const asks = [], answers = [], polls = [], bodies = {};
   const mon = http.createServer((rq, rs) => {
     const parts = [];
     rq.on('data', (c) => parts.push(c));
@@ -1892,6 +1892,9 @@ async function pullTests() {
       const s = Buffer.concat(parts);
       if (rq.url === '/api/v1/enrol') { rs.writeHead(200, { 'content-type': 'application/json' }); return rs.end(JSON.stringify({ key: 'stand-in-key-2' })); }
       if (rq.url === '/api/v1/report') { rs.writeHead(204); return rs.end(); }
+      // a Prepare call's body (Monitor 0.7)
+      const bm = /^\/api\/v1\/asks\/(.+)\/body$/.exec(rq.url);
+      if (bm) { const b = bodies[decodeURIComponent(bm[1])]; if (!b) { rs.writeHead(404); return rs.end(); } rs.writeHead(200, { 'content-type': 'application/json', 'content-length': b.length }); return rs.end(b); }
       if (rq.url === '/api/v1/asks') {
         polls.push({ at: Date.now(), auth: rq.headers.authorization });
         const give = () => { const list = asks.splice(0, 5); if (list.length) { rs.writeHead(200, { 'content-type': 'application/json' }); rs.end(JSON.stringify(list)); } else { rs.writeHead(204); rs.end(); } };
@@ -1960,16 +1963,56 @@ async function pullTests() {
     for (let i = 0; i < 40 && (await call('GET', 'v1/status')).data.state !== 'idle'; i++) await wait(100);
     const logLines = (await call('GET', 'local/log')).data;
     ok(logLines.some((l) => /Pathline Monitor asked for the .* log: sent/.test(l)) && logLines.some((l) => /Pathline Monitor asked for "exec": refused/.test(l)), 'every ask is in the diagnostics log, sent or refused', JSON.stringify(logLines.filter((l) => /asked/.test(l)).slice(-3)));
-    // the switch off: Run stops listening and answers nothing; on again: it answers
+
+    // Pathline Prepare through Pathline Monitor (0.7): what Prepare does with a machine, minus
+    // anything that moves it; a job sent this way waits for Start here
+    console.log('Pathline Prepare through Pathline Monitor');
+    // (the body is kept under the id ask() gives the call next)
+    const pcall = (c, b) => { const body = b === undefined ? null : Buffer.from(typeof b === 'string' ? b : JSON.stringify(b)); if (body) bodies['ask-test-' + String(n + 1).padStart(4, '0')] = body; return ask({ kind: 'call', call: c, from: { id: 'prep-0123456789abcdef', name: 'Office PC' }, size: body ? body.length : 0, type: 'application/json' }, 15000); };
+    const st0 = await call('GET', 'local/state');
+    ok(st0.data.monitorReport.prepare === true, 'on by default (Setup → Pathline Monitor has its own switch)');
+    a = await pcall('GET /status');
+    ok(a && a.status === 200 && a.bundle && typeof a.bundle.state === 'string', 'reading its status', JSON.stringify(a && a.bundle).slice(0, 200));
+    a = await pcall('GET /info');
+    ok(a && a.status === 200 && a.bundle.id && a.bundle.type === 'laser', 'and who it is (GET /info)');
+    a = await pcall('POST /jobs', example);
+    const PJ = a && a.bundle && a.bundle.id;
+    const st1 = (await call('GET', 'local/state')).data;
+    const pj = st1.jobs.find((j) => j.id === PJ);
+    ok(a && a.status === 200 && pj && pj.status === 'queued' && pj.from === 'Office PC' && st1.status.state === 'idle', 'a job sent through it is queued, marked with the computer it came from, and not started', JSON.stringify({ a: a && [a.status, a.bundle], from: pj && pj.from, state: st1.status.state }));
+    const refused = [await pcall('POST /start', { id: PJ }), await pcall('POST /jog', { x: 10 }), await pcall('POST /io', { air: true }), await pcall('PUT /config', {}), await pcall('GET /monitor-report')];
+    await wait(300);
+    ok(refused.every((x) => x && x.status === 403) && (await call('GET', 'v1/status')).data.state === 'idle', 'Start, jogging, outputs and settings are refused by Run too (the machine stays idle)', JSON.stringify(refused.map((x) => x && x.status)));
+    a = await pcall('POST /jobs/order', { ids: [PJ, J] });
+    ok(a && a.status === 200 && (await call('GET', 'v1/jobs')).data.filter((j) => j.status === 'queued')[0].id === PJ, 'queued jobs reordered');
+    const mats = { format: 'pathline-materials', version: 1, machine: { id: 'm1', name: 'Q500', type: 'laser' }, materials: [{ id: 'acr-3', name: 'Acrylic', t: 3, updatedAt: '2026-11-20T10:00:00.000Z', processes: [{ proc: 'Cut', power: 80, speed: 20 }] }] };
+    a = await pcall('PUT /materials', mats);
+    const back = await pcall('GET /materials');
+    ok(a && a.status === 200 && back && back.status === 200 && back.bundle.materials[0].id === 'acr-3', 'the materials list, both ways');
+    a = await pcall('DELETE /jobs/' + PJ);
+    ok(a && a.status === 200 && !(await call('GET', 'v1/jobs')).data.some((j) => j.id === PJ), 'a queued job removed');
+    const plog = (await call('GET', 'local/log')).data;
+    ok(plog.some((l) => /received .* from Pathline Prepare on Office PC via Pathline Monitor/.test(l)) && plog.some((l) => /POST \/start refused/.test(l)) && !plog.some((l) => /GET \/status/.test(l)), 'the log says where a job came from and what was refused (not every read)', JSON.stringify(plog.filter((l) => /Prepare/.test(l)).slice(-3)));
+    const poff = await call('POST', 'local/monitor-report/prepare', { on: false });
+    a = await pcall('GET /status');
+    ok(poff.data.prepare === false && a && a.status === 403 && /turned off/.test(a.bundle.error) && JSON.parse(fs.readFileSync(path.join(data, 'monitor-report.json'), 'utf8')).prepare === false, 'switched off in Setup: Prepare\'s calls are refused', JSON.stringify(a && a.bundle));
+    await call('POST', 'local/monitor-report/prepare', { on: true });
+
+    // the switches: pulls off (Prepare's calls still on) → pulls refused; both off → Run stops
+    // listening and answers nothing; pulls on again → the ask that waited is answered
     const cfg0 = JSON.stringify((await call('GET', 'local/state')).data.config);
     const off = await call('POST', 'local/monitor-report/pull', { on: false });
+    a = await ask({ what: 'health' });
+    ok(off.data.pull === false && a && a.status === 403 && /Pulls are turned off/.test(a.bundle.error), 'pulls switched off (Prepare\'s calls on): an ask for data is refused', JSON.stringify(a && a.bundle));
+    await call('POST', 'local/monitor-report/prepare', { on: false });
     await wait(700);
     const p1 = polls.length;
     const id = 'ask-test-off';
     asks.push({ id, what: 'health' });
     await wait(2500);
-    ok(off.data.pull === false && polls.length <= p1 + 1 && !answers.some((x) => x.id === id) && JSON.parse(fs.readFileSync(path.join(data, 'monitor-report.json'), 'utf8')).pull === false, 'switched off in Setup: Run stops waiting for asks and answers none (kept with the connection)', JSON.stringify({ more: polls.length - p1 }));
+    ok(polls.length <= p1 + 1 && !answers.some((x) => x.id === id) && JSON.parse(fs.readFileSync(path.join(data, 'monitor-report.json'), 'utf8')).pull === false, 'both switched off: Run stops waiting for asks and answers none (kept with the connection)', JSON.stringify({ more: polls.length - p1 }));
     await call('POST', 'local/monitor-report/pull', { on: true });
+    await call('POST', 'local/monitor-report/prepare', { on: true });
     for (let i = 0; i < 100 && !answers.some((x) => x.id === id); i++) await wait(50);
     ok(answers.some((x) => x.id === id && x.status === 200), 'switched on again: it listens, and the ask that waited is answered');
     ok(JSON.stringify((await call('GET', 'local/state')).data.config) === cfg0, 'asks changed nothing in the settings');

@@ -626,7 +626,9 @@ function queueView() {
     return '<div class="jobcard' + (j.id === ui.sel ? ' on' : '') + '">' +
       '<button class="pick" data-a="' + (ui.multi && j.status === 'queued' ? 'pick' : 'sel') + '" data-v="' + j.id + '" aria-pressed="' + (ui.multi ? ticked : j.id === ui.sel) + '">' + bedSvg(p) +
       '<span style="display:flex;flex-direction:column;gap:1px;line-height:1.3"><span style="font-weight:600">' + (i + 1) + '. ' + esc(j.name) + '</span>' +
-      '<span class="lbl">' + esc(j.material || '—') + '</span><span class="lbl mono">' + stamp(j.receivedAt) + ' · ' + short(j.seconds) + '</span></span></button>' + tick +
+      '<span class="lbl">' + esc(j.material || '—') + '</span><span class="lbl mono">' + stamp(j.receivedAt) + ' · ' + short(j.seconds) + '</span>' +
+      // sent from outside the workshop network: from which Pathline Prepare, through Pathline Monitor
+      (j.from ? '<span class="lbl" title="Sent from Pathline Prepare on ' + esc(j.from) + ' through Pathline Monitor">From ' + esc(j.from) + ' via Pathline Monitor</span>' : '') + '</span></button>' + tick +
       (j.status === 'running' ? '<span class="pill accent" style="position:absolute;top:16px;right:16px;box-shadow:var(--shadow-1)">Running</span>'
         : j.status === 'done' ? '<span class="pill ok" style="position:absolute;top:16px;right:16px;box-shadow:var(--shadow-1)">Done' + (j.runs > 1 ? ' ×' + j.runs : '') + '</span>'
         : '<div class="ord"><button class="ib" data-a="up" data-v="' + j.id + '" aria-label="Move up"' + (i === 0 ? ' disabled' : '') + '>' + ic(ICON.chevUp, 18) + '</button><button class="ib" data-a="down" data-v="' + j.id + '" aria-label="Move down"' + (i === q.length - 1 ? ' disabled' : '') + '>' + ic(ICON.chevDown, 18) + '</button></div>') +
@@ -1078,7 +1080,7 @@ function setupView() {
 function monitorReportCard(card) {
   const r = S.monitorReport || {};
   const clock = (ms) => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-  const about = '<span style="line-height:1.5">Pathline Monitor shows every machine\'s progress, queue and alerts on phones, from anywhere. Pathline Run sends it this machine\'s status; it never takes instructions from it.</span>';
+  const about = '<span style="line-height:1.5">Pathline Monitor shows every machine\'s progress, queue and alerts on phones, from anywhere. Pathline Run sends it this machine\'s status. Nothing through it can start a job or move the machine.</span>';
   if (r.connected) {
     const how = r.failingSince
       ? '<div class="warnbox" style="line-height:1.5">Can\'t reach it since ' + clock(r.failingSince).slice(0, 5) + '. Still trying.' + (r.failure ? '<br><span class="lbl">' + esc(r.failure) + '</span>' : '') + '</div>'
@@ -1089,8 +1091,13 @@ function monitorReportCard(card) {
     const pullNote = !r.pull ? 'Off: nothing is sent but the status.' : pl.last ? 'Last asked ' + clock(pl.last.at).slice(0, 5) + ' (' + esc(pl.last.what) + (pl.last.ok ? ', sent' : ', not sent') + ').' : pl.listening ? 'Listening. Nothing asked yet.' : 'Not listening yet (Pathline Monitor 0.6 or newer listens).';
     const pull = '<label class="row" style="align-items:flex-start"><span>Let Pathline Monitor ask for logs, drawings and camera pictures<span class="hint" style="line-height:1.45">They\'re only read and sent: an ask can\'t change a setting or touch the machine or a job. Each one is in the diagnostics log. ' + pullNote + '</span></span>' +
       '<button role="switch" class="sw" aria-checked="' + !!r.pull + '" data-a="mrPull" aria-label="Let Pathline Monitor ask for logs, drawings and camera pictures"' + (S.here ? '' : ' disabled title="Only on the machine\'s own screen"') + '></button></label>';
+    // Pathline Prepare through Pathline Monitor: queue jobs from anywhere (never start them)
+    const pp = pl.prepare || {};
+    const prepNote = r.prepare === false ? 'Off: Pathline Prepare reaches this machine only on the workshop network.' : pp.last ? 'Last: ' + esc(pp.last.from) + ' at ' + clock(pp.last.at).slice(0, 5) + '.' : pp.listening ? 'Listening.' : 'Not listening yet (Pathline Monitor 0.7 or newer).';
+    const prep = '<label class="row" style="align-items:flex-start"><span>Let Pathline Prepare send jobs through Pathline Monitor<span class="hint" style="line-height:1.45">From a computer signed in with the workshop password and an authenticator app code. It can queue, reorder and remove jobs and read settings and materials. It can\'t start a job, move the head or switch outputs: jobs wait here for Start. ' + prepNote + '</span></span>' +
+      '<button role="switch" class="sw" aria-checked="' + (r.prepare !== false) + '" data-a="mrPrepare" aria-label="Let Pathline Prepare send jobs through Pathline Monitor"' + (S.here ? '' : ' disabled title="Only on the machine\'s own screen"') + '></button></label>';
     return card('Pathline Monitor', about +
-      '<div class="row"><span>Reporting to</span><span class="mono" style="word-break:break-all">' + esc(r.address) + '</span></div>' + how + pull +
+      '<div class="row"><span>Reporting to</span><span class="mono" style="word-break:break-all">' + esc(r.address) + '</span></div>' + how + pull + prep +
       '<div style="display:flex;align-items:center;justify-content:flex-end;gap:12px;padding-top:6px;border-top:1px solid var(--line-soft)"><span class="lbl" style="flex:1">Disconnect stops reporting. Remove the machine in the app too, or it shows there as not reporting.</span>' +
       '<button class="tb" data-a="mrDisconnect">Disconnect</button></div>');
   }
@@ -1740,6 +1747,7 @@ const H = {
   mrOpen: () => { ui.dlg = null; ui.view = 'setup'; ui.setTab = 'Pathline Monitor'; render(); },
   mrDisconnect: act(async () => { S.monitorReport = await call('POST', LOCAL('/monitor-report/disconnect'), {}); ui.mr = null; }),
   mrPull: act(async () => { S.monitorReport = await call('POST', LOCAL('/monitor-report/pull'), { on: !(S.monitorReport || {}).pull }); }),
+  mrPrepare: act(async () => { S.monitorReport = await call('POST', LOCAL('/monitor-report/prepare'), { on: (S.monitorReport || {}).prepare === false }); }),
   // ☰ → Pathline Monitor on a phone: the Monitor server this machine reports to, or else a hub
   // on the workshop network (Pathline Monitor before 0.5)
   monitorQr: act(async () => {

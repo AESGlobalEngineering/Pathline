@@ -84,6 +84,29 @@ The files land in `pulled/<machine>/<ask>/` (`--out` for another folder). It nee
 - **When the machine is off,** the ask waits for it, a day at most. An answer nobody collects is dropped after an hour. A running job is never held up: Run reads and packs in small steps, one ask at a time, on its own connection.
 - **Nothing is kept:** answers are held in memory only until they're collected, 512 MB at most at a time, 64 MB each.
 
+## Pathline Prepare: send jobs from anywhere
+
+From **Pathline Monitor 0.7**, **Pathline Run 0.7.23** and **Pathline Prepare 1.6.21**. A computer with Pathline Prepare signs in to the workshop once, with the workshop password and a 6-digit code from an authenticator app, and can then add any machine in Pathline Monitor. On the workshop network Prepare talks to a machine directly, as always. Anywhere else (at home, another site) it goes through this server, which passes each call on and keeps nothing.
+
+**Set up the authenticator app first (once).** On a phone signed in to Pathline Monitor: **Settings → Pathline Prepare → Set up**. Scan the QR code with **Google Authenticator** or **Microsoft Authenticator** (on the phone itself: tap *Add it to the authenticator app*, or type the key), then type the code it shows. Ten **spare codes** follow, shown once: write them down and keep them away from the phone. Each one works once instead of a code, if the phone with the app is lost. Until this is set up, no Prepare computer can sign in at all.
+
+**Sign Prepare in.** The first time Pathline Prepare starts it asks; later it's under **Setup → Machines → Add machine → Machines in your workshop**. Type the address the phones open, the workshop password and the code the app shows. Then tick the machines to add. A machine already set up in Prepare on the workshop network is linked by itself.
+
+What a computer signed in can do through Pathline Monitor, and nothing else:
+
+| Allowed | Never |
+|---|---|
+| Send a job to a machine's queue | Start a job: it waits for **Start** at the machine |
+| Reorder and remove queued jobs | Move or home the head, frame |
+| Read a machine's settings, status and queue | Switch outputs (air assist …), feed, test fire |
+| The materials list, both ways | Accept a registration mark, change the machine's settings |
+
+- **At the machine:** Pathline Run shows where each job came from (*From OFFICE-PC via Pathline Monitor* in the queue, and in its diagnostics log), and **Setup → Pathline Monitor** has a switch, **Let Pathline Prepare send jobs through Pathline Monitor**. Run checks every call against the list again.
+- **On the phones:** a computer signing in shows in every phone's Alerts list, and **Settings → Pathline Prepare** lists the computers signed in. **Remove** ends that computer's access. Changing the workshop password ends every computer's access (and every phone's).
+- **A new phone for the codes:** *Set up again* (it asks for a code from the old app, or a spare code, first). **Spare codes running out:** *New codes* replaces them all.
+- **Lost the phone and every spare code?** Whoever looks after the server deletes `/var/lib/pathline-monitor/two-step.json` and restarts the service (`sudo systemctl restart pathline-monitor`); then set it up again on a phone. Computers already signed in keep working.
+- **Codes:** each works once, for its 30 seconds (and one either side, for a phone clock that's a little out). Ten wrong codes from anywhere in 10 minutes close two-step sign-in for the rest of the 10 minutes, and five wrong tries from one address pause it there, as for passwords.
+
 ## Put it on the server (once)
 
 For an Amazon Linux 2023 server with nothing else on ports 80 and 443. Before starting:
@@ -111,8 +134,8 @@ After that:
 
 | To | Do |
 |---|---|
-| Update | Download and unzip the newer zip, and run `install.sh` again. The password, pull token, certificate, machines, phones and alerts are kept. Phones get the new app the next time they open it |
-| Change the password | Edit `/etc/pathline-monitor/password`, then `sudo systemctl restart pathline-monitor`. Every phone signs in again and turns notifications on again. Machines aren't affected |
+| Update | Download and unzip the newer zip, and run `install.sh` again. The password, pull token, certificate, machines, phones, Prepare computers, the authenticator app's setup and alerts are kept. Phones get the new app the next time they open it |
+| Change the password | Edit `/etc/pathline-monitor/password`, then `sudo systemctl restart pathline-monitor`. Every phone signs in again and turns notifications on again, and every Prepare computer signs in again. Machines aren't affected |
 | See what it's doing | `journalctl -u pathline-monitor -f` |
 | Back it up | `/var/lib/pathline-monitor` (below) and `/etc/pathline-monitor/password` |
 
@@ -148,14 +171,17 @@ In `/var/lib/pathline-monitor` (or `monitor/data/` when started by hand):
 - `devices.json`: each signed-in phone's alert choices and its push subscription.
 - `alerts.json`: the last 14 days of alerts (300 at most).
 - `state.json`: what each machine last showed, so a job that finishes while the server restarts still alerts.
+- `prepare.json`: the Pathline Prepare computers signed in, each with a fingerprint of its key.
+- `two-step.json`: the authenticator app's secret (readable by the service only) and fingerprints of the spare codes.
 
-Job names, materials and times are stored there and nowhere else. Nothing a machine sends for a pull is written to disk. Notifications to a closed app go through the phone maker's push service (Apple or Google), encrypted so that only the phone can read them.
+Job names, materials and times are stored there and nowhere else. Nothing a machine sends for a pull, and nothing a Prepare computer sends or gets back, is written to disk. Notifications to a closed app go through the phone maker's push service (Apple or Google), encrypted so that only the phone can read them.
 
 ## How it's kept safe
 
 - **Phones** sign in with the workshop password. Five wrong tries from one address pause sign-in from that address (1 minute, doubling to an hour). Signing out, or changing the password, ends a phone's access.
 - **Machines** each have their own key, given once in exchange for a one-time code that a signed-in phone made. Removing a machine ends its key.
 - **Pulls** need the pull token, which is apart from the workshop password: a phone can't pull, and the token can't open the phones' side. Five wrong tokens from one address pause it, as for passwords. A machine only answers its own asks, and only asks on the list.
+- **Pathline Prepare computers** sign in with the workshop password *and* a code from the authenticator app, and get their own key; the password alone isn't enough. They can only queue and manage jobs, never start one or move a machine, and both this server and Pathline Run check that. Removing a computer, or changing the password, ends its key.
 - **Reports are cut down to what's shown** and to sane lengths before they're kept or sent on, so a broken or pretend report can't do more than show wrong text.
 - **A phone's push subscription** is only accepted if it points at Apple's, Google's, Mozilla's or Microsoft's push service.
 - **No packages**: nothing to install from npm, so nothing to keep patched but Node.js itself.
@@ -169,7 +195,10 @@ Two calls, both to the Monitor server over https. Pathline Run's side is describ
 | `POST /api/v1/enrol` | `{ "code": "K7M2QX", "id": "run-3f9c2a71", "name": "Laser A" }` | `200 { "key": "…" }`, once. `403` for a wrong or used code, `429` after too many tries |
 | `POST /api/v1/report` with `Authorization: Bearer <key>` | Run's `GET /api/v1/monitor` answer ([PROTOCOL.md](../PROTOCOL.md) *Watching*) | `204`, nothing else. `401` when the machine has been removed |
 | `GET /api/v1/asks` with the key | | The asks for data waiting for it, as soon as there are any, or `204` after 25 s ([PROTOCOL.md](../PROTOCOL.md) *Pulls*) |
-| `POST /api/v1/answer/<id>` with the key | The packed files, or `{ "error" }` | `204` |
+| `GET /api/v1/asks/<id>/body` with the key | | A Pathline Prepare call's body (a job package, the materials list) |
+| `POST /api/v1/answer/<id>` with the key | The packed files, or `{ "error" }`; for a Prepare call, Run's answer | `204` |
+
+A Pathline Prepare computer: `POST /api/v1/prepare/join` `{ id, name, password, code }` → `{ key }` (`401 { need: "code" }` without a code, `409 { need: "setup" }` before the app is set up); then with `Authorization: Bearer <key>`, `GET /api/v1/prepare/machines`, and `POST /api/v1/prepare/call/<machine>` with `x-pathline-call: POST /jobs` (or another call on the list in [lib/pulls.js](lib/pulls.js)) and the body, answered with the machine's own answer, `403` for a call not on the list, `503` when the machine isn't listening, `504` when it doesn't answer within 60 s.
 
 Run reports when something changes and at least every 10 seconds. After 35 seconds without a report the machine shows as not reporting.
 
@@ -178,8 +207,9 @@ Run reports when something changes and at least every 10 seconds. After 35 secon
 - `server.js` is the whole server: sign-in, the machines' calls (reports, and asks for data with their answers), the pull token's calls, the phones' live stream (`GET /api/events`: everything once, then each machine as it changes) and the app's files. With a certificate it serves https itself; without one, plain http for a web server in front.
 - `lib/machines.js` turns each report into one view per machine and compares it with the last to make the alerts in the table above. Phones count a running job down themselves, so they're only told when something else changes, and every 15 seconds while a job runs.
 - `lib/push.js` is Web Push with Node's own crypto: the message is encrypted for one phone and signed as coming from this server.
-- `lib/pulls.js` holds the asks for data and their answers, in memory only; `tools/pull.js` is the command that pulls (it isn't part of the server download).
-- `app/` is the phone app: `app.js` (screens, sign-in, and the banner and tone for new alerts), `sw.js` (service worker: opens without the network, shows notifications), `manifest.webmanifest` and the icons. `tools/make-icons.js` redraws the icons from the Pathline mark (run it with Electron).
+- `lib/pulls.js` holds the asks for data and Prepare's calls, and their answers, in memory only; `tools/pull.js` is the command that pulls (it isn't part of the server download).
+- `lib/totp.js` is the authenticator app's codes (RFC 6238, as Google and Microsoft Authenticator make them) and the spare codes, with Node's own crypto.
+- `app/` is the phone app: `app.js` (screens, sign-in, the authenticator setup, and the banner and tone for new alerts), `qr.js` (draws the setup QR code), `sw.js` (service worker: opens without the network, shows notifications), `manifest.webmanifest` and the icons. `tools/make-icons.js` redraws the icons from the Pathline mark (run it with Electron).
 - `install.sh` and `pathline-monitor.service` put it on a server. The release workflow ([../.github/workflows/release-monitor.yml](../.github/workflows/release-monitor.yml)) zips the folder whenever `package.json` has a new version.
 
-`npm test` checks which alerts each kind of report makes, the notification encryption against a message made by the `web-push` library, and the server itself: sign-in, adding and removing a machine, reporting, and what survives a restart.
+`npm test` checks which alerts each kind of report makes, the notification encryption against a message made by the `web-push` library, and the server itself: sign-in, adding and removing a machine, reporting, what survives a restart, pulls, and Pathline Prepare's sign-in (the authenticator codes against the standard's test values) and calls.

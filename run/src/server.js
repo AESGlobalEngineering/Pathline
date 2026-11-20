@@ -395,7 +395,9 @@ function start(opts = {}) {
   const puller = require('./pull').createPuller({
     dataDir: DATA, connection: reporter.connection, enabled: reporter.pullOn, log, version: pkgJson.version,
     info: () => ({ id: deviceId, name: cfg.name }), jobs: () => store.jobs.concat(store.history), machine: () => machine.status(),
-    scale: Number(process.env.PATHLINE_RUN_REPORT_SCALE) || 1
+    scale: Number(process.env.PATHLINE_RUN_REPORT_SCALE) || 1,
+    // Pathline Prepare through Pathline Monitor (relayCall below): its own switch
+    callsOn: reporter.prepareOn, call: (c, b, m) => relayCall(c, b, m)
   });
   const monitorStatus = () => ({ ...reporter.status(), pulls: puller.status() });
   // who has been watching (ip → when): the Pathline Monitor hub asks every 2 s or keeps a stream
@@ -457,7 +459,8 @@ function start(opts = {}) {
   // what Pathline is told while no machine has been added
   const needMachine =() => { if (!cfg.configured) throw err(409, 'No machine is set up in Pathline Run yet. Add one on its screen: Setup → Add machine.'); };
 
-  function queueJob(pkg, source) {
+  // from: the Pathline Prepare computer's name, for a job sent through Pathline Monitor
+  function queueJob(pkg, source, from) {
     needMachine();
     const warnings = validate.check(pkg, cfg);
     // convert now, so a job the controller can't take is refused at send time
@@ -466,8 +469,36 @@ function start(opts = {}) {
     // the Trotec times its own travel (as the machine really moves): its estimate replaces Pathline's
     const seconds = program && program.estimated ? Math.round(program.seconds) : null;
     const job = store.add(pkg, warnings, source, seconds);
-    log('received ' + job.name + ' · ' + (pkg.processes || []).length + ' processes · ' + ((pkg.estimate && pkg.estimate.total) || '?') + (seconds !== null ? ' (here ' + Math.floor(seconds / 60) + ' min ' + String(seconds % 60).padStart(2, '0') + ' s)' : '') + (warnings.length ? ' · ' + warnings.join('; ') : ''));
+    if (from) { job.from = from; store.flush(); }
+    log('received ' + job.name + (from ? ' from Pathline Prepare on ' + from + ' via Pathline Monitor' : '') + ' · ' + (pkg.processes || []).length + ' processes · ' + ((pkg.estimate && pkg.estimate.total) || '?') + (seconds !== null ? ' (here ' + Math.floor(seconds / 60) + ' min ' + String(seconds % 60).padStart(2, '0') + ' s)' : '') + (warnings.length ? ' · ' + warnings.join('; ') : ''));
     return job;
+  }
+
+  // Pathline Prepare through Pathline Monitor (pull.js checks the call first): what Prepare does
+  // with a machine on the network, minus anything that moves it. A job waits for Start here.
+  async function relayCall(call, raw, { from }) {
+    const json = () => { const s = raw.toString('utf8'); try { return s ? JSON.parse(s) : {}; } catch (e) { throw err(400, 'Body is not JSON'); } };
+    const ok = (v) => ({ status: 200, body: v || {} });
+    let m;
+    if (['GET /info', 'GET /machine', 'GET /status', 'GET /jobs'].includes(call)) return ok(await api[call]({}, null));
+    if (call === 'GET /materials') return { status: 200, type: 'application/json; charset=utf-8', body: Buffer.from(materials.read(DATA)) };
+    if (call === 'PUT /materials') {
+      if (raw.length > 20 * 1048576) throw err(413, 'The materials list is too large (over 20 MB)');
+      const n = materials.write(DATA, raw.toString('utf8'));
+      log('materials: ' + n + ' kept for Pathline Prepare (from ' + from + ' via Pathline Monitor)');
+      return ok({ ok: true, count: n });
+    }
+    if (call === 'POST /jobs') { const j = queueJob(json(), 'monitor', from); return ok({ id: j.id, status: 'queued' }); }
+    if (call === 'POST /jobs/order') { const b = json(); store.order(Array.isArray(b.ids) ? b.ids : []); return ok({ ok: true }); }
+    if ((m = call.match(/^DELETE \/jobs\/(J\d{1,8})$/))) {
+      const j = store.get(m[1]);
+      if (!j) throw err(404, 'No job ' + m[1]);
+      if (j.status === 'running') throw err(409, 'Job is running — stop it first');
+      store.remove(m[1]);
+      log('removed ' + m[1] + ' (from Pathline Prepare on ' + from + ' via Pathline Monitor)');
+      return ok({ ok: true });
+    }
+    throw err(403, 'Not through Pathline Monitor');
   }
 
   // ---------------------------------------------------------------- Pathline protocol
@@ -656,6 +687,12 @@ function start(opts = {}) {
     'POST /monitor-report/pull': (b, req) => {
       if (!isLocalReq(req)) throw err(403, 'Only on the machine\'s own screen');
       reporter.setPull(!!(b && b.on));
+      return monitorStatus();
+    },
+    // and for Pathline Prepare sending jobs through Pathline Monitor
+    'POST /monitor-report/prepare': (b, req) => {
+      if (!isLocalReq(req)) throw err(403, 'Only on the machine\'s own screen');
+      reporter.setPrepare(!!(b && b.on));
       return monitorStatus();
     },
     'GET /state': (b, req) => ({

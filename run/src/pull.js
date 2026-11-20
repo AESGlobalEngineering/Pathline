@@ -15,6 +15,13 @@
 // An answer is one gzipped JSON bundle: { format: 'pathline-run-pull', version: 1, machine, what,
 // day, job, at, app, files: [{ name, size, mtime, data (base64) }] } (monitor/tools/pull.js
 // unpacks it), or { error } with the status as x-pathline-status.
+//
+// Calls (Pathline Monitor 0.7): a Pathline Prepare computer signed in to Monitor (workshop password
+// and an authenticator app code) reaches this machine the same way, from anywhere, for what Prepare
+// does with a machine and nothing more: read it, queue a job, reorder or remove queued jobs, and
+// the materials list (CALLS below; Monitor has the same list). Never Start, moving the head,
+// framing, outputs or accepting marks: a job sent through Monitor waits in the queue for someone
+// here. Run says where each one came from, and Setup → Pathline Monitor has a switch for this too.
 'use strict';
 
 const fs = require('fs');
@@ -30,6 +37,10 @@ const DAY = /^\d{4}-\d{2}-\d{2}$/;
 const JOB = /^J\d{1,8}$/;
 const MAX_RAW = 48 * 1048576;   // the files of one answer, before packing (Monitor takes 64 MB packed)
 const CHUNK = 3 * 262144;       // packed 768 KB at a time (a multiple of 3: base64 joins up)
+// what Pathline Prepare may do through Pathline Monitor
+const CALLS = [/^GET \/(info|machine|status|jobs|materials)$/, /^POST \/jobs$/, /^POST \/jobs\/order$/, /^DELETE \/jobs\/J\d{1,8}$/, /^PUT \/materials$/];
+const callOk = (c) => typeof c === 'string' && c.length < 80 && CALLS.some((r) => r.test(c));
+const MAX_CALL = 64 * 1048576;  // a job package sent through Monitor
 
 const fail = (code, msg) => Object.assign(new Error(msg), { code });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -54,20 +65,22 @@ const label = (a) => {
   return { list: 'what it has', log: 'the ' + d + ' log', job: a.job + '\'s drawings', marks: a.job + '\'s mark pictures', runs: (a.job || 'the ' + d) + ' run records', fit: 'the head drawing fit and bed maps', settings: 'the settings', health: 'its health' }[a.what] || a.what;
 };
 
-// o: { dataDir, connection() → { base, key } | null, enabled() → bool, log, info() → { id, name },
-//      jobs() → [{ id, name, status, receivedAt, finishedAt }], machine() → status, version, scale }
+// o: { dataDir, connection() → { base, key } | null, enabled() → bool (pulls), log, info() → { id, name },
+//      jobs() → [{ id, name, status, receivedAt, finishedAt }], machine() → status, version, scale,
+//      callsOn() → bool, call(call, body: Buffer, { from }) → { status?, type?, body } (Prepare's calls) }
 function createPuller(o) {
   const k = Number(o.scale) > 0 ? Number(o.scale) : 1;
-  const T = { off: 5000 * k, retry: 10000 * k, old: 300000 * k, wait: 40000 * k, upload: 600000 * k };
+  const T = { off: 5000 * k, retry: 10000 * k, old: 300000 * k, wait: 40000 * k, upload: 600000 * k, call: 60000 * k };
   const DATA = path.resolve(o.dataDir);
   const log = (s) => { try { o.log(s); } catch (e) { /* never in the way */ } };
-  const st = { listening: false, last: null };
+  const st = { listening: false, last: null, lastCall: null };
+  const callsOn = () => !!(o.callsOn && o.call && o.callsOn());
   let stopped = false, current = null;
   // its own connections: a report never waits behind an ask
   const agents = { 'http:': new http.Agent({ keepAlive: true, maxSockets: 2 }), 'https:': new https.Agent({ keepAlive: true, maxSockets: 2 }) };
 
-  // one request; resolves { status, body: Buffer } or { error }
-  function request(method, url, headers, body, ms) {
+  // one request; resolves { status, body: Buffer } (up to `max` bytes) or { error }
+  function request(method, url, headers, body, ms, max = 65536) {
     return new Promise((resolve) => {
       let done = false, timer = null, req = null;
       const end = (v) => { if (done) return; done = true; clearTimeout(timer); if (current === req) current = null; resolve(v); };
@@ -77,7 +90,7 @@ function createPuller(o) {
         req = (u.protocol === 'https:' ? https : http).request(u, { method, agent: agents[u.protocol], headers }, (res) => {
           const parts = [];
           let n = 0;
-          res.on('data', (c) => { n += c.length; if (n <= 65536) parts.push(c); else req.destroy(); });
+          res.on('data', (c) => { n += c.length; if (n <= max) parts.push(c); else req.destroy(); });
           res.on('end', () => end({ status: res.statusCode, body: Buffer.concat(parts) }));
           res.on('error', (e) => end({ error: e.message }));
         });
@@ -232,22 +245,62 @@ function createPuller(o) {
       (status === 200 ? (sent ? 'sent (' + why + ')' : 'not sent (' + (r.error || 'it answered ' + r.status) + ')') : 'refused (' + why + ')'));
   }
 
-  // ---- listening: one GET /api/v1/asks after another while connected with pulls on
+  // ---- Pathline Prepare's calls: checked here again, then done by server.js (o.call)
+  async function answerCall(c, a) {
+    const id = String((a && a.id) || '');
+    if (!/^[\w-]{8,40}$/.test(id)) return;
+    const call = String(a.call || '').slice(0, 80);
+    const from = String((a.from && a.from.name) || 'another computer').replace(/[\r\n]+/g, ' ').slice(0, 60);
+    let status = 200, type = 'application/json; charset=utf-8', payload;
+    try {
+      if (!callsOn()) throw fail(403, 'Pathline Prepare through Pathline Monitor is turned off on this machine (Pathline Run: Setup, Pathline Monitor)');
+      if (!callOk(call)) throw fail(403, 'Not through Pathline Monitor. Start, moving the head and the machine\'s outputs are only at the machine, or from Pathline Prepare on the workshop network.');
+      let body = Buffer.alloc(0);
+      const size = Number(a.size) || 0;
+      if (size > 0) {
+        if (size > MAX_CALL) throw fail(413, 'Too large (' + kb(size) + ')');
+        const r = await request('GET', c.base + '/api/v1/asks/' + encodeURIComponent(id) + '/body', { authorization: 'Bearer ' + c.key }, null, T.call, size + 1024);
+        if (r.status !== 200) throw fail(502, 'Couldn\'t fetch what Pathline Prepare sent (' + (r.error || 'Pathline Monitor answered ' + r.status) + ')');
+        body = r.body;
+      }
+      const out = (await o.call(call, body, { from })) || {};
+      status = out.status || 200;
+      if (out.type) type = out.type;
+      payload = Buffer.isBuffer(out.body) ? out.body : Buffer.from(typeof out.body === 'string' ? out.body : JSON.stringify(out.body === undefined ? {} : out.body));
+    } catch (e) {
+      status = typeof e.code === 'number' && e.code >= 400 && e.code < 600 ? e.code : 500;
+      type = 'application/json; charset=utf-8';
+      payload = Buffer.from(JSON.stringify({ error: e.message }));
+      // reads are too many to log; refusals and failures are not
+      log('Pathline Prepare on ' + from + ' via Pathline Monitor: ' + call + ' refused (' + e.message + ')');
+    }
+    const r = await request('POST', c.base + '/api/v1/answer/' + encodeURIComponent(id), {
+      authorization: 'Bearer ' + c.key, 'content-type': type, 'content-length': payload.length, 'x-pathline-status': String(status),
+    }, payload, T.call);
+    st.lastCall = { at: Date.now(), call, from, ok: r.status === 204 && status < 400 };
+  }
+
+  // ---- listening: one GET /api/v1/asks after another while connected with pulls or Prepare's calls on
+  const anyOn = () => o.enabled() || callsOn();
   (async function listen() {
     while (!stopped) {
       const c = o.connection();
-      if (!c || !o.enabled()) { st.listening = false; await sleep(T.off); continue; }
+      if (!c || !anyOn()) { st.listening = false; await sleep(T.off); continue; }
       const r = await request('GET', c.base + '/api/v1/asks', { authorization: 'Bearer ' + c.key, accept: 'application/json' }, null, T.wait);
       if (stopped) break;
       const now = o.connection();
-      if (!now || now.key !== c.key || !o.enabled()) continue;
+      if (!now || now.key !== c.key || !anyOn()) continue;
       if (r.status === 200 || r.status === 204) {
         st.listening = true;
         let list = [];
         if (r.status === 200) { try { list = JSON.parse(r.body.toString('utf8')); } catch (e) { list = []; } }
         for (const a of (Array.isArray(list) ? list : []).slice(0, 5)) {
-          if (stopped || !o.enabled()) break;
-          try { await answer(c, a); } catch (e) { log('Pathline Monitor ask: ' + e.message); }
+          if (stopped) break;
+          try {
+            if (a && a.kind === 'call') await answerCall(c, a);
+            else if (o.enabled()) await answer(c, a);
+            else await refuse(c, a, 'Pulls are turned off on this machine (Pathline Run: Setup, Pathline Monitor)');
+          } catch (e) { log('Pathline Monitor ask: ' + e.message); }
         }
         continue;
       }
@@ -257,11 +310,20 @@ function createPuller(o) {
     }
   })().catch((e) => log('Pathline Monitor asks stopped: ' + e.message));
 
+  // a pull that came while pulls are off: told so (it was taken, so it's answered)
+  async function refuse(c, a, why) {
+    const id = String((a && a.id) || '');
+    if (!/^[\w-]{8,40}$/.test(id)) return;
+    const payload = Buffer.from(JSON.stringify({ error: why }));
+    await request('POST', c.base + '/api/v1/answer/' + encodeURIComponent(id), { authorization: 'Bearer ' + c.key, 'content-type': 'application/json', 'content-length': payload.length, 'x-pathline-status': '403' }, payload, T.call);
+    log('Pathline Monitor asked for "' + String((a && a.what) || '').slice(0, 40) + '": refused (pulls are off)');
+  }
+
   return {
-    status: () => ({ listening: st.listening && !!o.connection() && o.enabled(), last: st.last }),
+    status: () => ({ listening: st.listening && !!o.connection() && o.enabled(), last: st.last, prepare: { listening: st.listening && !!o.connection() && callsOn(), last: st.lastCall } }),
     close: () => { stopped = true; try { if (current) current.destroy(); } catch (e) { /* gone */ } for (const a of Object.values(agents)) a.destroy(); },
     _check: check,
   };
 }
 
-module.exports = { createPuller, check, WHAT };
+module.exports = { createPuller, check, WHAT, CALLS, callOk };

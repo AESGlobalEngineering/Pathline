@@ -94,6 +94,20 @@ The bundle is gzipped JSON: `{ "format": "pathline-run-pull", "version": 1, "mac
 
 On the Monitor side, with `authorization: Bearer <pull token>`: `GET /api/pull/machines`, `POST /api/pull { "machine": "<name or id>", "what", "day", "job" }` → `202 { "id" }`, then `GET /api/pull/<id>`: `202` not yet (it waits up to 25 s each time), the machine's answer once it's sent (then forgotten), `410` given up. `monitor/tools/pull.js` does all of this and unpacks the bundle.
 
+### Pathline Prepare through Pathline Monitor (Monitor 0.7, Run 0.7.23, Prepare 1.6.21)
+
+A Pathline Prepare computer signed in to Monitor (the workshop password and a code from the authenticator app set up in the Monitor app) reaches a machine from anywhere over the same connection: Monitor puts its call in the machine's asks, and the device's answer goes straight back to Prepare. On the workshop network Prepare still talks to the device directly; it uses Monitor only when the device doesn't answer there, or has no address.
+
+Only these calls, the same as on the network: `GET /info`, `GET /machine`, `GET /status`, `GET /jobs`, `GET /materials`, `POST /jobs`, `POST /jobs/order`, `DELETE /jobs/<J…>`, `PUT /materials`. Never `/start`, `/jog`, `/home`, `/frame`, `/io`, `/feed`, `/marks/*` or settings: **a job sent this way waits in the queue for Start at the machine**. Monitor checks the list, and so does the device. Run's **Setup → Pathline Monitor** has a switch for it (on unless turned off, on the machine's own screen only), shows *From <computer> via Pathline Monitor* on each job sent this way, and logs every job received and every call refused (not every read).
+
+| | |
+|---|---|
+| The ask, in `GET /api/v1/asks` | `{ "id", "kind": "call", "call": "POST /jobs", "from": { "id", "name" }, "size", "type" }` |
+| Its body (when `size` > 0) | `GET /api/v1/asks/<id>/body` with the machine's key: the request body as Prepare sent it (64 MB at most) |
+| The answer | `POST /api/v1/answer/<id>`: the device's own answer and `x-pathline-status`; `403 { "error" }` when the switch is off or the call isn't on the list |
+
+Monitor gives up on a call the device hasn't answered in 60 s (Prepare is told `504`), and answers `503` straight away when the device isn't listening. Nothing a call carries is written to disk.
+
 ## Send a job
 
 `POST /jobs` with a **job package** (below). Respond `{ id, status: "queued" }`. The app may then call `POST /start`.

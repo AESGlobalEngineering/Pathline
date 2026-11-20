@@ -60,9 +60,9 @@ function createReporter(o) {
     } catch (e) { log('couldn\'t save the connection (' + e.message + ')'); }
   };
   const st = { lastSent: null, failingSince: null, failure: null, removed: !!saved.removed };
-  // pulls (pull.js): on unless switched off in Setup → Pathline Monitor; the choice outlives a
-  // disconnect
-  const keepPull = () => (saved.pull === false ? { pull: false } : {});
+  // pulls (pull.js), and Pathline Prepare sending jobs through Pathline Monitor: each on unless
+  // switched off in Setup → Pathline Monitor; the choices outlive a disconnect
+  const keepPull = () => ({ ...(saved.pull === false ? { pull: false } : {}), ...(saved.prepare === false ? { prepare: false } : {}) });
 
   // https, the certificate checked as usual; one connection, kept open between reports
   const agents = { 'http:': new http.Agent({ keepAlive: true, maxSockets: 1 }), 'https:': new https.Agent({ keepAlive: true, maxSockets: 1 }) };
@@ -173,18 +173,27 @@ function createReporter(o) {
     save();
     return status();
   }
+  // and for Pathline Prepare through Pathline Monitor
+  function setPrepare(on) {
+    if ((saved.prepare !== false) !== !!on) log(on ? 'Pathline Prepare may send jobs through Pathline Monitor again' : 'Pathline Prepare may no longer send jobs through Pathline Monitor');
+    saved = { ...saved, prepare: !!on };
+    if (on) delete saved.prepare;
+    save();
+    return status();
+  }
   // for the panel (never the key)
   function status() {
     let label = null;
     try { label = saved.address ? address(saved.address).label : null; } catch (e) { /* kept as typed */ }
-    return { connected: !!saved.key, address: label, lastSent: st.lastSent, failingSince: st.failingSince, failure: st.failure, removed: !saved.key && st.removed, pull: saved.pull !== false };
+    return { connected: !!saved.key, address: label, lastSent: st.lastSent, failingSince: st.failingSince, failure: st.failure, removed: !saved.key && st.removed, pull: saved.pull !== false, prepare: saved.prepare !== false };
   }
 
   return {
-    connect, disconnect, status, tick, setPull,
+    connect, disconnect, status, tick, setPull, setPrepare,
     // for pull.js: where to listen for asks, with which key (never shown), and whether it may
     connection: () => (saved.key && saved.address ? { base: saved.address, key: saved.key } : null),
     pullOn: () => saved.pull !== false,
+    prepareOn: () => saved.prepare !== false,
     close: () => { clearInterval(timer); for (const a of Object.values(agents)) a.destroy(); }, _T: T
   };
 }

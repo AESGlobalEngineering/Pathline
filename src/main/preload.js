@@ -33,6 +33,9 @@ contextBridge.exposeInMainWorld('api', {
     tabs: call('job:tabs'), switchTab: call('job:switchTab'), closeTab: call('job:closeTab'), moveTab: call('job:moveTab')
   },
   discover: { find: call('discover:find') },
+  // the workshop's Pathline Monitor: sign in once (workshop password + authenticator code), then
+  // add its machines, reached from anywhere (queue only: never Start)
+  workshop: { status: call('workshop:status'), asked: call('workshop:asked'), join: call('workshop:join'), machines: call('workshop:machines'), add: call('workshop:add'), leave: call('workshop:leave') },
   device: {
     test: call('device:test'), sync: call('device:sync'), status: call('device:status'), command: call('device:command'), send: call('device:send'),
     jobs: call('device:jobs'), removeJob: call('device:removeJob'), orderJobs: call('device:orderJobs')

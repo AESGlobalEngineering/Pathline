@@ -292,10 +292,10 @@ class Component extends DCLogic {
   pingAll() {
     if (document.hidden) return;
     for (const m of this.state.saved) {
-      if (m.conn !== 'Ethernet' || !m.ip) { this.setState((s) => ({ online: { ...s.online, [m.id]: null } })); continue; }
+      if (m.conn !== 'Ethernet' || (!m.ip && !m.monitorId)) { this.setState((s) => ({ online: { ...s.online, [m.id]: null } })); continue; }
       const t0 = performance.now();
       window.api.device.status(m.id)
-        .then((st) => this.setState((s) => ({ online: { ...s.online, [m.id]: { ok: true, state: st.state, link: st.link, ms: Math.round(performance.now() - t0) } } })))
+        .then((st) => this.setState((s) => ({ online: { ...s.online, [m.id]: { ok: true, state: st.state, link: st.link, ms: Math.round(performance.now() - t0), via: st.via || null } } })))
         .catch((err) => this.setState((s) => ({ online: { ...s.online, [m.id]: { ok: false, msg: err.message } } })));
     }
   }
@@ -413,11 +413,33 @@ class Component extends DCLogic {
         { key: 'ip', label: 'IP address', value: '', full: true, real: true, placeholder: 'Or type it, e.g. 192.168.1.63',
           // typing a different address leaves the machine picked above
           onInput: (v) => { if (picked && v.trim() !== picked.ip && list) { picked = null; [...list.children].forEach((c) => { c.classList.remove('on'); c.setAttribute('aria-selected', 'false'); }); } } },
-        { key: 'ctrl', label: 'Controller', type: 'select', value: 'Ruida', options: CONTROLLERS, full: true, sim: true, hidden: true }
+        { key: 'ctrl', label: 'Controller', type: 'select', value: 'Ruida', options: CONTROLLERS, full: true, sim: true, hidden: true },
+        // not on the workshop network: the machines in the workshop's Pathline Monitor
+        { key: 'workshop', type: 'custom', real: true, mount: (el, box) => {
+          const row = document.createElement('div');
+          row.className = 'found-head';
+          const t = document.createElement('span');
+          t.className = 'lbl';
+          t.textContent = 'Not on the workshop network? Add machines through your workshop\'s Pathline Monitor.';
+          const b = document.createElement('button');
+          b.type = 'button';
+          b.textContent = 'Machines in your workshop…';
+          b.onclick = (e) => { e.preventDefault(); box.close('workshop'); };
+          row.append(t, b);
+          el.appendChild(row);
+        } }
       ],
       buttons: [{ label: 'Cancel', value: null }, { label: 'Add', value: 'ok', primary: true }]
     });
     if (!r) return;
+    if (r.button === 'workshop') {
+      const added = await LRC.workshop.add();
+      if (!added.length) return;
+      // created on disk already; keep the working copy in step
+      this.setState((s) => ({ list: s.list.concat(JSON.parse(JSON.stringify(added))), saved: s.saved.concat(added), mid: added[0].id, tab: null }));
+      setTimeout(() => this.pingAll(), 500);
+      return;
+    }
     // a real machine reports its controller (until it does, the default for its type)
     let type = r.values.type, ctrl = r.values.kind === 'sim' ? r.values.ctrl : null, found = null, port = 8470;
     if (r.values.kind !== 'sim') {
@@ -541,7 +563,11 @@ class Component extends DCLogic {
     if (sim) {
       // nothing to connect to: Ethernet is greyed out and jobs are saved as files
       connFields[0].opts.forEach((o) => { if (o.l === 'Ethernet') { o.ro = true; o.pick = () => {}; } });
-    } else if (raw.conn === 'Ethernet') connFields.push(text('IP address', 'ip', '', '192.168.1.60'), text('Port', 'port', '', '8470'), text('Timeout', 'timeout', 'ms', '3000'));
+    } else if (raw.conn === 'Ethernet') {
+      connFields.push(text('IP address', 'ip', '', raw.monitorId ? 'Found on the network' : '192.168.1.60'), text('Port', 'port', '', '8470'), text('Timeout', 'timeout', 'ms', '3000'));
+      // added from the workshop's Pathline Monitor: reached from anywhere, for queuing only
+      if (raw.monitorId) connFields.push({ isNote: true, l: 'In your workshop\'s Pathline Monitor. On the workshop network Pathline Prepare talks to it directly; anywhere else it goes through Pathline Monitor, where jobs are queued only: Start is pressed at the machine.' });
+    }
     else connFields.push({ isNote: true, l: 'Send to machine saves the job as a file to load on the controller.' });
     if (sim) {
       // a simulated machine still has a controller type: the operator picks it
@@ -627,7 +653,7 @@ class Component extends DCLogic {
       if (o === undefined) return { status: 'Checking…', short: 'Checking…', pcls: 'busy', ...IDLE };
       // the HMI answers but its own link to the controller is down
       if (o && o.ok && o.link && o.link !== 'online') return { status: 'Connected · machine offline', short: 'Machine offline', dot: 'var(--warn-dot)', bg: 'var(--warn-soft)', fg: 'var(--warn)' };
-      if (o && o.ok) return { status: 'Connected' + (o.state && o.state !== 'idle' ? ' · ' + o.state : ''), short: 'Connected', dot: 'var(--ok-dot)', bg: 'var(--ok-soft)', fg: 'var(--ok)' };
+      if (o && o.ok) return { status: 'Connected' + (o.via === 'monitor' ? ' via Pathline Monitor' : '') + (o.state && o.state !== 'idle' ? ' · ' + o.state : ''), short: 'Connected', dot: 'var(--ok-dot)', bg: 'var(--ok-soft)', fg: 'var(--ok)' };
       return { status: 'Offline', short: 'Offline', dot: 'var(--err-dot)', bg: 'var(--err-soft)', fg: 'var(--err)' };
     };
     const machineList = S.list.map((x) => {
@@ -635,7 +661,7 @@ class Component extends DCLogic {
       const st = statusOf(x);
       return {
         ...TYPE[x.type], name: x.name,
-        sub: x.sim ? 'Simulated' + (CONTROLLERS.includes(x.ctrl) ? ' · ' + x.ctrl : '') : (x.ctrl ? x.ctrl + ' · ' : '') + (x.conn === 'Ethernet' ? (x.ip || 'no IP') : 'save locally'),
+        sub: x.sim ? 'Simulated' + (CONTROLLERS.includes(x.ctrl) ? ' · ' + x.ctrl : '') : (x.ctrl ? x.ctrl + ' · ' : '') + (x.conn === 'Ethernet' ? (x.ip || (x.monitorId ? 'via Pathline Monitor' : 'no IP')) : 'save locally'),
         status: st.status, short: st.short, pcls: st.pcls || '', dot: st.dot, pbg: st.bg, pfg: st.fg, cur: on ? 'page' : 'false',
         bg: on ? accentSoft : '', bd: on ? accent : 'transparent',
         pick: () => this.setState({ mid: x.id, tab: null })
@@ -661,7 +687,7 @@ class Component extends DCLogic {
         const o = S.online[raw.id];
         // (the status pill already says Connected)
         const line = test ? (test.busy ? 'Testing…' : String(test.text).replace(/^Connected · /, ''))
-          : o && o.ok ? o.ms + ' ms' : o ? 'Not answering' + (o.msg ? ' · ' + o.msg : '') : o === null ? 'Not checked yet' : '';
+          : o && o.ok ? o.ms + ' ms' + (o.via === 'monitor' ? ' · via Pathline Monitor' : '') : o ? 'Not answering' + (o.msg ? ' · ' + o.msg : '') : o === null ? 'Not checked yet' : '';
         const ok = test ? test.ok : o && o.ok;
         return {
           show: raw.conn === 'Ethernet' && !sim, line,
@@ -670,7 +696,7 @@ class Component extends DCLogic {
         };
       })(),
       runTest: R(() => this.test()),
-      noSync: raw.conn !== 'Ethernet' || !raw.ip || S.syncing,
+      noSync: raw.conn !== 'Ethernet' || (!raw.ip && !raw.monitorId) || S.syncing,
       syncTip: raw.conn !== 'Ethernet' ? 'Settings can only be read over Ethernet' : connChanged ? 'Saves the connection, then reads settings from the machine' : 'Read bed size, speeds and features from the machine',
       refreshLabel: S.syncing ? 'Reading…' : 'Refresh from machine',
       refresh: R(() => this.refresh()),

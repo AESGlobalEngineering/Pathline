@@ -22,14 +22,21 @@
 //            a service): GET /api/pull/machines, POST /api/pull { machine, what, day, job } →
 //            { id }, GET /api/pull/<id> → the machine's answer once it's sent (lib/pulls.js).
 //            Nothing about a pull is kept on disk.
+// Prepare:   a Pathline Prepare computer signs in once with the workshop password and a code from
+//            the authenticator app (set up on a phone: Settings, Pathline Prepare) and gets its own
+//            key: POST /api/v1/prepare/join. Then GET /api/v1/prepare/machines, and
+//            POST /api/v1/prepare/call/<machine> (x-pathline-call: "POST /jobs" …) passes one of
+//            the calls in lib/pulls.js CALLS to that machine and hands back its answer. Never
+//            Start, the head or outputs. Removed in Settings, its key stops working.
 'use strict';
 
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const push = require('./lib/push');
+const totp = require('./lib/totp');
 const { Machines } = require('./lib/machines');
-const { Pulls, checkAsk, WHAT } = require('./lib/pulls');
+const { Pulls, checkAsk, WHAT, callOk } = require('./lib/pulls');
 const pkg = require('./package.json');
 
 const argv = process.argv.slice(2);
@@ -77,6 +84,16 @@ const saveDevices = () => save('devices.json', devices);
 const enrolled = load('machines.json', {});
 const byKey = new Map(Object.values(enrolled).map((m) => [m.key, m.id]));
 
+// prepare.json: the signed-in Pathline Prepare computers { id, name, key (its hash), pw, addedAt,
+// seenAt }. Like phones, they're tied to the password: change it and each signs in again
+const computers = Object.fromEntries(Object.entries(load('prepare.json', {})).filter(([, c]) => c.pw === pw));
+const byPrepKey = new Map(Object.values(computers).map((c) => [c.key, c.id]));
+const saveComputers = () => save('prepare.json', computers);
+// two-step.json: the authenticator app's secret, the spare codes (as hashes) and the last code's
+// step (a code works once). Gone (deleted on the server): set up again on a phone
+let twoStep = load('two-step.json', null);
+const saveTwoStep = () => save('two-step.json', twoStep);
+
 // alerts.json: newest first, the last 300 or the last 14 days
 let alerts = load('alerts.json', []);
 const keepAlerts = () => { const cut = Date.now() - 14 * 864e5; alerts = alerts.filter((a) => a.at > cut).slice(0, 300); save('alerts.json', alerts); };
@@ -86,22 +103,36 @@ const streams = new Set();
 const tell = (v) => { const msg = 'data: ' + JSON.stringify({ now: Date.now(), ...v }) + '\n\n'; for (const res of streams) res.write(msg); };
 let saving = null;
 const saveState = () => { clearTimeout(saving); saving = null; save('state.json', Object.fromEntries(machines.views().map((v) => [v.id, v]))); };
+function raise(a) {
+  a.id = crypto.randomBytes(6).toString('hex');
+  alerts.unshift(a);
+  keepAlerts();
+  log('alert: ' + a.title + ' · ' + a.body);
+  tell({ alert: a });
+  notify(a);
+}
 const machines = new Machines({
   saved: load('state.json', {}),
   onChange: (m) => { tell({ m }); saving = saving || setTimeout(saveState, 2000); },
-  onAlert: (a) => {
-    a.id = crypto.randomBytes(6).toString('hex');
-    alerts.unshift(a);
-    keepAlerts();
-    log('alert: ' + a.title + ' · ' + a.body);
-    tell({ alert: a });
-    notify(a);
-  },
+  onAlert: raise,
 });
 for (const m of Object.values(enrolled)) machines.add(m.id, m.name);
 // asks for data and their answers, in memory only; each machine's Run version from its reports
 const pulls = new Pulls({ log, scale: Number(process.env.MONITOR_PULL_SCALE) || 1 });
 const apps = new Map();
+// how long a Prepare computer's call waits for the machine's answer (queuing a big job takes a while)
+const CALL_MS = 60000 * (Number(process.env.MONITOR_PULL_SCALE) || 1);
+const nameOf = (e) => { const m = machines.list.get(e.id); return (m && m.view && m.view.name) || e.name; };
+// the machines as a Prepare computer sees them
+const machineList = (now) => Object.values(enrolled).map((e) => {
+  const v = (machines.list.get(e.id) || {}).view || {};
+  return { id: e.id, name: nameOf(e), kind: v.kind || 'laser', model: v.model || '', state: v.state || 'offline', listening: pulls.listening(e.id, now), app: apps.get(e.id) || null };
+});
+// what a phone shows under Settings, Pathline Prepare
+const prepareView = () => ({
+  twoStep: twoStep ? { on: true, setAt: twoStep.setAt, spareLeft: twoStep.spare.length } : { on: false },
+  computers: Object.values(computers).sort((a, b) => b.seenAt - a.seenAt).map((c) => ({ id: c.id, name: c.name, addedAt: c.addedAt, seenAt: c.seenAt })),
+});
 const snapshot = () => ({ app: pkg.version, now: Date.now(), machines: machines.views(), alerts: alerts.slice(0, 100), pushKey: keys.publicKey });
 
 // quiet hours (18:00 to 07:00 by the phone's own clock, given with its settings): no sound
@@ -144,6 +175,32 @@ function failed(ip, now) {
   recent = recent.filter((t) => now - t < 600000).concat(now);
 }
 setInterval(() => { const now = Date.now(); for (const [ip, f] of fails) if (f.until < now - 3600000) fails.delete(ip); }, 3600000).unref();
+// wrong authenticator codes from anywhere: 10 in 10 minutes closes two-step sign-in for the rest
+// of those 10 minutes (a 6-digit code can't be guessed at that rate)
+let stepFails = [];
+const stepBlocked = (now) => stepFails.filter((t) => now - t < 600000).length >= 10;
+function stepFailed(ip, now) { failed(ip, now); stepFails = stepFails.filter((t) => now - t < 600000).concat(now); }
+// a code from the authenticator app (each one works once) or a spare code (used up): true when right
+function codeOk(typed, now) {
+  if (!twoStep) return false;
+  if (totp.isSpare(typed)) {
+    const i = twoStep.spare.indexOf(totp.hashSpare(typed));
+    if (i < 0) return false;
+    twoStep.spare.splice(i, 1);
+    saveTwoStep();
+    log('two-step: a spare code was used (' + twoStep.spare.length + ' left)');
+    return true;
+  }
+  const step = totp.check(twoStep.secret, typed, now, Number.isFinite(twoStep.lastStep) ? twoStep.lastStep : -1);
+  if (step < 0) return false;
+  twoStep.lastStep = step;
+  saveTwoStep();
+  return true;
+}
+// a setup started on a phone, until its first code confirms it (phone id → { secret, until })
+const pendingSteps = new Map();
+// the name the authenticator app lists it under: this server's address
+const accountOf = (req) => (origin || 'https://' + (req.headers.host || 'pathline-monitor')).replace(/^https?:\/\//, '').replace(/\/.*$/, '');
 
 // a signed-in phone: the cookie is its id and that id signed with the session key
 const validId = (s) => typeof s === 'string' && /^[a-z0-9-]{8,64}$/i.test(s);
@@ -232,6 +289,75 @@ async function handle(req, res) {
       } catch (e) { return send(res, e.code || 500, { error: e.message }); }
       return send(res, 204);
     }
+    // a Prepare computer's call carries a body (a job package, the materials list): the machine
+    // fetches it here once it has taken the call
+    const ab = /^\/api\/v1\/asks\/([\w-]{8,40})\/body$/.exec(p);
+    if (ab && req.method === 'GET') {
+      const id = machineOf(req);
+      if (!id) return send(res, 401, { error: 'This machine isn\'t connected to Pathline Monitor' });
+      let b;
+      try { b = pulls.bodyOf(id, ab[1]); } catch (e) { return send(res, e.code || 500, { error: e.message }); }
+      res.writeHead(200, { ...SAFE, 'content-type': b.type, 'cache-control': 'no-store', 'content-length': b.body.length });
+      return res.end(b.body);
+    }
+
+    // ---- Pathline Prepare: signs in once (workshop password + authenticator code), then calls machines
+    if (p === '/api/v1/prepare/join' && post) {
+      const ip = ipOf(req);
+      if (blocked(ip, now)) return send(res, 429, { error: 'Too many tries. Wait a few minutes and try again.' });
+      const b = await body(req);
+      if (!validId(b.id)) return send(res, 400, { error: 'Bad computer id' });
+      if (!same(b.password, PASSWORD)) { failed(ip, now); return send(res, 403, { need: 'password', error: 'That isn\'t the workshop password.' }); }
+      if (!twoStep) return send(res, 409, { need: 'setup', error: 'Two-step sign-in isn\'t set up yet. On a phone signed in to Pathline Monitor, open Settings, Pathline Prepare, and set up the authenticator app first.' });
+      if (!String(b.code || '').trim()) return send(res, 401, { need: 'code', error: 'Type the 6-digit code from the authenticator app.' });
+      if (stepBlocked(now)) return send(res, 429, { error: 'Too many wrong codes. Wait 10 minutes and try again.' });
+      if (!codeOk(b.code, now)) { stepFailed(ip, now); return send(res, 403, { need: 'code', error: 'That code isn\'t right, or it was used already. Type the code the app shows now.' }); }
+      fails.delete(ip);
+      const key = crypto.randomBytes(32).toString('base64url');
+      const old = computers[b.id];
+      if (old) byPrepKey.delete(old.key);
+      computers[b.id] = { id: b.id, name: String(b.name || 'Pathline Prepare').replace(/[\r\n]+/g, ' ').slice(0, 60), key: hash(key), pw, addedAt: old ? old.addedAt : now, seenAt: now };
+      byPrepKey.set(hash(key), b.id);
+      saveComputers();
+      log('Pathline Prepare signed in: ' + computers[b.id].name + ' (' + b.id + ')');
+      // in every phone's Alerts list (not a notification): who can now send jobs to the machines
+      if (!old) raise({ kind: 'info', tags: [], machine: null, title: 'Pathline Prepare signed in on ' + computers[b.id].name, body: 'It can send jobs to the machines\' queues. Remove it in Settings, Pathline Prepare, if that wasn\'t you.', at: now });
+      return send(res, 200, { key, name: computers[b.id].name, machines: machineList(now) });
+    }
+    if (p.startsWith('/api/v1/prepare/')) {
+      const c = computers[byPrepKey.get(hash(bearer(req)))];
+      if (!c) return send(res, 401, { error: 'This computer isn\'t signed in to Pathline Monitor any more. Sign in again in Pathline Prepare: Setup, Machines, Add machine, Machines in your workshop.' });
+      if (now - (c.seenAt || 0) > 60000) { c.seenAt = now; saveComputers(); }
+      if (p === '/api/v1/prepare/machines' && req.method === 'GET') return send(res, 200, { machines: machineList(now) });
+      if (p === '/api/v1/prepare/leave' && post) {
+        byPrepKey.delete(c.key);
+        delete computers[c.id];
+        saveComputers();
+        log('Pathline Prepare signed out: ' + c.name + ' (' + c.id + ')');
+        return send(res, 200, { ok: true });
+      }
+      const cm = /^\/api\/v1\/prepare\/call\/([a-z0-9-]{8,64})$/i.exec(p);
+      if (cm && post) {
+        const e = enrolled[cm[1]];
+        if (!e) return send(res, 404, { error: 'That machine isn\'t in Pathline Monitor any more' });
+        const call = String(req.headers['x-pathline-call'] || '').trim();
+        if (!callOk(call)) return send(res, 403, { error: 'Not through Pathline Monitor. Start, moving the head and the machine\'s outputs are only at the machine, or from Pathline Prepare on the workshop network.' });
+        if (!pulls.listening(e.id, now)) return send(res, 503, { offline: true, error: nameOf(e) + ' isn\'t connected to Pathline Monitor right now: its computer is off, Pathline Run is closed, or Run has this turned off.' });
+        let data = Buffer.alloc(0);
+        if (/^(POST|PUT) /.test(call)) {
+          try { data = await raw(req, pulls.maxAnswer); } catch (err) { return send(res, err.code === 413 ? 413 : 400, { error: err.code === 413 ? 'Too large: ' + Math.round(pulls.maxAnswer / 1048576) + ' MB at most' : err.message }); }
+        }
+        let r;
+        try { r = await pulls.call(e.id, { call, from: { id: c.id, name: c.name }, body: data, type: String(req.headers['content-type'] || 'application/json').slice(0, 100) }, CALL_MS, (f) => res.on('close', f)); } catch (err) {
+          if (res.writableEnded || res.destroyed) return;
+          return send(res, err.code === 504 ? 504 : err.code || 503, { offline: err.code !== 507, error: nameOf(e) + ': ' + err.message });
+        }
+        if (res.writableEnded || res.destroyed) return;
+        res.writeHead(r.status, { ...SAFE, 'content-type': r.type, 'cache-control': 'no-store', 'content-length': r.body.length, 'x-pathline-via': 'monitor' });
+        return res.end(r.body);
+      }
+      return send(res, 404, { error: 'No route ' + p });
+    }
 
     // ---- pulls: the pull token asks a machine for data, then collects its answer
     if (p === '/api/pull' || p.startsWith('/api/pull/')) {
@@ -239,7 +365,6 @@ async function handle(req, res) {
       const ip = ipOf(req);
       if (blocked(ip, now)) return send(res, 429, { error: 'Too many tries. Wait a few minutes.' });
       if (!same(bearer(req), PULL_TOKEN)) { failed(ip, now); return send(res, 401, { error: 'That isn\'t the pull token' }); }
-      const nameOf = (e) => { const m = machines.list.get(e.id); return (m && m.view && m.view.name) || e.name; };
       if (p === '/api/pull/machines' && req.method === 'GET') {
         return send(res, 200, { what: WHAT, machines: Object.values(enrolled).map((e) => { const m = machines.list.get(e.id); return { id: e.id, name: nameOf(e), reporting: !!m && now - m.at < 35000, listening: pulls.listening(e.id, now), app: apps.get(e.id) || null }; }) });
       }
@@ -325,6 +450,58 @@ async function handle(req, res) {
       }
       if (p === '/api/logout' && post) { delete devices[d.id]; saveDevices(); return send(res, 200, { ok: true }, { 'set-cookie': cookie(req, '', 0) }); }
       if (p === '/api/machine-code' && post) return send(res, 200, { code: newCode(now), minutes: 10 });
+      // Settings, Pathline Prepare: the authenticator app's setup, and the computers signed in
+      if (p === '/api/prepare' && !post) return send(res, 200, prepareView());
+      if (p === '/api/prepare/two-step' && post) {
+        const b = await body(req);
+        const ip = ipOf(req);
+        // set up already: replacing it takes a code from the app as it is now (or a spare)
+        if (twoStep) {
+          if (blocked(ip, now) || stepBlocked(now)) return send(res, 429, { error: 'Too many wrong codes. Wait 10 minutes and try again.' });
+          if (!codeOk(b.code, now)) { stepFailed(ip, now); return send(res, 403, { need: 'code', error: 'To set it up again, first type a code from the authenticator app as it is now, or a spare code.' }); }
+        }
+        const secret = totp.newSecret();
+        pendingSteps.set(d.id, { secret, until: now + 600000 });
+        return send(res, 200, { secret, uri: totp.uri(secret, accountOf(req)), account: accountOf(req), minutes: 10 });
+      }
+      if (p === '/api/prepare/two-step/confirm' && post) {
+        const b = await body(req);
+        const ip = ipOf(req);
+        if (blocked(ip, now)) return send(res, 429, { error: 'Too many tries. Wait a few minutes and try again.' });
+        const pd = pendingSteps.get(d.id);
+        if (!pd || pd.until < now) return send(res, 409, { error: 'Start again: a setup lasts 10 minutes.' });
+        const step = totp.check(pd.secret, b.code, now);
+        if (step < 0) { failed(ip, now); return send(res, 403, { error: 'That code doesn\'t match. Type the code the app shows now, and check the phone sets its clock automatically.' }); }
+        pendingSteps.delete(d.id);
+        const spare = totp.newSpares();
+        const again = !!twoStep;
+        // (the code that confirmed it may still sign in a computer within its 30 s)
+        twoStep = { secret: pd.secret, setAt: now, lastStep: -1, spare: spare.map(totp.hashSpare) };
+        saveTwoStep();
+        log('two-step sign-in for Pathline Prepare ' + (again ? 'set up again' : 'set up'));
+        return send(res, 200, { ...prepareView(), spare });
+      }
+      if (p === '/api/prepare/spare' && post) {
+        const b = await body(req);
+        const ip = ipOf(req);
+        if (!twoStep) return send(res, 409, { error: 'Set up the authenticator app first' });
+        if (blocked(ip, now) || stepBlocked(now)) return send(res, 429, { error: 'Too many wrong codes. Wait 10 minutes and try again.' });
+        if (!codeOk(b.code, now)) { stepFailed(ip, now); return send(res, 403, { need: 'code', error: 'Type a code from the authenticator app first.' }); }
+        const spare = totp.newSpares();
+        twoStep.spare = spare.map(totp.hashSpare);
+        saveTwoStep();
+        log('two-step: new spare codes made (the old ones no longer work)');
+        return send(res, 200, { ...prepareView(), spare });
+      }
+      if (p === '/api/prepare/remove' && post) {
+        const c = computers[(await body(req)).id];
+        if (!c) return send(res, 404, { error: 'No such computer' });
+        byPrepKey.delete(c.key);
+        delete computers[c.id];
+        saveComputers();
+        log('Pathline Prepare removed: ' + c.name + ' (' + c.id + ')');
+        return send(res, 200, prepareView());
+      }
       if (p === '/api/machine-remove' && post) {
         const m = enrolled[(await body(req)).id];
         if (!m) return send(res, 404, { error: 'No such machine' });
@@ -354,7 +531,7 @@ async function handle(req, res) {
 }
 
 const server = tls ? require('https').createServer(tls, handle) : require('http').createServer(handle);
-server.listen(PORT, HOST, () => log('Pathline Monitor ' + pkg.version + ' on ' + (tls ? 'https' : 'http') + '://' + HOST + ':' + server.address().port + ' · ' + machines.list.size + ' machines · data in ' + DATA + ' · pulls ' + (PULL_TOKEN ? 'on' : 'off (no pull token)')));
+server.listen(PORT, HOST, () => log('Pathline Monitor ' + pkg.version + ' on ' + (tls ? 'https' : 'http') + '://' + HOST + ':' + server.address().port + ' · ' + machines.list.size + ' machines · data in ' + DATA + ' · pulls ' + (PULL_TOKEN ? 'on' : 'off (no pull token)') + ' · Pathline Prepare ' + (twoStep ? 'on (' + Object.keys(computers).length + ' signed in)' : 'off until the authenticator app is set up')));
 // a machine waiting on GET /api/v1/asks holds its request open for up to 25 s
 server.requestTimeout = 0;
 // who has gone quiet; and a comment line every 25 s keeps live connections open through

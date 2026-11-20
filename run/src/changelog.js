@@ -5,6 +5,14 @@
 
 module.exports = [
   {
+    version: '0.7.23', date: '20 Nov 2026',
+    added: [
+      'Pathline Prepare can send jobs to this machine from anywhere, through Pathline Monitor (Pathline Monitor 0.7 and Pathline Prepare 1.6.21 or newer). The computer signs in to Pathline Monitor with the workshop password and a code from an authenticator app. It can queue, reorder and remove jobs, read the machine and swap the materials list. It can\'t start a job, move the head, frame or switch outputs: a job sent this way waits in the queue for Start here. Pathline Run checks every call itself.',
+      'The queue says where each job sent this way came from: From OFFICE-PC via Pathline Monitor. The diagnostics log has each job received this way and each call refused.',
+      'Setup → Pathline Monitor: a switch, Let Pathline Prepare send jobs through Pathline Monitor. On unless turned off, and only changed on the machine\'s own screen.'
+    ]
+  },
+  {
     version: '0.7.22', date: '20 Nov 2026',
     fixed: [
       'Part edges: each printed corner is read to within 10 µm, the same every time. Tested on the Q500 with J0115 (clear acrylic, four corners with 10 mm roundings), nothing cut. The old corner finder fitted each straight edge on its own, from the few mm showing past the rounding, and carried the two 10 mm to where they meet. Three pictures from the same place gave corners up to 0.45 mm apart, and moving the camera 2–3 mm moved them up to 0.9 mm. Now the whole outline is fitted: both straight edges and the rounding together.',

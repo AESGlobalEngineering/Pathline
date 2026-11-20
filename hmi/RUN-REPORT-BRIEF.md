@@ -3,6 +3,8 @@
 From Pathline Monitor 0.5.0 (16 Nov 2026). It replaces the way Monitor got its data in [RUN-MONITOR-BRIEF.md](RUN-MONITOR-BRIEF.md).
 
 > **Since Pathline Monitor 0.6 and Pathline Run 0.7.21 (20 Nov 2026)** the one rule below has one exception, chosen by the owner: **pulls**. Someone with Monitor's pull token can ask a machine for one thing from a fixed list (a day's log, a job's drawings, its mark pictures, health …), and Run reads it and sends it. It still never changes anything because of the server. See *Pulls* in [PROTOCOL.md](../PROTOCOL.md).
+>
+> **Since Pathline Monitor 0.7 and Pathline Run 0.7.23** there's a second, also chosen by the owner: a **Pathline Prepare computer** signed in to Monitor with the workshop password and an authenticator app code can do through it what Prepare does on the network, minus anything that moves the machine: queue, reorder and remove jobs, read the machine, and the materials list. Never Start, the head, framing or outputs; a job waits for Start at the machine. Run checks the list itself and has its own switch. See *Pathline Prepare through Pathline Monitor* in [PROTOCOL.md](../PROTOCOL.md).
 
 ## What changed in Monitor
 

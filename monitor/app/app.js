@@ -34,7 +34,10 @@ let S = null;           // what the server last said: { app, machines, alerts, p
 let skew = 0;           // this phone's clock minus the server's, to count down between updates
 let live = false;
 // signedIn: null until the server has answered, then true or false
-const ui = { view: 'machines', machine: null, seenAt: store.get('seenAt', 0), prefs: null, notif: false, busy: false, note: '', signedIn: null, signMsg: '', code: null, codeNote: '', removing: null };
+const ui = { view: 'machines', machine: null, seenAt: store.get('seenAt', 0), prefs: null, notif: false, busy: false, note: '', signedIn: null, signMsg: '', code: null, codeNote: '', removing: null,
+  // Settings, Pathline Prepare: what the server says (GET /api/prepare), the authenticator setup
+  // under way ({ mode: new|again|spare, step: code|scan|spare, secret, uri, spare, msg }), a computer being removed
+  prep: null, ts: null, removingPc: null };
 
 // seconds since the machine's last report (m.at, by the server's clock)
 const age = (m) => Math.max(0, (Date.now() - skew - m.at) / 1000);
@@ -226,6 +229,80 @@ function addMachineCard() {
     '<button class="tb" data-a="codeDone">Done</button></div>';
 }
 
+// Pathline Prepare: a computer signs in with the workshop password and a code from the
+// authenticator app set up here (Google or Microsoft Authenticator), then queues jobs on the
+// machines from anywhere. It can't start them: Start is pressed at the machine.
+const dateOf = (ms) => new Date(ms).toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' });
+function prepareCard() {
+  const p = ui.prep;
+  const head = '<section class="sec"><div class="sec-h">Pathline Prepare</div><div class="list">';
+  // asked for when first shown (and again every 10 s while it can't be had)
+  if (!p && Date.now() - (ui.prepAt || 0) > 10000) { ui.prepAt = Date.now(); setTimeout(loadPrep, 0); }
+  if (!p) return head + '<div class="set"><span class="body"><span class="s">Loading…</span></span></div></div></section>';
+  const ts = p.twoStep || {};
+  const auth = ts.on
+    ? '<div class="set"><span class="body">Authenticator app set up<span class="s">Since ' + dateOf(ts.setAt) + '. A new phone, or a lost one: set it up again</span></span><button class="tb" data-a="tsStart" data-v="again">Set up again</button></div>' +
+      '<div class="set"><span class="body">Spare codes<span class="s">' + ts.spareLeft + ' left. New ones replace them</span></span><button class="tb" data-a="tsStart" data-v="spare">New codes</button></div>'
+    : '<div class="set"><span class="body">Set up the authenticator app<span class="s">Google or Microsoft Authenticator on a phone. Pathline Prepare can\'t sign in until it\'s set up</span></span><button class="btn-primary" data-a="tsStart" data-v="new">Set up</button></div>';
+  const pcs = p.computers.map((c) => (ui.removingPc === c.id
+    ? '<div class="hint"><b>Remove ' + esc(c.name) + '?</b> It can\'t reach the machines through Pathline Monitor any more, until it signs in again with the password and a code.</div><div class="set"><span class="body"></span><span class="acts"><button class="tb" data-a="removePcNo">Keep it</button><button class="btn-primary" data-a="removePcYes" data-v="' + esc(c.id) + '">Remove</button></span></div>'
+    : '<div class="set"><span class="body">' + esc(c.name) + '<span class="s">Signed in ' + dateOf(c.addedAt) + ' · last used ' + (since(c.seenAt) === 'now' ? 'now' : since(c.seenAt) + ' ago') + '</span></span><button class="tb" data-a="removePc" data-v="' + esc(c.id) + '">Remove</button></div>')).join('');
+  return head + '<div class="hint">A computer with Pathline Prepare signs in with the workshop password and a code from the authenticator app. It can then queue jobs on the machines from anywhere, but never start them: Start is pressed at the machine.' + (ui.prepMsg ? '<br><b style="color:var(--err)">' + esc(ui.prepMsg) + '</b>' : '') + '</div>' +
+    auth + (pcs || (ts.on ? '<div class="set"><span class="body"><span class="s">No computers signed in yet</span></span></div>' : '')) + '</div></section>';
+}
+// setting up the authenticator app: (a code from it first, when replacing it) → scan → spare codes
+function twoStepView() {
+  const t = ui.ts || {};
+  const back = '<button class="tb" data-a="tsDone">' + (t.step === 'spare' ? 'Done' : 'Cancel') + '</button>';
+  const top = bar('<h1>' + (t.mode === 'spare' ? 'Spare codes' : 'Authenticator app') + '</h1><div class="sub">For Pathline Prepare\'s sign-in</div>', back);
+  const msg = '<span class="s" id="tsmsg" role="alert" style="color:var(--err)">' + esc(t.msg || '') + '</span>';
+  const codeField = (label) => '<label class="field"><span>' + label + '</span><input name="code" inputmode="numeric" autocomplete="one-time-code" autocapitalize="off" spellcheck="false" enterkeyhint="go" required class="mono"></label>';
+  let body = '';
+  if (t.step === 'code') {
+    body = '<div class="list"><div class="hint">' + (t.mode === 'spare' ? 'New spare codes replace the old ones.' : 'Setting it up again replaces the app\'s codes: the old ones stop working.') + ' First type the 6-digit code the authenticator app shows now (or a spare code).</div>' +
+      '<form id="tsform" data-step="code">' + codeField('Code from the authenticator app') + '<div class="set"><span class="body">' + msg + '</span><button class="btn-primary" type="submit"' + (ui.busy ? ' disabled' : '') + '>Next</button></div></form></div>';
+  } else if (t.step === 'scan') {
+    const step = (n, html) => '<li><span class="ord">' + n + '</span><span>' + html + '</span></li>';
+    const key = (t.secret || '').replace(/(.{4})/g, '$1 ').trim();
+    body = '<div class="list"><div class="hint"><ol class="steps">' +
+      step(1, 'Open <b>Google Authenticator</b> or <b>Microsoft Authenticator</b> on the phone that will keep the codes, tap <b>+</b> and scan this code') +
+      step(2, 'Type the 6-digit code it then shows for <b>Pathline Monitor</b>') + '</ol></div>' +
+      '<div class="qr">' + (window.QR ? window.QR.svg(t.uri) : '') + '</div>' +
+      '<div class="hint">On this phone itself? <a href="' + esc(t.uri) + '">Add it to the authenticator app</a>, or type this key in the app (time-based):<div class="key mono">' + esc(key) + '</div></div>' +
+      '<form id="tsform" data-step="scan">' + codeField('Code from the authenticator app') + '<div class="set"><span class="body">' + msg + '</span><button class="btn-primary" type="submit"' + (ui.busy ? ' disabled' : '') + '>Turn on</button></div></form></div>';
+  } else if (t.step === 'spare') {
+    body = '<div class="list"><div class="hint"><b>Write these down, or take a picture and keep it off the phone.</b> If the phone with the authenticator app is lost, each one works once instead of a code. They\'re not shown again.</div>' +
+      '<div class="spares mono">' + (t.spare || []).map((c) => '<span>' + esc(c) + '</span>').join('') + '</div>' +
+      '<div class="set"><span class="body"><span class="s">Pathline Prepare now asks for a code from the app when a computer signs in.</span></span><button class="btn-primary" data-a="tsDone">Done</button></div></div>';
+  }
+  return top + '<main class="main" id="ts">' + body + '</main>';
+}
+async function tsSubmit(form) {
+  const t = ui.ts;
+  if (!t) return;
+  const code = form.code.value.trim();
+  const say = (m) => { t.msg = m; const el = document.getElementById('tsmsg'); if (el) el.textContent = m; };
+  ui.busy = true; say('');
+  form.querySelector('button').disabled = true;
+  try {
+    if (form.dataset.step === 'code' && t.mode === 'spare') {
+      const v = await api('prepare/spare', { code });
+      ui.prep = v; Object.assign(t, { step: 'spare', spare: v.spare, msg: '' });
+    } else if (form.dataset.step === 'code') {
+      const v = await api('prepare/two-step', { code });
+      Object.assign(t, { step: 'scan', secret: v.secret, uri: v.uri, msg: '' });
+    } else {
+      const v = await api('prepare/two-step/confirm', { code });
+      ui.prep = v; Object.assign(t, { step: 'spare', spare: v.spare, secret: null, uri: null, msg: '' });
+    }
+    render(true);
+  } catch (e) {
+    say(e.message);
+    form.code.select();
+  } finally { ui.busy = false; const b = form.querySelector('button'); if (b) b.disabled = false; }
+}
+async function loadPrep() { try { ui.prep = await api('prepare'); } catch (e) { /* shown as loading; tried again on the next visit */ } render(); }
+
 function prefsView() {
   const p = ui.prefs || {};
   const sw = (k, t, s) => '<div class="set"><span class="body">' + t + '<span class="s">' + s + '</span></span><button role="switch" class="sw" aria-checked="' + !!p[k] + '" aria-label="' + t + '" data-a="pref" data-v="' + k + '"></button></div>';
@@ -241,6 +318,7 @@ function prefsView() {
     sw('quiet', 'Quiet hours', '18:00 to 07:00: alerts arrive without a sound') + '</div></section>' +
     '<section class="sec"><div class="sec-h">Machines</div><div class="list">' + M.map((m) => '<div class="set">' + badge(m) + '<span class="body">' + esc(m.name) + '<span class="s">' + esc(m.model || (m.kind === 'plotter' ? 'Plotter' : 'Laser')) + '</span></span><button role="switch" class="sw" aria-checked="' + !(p.mute && p.mute[m.id]) + '" aria-label="Alerts for ' + esc(m.name) + '" data-a="mute" data-v="' + esc(m.id) + '"></button></div>').join('') +
     addMachineCard() + '</div></section>' +
+    prepareCard() +
     '<section class="sec"><div class="sec-h">Sign-in</div><div class="list"><div class="set"><span class="body">Signed in on this phone<span class="s">Signing out also stops its notifications</span></span><button class="tb" data-a="signOut">Sign out</button></div></div></section>' +
     '<span style="font-size:12px;color:var(--text-4);padding:0 2px">Pathline Monitor ' + esc(S ? S.app : '') + '</span></main>';
 }
@@ -282,10 +360,15 @@ function tabs() {
 }
 
 const $app = document.getElementById('app');
-function render() {
+function render(force) {
   // signed out: the form is drawn once and left alone, so typing isn't lost to the redraw
   if (ui.signedIn === false) {
     if (!document.getElementById('signin')) { $app.innerHTML = signInView(); const d = document.getElementById('desk'); if (d) d.remove(); document.getElementById('signmsg').textContent = ui.signMsg; }
+    return;
+  }
+  // the authenticator setup: drawn when its step changes (render(true)), so a code being typed stays
+  if (ui.view === 'twostep') {
+    if (force === true || !document.getElementById('ts')) { $app.innerHTML = twoStepView(); window.scrollTo(0, 0); const f = $app.querySelector('#tsform input'); if (f && !matchMedia('(pointer:coarse)').matches) f.focus(); }
     return;
   }
   const v = ui.view === 'machines' && ui.machine ? detailView() : ui.view === 'alerts' ? alertsView() : ui.view === 'prefs' ? prefsView() : machinesView();
@@ -434,7 +517,7 @@ function route(top) {
 function fromHash() {
   const h = decodeURIComponent(location.hash.slice(1));
   if (h.startsWith('m-')) { ui.view = 'machines'; ui.machine = h.slice(2); }
-  else if (h === 'alerts' || h === 'prefs') { ui.view = h; ui.machine = null; }
+  else if (h === 'alerts' || h === 'prefs') { ui.view = h; ui.machine = null; if (h === 'prefs' && ui.signedIn !== false) loadPrep(); }
   else { ui.view = 'machines'; ui.machine = null; }
   render();
 }
@@ -442,7 +525,7 @@ window.addEventListener('popstate', fromHash);
 window.addEventListener('resize', () => render());
 
 const H = {
-  go: (v) => { if (ui.view === 'alerts' && v !== 'alerts') markSeen(true); ui.view = v; ui.machine = null; route(); },
+  go: (v) => { if (ui.view === 'alerts' && v !== 'alerts') markSeen(true); ui.view = v; ui.machine = null; if (v === 'prefs') loadPrep(); route(); },
   open: (v) => { ui.view = 'machines'; ui.machine = v; route(); },
   home: () => { ui.machine = null; route(); },
   alert: (v) => { markSeen(true); ui.view = 'machines'; ui.machine = v; route(); },
@@ -463,13 +546,28 @@ const H = {
   remove: (v) => { ui.removing = v; render(); },
   removeNo: () => { ui.removing = null; render(); },
   removeYes: async (v) => { ui.removing = null; try { await api('machine-remove', { id: v }); ui.machine = null; route(); } catch (e) { render(); } },
+  // Settings, Pathline Prepare
+  tsStart: async (v) => {
+    ui.ts = { mode: v, step: v === 'new' ? 'scan' : 'code', msg: '' };
+    if (v === 'new') {
+      try { const r = await api('prepare/two-step', {}); Object.assign(ui.ts, { secret: r.secret, uri: r.uri }); } catch (e) { ui.ts = null; ui.prepMsg = e.message; render(); return; }
+    }
+    ui.view = 'twostep'; render(true); window.scrollTo(0, 0);
+  },
+  tsDone: () => { ui.ts = null; ui.view = 'prefs'; route(); loadPrep(); },
+  removePc: (v) => { ui.removingPc = v; render(); },
+  removePcNo: () => { ui.removingPc = null; render(); },
+  removePcYes: async (v) => { ui.removingPc = null; try { ui.prep = await api('prepare/remove', { id: v }); } catch (e) { /* shown again as it was */ } render(); },
   signOut: async () => {
     try { if (canPush) { const sub = await (await swReg()).pushManager.getSubscription(); if (sub) await sub.unsubscribe(); } } catch (e) { /* the server forgets it anyway */ }
     try { await api('logout', {}); } catch (e) { /* signed out either way */ }
     signedOut();
   },
 };
-$app.addEventListener('submit', (e) => { if (e.target.id === 'signin') { e.preventDefault(); signIn(e.target); } });
+$app.addEventListener('submit', (e) => {
+  if (e.target.id === 'signin') { e.preventDefault(); signIn(e.target); }
+  if (e.target.id === 'tsform') { e.preventDefault(); tsSubmit(e.target); }
+});
 $app.addEventListener('click', (e) => {
   const el = e.target.closest('[data-a]');
   if (!el || el.disabled || !H[el.dataset.a]) return;
