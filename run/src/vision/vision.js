@@ -13,6 +13,7 @@
 
 const detect = require('./detect');
 const fitting = require('./fit');
+const outline = require('./outline');
 const { makeCamera, MAX_EXPOSURE } = require('./camera');
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -218,6 +219,67 @@ class Vision {
     return null;
   }
 
+  // A printed part's corner (Part edges), near p (outline.js): the camera looks from inside the
+  // corner (cornerAim) and the corner is located in the picture from its outline, wherever it is;
+  // not where it should be in the picture (the head put 12 mm off the job's first corner on J0115),
+  // the camera is aimed again on it, up to 3 times. The outline fitted there gives the edges' turn;
+  // then the camera is put right over the corner and it's read again there, where the camera's
+  // scale on the print (1–6 % off on J0115) and the small turn of its calibration can't move it.
+  // That picture is kept (frame) for readMarks to read once more with the turn all the job's
+  // corners agree on. opts: { r, toward, dark (the job's print, once known), times, ctl, why }.
+  // Returns { found, off, tries, hit, frame } or null.
+  async measurePart(p, opts = {}) {
+    const r = Math.max(0, Number(opts.r) || 0), toward = opts.toward || [1, 1];
+    const why = opts.why || {};
+    const M = this.cfg.matrix;
+    const shot = async (look) => {
+      if (opts.ctl && opts.ctl.aborted) throw err('Stopped');
+      await this.moveCamera(look, opts);
+      const tl = Date.now();
+      let img = await this.grab();
+      let q = outline.locate(img, M, toward, r, { dark: opts.dark });
+      // (the Trotec's lamp lights part of the view: a print in its shadow shows at a longer exposure)
+      for (const k of [3, 9]) { if (q && q.value >= 0.15) break; img = await this.grabTimes(k); q = outline.locate(img, M, toward, r, { dark: opts.dark }); }
+      if (opts.times) opts.times.look += Date.now() - tl;
+      return { img, q: q && q.value >= 0.15 ? q : null, cam: this.cameraAt([this.last.at.x, this.last.at.y]) };
+    };
+    let aim = this.cornerAim(r, toward);
+    let at = p.slice(), s = null, tries = 0;
+    for (let k = 0; k < 4; k++) {
+      tries++;
+      s = await shot([at[0] + aim[0], at[1] + aim[1]]);
+      if (!s.q) { why.reason = 'no printed corner of this part in view'; return null; }
+      if (k === 0) aim = this.cornerAim(r, toward); // (the picture's size known now)
+      const seen = [s.cam[0] + s.q.c[0], s.cam[1] + s.q.c[1]];
+      const off = Math.hypot(seen[0] - (at[0]), seen[1] - (at[1]));
+      at = seen;
+      if (s.q.seen > 0.9 && off < 2) break;
+      if (k === 3) { why.reason = 'the corner kept moving as the camera was aimed on it'; return null; }
+    }
+    const f1 = outline.fit(s.img, M, toward, r, { c: [at[0] - s.cam[0], at[1] - s.cam[1]], dark: s.q.dark }, { fitR: true });
+    if (!f1.bed) { why.reason = f1.fail; return null; }
+    const c1 = [s.cam[0] + f1.bed[0], s.cam[1] + f1.bed[1]];
+    // right over the corner, with the turn just found held
+    tries++;
+    if (opts.ctl && opts.ctl.aborted) throw err('Stopped');
+    await this.moveCamera(c1, opts);
+    const tl = Date.now();
+    const img = await this.grab();
+    if (opts.times) opts.times.look += Date.now() - tl;
+    const cam = this.cameraAt([this.last.at.x, this.last.at.y]);
+    const fr = { img, cam, toward, r, dark: s.q.dark, theta: f1.theta };
+    // (held at the turn the job's corners so far agree on, once there are some: steadier than one's own)
+    const hold = Number.isFinite(opts.theta) ? opts.theta : f1.theta;
+    const f2 = outline.fit(img, M, toward, r, { c: [c1[0] - cam[0], c1[1] - cam[1]], dark: s.q.dark }, { fitR: true, theta: hold, mustSettle: true });
+    if (!f2.bed) { why.reason = f2.fail; return null; }
+    const found = [cam[0] + f2.bed[0], cam[1] + f2.bed[1]];
+    // more than a mm from where the first picture had it: not the same corner
+    if (Math.hypot(found[0] - c1[0], found[1] - c1[1]) > 1) { why.reason = 'read ' + Math.hypot(found[0] - c1[0], found[1] - c1[1]).toFixed(1) + ' mm apart from two places'; return null; }
+    const [u, v] = outline.frame(img, M).toPx(f2.bed[0], f2.bed[1]);
+    const hit = { x: u, y: v, bed: f2.bed, r, angles: [f1.theta, f1.theta], rotation: f1.theta, squareness: 0, plateBrighter: !s.q.dark, printed: true, outline: true, radius: f2.r, spread: f2.spread, points: f2.points, rms: f2.spread };
+    return { found, off: [found[0] - p[0], found[1] - p[1]], tries, hit, frame: fr };
+  }
+
   // how far the last picture reaches from its middle along bed X and Y (mm); null before the first
   fieldHalf() {
     const img = this.last && this.last.img;
@@ -294,6 +356,8 @@ class Vision {
     // part is cut as normal). Found from the print's edges, and the job fitted to the corners like
     // marks: printed sheets stretch, so it's stretched to them too (Full linear from three corners)
     const edges = (pkg.regMarks && pkg.regMarks.kind === 'edge') || steps.some((s) => s.kind === 'corner' && s.part);
+    let partDark; // (part edges: the print against what's past it, from the first corner)
+    const frames = []; // (part edges: each corner's picture with it in the middle, read again below)
     this.clearMarkFrames(opts.job);
     for (const s of steps) {
       // what the mark is (PROTOCOL.md): a printed dot (the default), a hole in the plate (white under
@@ -316,7 +380,12 @@ class Vision {
       // where each mark's time goes (logged): sending the move, the head travelling and settling,
       // the pictures and finding the dot
       const times = { send: 0, travel: 0, look: 0 }, tm0 = Date.now();
-      let r = await this.measure(pred, kind, { d: s.d, ctl, whiteRing: true, times, ...what() });
+      // printed part corners: read as their outline, with the corner in the middle of the picture
+      // (measurePart); the print's darker or lighter than past it as the job's first corner showed
+      const part = kind === 'plate' && edges;
+      const thSoFar = frames.length ? frames.map((q) => q.theta).sort((a, b) => a - b)[(frames.length - 1) >> 1] : undefined;
+      const read = (p, extra = {}) => (part ? this.measurePart(p, { r: rad, toward: s.toward || [1, 1], dark: partDark, theta: thSoFar, why, ctl, ...extra }) : this.measure(p, kind, { d: s.d, ctl, whiteRing: true, ...what(), ...extra }));
+      let r = await read(pred, { times });
       this.saveMarkFrame('mark' + s.mark, { mark: s.mark, kind, toward: s.toward, design: s.at, expected: pred, d: s.d, found: r ? r.found : null, hit: r ? r.hit : null });
       // Anchored, and the first mark isn't there: the camera may have been put over the dot at
       // Start in place of the laser (J0064: every mark 42, 19 mm off, the camera's offset). Look
@@ -324,7 +393,7 @@ class Vision {
       if (!r && !E.length && opts.anchored) {
         const o = this.cfg.offset, alt = [pred[0] - o[0], pred[1] - o[1]];
         status('Reading mark ' + s.mark + ' of ' + s.of + ' (as if the camera was put over the dot)');
-        r = await this.measure(alt, kind, { d: s.d, ctl, whiteRing: true, ...what() }).catch((e) => { if (ctl.aborted) throw e; return null; });
+        r = await read(alt).catch((e) => { if (ctl.aborted) throw e; return null; });
         if (r) this.log('mark ' + s.mark + ': found one camera offset from where it should be: the camera, not the laser, was put over the dot at Start. Put the laser over it next time');
       }
       // not where it should be: the job waits while the user jogs the camera over it (Jog page),
@@ -336,22 +405,44 @@ class Vision {
         const at = await this.m.waitForMark({ mark: s.mark, of: s.of, near: pred, again, kind: s.kind === 'corner' || s.kind === 'hole' ? s.kind : 'dot', r: rad, why: why.view ? why.reason : null, part: kind === 'plate' && edges, toward: s.toward }, ctl);
         delete why.reason; delete why.view;
         status('Reading mark ' + s.mark + ' of ' + s.of + ' where the camera was put');
-        r = await this.measure(at, kind, { d: s.d, ctl, whiteRing: false, ...what() });
+        r = await read(at, { whiteRing: false });
         this.saveMarkFrame('mark' + s.mark + '-hand' + (again ? '2' : ''), { mark: s.mark, kind, toward: s.toward, design: s.at, expected: pred, camera: at, d: s.d, found: r ? r.found : null, hit: r ? r.hit : null });
         if (r) this.log('mark ' + s.mark + ': found by hand, ' + Math.hypot(r.found[0] - pred[0], r.found[1] - pred[1]).toFixed(2) + ' mm from where it was expected; the camera was put ' + Math.hypot(r.found[0] - at[0], r.found[1] - at[1]).toFixed(2) + ' mm from it');
       }
       E.push(s.at); D.push(r.found);
+      if (part) { partDark = !r.hit.plateBrighter; frames.push({ i: D.length - 1, mark: s.mark, ...r.frame }); }
       // (printed dots only: a hole's size is the cut's, not the camera's height)
       if (kind === 'dot' && !r.hit.light && r.dotMm && s.d) sizes.push(r.dotMm / s.d);
       if (kind === 'plate') { turns.push(r.hit.rotation); squares.push({ r: rad, sq: r.hit.squareness }); }
       const sec = (ms) => (ms / 1000).toFixed(2) + ' s';
-      const seen = kind === 'plate' && edges
+      const seen = part && r.hit.outline
+        ? '; printed corner of part ' + (s.part || '?') + ', r ' + rad + ' mm (where its straight edges meet), read with it in the middle of the picture: edges at ' + r.hit.rotation.toFixed(2) + '°' + (rad ? ', rounding read ' + r.hit.radius.toFixed(2) + ' mm (the camera\'s scale there ' + ((r.hit.radius / rad - 1) * 100).toFixed(1) + ' %)' : '') + ', outline within ' + (r.hit.spread * 1000).toFixed(0) + ' µm, print ' + (r.hit.plateBrighter ? 'lighter' : 'darker') + ' than past it'
+        : kind === 'plate' && edges
         ? '; printed corner of part ' + (s.part || '?') + ', r ' + rad + ' mm (where its straight edges meet), edges at ' + r.hit.angles.map((v) => v.toFixed(2) + '°').join(' and ') + ' (' + Math.abs(r.hit.squareness).toFixed(2) + '° off square), print ' + (r.hit.plateBrighter ? 'lighter' : 'darker') + ' than past it' + (r.hit.sharp ? ', edges ' + r.hit.sharp.map((v) => v.toFixed(2)).join(' / ') + ' mm sharp' : '')
         : kind === 'plate'
         ? '; plate corner' + (rad ? ' (rounded, r ' + rad + ' mm: where its straight edges meet)' : '') + ', edges at ' + r.hit.angles.map((v) => v.toFixed(2) + '°').join(' and ') + ' (' + Math.abs(r.hit.squareness).toFixed(2) + '° off square), plate ' + (r.hit.plateBrighter ? 'lighter' : 'darker') + ' than the background'
         : r.dotMm ? '; ' + (r.hit.light ? (kind === 'hole' ? 'hole ' : 'found as a hole (light, in a darker surround) ') : kind === 'hole' ? 'hole (darker than the plate round it) ' : 'dot ') + r.dotMm.toFixed(2) + ' mm across (' + s.d + ' expected)' : '';
       this.log('mark ' + s.mark + ': expected ' + s.at.map((v) => v.toFixed(2)).join(', ') + ', found ' + r.found.map((v) => v.toFixed(3)).join(', ') + ' (' + r.tries + ' frame' + (r.tries > 1 ? 's' : '') + '); ' +
         sec(Date.now() - tm0) + ': sending ' + sec(times.send) + ', travel and settle ' + sec(times.travel) + ', pictures ' + sec(times.look) + seen);
+    }
+    // Part edges, two or more corners: each read once more from its picture, with the edges' turn
+    // held at what the corners say together (their middle value), not each its own: a few mm of
+    // straight edge past a rounding give the turn to a degree at best (J0115's corner 4 read 1.55°
+    // in its picture, the other three 0.84–0.91°), and with the corner in the middle the turn
+    // carries the corner sideways, 0.17 mm a degree over a 10 mm rounding. The parts are printed
+    // square to the sheet, and the camera's own small turn is the same in every picture.
+    if (frames.length >= 2) {
+      const th = frames.map((q) => q.theta).sort((a, b) => a - b);
+      const mid = th.length % 2 ? th[th.length >> 1] : (th[th.length / 2 - 1] + th[th.length / 2]) / 2;
+      const moved = [];
+      for (const q of frames) {
+        const f = outline.fit(q.img, this.cfg.matrix, q.toward, q.r, { c: [D[q.i][0] - q.cam[0], D[q.i][1] - q.cam[1]], dark: q.dark }, { fitR: true, theta: mid, mustSettle: true });
+        if (!f.bed) { moved.push(q.mark + ' kept (' + f.fail + ')'); continue; }
+        const now = [q.cam[0] + f.bed[0], q.cam[1] + f.bed[1]];
+        moved.push(q.mark + ' ' + (Math.hypot(now[0] - D[q.i][0], now[1] - D[q.i][1]) * 1000).toFixed(0) + ' µm');
+        D[q.i] = now;
+      }
+      this.log('part corners read again with their edges at ' + mid.toFixed(2) + '° in the picture (each corner\'s own: ' + frames.map((q) => q.theta.toFixed(2) + '°').join(', ') + '): moved ' + moved.join(', ') + '; now ' + frames.map((q) => q.mark + ' at ' + D[q.i].map((v) => v.toFixed(3)).join(', ')).join(', '));
     }
     // the marks found must be as far apart as the job's: a dot that isn't the mark (a hole in the
     // bed through clear acrylic, artwork) bent the job 5 % one way and 6 % the other, and it was cut

@@ -5,6 +5,15 @@
 
 module.exports = [
   {
+    version: '0.7.22', date: '20 Nov 2026',
+    fixed: [
+      'Part edges: each printed corner is read to within 10 µm, the same every time. Tested on the Q500 with J0115 (clear acrylic, four corners with 10 mm roundings), nothing cut. The old corner finder fitted each straight edge on its own, from the few mm showing past the rounding, and carried the two 10 mm to where they meet. Three pictures from the same place gave corners up to 0.45 mm apart, and moving the camera 2–3 mm moved them up to 0.9 mm. Now the whole outline is fitted: both straight edges and the rounding together.',
+      'Part edges: the camera\'s scale on the print is no longer an error. The print isn\'t at the height the camera was calibrated at (printed under the clear sheet, or the table not focused on it). On J0115 the camera measured 1–7 % short, different at each corner, and a corner read 10 mm from the middle of the picture was pulled up to 0.5 mm into the part. Each corner is now read with it in the middle of the picture, where the scale can\'t move it; how far off the scale was shows in the log as the rounding read (9.2–10.2 mm for 10).',
+      'Part edges: a corner well away from where it should be is found anyway, and the camera is aimed again on it. On J0115 the first corner was 12 mm from the laser, and the old finder took the white card\'s edge for the print, or asked for the camera to be jogged by hand.',
+      'Part edges: the corners\' edge turn is held at what all the job\'s corners agree on, as a few mm of straight edge give it only to a degree. J0115 read three times from head positions up to 5 mm apart: the same four corners within 4–10 µm each time, the sheet turned −0.39°, its width as the job\'s within 0.05 mm/m.'
+    ]
+  },
+  {
     version: '0.7.21', date: '20 Nov 2026',
     added: [
       'Pathline Monitor can ask this machine for a day\'s diagnostics log, a job\'s drawings, the camera\'s pictures of its marks, its run records, the head drawing fit and bed maps, its settings or its health (temperature, and a Raspberry Pi\'s power warnings), when someone at the company needs them (Pathline Monitor 0.6 or newer, with its pull token). Pathline Run reads what\'s asked and sends just that, over its own outgoing connection; Monitor passes it on and keeps nothing. An ask can only ever make Pathline Run read one of those things: it can\'t change a setting, or touch the machine or a job, and a running job is never held up. Each ask is in the diagnostics log.',

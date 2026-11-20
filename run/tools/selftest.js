@@ -1044,6 +1044,30 @@ async function visionTests() {
       const se = sh ? Math.hypot(308 + sh.bed[0] - 300, 308 + sh.bed[1] - 300) : null;
       ok(se !== null && se < 0.05, 'printed part corner with its shadow 0.6 mm outside it (soft, on the card under clear acrylic): the print\'s sharp edge is read, ' + (se === null ? 'nothing found' : se.toFixed(3) + ' mm off'), JSON.stringify(sh && sh.sharp));
       ok(pe !== null && pe < 0.05 && ph.printed && Math.abs(ph.rotation - 0.5) < 0.3,'printed part corner on clear acrylic over the honeycomb (r 10, panel inside): found ' + (pe === null ? 'nothing' : pe.toFixed(3) + ' mm off, edges at ' + ph.rotation.toFixed(2) + '° (0.5)'), JSON.stringify(ph && ph.angles));
+      // Part edges as Run reads them now (outline.js): the print 4 % nearer the camera than its
+      // calibration (as J0115's corners, 1–6 % off) and the calibration 0.5° out. Aimed 10 mm inside
+      // the corner, any finder is pulled ~0.6 mm towards the picture's middle; with the corner in
+      // the middle the scale and the turn can't move it. And found from 9 mm off, to aim again
+      {
+        const O = require('../src/vision/outline');
+        const ps = 0.045, ks = 1.04, as = (90.5 * Math.PI) / 180;
+        const Mo = [ks * ps * Math.cos(as), -ks * ps * Math.sin(as), ks * ps * Math.sin(as), ks * ps * Math.cos(as)];
+        const scene = { plates: [{ pts: rr(300, 300, 380, 420, 10).map(t5), v: 55 }], under: shade };
+        const snap = (at) => new SimCamera({ size: 600, truth: { offset: [0, 0], pixel: ps, rotation: 90 }, scene, headAt: () => ({ x: at[0], y: at[1] }) }).grab();
+        const c5 = t5([300, 300]);
+        const l1 = [c5[0] + 10.7, c5[1] + 9.4], i1 = await snap(l1);
+        const q1 = O.locate(i1, Mo, [1, 1], 10);
+        const f1 = q1 && O.fit(i1, Mo, [1, 1], 10, { c: q1.c, dark: q1.dark }, { fitR: true });
+        const g1 = f1 && f1.bed ? [l1[0] + f1.bed[0], l1[1] + f1.bed[1]] : null;
+        const e1 = g1 ? Math.hypot(g1[0] - c5[0], g1[1] - c5[1]) : null;
+        const i2 = g1 ? await snap(g1) : null;
+        const f2 = i2 && O.fit(i2, Mo, [1, 1], 10, { c: [0, 0], dark: true }, { fitR: true, theta: f1.theta });
+        const e2 = f2 && f2.bed ? Math.hypot(g1[0] + f2.bed[0] - c5[0], g1[1] + f2.bed[1] - c5[1]) : null;
+        ok(e1 !== null && e1 > 0.4 && e2 !== null && e2 < 0.04 && Math.abs(f2.r - 10.4) < 0.15,
+          'printed corner, camera 4 % off scale and 0.5° off turn: aimed inside it ' + (e1 === null ? '-' : e1.toFixed(3)) + ' mm off; read over it ' + (e2 === null ? 'nothing' : e2.toFixed(3) + ' mm off') + ', its rounding read ' + (f2 && f2.r ? f2.r.toFixed(2) : '-') + ' mm (10 × 1.04)', JSON.stringify({ f1, f2 }));
+        const l3 = [c5[0] + 4, c5[1] + 3], q3 = O.locate(await snap(l3), Mo, [1, 1], 10);
+        ok(q3 && q3.dark && q3.seen > 0.9 && Math.hypot(l3[0] + q3.c[0] - c5[0], l3[1] + q3.c[1] - c5[1]) < 1.2, 'printed corner with the camera 9 mm from where it should look: located to ' + (q3 ? Math.hypot(l3[0] + q3.c[0] - c5[0], l3[1] + q3.c[1] - c5[1]).toFixed(2) : '-') + ' mm (to aim again), the print darker', JSON.stringify(q3));
+      }
     }
     // (the angle only aims the scan at the next corner; the board's angle comes from the corners found)
     ok(c && Math.abs(c.x - (239.5 - 25)) < 0.5 && Math.abs(c.y - (239.5 + 12.5)) < 0.5 && Math.abs(c.angle - 25) < 3, 'checkerboard corner at 25°: found to a fraction of a pixel, angle ' + (c && c.angle.toFixed(1)) + '° (a hint, within 3°)', JSON.stringify(c));
