@@ -5,6 +5,17 @@
 
 module.exports = [
   {
+    version: '1.6.20', date: '20 Nov 2026',
+    added: [
+      'Registration marks has five choices: Off, Position & rotation, Full linear, Non-linear and Part edges. The Mark type section is gone.',
+      'Part edges always reads four printed corners and lines the job up full linear. Choose the box the camera reads: the cut lines (cut as normal) or a box drawn in the Registration marks colour (read, not cut).',
+      'Part edges: drag any of the four corner Ls on the bed to read a different corner. It snaps to the nearest corner of a box.'
+    ],
+    fixed: [
+      'The Move tab is gone from the Job page.'
+    ]
+  },
+  {
     version: '1.6.19', date: '19 Nov 2026',
     added: [
       'Registration by part edges, for full printed sheets with no marks: Registration marks → Mark type → Part edges. The camera reads the printed corners of the parts at the corners of the sheet (top left, bottom left and top right, and bottom right with 4 parts) on their own cut lines, and the whole job is lined up to them. Parts must be rectangles (square or rounded corners). Nothing extra to draw. Print those corner parts with a sharp edge on the cut line, and put white card under clear material there. Needs Pathline Run updated to read printed edges.'

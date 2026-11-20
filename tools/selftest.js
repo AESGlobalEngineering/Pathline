@@ -701,16 +701,31 @@ async function main() {
     }
     const edges = { ...base, regKind: 'edge', sheet: { on: false }, processes: [base.processes[0], CC.regProcess()], entities: grid };
     const es = CC.regMarks(edges, cam);
-    const wantE = { 'p00-tl': [60, 50, 1, 1], 'p03-tr': [380, 50, -1, 1], 'p20-bl': [60, 410, 1, -1] };
-    ok(es.length === 3 && es.every((m) => { const w = wantE[m.id]; return w && near(m.x, w[0], 0.01) && near(m.y, w[1], 0.01) && m.toward[0] === w[2] && m.toward[1] === w[3] && m.kind === 'corner' && near(m.r, 10, 0.15); }), 'part edges: the outer corners of the parts at the top left, top right and bottom left of the sheet, with the corner radius');
-    ok(CC.regMarks({ ...edges, regCorners: 4 }, cam).map((m) => m.id).join() === 'p00-tl,p03-tr,p20-bl,p23-br', 'four part corners adds the bottom right part for a large sheet');
+    const wantE = { 'p00-tl': [60, 50, 1, 1], 'p03-tr': [380, 50, -1, 1], 'p20-bl': [60, 410, 1, -1], 'p23-br': [380, 410, -1, -1] };
+    ok(es.length === 4 && es.every((m) => { const w = wantE[m.id]; return w && near(m.x, w[0], 0.01) && near(m.y, w[1], 0.01) && m.toward[0] === w[2] && m.toward[1] === w[3] && m.kind === 'corner' && near(m.r, 10, 0.15); }), 'part edges: always the four outer corners of the parts at the sheet\'s corners, with the corner radius');
+    ok(CC.regMarks({ ...edges, regCorners: 2 }, cam).length === 4 && CC.regCornersOf(edges) === 4, 'part edges always read four corners');
     const est = inspect(edges);
-    ok(est.length === 3 && est.map((x) => x.at.map((v) => +v.toFixed(1)).join(',')).join(' ') === '60,50 60,410 380,50' && est.every((x) => x.kind === 'corner' && x.part && near(x.r, 10, 0.15)), 'part edges are sent as plate corners, read top left, bottom left, top right, naming the part');
+    ok(est.length === 4 && est.map((x) => x.at.map((v) => +v.toFixed(1)).join(',')).join(' ') === '60,50 60,410 380,50 380,410' && est.every((x) => x.kind === 'corner' && x.part && near(x.r, 10, 0.15)), 'part edges are sent as plate corners, read top left, bottom left, top right, bottom right, naming the part');
     const pkgE = ex.buildPackage(edges, cam, null, CC.estimate(edges, cam, { timeline: true }));
-    ok(grid.every((e) => pkgE.toolpath.some((x) => x.type === 'cut' && x.ent === e.id)), 'with part edges every part outline is still cut');
-    ok(CC.checkJob(edges, cam).some((c) => c.ok && /3 part corners · rounded, r 10 mm/.test(c.l)), 'the check says how many part corners are read');
-    ok(CC.checkJob({ ...edges, entities: [{ id: 'disc', aci: 1, paths: [{ p: CC.shapes.ellipse(200, 140, 50, 50), c: true }] }] }, cam).some((c) => c.block && /no part outline/.test(c.l)), 'part edges need rectangular part outlines to read');
-    ok(CC.checkJob({ ...edges, entities: [grid[0]] }, cam).some((c) => c.block && /one part outline/.test(c.l)), 'part edges need parts at different corners of the sheet');
+    ok(grid.every((e) => pkgE.toolpath.some((x) => x.type === 'cut' && x.ent === e.id)), 'part edges on the cut lines: every part outline is still cut');
+    ok(CC.checkJob(edges, cam).some((c) => c.ok && /part edges · 4 corners · rounded, r 10 mm/.test(c.l)), 'the check says four part corners are read');
+    ok(CC.checkJob({ ...edges, entities: [{ id: 'disc', aci: 1, paths: [{ p: CC.shapes.ellipse(200, 140, 50, 50), c: true }] }] }, cam).some((c) => c.block && /no part outline/.test(c.l)), 'part edges need rectangular outlines to read');
+    // moving a corner: it snaps to the nearest box corner and stays there
+    const sn = CC.snapEdgeCorner(edges, 143, 166);
+    ok(sn && sn.part === 'p01' && sn.corner === 'bl' && near(sn.x, 140, 0.01) && near(sn.y, 170, 0.01) && sn.toward.join() === '1,-1', 'a dragged corner snaps to the nearest box corner, of the part it was dropped on (' + (sn && sn.part + ' ' + sn.corner) + ')');
+    const moved = { ...edges, edgeCorners: { tr: { part: sn.part, corner: sn.corner } } };
+    const mm = CC.regMarks(moved, cam).find((m) => m.slot === 'tr');
+    ok(mm && near(mm.x, 140, 0.01) && near(mm.y, 170, 0.01) && mm.toward.join() === '1,-1' && mm.part === 'p01', 'a moved corner is read where it was put, looking the right way');
+    ok(CC.regMarks({ ...edges, edgeCorners: { tr: { part: 'gone', corner: 'tr' } } }, cam).find((m) => m.slot === 'tr').id === 'p03-tr', 'a corner moved onto a part that has gone goes back to its own corner');
+    ok(CC.checkJob({ ...edges, edgeCorners: { tr: { part: 'p00', corner: 'tl' } } }, cam).some((c) => c.block && /same corner/.test(c.l)), 'two corners on the same spot can\'t be sent');
+    // the box in the Registration marks colour: read, not cut
+    const box = { id: 'box', aci: 5, paths: [{ p: CC.shapes.rect(40, 30, 360, 400, 8), c: true }] };
+    const marked = { ...edges, edgeSource: 'mark', processes: [base.processes[0], { ...CC.regProcess(), aci: [5] }], entities: grid.concat(box) };
+    const mk = CC.regMarks(marked, cam);
+    ok(mk.length === 4 && mk.every((m) => m.part === 'box' && near(m.r, 8, 0.15)) && near(mk[3].x, 400, 0.01) && near(mk[3].y, 430, 0.01), 'part edges from a box in the mark colour: its four corners');
+    const pkgM = ex.buildPackage(marked, cam, null, CC.estimate(marked, cam, { timeline: true }));
+    ok(!pkgM.toolpath.some((x) => x.type === 'cut' && x.ent === 'box') && grid.every((e) => pkgM.toolpath.some((x) => x.type === 'cut' && x.ent === e.id)), 'the box in the mark colour isn\'t cut; the parts are');
+    ok(CC.checkJob({ ...marked, entities: grid }, cam).some((c) => c.block && /Registration marks colour/.test(c.l)), 'part edges from the mark colour need the box drawn');
     ok(/part edges/.test(ex.jobSheet(edges, cam, null, CC.estimate(edges, cam))), 'the job sheet says the job is lined up by part edges');
     const sheetText = ex.jobSheet(rounded, cam, null, CC.estimate(rounded, cam));
     ok(/plate corners/.test(sheetText) && /r 8 mm/.test(sheetText) && /10 mm of white/.test(sheetText) && /white card or paper/.test(ex.jobSheet(holes, cam, null, CC.estimate(holes, cam))), 'the job sheet says the mark type, the corner radius and what to put under or around the plate');

@@ -1214,6 +1214,19 @@
       }
       return null;
     }
+    // the part-edge corner (an L on the bed) at a world point, or null
+    cornerAt(w) {
+      const p = this.props;
+      if (!p.onCornerMove || !p.corners || !this.state.view) return null;
+      const tol = 8 / this.state.view.s, L = 12;
+      const segDist = (ax, ay, bx, by) => { const dx = bx - ax, dy = by - ay, l2 = dx * dx + dy * dy; const t = l2 ? Math.max(0, Math.min(1, ((w.x - ax) * dx + (w.y - ay) * dy) / l2)) : 0; return Math.hypot(w.x - ax - t * dx, w.y - ay - t * dy); };
+      let best = null, bd = tol;
+      for (const c of p.corners) {
+        const d = Math.min(segDist(c.x, c.y, c.x + c.toward[0] * L, c.y), segDist(c.x, c.y, c.x, c.y + c.toward[1] * L));
+        if (d <= bd) { bd = d; best = c; }
+      }
+      return best;
+    }
     onDown = (e) => {
       if (!this.state.view) return;
       const el = this.root.current;
@@ -1233,6 +1246,9 @@
       if (e.button !== 0) return;
       const tool = p.tool || 'select';
       if (tool === 'select') {
+        // part-edge corners: drag one to another box corner
+        const ck = this.cornerAt(w);
+        if (ck) { this.drag = { kind: 'corner', slot: ck.slot, w0: w }; return; }
         const hk = this.handleAt(e.clientX, e.clientY);
         if (hk) {
           const b = this.selBoxWorld();
@@ -1271,7 +1287,7 @@
       const d = this.drag;
       if (!d) {
         const hk = this.handleAt(e.clientX, e.clientY);
-        const c = hk ? (hk === 'tl' || hk === 'br' ? 'nwse-resize' : 'nesw-resize') : (this.space ? 'grab' : (this.props.tool && this.props.tool !== 'select' ? 'crosshair' : 'default'));
+        const c = !hk && (!this.props.tool || this.props.tool === 'select') && this.cornerAt(w) ? 'grab' : hk ? (hk === 'tl' || hk === 'br' ? 'nwse-resize' : 'nesw-resize') : (this.space ? 'grab' : (this.props.tool && this.props.tool !== 'select' ? 'crosshair' : 'default'));
         if (this.root.current.style.cursor !== c) this.root.current.style.cursor = c;
         // show where a measuring/drawing click would snap to
         const tool = this.props.tool;
@@ -1281,6 +1297,12 @@
           const cur = this.state.hover;
           if ((hover && (!cur || cur.x !== hover.x || cur.y !== hover.y)) || (!hover && cur)) this.setState({ hover });
         } else if (this.state.hover) this.setState({ hover: null });
+        return;
+      }
+      if (d.kind === 'corner') {
+        d.moved = true;
+        const snap = this.props.cornerSnap ? this.props.cornerSnap(w.x, w.y) : null;
+        this.setState({ drag: { kind: 'corner', slot: d.slot, x: w.x, y: w.y, snap } });
         return;
       }
       if (d.kind === 'rclick') {
@@ -1332,6 +1354,10 @@
       const p = this.props;
       if (!d) return;
       this.setState({ drag: null });
+      if (d.kind === 'corner') {
+        if (d.moved && p.onCornerMove) { const w = this.toWorld(e.clientX, e.clientY); p.onCornerMove(d.slot, w.x, w.y); }
+        return;
+      }
       if (d.kind === 'rclick') {
         // select what was clicked (unless it is already part of the selection), then open the menu
         const ent = this.hit(d.w.x, d.w.y);
@@ -1556,9 +1582,12 @@
         // an L along the plate's two edges at each corner, 12 mm each way
         if (p.corners && p.corners.length) {
           const L = 12;
-          const d = p.corners.map((c) => 'M' + (c.x + c.toward[0] * L) + ' ' + c.y + 'L' + c.x + ' ' + c.y + 'L' + c.x + ' ' + (c.y + c.toward[1] * L)).join('');
+          const dc = drag && drag.kind === 'corner' ? drag : null;
+          const shown = p.corners.map((c) => (dc && c.slot === dc.slot && dc.snap ? { ...c, x: dc.snap.x, y: dc.snap.y, toward: dc.snap.toward } : c));
+          if (dc) kids.push(h('circle', { key: 'corner-ptr', cx: dc.x, cy: dc.y, r: 4 / v.s, strokeWidth: 1.5, vectorEffect: 'non-scaling-stroke', style: { fill: 'none', stroke: 'var(--accent)' }, pointerEvents: 'none' }));
+          const d = shown.map((c) => 'M' + (c.x + c.toward[0] * L) + ' ' + c.y + 'L' + c.x + ' ' + c.y + 'L' + c.x + ' ' + (c.y + c.toward[1] * L)).join('');
           kids.push(h('path', { key: 'corners-halo', d, fill: 'none', strokeWidth: 5, strokeLinecap: 'round', strokeLinejoin: 'round', vectorEffect: 'non-scaling-stroke', style: { stroke: 'var(--ink-halo)' }, pointerEvents: 'none' }));
-          kids.push(h('path', { key: 'corners', d, fill: 'none', strokeWidth: 2.5, strokeLinecap: 'round', strokeLinejoin: 'round', vectorEffect: 'non-scaling-stroke', style: { stroke: 'var(--ink)' }, pointerEvents: 'none' }, h('title', null, 'Plate corner the camera reads')));
+          kids.push(h('path', { key: 'corners', d, fill: 'none', strokeWidth: 2.5, strokeLinecap: 'round', strokeLinejoin: 'round', vectorEffect: 'non-scaling-stroke', style: { stroke: 'var(--ink)' }, pointerEvents: 'none' }, h('title', null, p.onCornerMove ? 'Corner the camera reads — drag to another corner' : 'Plate corner the camera reads')));
         }
         let selXf;
         if (moving) selXf = 'translate(' + drag.dx + ' ' + drag.dy + ')';

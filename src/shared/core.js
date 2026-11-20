@@ -2274,27 +2274,32 @@
   //  - 'corner': the plate's own corners, on a white background. The plate is
   //    a box (rectangle along X and Y, corners square or rounded) drawn in the
   //    Registration marks colour; its corners are where its straight edges meet.
-  //  - 'edge': the printed edges of the parts themselves, for a full printed
-  //    sheet with no marks. The camera reads the outer corner of the parts at
-  //    the sheet's corners (top left, bottom left, top right, and bottom right
-  //    for four), on their own cut outlines: rectangles along X and Y, square
-  //    or rounded. Sent to Run as plate corners ('corner', with toward and r).
+  //  - 'edge': part edges, for a full printed sheet with no printed marks.
+  //    The camera reads four printed corners, fitted linearly. The boxes it
+  //    reads are rectangles along X and Y (square or rounded): the parts' own
+  //    cut outlines (job.edgeSource 'cut', the default), or boxes drawn in the
+  //    Registration marks colour, which aren't cut ('mark'). By default the
+  //    corners are the outer corners of the boxes at the sheet's corners; each
+  //    can be moved to any corner of any box (job.edgeCorners). Sent to Run as
+  //    plate corners ('corner', with toward and r).
   const REG_KINDS = ['dot', 'hole', 'corner', 'edge'];
   const regKindOf = (job) => (job && REG_KINDS.includes(job.regKind) ? job.regKind : 'dot');
   // plate corners read: job.regCorners (1–3), else from the mode (2 for
   // Position & rotation, 3 otherwise). Run fits corners by shift and turn
   // only, whatever the mode, and one corner is enough (its two edges give the turn)
-  // Part edges read 2–4 corners (default 3: top left, bottom left, top right)
+  // Part edges always read 4 corners
   const regCornersOf = (job) => {
+    if (regKindOf(job) === 'edge') return 4;
     const n = Math.round(Number(job && job.regCorners));
-    const max = regKindOf(job) === 'edge' ? 4 : 3;
-    return n >= 1 && n <= max ? n : job && job.regMode === 'pos' ? 2 : 3;
+    return n >= 1 && n <= 3 ? n : job && job.regMode === 'pos' ? 2 : 3;
   };
+  const edgeSourceOf = (job) => (job && job.edgeSource === 'mark' ? 'mark' : 'cut');
+  const EDGE_SLOTS = ['tl', 'tr', 'bl', 'br'];
   // what the operator has to do for each kind (job sheet and the marks menu)
   const REG_TIPS = {
     hole: 'Put white card or paper under the plate, so the holes show light.',
     corner: 'Draw the plate\'s outline as a box in the Registration marks colour. Lay the plate on white, with at least 10 mm of white showing past both edges at each corner that\'s read. Don\'t push those corners against a fence.',
-    edge: 'The camera reads the printed corner of the part at each corner of the sheet. Print those parts with a sharp edge on the cut line (no bleed past it there), and on clear material put white paper or card under those corners.'
+    edge: 'The camera reads four printed corners (the Ls on the bed; drag one to read another corner). Print a sharp edge there (no bleed past it), and on clear material put white paper or card under those corners.'
   };
   // which corners, by count: the diagonal for two (the longest baseline)
   const CORNER_SETS = { 1: ['tl'], 2: ['tl', 'br'], 3: ['tl', 'tr', 'bl'], 4: ['tl', 'tr', 'bl', 'br'] };
@@ -2341,15 +2346,17 @@
     const square = W > 2 * r && H > 2 * r && Math.abs(a - (W * H - (4 - Math.PI) * r * r)) <= 0.02 * W * H;
     return { box: b, r, square };
   }
-  // Part edges: the parts at the sheet's corners. The parts are the closed cut
-  // outlines (laser Cut processes that are output) that are rectangles along X
-  // and Y, 10 mm or more each way; for each corner, the part whose box corner
-  // lies furthest that way. { tl: { e, box, r }, … } and how many parts there are
-  function partCorners(job) {
-    const cutAci = new Set(job.processes.filter((p) => p.proc === 'Cut' && p.out !== false && !p.hidden && !isRegProc(p)).flatMap((p) => p.aci || []));
+  // Part edges: the boxes the camera can read. From the parts' cut outlines
+  // (output laser Cut processes) or from boxes in the Registration marks
+  // colour (edgeSource 'mark'): an object's biggest closed path that is a
+  // rectangle along X and Y, 10 mm or more each way. [{ e, box, r }]
+  function edgeBoxes(job) {
+    const acis = edgeSourceOf(job) === 'mark'
+      ? new Set(job.processes.filter(isRegProc).flatMap((p) => p.aci || []))
+      : new Set(job.processes.filter((p) => p.proc === 'Cut' && p.out !== false && !p.hidden && !isRegProc(p)).flatMap((p) => p.aci || []));
     const parts = [];
     for (const e of job.entities || []) {
-      if (e.hidden || !cutAci.has(e.aci)) continue;
+      if (e.hidden || !acis.has(e.aci)) continue;
       // the outline: the object's biggest closed path
       let best = null, ba = 0;
       for (const q of e.paths) { if (!q.c || q.p.length < 4) continue; const a = Math.abs(polyArea(q.p)); if (a > ba) { ba = a; best = q; } }
@@ -2359,11 +2366,40 @@
       const sh = rectShape(best);
       if (sh.square) parts.push({ e, ...sh });
     }
+    return parts;
+  }
+  const boxCorner = (b, k) => [b.x0 + CORNERS[k].fx * (b.x1 - b.x0), b.y0 + CORNERS[k].fy * (b.y1 - b.y0)];
+  // The four corners read, by slot (tl, tr, bl, br): by default the outer
+  // corner of the box at that corner of the sheet; job.edgeCorners[slot] =
+  // { part, corner } moves a slot to another box's corner (while that box is
+  // still there). { count, corners: { slot: { e, box, r, corner } } }
+  function partCorners(job) {
+    const parts = edgeBoxes(job);
     if (!parts.length) return { count: 0, corners: {} };
     const score = { tl: (b) => -(b.x0 + b.y0), tr: (b) => b.x1 - b.y0, bl: (b) => b.y1 - b.x0, br: (b) => b.x1 + b.y1 };
+    const set = job.edgeCorners || {};
     const corners = {};
-    for (const k of Object.keys(score)) corners[k] = parts.reduce((m, p) => (score[k](p.box) > score[k](m.box) ? p : m));
+    for (const k of EDGE_SLOTS) {
+      const o = set[k];
+      const moved = o && CORNERS[o.corner] && parts.find((p) => p.e.id === o.part);
+      corners[k] = moved ? { ...moved, corner: o.corner } : { ...parts.reduce((m, p) => (score[k](p.box) > score[k](m.box) ? p : m)), corner: k };
+    }
     return { count: parts.length, corners };
+  }
+  // The box corner nearest to (x, y), for moving a part-edge corner there:
+  // { part, corner, x, y, toward, r } or null. Parts butted together share
+  // corners: of those, the corner of the part the point is over (nearest its middle).
+  function snapEdgeCorner(job, x, y) {
+    let best = null, bd = Infinity;
+    for (const p of edgeBoxes(job)) {
+      const mid = Math.hypot((p.box.x0 + p.box.x1) / 2 - x, (p.box.y0 + p.box.y1) / 2 - y);
+      for (const k of EDGE_SLOTS) {
+        const [cx, cy] = boxCorner(p.box, k);
+        const d = Math.round(Math.hypot(cx - x, cy - y) * 1000) / 1000 + mid * 1e-6;
+        if (d < bd) { bd = d; best = { part: p.e.id, corner: k, x: cx, y: cy, toward: CORNERS[k].toward.slice(), r: p.r }; }
+      }
+    }
+    return best;
   }
   // Print-and-cut registration marks: the objects drawn in a reg-mark colour
   // (nothing is placed automatically), each reported by its centre; or, for
@@ -2374,12 +2410,13 @@
     if (!job.regMode || job.regMode === 'off') return [];
     const kind = regKindOf(job);
     if (kind === 'edge') {
-      // the outer corner of the part at each corner of the sheet, read as a plate corner
+      // four box corners (slots tl, tr, bl, br), each read as a plate corner
       const pc = partCorners(job);
       if (!pc.count) return [];
-      return CORNER_SETS[regCornersOf(job)].map((k) => {
-        const c = CORNERS[k], p = pc.corners[k], b = p.box;
-        return { id: p.e.id + '-' + k, x: b.x0 + c.fx * (b.x1 - b.x0), y: b.y0 + c.fy * (b.y1 - b.y0), d: 0, kind: 'corner', part: p.e.id, toward: c.toward.slice(), r: p.r };
+      return EDGE_SLOTS.map((k) => {
+        const p = pc.corners[k];
+        const [x, y] = boxCorner(p.box, p.corner);
+        return { id: p.e.id + '-' + p.corner, slot: k, x, y, d: 0, kind: 'corner', part: p.e.id, toward: CORNERS[p.corner].toward.slice(), r: p.r };
       });
     }
     if (kind === 'corner') {
@@ -2556,10 +2593,12 @@
           const pc = partCorners(job);
           const ms = regMarks(job, machine);
           const rs = [...new Set(ms.map((m) => m.r))];
-          if (!pc.count) out.push({ ok: false, block: true, l: 'Part edges: no part outline to read. The parts\' cut lines must be rectangles along X and Y (square or rounded corners)' });
-          else if (new Set(ms.map((m) => m.part)).size < Math.min(ms.length, 2)) out.push({ ok: false, block: true, l: 'Part edges need parts at different corners of the sheet; this job has one part outline to read' });
-          else out.push({ ok: true, l: 'Registration marks · ' + ms.length + ' part corners' + (rs.length === 1 && rs[0] ? ' · rounded, r ' + rs[0] + ' mm' : '') });
-          if (job.processes.some((p) => isRegProc(p) && (p.aci || []).length)) out.push({ ok: false, warn: true, l: 'Part edges read the parts\' own corners: objects in the Registration marks colour aren\'t read or cut' });
+          const fromMark = edgeSourceOf(job) === 'mark';
+          const spots = new Set(ms.map((m) => m.x.toFixed(2) + ',' + m.y.toFixed(2)));
+          if (!pc.count) out.push({ ok: false, block: true, l: fromMark ? 'Part edges: draw the box as a rectangle (square or rounded corners) in the Registration marks colour' : 'Part edges: no part outline to read. The cut lines must include rectangles along X and Y (square or rounded corners)' });
+          else if (spots.size < 4) out.push({ ok: false, block: true, l: 'Part edges read four different corners; two are on the same corner — drag one to another corner' });
+          else out.push({ ok: true, l: 'Registration marks · part edges · 4 corners' + (rs.length === 1 && rs[0] ? ' · rounded, r ' + rs[0] + ' mm' : '') + (fromMark ? ' · box not cut' : '') });
+          if (!fromMark && job.processes.some((p) => isRegProc(p) && (p.aci || []).length)) out.push({ ok: false, warn: true, l: 'Part edges read the cut lines: objects in the Registration marks colour aren\'t read or cut' });
         } else if (kind === 'corner') {
           // the plate is one box in the mark colour: none, or several, and the camera can't be told where to look
           const pl = plateOutline(job);
@@ -2602,7 +2641,7 @@
     uid, EMPTY_BOX, growBox, entityBox, boxOf, boxValid, boxW, boxH,
     mapEntity, translate, scaleAbout, rotateAbout, polyLen, polyArea, pointInPoly, distToEntity, isClosedPts, cleanPath, shapes,
     processOrder, processOfAci, engraveHoles, toolSlot, isPunch, punchHead, punchPoints, punchSpaceOf, PUNCH_SPACE, toolOptions, toolFor, STD_TOOLS, matOnMachine, frameArgs, originOf, toolRank, polyTime, travelTime, rasterSpans, orderPaths,
-    estimate, headAt, fmtDuration, fmtLen, fmtArea, checkJob, regMarks, regMarkAci, regKindOf, regCornersOf, marksCutByJob, plateOutline, partCorners, rectShape, REG_KINDS, REG_TIPS, camReach, marksOutOfReach, reachShift, regProcess, withPresets, ensureRegProcess, isRegProc, REG_PROC, REG_NEEDED,
+    estimate, headAt, fmtDuration, fmtLen, fmtArea, checkJob, regMarks, regMarkAci, regKindOf, regCornersOf, marksCutByJob, plateOutline, partCorners, rectShape, edgeBoxes, snapEdgeCorner, edgeSourceOf, EDGE_SLOTS, REG_KINDS, REG_TIPS, camReach, marksOutOfReach, reachShift, regProcess, withPresets, ensureRegProcess, isRegProc, REG_PROC, REG_NEEDED,
     cutOrderOf, CUT_ORDER_DEFAULT, START_CLEAR, commonLines, bedOf, bedCount, defaultPresets, DEFAULTS,
     rasterIslands, engraveScan, ENGRAVE_DIRS, DPI_STEPS, starterPresets, nestRects, THERMAL, thermalKey, thermalOf, colourOf, absorptionOf, thermalSim, bendLimit, cutModelOf, cutModelTime, fitArcs, TROTEC_CUT, rasterModelOf, rasterPitch, rasterModelTime, TROTEC_RASTER, isBareMetal, markingSprayOf, SPRAY_ABSORB, metalPresets, presetsFor
   };

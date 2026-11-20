@@ -135,7 +135,7 @@ function jobSheet(job, machine, material, est) {
     if (on && kind === 'edge') {
       const ms = regMarks(job, machine);
       const rs = [...new Set(ms.map((m) => m.r))];
-      line('Reg marks: part edges · the printed corners of ' + ms.length + ' parts at the sheet\'s corners' + (rs.length === 1 && rs[0] ? ' · rounded corners, r ' + rs[0] + ' mm' : ''));
+      line('Reg marks: part edges · ' + ms.length + ' printed corners, full linear' + (rs.length === 1 && rs[0] ? ' · rounded corners, r ' + rs[0] + ' mm' : '') + (CC.edgeSourceOf(job) === 'mark' ? ' · box in the Registration marks colour (not cut)' : ' · on the cut lines'));
     } else if (on && kind === 'corner') {
       const n = regMarks(job, machine).length;
       const pl = CC.plateOutline(job);

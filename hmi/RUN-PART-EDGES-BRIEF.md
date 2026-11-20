@@ -25,6 +25,17 @@ The new mark type is `job.regKind: "edge"`, called **Part edges** in Prepare. `r
 
 `validate.js` already accepts these steps; Prepare's self-test checks it.
 
+## Changed in Prepare 1.6.20 (20 Nov)
+
+- **Always four corners, always full linear.** Part edges is now a choice of its own in the marks menu, next to Off, Position & rotation, Full linear and Non-linear. A part-edges job always has `regMode: "linear"` and four corner steps.
+- **The box the camera reads** (`job.edgeSource`, not sent) is one of:
+  - the parts' cut outlines, as before; those are cut;
+  - a box drawn in the **Registration marks colour**, which is read and **not cut**, like plate corners. Its `part` is that box's id.
+- **The operator can move any of the four corners** to another corner of any box. It snaps to the nearest one. So the four corners aren't always the outer corners of the sheet:
+  - An inspect step's `at`/`toward` can be any box corner, including an inner corner of the grid.
+  - The steps come in reading order: top left, bottom left, top right, then the rest.
+  - Fit the four as a set: shift, rotation and scale (full linear).
+
 ## What Run needs to do
 
 1. **Find a printed edge, not a plate edge.** For plate corners, the plate stands out against white. Here the edge is the **edge of the print**, on material that may be clear. The operator's instructions are to print a sharp edge on the cut line at those parts, with no bleed past it, and to put white paper or card under those corners on clear material. The corner finder should:
