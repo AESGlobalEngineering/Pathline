@@ -27,10 +27,10 @@
   // coarse ones). Measured at 500 mm/s on 41 islands of 8 jobs at 100–1000 DPI (16–18 Nov,
   // J0093–J0111, from every report's line and place along it): 82.8 ms + 0.29 ms per mm under
   // 50 mm + 5.4 ms at 1000 DPI, 9.5 at 500, 14.1 at 300, 24.5 at 100. Each job left out of the fit and
-  // worked out from the others: within 0.9 ms a line (rms, 1.9 at worst); the estimate's model was
-  // 3.8 ms off (up to 8). How it changes with the speed is the estimate's (calibration bars at
-  // 100–600 mm/s). The head speeds up and slows down over dr mm at each end of the line, and turns
-  // in what's left.
+  // worked out from the others: within 0.9 ms a line (rms, 1.9 at worst); the estimate's old model
+  // was 3.8 ms off (up to 8). How it changes with the speed is from the calibration bars at
+  // 100–600 mm/s. The estimate times lines the same way (compile.js ENGRAVE: keep the two alike).
+  // The head speeds up and slows down over dr mm at each end of the line, and turns in what's left.
   const TROTEC = { travel: { a: 2000, j: 50000, v: 1000 }, cut: { arc: 500, corner: 5, acc: 300 }, row: { c: 0.0782, cv: 2.295e-5, sh: 3.43, nk: 0.000288, nw: 50, kp: 0.261, ps: 0.15, dr: 20 } };
   // Of places on the route that fit a report about equally well, the one nearest where the drawing
   // has the head by then wins, by this many mm per second of the job between them. Engraving lines

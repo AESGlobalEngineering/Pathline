@@ -182,14 +182,22 @@ console.log('Trotec job stream');
   ok(lens[0].name === 'MOVEX_PLUS' && lens[1].name === 'MOVEX_MINUS', 'bidirectional lines alternate');
   const ys = cmds.filter((c) => c.name === 'MOVEXY').map((c) => c.v[1]);
   ok(ys[0] > ys[ys.length - 1], 'direction "up" starts at the front (largest Y)');
-  // its time, as Ruby engraves (fitted on J0076, J0093, J0094): each line (40 − 3.43) mm at the set
-  // speed, then a turn of 0.0902 + 2.295e-5 · v s, and 0.203 s for the island
+  // its time, as the Q500 engraves (measured on J0093–J0111): each line 40 mm at the set speed, then
+  // 0.0782 + 2.295e-5·v − 3.43/v s, 0.288 ms per mm under 50 mm wide, the step of 0.048 mm
+  // (0.261·p / (1 + p/0.15)), and 0.31 s less for the island
   const st = trotec.compile(plan.build(pkg), cfg).segments[0].steps[0];
-  const n = tables.length, want = n * ((40 - 3.43) / 400 + 0.0902 + 2.295e-5 * 400) + 0.203;
-  ok(Math.abs(st.parts.engrave - want) < 0.05, 'engraving time: ' + n + ' lines × ' + ((st.parts.engrave - 0.203) / n).toFixed(4) + ' s + 0.203 s = ' + st.parts.engrave + ' s (' + want.toFixed(2) + ')', JSON.stringify(st.parts));
+  const perLine = 40 / 400 + 0.0782 + 2.295e-5 * 400 - 3.43 / 400 + 0.000288 * 10 + (0.261 * 0.048) / (1 + 0.048 / 0.15);
+  const n = tables.length, want = n * perLine - 0.31;
+  ok(Math.abs(st.parts.engrave - want) < 0.05, 'engraving time: ' + n + ' lines × ' + perLine.toFixed(4) + ' s − 0.31 s = ' + st.parts.engrave + ' s (' + want.toFixed(2) + ')', JSON.stringify(st.parts));
   const rows = trotec.engraveRows(pkg, cfg)[0];
-  ok(rows && rows.n === n && rows.lead === 0.203 && Math.abs(rows.sec + rows.lead - st.parts.engrave) < 0.01,
-    'the screen\'s engraving rows take the estimate\'s time (lines and the island\'s own 0.203 s)', JSON.stringify(rows));
+  ok(rows && rows.n === n && rows.lead === -0.31 && Math.abs(rows.sec + rows.lead - st.parts.engrave) < 0.01,
+    'the screen\'s engraving rows take the estimate\'s time (lines and the island\'s own −0.31 s)', JSON.stringify(rows));
+  // the estimate and the drawing time a line alike
+  {
+    const R0 = require('../ui/follow').TROTEC.row, p = 0.048;
+    const per = 40 / 400 + Math.max(0.01, R0.c + R0.cv * 400 - R0.sh / 400) + R0.nk * Math.max(0, R0.nw - 40) + (R0.kp * p) / (1 + p / R0.ps);
+    ok(Math.abs(per * n - rows.sec) < 0.01, 'the estimate times each line as the drawing does (' + (rows.sec / n * 1000).toFixed(2) + ' ms, ' + (per * 1000).toFixed(2) + ')');
+  }
   const rowsK = trotec.engraveRows(pkg, { ...cfg, timeScale: { engrave: 0.99 } })[0];
   ok(Math.abs(rowsK.sec - rows.sec * 0.99) < 0.01, 'the drawing takes the fitted engraving scale, as the estimate does');
   // the lines as sent, for the screen: how many, how far apart, which way, how fast

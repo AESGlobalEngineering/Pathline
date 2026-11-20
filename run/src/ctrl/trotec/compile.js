@@ -22,16 +22,22 @@ const CUT = { arc: 1000, acc: 2000 };
 // a registration mark, s: learnt from the jobs run (cfg.markSec, server.js), this until then.
 // Ruby's X21 jobs took 7–9 s a mark (19–28 s for 3), not the 4 s first assumed
 const MARK_SEC = 8;
-// Engraving: each line is one move across the island's box and its overscan, whatever is on that
-// line, at the engraving speed; the head then turns, in turn0 + turnPerV · v seconds; and each
-// island (step) costs `step` s more. The sweep takes as long as if it were `short` mm shorter than
-// sent (as if the overscan were 8.3 mm, not 10: the head is at speed sooner than the line's ends).
-// Fitted on 34 engraving steps: the calibration bars (J0076, 100–600 mm/s, 40 and 80 mm) and two
-// 500 DPI stainless jobs of 9 islands each (J0093, J0094, ~500 mm/s, 16 Nov), each step's real time
-// from its markers less Run's own travel to it: 2.2 % rms a step, the jobs −0.7, +0.8, −0.3 %.
-// (Before: turn0 0.0578, turnPerV 9.44e-5 on J0076 and J0068 alone ran the two jobs 5–6 % long.
-// Pathline Prepare's 2·v/acc a line, with the travel acceleration, ran them 16× long.)
-const ENGRAVE = { turn0: 0.0902, turnPerV: 2.295e-5, short: 3.43, step: 0.203 };
+// Engraving: each line is one move across the island's box and its overscan (w mm), whatever is on
+// that line, at the engraving speed v; a line takes
+//   w/v + turn0 + turnPerV·v − short/v  (the sweep and the turn, at least 10 ms)
+//     + narrow · (wide − w) for a line narrower than wide mm
+//     + pitchK·p / (1 + p/pitchS) for the step of p mm to the next line
+// and each island (step) `step` s more (less: the first line has no turn before it). The same
+// model the screen draws the head by (ui/follow.js TROTEC.row, measured from every report's line
+// and place along it: 82.8 ms more than the sweep at 500 mm/s, 0.29 ms per mm under 50 mm, 5.4 ms
+// for the step at 1000 DPI, 9.5 at 500, 14.1 at 300, 24.5 at 100). How it changes with the speed
+// is from the calibration bars (J0076, 100–600 mm/s, 40 and 80 mm). On the 65 engraving steps of
+// 8 jobs (16–18 Nov, J0093–J0111, 100–1000 DPI, 23–107 mm wide), each step's real time from its
+// markers less Run's own travel to it, each job left out of the fit of `step`: 3.3 % rms a step,
+// the jobs −0.3 … +1.4 %. (Before, one turn for every speed and width and no pitch: 9.1 % a step,
+// the jobs −3.9 … +2.8 %: wide islands long, J0106's 107 mm ones by 7 s in 349, and coarse
+// pitches short. Pathline Prepare's 2·v/acc a line ran them 16× long.)
+const ENGRAVE = { turn0: 0.0782, turnPerV: 2.295e-5, short: 3.43, narrow: 0.000288, wide: 50, pitchK: 0.261, pitchS: 0.15, step: -0.31 };
 
 // The lines one engraving step is sent as: { pitch, lines, xs, xe (mm, the row with its
 // overscan), v, sweep and turn (s, one line's), secPerLine, lead (s, the step's own) }
@@ -43,8 +49,9 @@ function engraveLines(step, S) {
   const os = S.overscan + (p.overshoot || 0);
   const xs = Math.max(0, step.box[0] - os), xe = Math.min(S.bed[0], step.box[2] + os);
   const v = Math.min(p.speed, S.max);
-  const sweep = Math.max(0.2 * (xe - xs), xe - xs - ENGRAVE.short) / v, turn = ENGRAVE.turn0 + ENGRAVE.turnPerV * v;
-  return { pitch, lines, xs, xe, v, sweep, turn, secPerLine: sweep + turn, lead: ENGRAVE.step };
+  const w = xe - xs, E = ENGRAVE;
+  const sweep = w / v, turn = Math.max(0.01, E.turn0 + E.turnPerV * v - E.short / v) + E.narrow * Math.max(0, E.wide - w) + (E.pitchK * pitch) / (1 + pitch / E.pitchS);
+  return { pitch, lines, xs, xe, v, sweep, turn, secPerLine: sweep + turn, lead: E.step };
 }
 // (cfg.trotec.cutModel overrides any of them: for fitting and trying values)
 const cutProfile = (P, cfg) => ({ arc: CUT.arc, corner: P ? P[2] : 20, acc: CUT.acc, ...((cfg && cfg.trotec && cfg.trotec.cutModel) || {}) });
@@ -327,7 +334,7 @@ function compile(plan, cfg) {
     const travel = moveTime(Math.hypot(first[0] - head[0], first[1] - head[1]), Math.min(T.v, S.max), T.a, T.j) + (T.h || 0);
     const last = lines[lines.length - 1];
     head = [!step.bidi || (lines.length - 1) % 2 === 0 ? xe : xs, last.y];
-    const eng = lines.length * E.secPerLine + E.lead;
+    const eng = Math.max(0.5 * lines.length * E.secPerLine, lines.length * E.secPerLine + E.lead);
     parts = { travel: +travel.toFixed(3), engrave: +eng.toFixed(3) };
     return travel * kTravel + eng * kEngrave;
   };
@@ -399,7 +406,7 @@ function engraveRows(pkg, cfg) {
     }
     out[step.i] = {
       n: E.lines.length, y0: +E.lines[0].y.toFixed(3), y1: +E.lines[E.lines.length - 1].y.toFixed(3), xs: +E.xs.toFixed(3), xe: +E.xe.toFixed(3), bidi: step.bidi,
-      sec: +(E.lines.length * E.secPerLine * k).toFixed(3), lead: +(E.lead * k).toFixed(3),
+      sec: +(E.lines.length * E.secPerLine * k).toFixed(3), lead: +(Math.max(-0.5 * E.lines.length * E.secPerLine, E.lead) * k).toFixed(3),
       v: E.v, dy, runs: runs.map(([y, c]) => [+y.toFixed(4), c])
     };
   }

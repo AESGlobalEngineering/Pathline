@@ -5,6 +5,12 @@
 
 module.exports = [
   {
+    version: '0.7.19', date: '20 Nov 2026',
+    fixed: [
+      'Trotec estimate: engraving is timed line by line as the Q500 was measured doing it, the same way the Queue draws the head: each line\'s turn is shorter on wide islands and longer on narrow ones, and the step to the next line takes longer at coarse pitches (5.4 ms a line at 1000 DPI, 24.5 ms at 100 DPI). On the 65 engraved islands of the 8 engraving jobs run, each job timed from the others: 3.3 % off an island (was 9.1 %) and each job within −0.3 … +1.4 % (was −3.9 … +2.8 %). J0106\'s 107 mm wide island had run 7 s long in 349. Whole jobs over the last 21 run: 2.7 % off (was 3.1 %).'
+    ]
+  },
+  {
     version: '0.7.18', date: '19 Nov 2026',
     fixed: [
       'Queue: the head drawn during an engraving is where the head is. It was drawn on the right line but 8–21 mm along it from the real head (median, Ruby\'s engraving jobs), and 13.9 mm off over all of them; now 2.9 mm. The screen now draws every line the laser is sent, blank lines skipped as the laser skips them, each swept at the engraving speed with the head slowing for the turn at each end (it drew at most 200 lines spread over the island at an even pace). Each line\'s time was measured from the jobs run: 82.8 ms more than its sweep at 500 mm/s, more for narrow islands and coarse pitches (5.4 ms at 1000 DPI, 24.5 ms at 100 DPI), within 0.9 ms a line on jobs left out of the measuring.',
