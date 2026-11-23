@@ -470,7 +470,7 @@ function registerIpc() {
   handle('update:check', () => updates.check());
   handle('update:status', () => updates.status());
   handle('update:download', () => updates.download());
-  handle('update:install', () => updates.install());
+  handle('update:install', () => installUpdate());
   handle('app:openExternal', (url) => {
     if (!/^https?:\/\//i.test(url)) throw new Error('Only web links can be opened');
     return shell.openExternal(url);
@@ -738,29 +738,15 @@ function createWindow() {
   });
   win.on('close', async (e) => {
     if (win.forceClose) return;
-    const open = tabs.unsavedTabs();
-    if (open.length) {
-      e.preventDefault();
-      const one = open.length === 1;
-      const r = await dialog.showMessageBox(win, { type: 'question', buttons: [one ? 'Save' : 'Save all', "Don't save", 'Cancel'], defaultId: 0, cancelId: 2,
-        message: one ? 'Save changes to "' + open[0].job.name + '"?' : open.length + ' jobs have unsaved changes. Save them?',
-        detail: (one ? '' : open.map((d) => '• ' + d.job.name).join('\n') + '\n\n') + 'The app starts with a new job next time, so unsaved changes are lost.' });
-      if (r.response === 2) return;
-      if (r.response === 0) {
-        for (const d of open) {
-          const file = d.job.path || (await askJobFile(d.job, 'Save job · ' + d.job.name));
-          if (!file) return; // cancelled: nothing closes
-          writeJobFile(d.job, file);
-          addRecent(file, d.job.name);
-          d.job = { ...d.job, path: file, dirty: false };
-        }
-      }
-      win.forceClose = true;
-      win.close();
-    }
+    if (!tabs.unsavedTabs().length) return;
+    e.preventDefault();
+    if (!(await saveOrDiscardAll())) return;
+    win.forceClose = true;
+    win.close();
   });
   // a Setup page with unsaved changes holds the window (beforeunload); ask before discarding them
   win.webContents.on('will-prevent-unload', (e) => {
+    if (win.forceClose) { e.preventDefault(); return; } // closing for an update: already asked
     const r = dialog.showMessageBoxSync(win, { type: 'question', buttons: ['Discard changes', 'Cancel'], defaultId: 1, cancelId: 1, message: 'Discard unsaved changes?', detail: 'Machine or material changes on this page have not been saved.' });
     if (r === 0) e.preventDefault(); // let the page go
   });
@@ -822,6 +808,38 @@ function attachTestHarness(w) {
     w.forceClose = true;
     app.quit();
   });
+}
+
+// Jobs with unsaved changes: Save (all) / Don't save / Cancel. Resolves true
+// when the app may close (saved or discarded), false when the operator cancelled.
+async function saveOrDiscardAll() {
+  const open = tabs.unsavedTabs();
+  if (!open.length) return true;
+  const one = open.length === 1;
+  const r = await dialog.showMessageBox(win, { type: 'question', buttons: [one ? 'Save' : 'Save all', "Don't save", 'Cancel'], defaultId: 0, cancelId: 2,
+    message: one ? 'Save changes to "' + open[0].job.name + '"?' : open.length + ' jobs have unsaved changes. Save them?',
+    detail: one ? '' : open.map((d) => '• ' + d.job.name).join('\n') });
+  if (r.response === 2) return false;
+  if (r.response === 0) {
+    for (const d of open) {
+      const file = d.job.path || (await askJobFile(d.job, 'Save job · ' + d.job.name));
+      if (!file) return false; // cancelled: nothing closes
+      writeJobFile(d.job, file);
+      addRecent(file, d.job.name);
+      d.job = { ...d.job, path: file, dirty: false };
+    }
+  }
+  return true;
+}
+
+// Restart and install: the installer refuses to run while Pathline Prepare is
+// open, so everything is settled and closed first, then it starts
+async function installUpdate() {
+  if (updates.status().state !== 'ready') return updates.status();
+  if (!(await saveOrDiscardAll())) return { ...updates.status(), cancelled: true };
+  for (const w of BrowserWindow.getAllWindows()) { w.forceClose = true; w.destroy(); }
+  updates.install();
+  return updates.status();
 }
 
 function openFromArgs(argv) {

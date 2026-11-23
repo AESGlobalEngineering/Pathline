@@ -5,6 +5,13 @@
 
 module.exports = [
   {
+    version: '1.6.23', date: '23 Nov 2026',
+    added: [],
+    fixed: [
+      'Restart and install no longer stops with "Pathline Prepare is already open". Unsaved jobs are asked about first, then Pathline Prepare closes completely before the installer starts.'
+    ]
+  },
+  {
     version: '1.6.22', date: '20 Nov 2026',
     added: [
       'Scale buttons beside Rotation (Objects): ×0.1, ×10 and Revert, which goes back to the size before scaling.',
