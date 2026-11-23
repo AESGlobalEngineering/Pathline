@@ -23,6 +23,10 @@ const { RD, abs } = require('./rd');
 const { trace } = require('../../job/plan');
 
 const um = (mm) => Math.round(mm * 1000);
+// smallest and largest of a list without spreading it into one call (a big job's lists are
+// longer than a call can take: "Maximum call stack size exceeded")
+const lo = (a) => a.reduce((m, v) => (v < m ? v : m), Infinity);
+const hi = (a) => a.reduce((m, v) => (v > m ? v : m), -Infinity);
 const two = (n) => [(n >> 7) & 0x7f, n & 0x7f];
 // angle of travel from a to b, 0.001° (0 = +X, 90° = +Y), 0 … 359.999°
 const angle = (a, b) => { let d = (Math.atan2(b[1] - a[1], b[0] - a[0]) * 180) / Math.PI; if (d < 0) d += 360; return Math.round(d * 1000) % 360000; };
@@ -42,7 +46,7 @@ function toolOf(proc, cfg) {
 function holes(pts, step) {
   const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
   const closed = pts.length > 2 && Math.hypot(pts[0][0] - pts[pts.length - 1][0], pts[0][1] - pts[pts.length - 1][1]) < 0.01;
-  if (closed && Math.max(...xs) - Math.min(...xs) <= 10 && Math.max(...ys) - Math.min(...ys) <= 10) return [[(Math.max(...xs) + Math.min(...xs)) / 2, (Math.max(...ys) + Math.min(...ys)) / 2]];
+  if (closed && hi(xs) - lo(xs) <= 10 && hi(ys) - lo(ys) <= 10) return [[(hi(xs) + lo(xs)) / 2, (hi(ys) + lo(ys)) / 2]];
   const out = [pts[0]];
   let left = step;
   for (let i = 1; i < pts.length; i++) {
@@ -85,7 +89,7 @@ function bedFile(layers, opts = {}) {
         body.push(0x80, ...abs(um(run[0][0])), ...abs(um(run[0][1])), ...abs(a0));
         if (l.tool === 'knife') {
           const ys = run.map((q) => um(q[1]));
-          body.push(0xe7, 0x3a, 0x01, 0xe7, 0x35, ...abs(1500000 - Math.max(...ys)), ...abs(1700000 - Math.min(...ys)));
+          body.push(0xe7, 0x3a, 0x01, 0xe7, 0x35, ...abs(1500000 - hi(ys)), ...abs(1700000 - lo(ys)));
         }
         body.push(0xca, 0x08, ...abs(a0));
         for (let j = 1; j < run.length; j++) {
@@ -121,7 +125,7 @@ function bedFile(layers, opts = {}) {
   const w = knifeOnly ? x0 - x1 : x1 - x0;
   f.push(0xe7, 0x37, ...abs(w), ...abs(y1 - y0));
   f.push(0xe7, 0x08, ...two(1), ...two(1), ...abs(w), ...abs(y1 - y0));
-  f.push(...body);
+  for (const b of body) f.push(b); // the cuts: far too many bytes to spread into one push
   f.push(0xeb, 0xe7, 0x00);
   const L = Math.round(length);
   f.push(0xda, 0x01, 0x06, 0x20, ...abs(L), ...abs(L), 0xd7);

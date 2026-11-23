@@ -5,6 +5,12 @@
 
 module.exports = [
   {
+    version: '0.7.24', date: '23 Nov 2026',
+    fixed: [
+      'Knife cutters (RDD6584): a big job no longer fails with "Can\'t convert this job: Maximum call stack size exceeded". Jobs with many cuts were too big to put together in one go.'
+    ]
+  },
+  {
     version: '0.7.23', date: '20 Nov 2026',
     added: [
       'Pathline Prepare can send jobs to this machine from anywhere, through Pathline Monitor (Pathline Monitor 0.7 and Pathline Prepare 1.6.21 or newer). The computer signs in to Pathline Monitor with the workshop password and a code from an authenticator app. It can queue, reorder and remove jobs, read the machine and swap the materials list. It can\'t start a job, move the head, frame or switch outputs: a job sent this way waits in the queue for Start here. Pathline Run checks every call itself.',

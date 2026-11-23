@@ -438,6 +438,12 @@ console.log('RDD6584 knife job (compared with VCutWorks, recorded on a YC-1610)'
   ok(layerStarts === 'ca0011,ca0040,ca0060' && cmds.filter((h) => /^e718/.test(h)).slice(1).join() === 'e7180000000001,e7180000000002,e7180000000003' &&
     cmds.includes('f30a000000000001') && cmds.includes('f309000000000003') && punches === 5,
   'pen, knife and punch: three layers (11, 40, 60 as VCutWorks marks them), knife flagged, 3 layers counted, a 20 mm punch line = 5 holes 5 mm apart', layerStarts + ' · ' + punches + ' holes');
+  // a big job (Prepare bug report 2026-11-23: 172 cuts, 11 489 points) once overflowed the
+  // stack spreading the whole file into one push: "Maximum call stack size exceeded"
+  const bigRun = Array.from({ length: 40001 }, (_, k) => [10 + (k % 2) * 300, 10 + k * 0.03]);
+  let bigErr = null, bigLen = 0;
+  try { bigLen = knife.compile({ name: 'big', warnings: [], seconds: 1, steps: [{ op: 'cut', i: 0, proc: { index: 0, speed: 60, tool: 'T1 · Knife' }, runs: [bigRun], seconds: 1 }] }, { bed: [1000, 1600], timing: {} }).segments[0].data.length; } catch (e) { bigErr = e; }
+  ok(!bigErr && bigLen > 500000, 'a big knife job converts (40 000 cuts, ' + bigLen + ' bytes), no stack overflow', bigErr && bigErr.message);
   // origin top right (YC-1610): a cut near the right of the bed has a small machine X, and a
   // cut running right in Pathline runs towards smaller X (knife at 180°)
   const planR = { name: 'right', warnings: [], seconds: 1, steps: [{ op: 'cut', i: 0, proc: { speed: 60 }, runs: [[[900, 50], [950, 50]]], seconds: 1 }] };
